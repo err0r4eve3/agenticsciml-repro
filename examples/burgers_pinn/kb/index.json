@@ -1,0 +1,8 @@
+[
+  {
+    "id": "periodic_residual_sampling",
+    "title": "Periodic Residual Sampling",
+    "file": "periodic_residual_sampling.md",
+    "description": "Periodic features and adaptive sampling help Burgers-like steep gradients."
+  }
+]

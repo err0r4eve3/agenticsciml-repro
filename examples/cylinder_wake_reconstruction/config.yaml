@@ -1,0 +1,6 @@
+experiment_id: cylinder-wake-reconstruction-real
+benchmark_dir: examples/cylinder_wake_reconstruction
+max_iterations: 1
+parallel_mutations: 1
+model: ${OPENAI_MODEL}
+temperature: 0.2

@@ -1,0 +1,5 @@
+{
+  "train_path": "train_data.npz",
+  "validation_path": "val_data.npz",
+  "description": "Random sine-series input functions mapped to their cumulative antiderivatives on a fixed grid."
+}

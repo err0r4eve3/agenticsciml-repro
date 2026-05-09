@@ -1,0 +1,6 @@
+experiment_id: poisson-lshape-real
+benchmark_dir: examples/poisson_lshape
+max_iterations: 1
+parallel_mutations: 1
+model: ${OPENAI_MODEL}
+temperature: 0.2

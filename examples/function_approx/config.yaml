@@ -1,0 +1,6 @@
+experiment_id: function-approx-real
+benchmark_dir: examples/function_approx
+max_iterations: 1
+parallel_mutations: 1
+model: ${OPENAI_MODEL}
+temperature: 0.2

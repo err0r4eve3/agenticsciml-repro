@@ -1,0 +1,8 @@
+[
+  {
+    "id": "singularity_aware_pinn",
+    "title": "Singularity-aware PINN",
+    "file": "singularity_aware_pinn.md",
+    "description": "Use corner-aware basis terms, localized sampling, or decomposition near re-entrant singularities."
+  }
+]

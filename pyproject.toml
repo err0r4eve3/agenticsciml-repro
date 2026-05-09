@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agenticsciml-repro"
+version = "0.1.0"
+description = "Engineering MVP reproduction of the AgenticSciML multi-agent workflow."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+real-llm = [
+  "openai>=1.0",
+]
+sciml = [
+  "torch>=2.2",
+]
+
+[project.scripts]
+agenticsciml = "agenticsciml.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+agenticsciml = ["prompts/*.md"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

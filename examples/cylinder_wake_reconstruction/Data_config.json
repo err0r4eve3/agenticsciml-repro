@@ -1,0 +1,5 @@
+{
+  "train_path": "train_data.npz",
+  "validation_path": "val_data.npz",
+  "description": "Four sparse sensor values plus time mapped to a flattened 16x16 vorticity field."
+}

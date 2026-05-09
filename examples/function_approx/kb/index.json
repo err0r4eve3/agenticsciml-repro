@@ -1,0 +1,32 @@
+[
+  {
+    "id": "adaptive_activation",
+    "title": "Adaptive Activation",
+    "file": "adaptive_activation.md",
+    "description": "Learnable activation scaling can help neural networks represent sharp gradients."
+  },
+  {
+    "id": "mixture_of_experts",
+    "title": "Mixture Of Experts",
+    "file": "mixture_of_experts.md",
+    "description": "Piecewise or gated experts help discontinuity and regime changes."
+  },
+  {
+    "id": "fourier_features",
+    "title": "Fourier Features",
+    "file": "fourier_features.md",
+    "description": "Sinusoidal feature maps help represent high-frequency oscillation."
+  },
+  {
+    "id": "weighted_loss",
+    "title": "Weighted Loss",
+    "file": "weighted_loss.md",
+    "description": "Adaptive or localized loss weighting can focus learning near discontinuity."
+  },
+  {
+    "id": "gradient_clipping",
+    "title": "Gradient Clipping",
+    "file": "gradient_clipping.md",
+    "description": "Gradient clipping and conservative schedules improve optimization instability."
+  }
+]

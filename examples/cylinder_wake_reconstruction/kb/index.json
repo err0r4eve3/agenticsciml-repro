@@ -1,0 +1,8 @@
+[
+  {
+    "id": "sensor_decoder",
+    "title": "Sensor-conditioned Decoder",
+    "file": "sensor_decoder.md",
+    "description": "Sparse sensor reconstruction benefits from sensor encoders and smooth or band-limited decoders."
+  }
+]

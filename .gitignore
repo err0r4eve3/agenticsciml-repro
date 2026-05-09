@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+runs/
+*.egg-info/
+examples/function_approx/train_data.npz
+examples/function_approx/val_data.npz

@@ -1,0 +1,5 @@
+{
+  "train_path": "train_data.npz",
+  "validation_path": "val_data.npz",
+  "description": "Synthetic viscous Burgers-style snapshots with periodic spatial coordinate and time."
+}

@@ -1,0 +1,8 @@
+[
+  {
+    "id": "basis_operator",
+    "title": "Basis Operator",
+    "file": "basis_operator.md",
+    "description": "Use spectral bases or learned branch-trunk factors for smooth integral operators."
+  }
+]

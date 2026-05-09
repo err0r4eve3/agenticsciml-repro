@@ -1,0 +1,5 @@
+{
+  "train_path": "train_data.npz",
+  "validation_path": "val_data.npz",
+  "description": "L-shaped domain points with a synthetic singular Poisson-style reference solution."
+}

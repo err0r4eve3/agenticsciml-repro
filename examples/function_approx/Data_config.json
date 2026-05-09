@@ -1,0 +1,5 @@
+{
+  "train_path": "train_data.npz",
+  "validation_path": "val_data.npz",
+  "description": "One-dimensional discontinuous and oscillatory function approximation dataset."
+}
