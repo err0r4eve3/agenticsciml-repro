@@ -26,6 +26,12 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     event_types = {event["event_type"] for event in trace_events}
 
     assert len(tree["nodes"]) >= 2
+    child_nodes = [node for node in tree["nodes"] if node["parent_id"] is not None]
+    assert child_nodes
+    assert child_nodes[0]["method_tags"]
+    assert child_nodes[0]["benchmark_name"] == "function_approx"
+    assert child_nodes[0]["contract_hash"]
+    assert "num_debug_attempts" in child_nodes[0]
     assert (run_dir / "leaderboard.csv").exists()
     assert (run_dir / "champion" / "solution.py").exists()
     assert (run_dir / "tree.mmd").exists()
@@ -156,3 +162,47 @@ def test_cli_trace_summary_prints_quality_gate(tmp_path: Path) -> None:
 
     assert summary["quality_gate"]["passed"] is True
     assert summary["event_counts"]["workflow_span"] >= 1
+
+
+def test_orchestrator_no_kb_mode_skips_retrieved_entry(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="no-kb-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(
+            max_iterations=1,
+            parallel_mutations=1,
+            max_debug_retries=1,
+            use_kb=False,
+        ),
+        use_mock=True,
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+    child_workspace = run_dir / "solutions" / "solution_001"
+
+    assert (child_workspace / "retrieval_query.txt").exists()
+    assert not (child_workspace / "retrieved_kb.md").exists()
+
+
+def test_orchestrator_random_kb_is_deterministic_for_same_seed(tmp_path: Path) -> None:
+    def run(experiment_id: str) -> str:
+        config = ExperimentConfig(
+            experiment_id=experiment_id,
+            benchmark_dir=Path("examples/function_approx").resolve(),
+            output_dir=tmp_path,
+            evolution=EvolutionConfig(
+                max_iterations=1,
+                parallel_mutations=1,
+                max_debug_retries=1,
+                random_kb=True,
+                random_seed=11,
+            ),
+            use_mock=True,
+        )
+        run_dir = AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+        return (run_dir / "solutions" / "solution_001" / "retrieved_kb.md").read_text(
+            encoding="utf-8"
+        )
+
+    assert run("random-kb-a") == run("random-kb-b")

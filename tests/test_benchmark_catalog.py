@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from agenticsciml.benchmarks import BENCHMARKS
+from agenticsciml.benchmarks import BENCHMARKS, BenchmarkContractFactory, ProblemBundle
 from agenticsciml.config import EvaluationContract, EvolutionConfig, ExperimentConfig
 from agenticsciml.execution.sandbox import prepare_solution_workspace, train_and_evaluate
 from agenticsciml.llm.mock import MockLLMClient
@@ -97,6 +97,36 @@ def test_all_benchmarks_have_required_artifacts() -> None:
         assert data_config["validation_path"] == "val_data.npz"
 
 
+def test_problem_bundle_and_contract_are_benchmark_aware() -> None:
+    hashes = set()
+    for name, spec in BENCHMARKS.items():
+        bundle = ProblemBundle.load(spec.path)
+        contract = BenchmarkContractFactory.create_contract(bundle)
+
+        assert bundle.benchmark_name == name
+        assert contract.benchmark_name == name
+        assert contract.metric_name == spec.metric
+        assert contract.contract_hash
+        assert "train_data.npz" in contract.allowed_train_files
+        assert any(path.endswith("val_data.npz") for path in contract.evaluator_only_files)
+        assert contract.contract_hash == BenchmarkContractFactory.create_contract(bundle).contract_hash
+        hashes.add(contract.contract_hash)
+
+    assert len(hashes) == len(BENCHMARKS)
+
+
+def test_unknown_benchmark_bundle_fails_clearly(tmp_path: Path) -> None:
+    for filename in ["Problem.md", "Requirements.md", "Evaluation.md", "Data_config.json"]:
+        (tmp_path / filename).write_text("{}", encoding="utf-8")
+
+    try:
+        ProblemBundle.load(tmp_path)
+    except ValueError as exc:
+        assert "Unknown benchmark" in str(exc)
+    else:
+        raise AssertionError("Expected unknown benchmark to fail.")
+
+
 def test_all_benchmark_data_generators_are_deterministic(tmp_path: Path) -> None:
     for name, spec in BENCHMARKS.items():
         out_a = tmp_path / name / "a"
@@ -128,7 +158,7 @@ def test_all_benchmark_evaluators_accept_generic_baseline(tmp_path: Path) -> Non
 
         result = train_and_evaluate(
             workspace,
-            EvaluationContract.default_function_approx(),
+            BenchmarkContractFactory.create_contract(ProblemBundle.load(spec.path)),
             timeout_s=20,
         )
 
@@ -165,6 +195,9 @@ def test_mock_orchestrator_root_only_runs_all_benchmarks(tmp_path: Path) -> None
             (run_dir / "solutions" / "solution_000" / "eval.json").read_text(encoding="utf-8")
         )
         assert eval_data["metric"] == spec.metric
+        tree = json.loads((run_dir / "tree.json").read_text(encoding="utf-8"))
+        assert tree["nodes"][0]["benchmark_name"] == name
+        assert tree["nodes"][0]["contract_hash"]
 
 
 def test_mock_orchestrator_one_iteration_runs_all_benchmarks(tmp_path: Path) -> None:

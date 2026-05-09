@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -38,6 +40,9 @@ class EvolutionConfig:
     timeout_s: int = 60
     use_kb: bool = True
     random_kb: bool = False
+    random_seed: int = 0
+    use_critic: bool = True
+    use_debugger: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -48,6 +53,9 @@ class EvolutionConfig:
             "timeout_s": self.timeout_s,
             "use_kb": self.use_kb,
             "random_kb": self.random_kb,
+            "random_seed": self.random_seed,
+            "use_critic": self.use_critic,
+            "use_debugger": self.use_debugger,
         }
 
     @classmethod
@@ -60,6 +68,9 @@ class EvolutionConfig:
             timeout_s=int(data.get("timeout_s", 60)),
             use_kb=bool(data.get("use_kb", True)),
             random_kb=bool(data.get("random_kb", False)),
+            random_seed=int(data.get("random_seed", 0)),
+            use_critic=bool(data.get("use_critic", True)),
+            use_debugger=bool(data.get("use_debugger", True)),
         )
 
 
@@ -71,6 +82,12 @@ class EvaluationContract:
     train_command: list[str]
     evaluate_command: list[str]
     checkpoint_path: str = "model.pkl"
+    benchmark_name: str = "function_approx"
+    allowed_train_files: list[str] = field(default_factory=lambda: ["train_data.npz"])
+    evaluator_only_files: list[str] = field(
+        default_factory=lambda: [".evaluator/evaluate.py", ".evaluator/val_data.npz"]
+    )
+    contract_hash: str = ""
 
     @classmethod
     def default_function_approx(cls) -> "EvaluationContract":
@@ -79,9 +96,31 @@ class EvaluationContract:
             higher_is_better=False,
             validate_command=["python", "solution.py", "--mode=validate"],
             train_command=["python", "solution.py", "--mode=train"],
-            evaluate_command=["python", "evaluate.py"],
+            evaluate_command=["python", ".evaluator/evaluate.py"],
             checkpoint_path="model.pkl",
-        )
+            benchmark_name="function_approx",
+        ).with_computed_hash()
+
+    def hash_payload(self) -> dict[str, Any]:
+        return {
+            "metric_name": self.metric_name,
+            "higher_is_better": self.higher_is_better,
+            "validate_command": self.validate_command,
+            "train_command": self.train_command,
+            "evaluate_command": self.evaluate_command,
+            "checkpoint_path": self.checkpoint_path,
+            "benchmark_name": self.benchmark_name,
+            "allowed_train_files": self.allowed_train_files,
+            "evaluator_only_files": self.evaluator_only_files,
+        }
+
+    def compute_hash(self) -> str:
+        payload = json.dumps(self.hash_payload(), sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def with_computed_hash(self) -> "EvaluationContract":
+        self.contract_hash = self.compute_hash()
+        return self
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -91,18 +130,29 @@ class EvaluationContract:
             "train_command": self.train_command,
             "evaluate_command": self.evaluate_command,
             "checkpoint_path": self.checkpoint_path,
+            "benchmark_name": self.benchmark_name,
+            "allowed_train_files": self.allowed_train_files,
+            "evaluator_only_files": self.evaluator_only_files,
+            "contract_hash": self.contract_hash,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "EvaluationContract":
-        return cls(
+        contract = cls(
             metric_name=str(data["metric_name"]),
             higher_is_better=bool(data["higher_is_better"]),
             validate_command=list(data["validate_command"]),
             train_command=list(data["train_command"]),
             evaluate_command=list(data["evaluate_command"]),
             checkpoint_path=str(data.get("checkpoint_path", "model.pkl")),
+            benchmark_name=str(data.get("benchmark_name", "function_approx")),
+            allowed_train_files=list(data.get("allowed_train_files", ["train_data.npz"])),
+            evaluator_only_files=list(
+                data.get("evaluator_only_files", [".evaluator/evaluate.py", ".evaluator/val_data.npz"])
+            ),
+            contract_hash=str(data.get("contract_hash", "")),
         )
+        return contract if contract.contract_hash else contract.with_computed_hash()
 
 
 @dataclass(slots=True)

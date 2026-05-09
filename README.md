@@ -11,12 +11,17 @@ available, so this project implements a source-grounded approximation:
 - structured `Problem.md`, `Requirements.md`, `Evaluation.md`, and optional
   `Data_config.json` inputs
 - data analysis and evaluation-contract artifacts
+- benchmark-aware evaluation contracts with deterministic content hashes
 - root single-agent solution generation
-- solution tree with parent selection, mutation, evaluation, and analysis
-- 0-1 knowledge-base retrieval per mutation
+- solution tree with deterministic exploitation/exploration parent selection,
+  mutation, evaluation, and analysis
+- benchmark-aware 0-1 knowledge-base retrieval per mutation, with deterministic
+  `random_kb` mode for ablation
 - proposer/critic debate with concise rationale summaries
 - engineer and debugger roles around generated code
+- digest-checked patch mutation for generated `solution.py`
 - per-solution workspaces, logs, scores, prompts, responses, and reports
+- evaluator-only validation data kept outside the generated solution train path
 - champion export
 
 ## Quick Start
@@ -25,12 +30,19 @@ available, so this project implements a source-grounded approximation:
 uv run --python 3.11 --extra dev pytest -q
 uv run --python 3.11 --extra dev agenticsciml benchmarks
 uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --mock --max-iterations 1
+uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --mock --max-iterations 1 --random-kb --random-seed 11
 ```
 
 Inspect the trace quality gate for a completed run:
 
 ```bash
 uv run --python 3.11 --extra dev agenticsciml trace-summary runs/<experiment_id>
+```
+
+Run a mock ablation suite:
+
+```bash
+uv run --python 3.11 --extra dev agenticsciml ablate examples/function_approx --seeds 0 1 2 --variants root_only,no_kb,kb,random_kb,no_critic,no_debugger
 ```
 
 Resume an interrupted or staged run by reusing the same `--output-dir` and
@@ -48,6 +60,7 @@ The mock run writes a directory under `runs/` with:
 - `solutions/solution_*/train.log`
 - `solutions/solution_*/eval.json`
 - `solutions/solution_*/analysis.md`
+- `solutions/solution_*/retrieval_query.txt`
 - `leaderboard.csv`
 - `tree.json`
 - `tree.mmd`
@@ -58,6 +71,10 @@ The mock run writes a directory under `runs/` with:
   count/token-estimate placeholders
 - `champion/solution.py`
 - `champion/analysis.md`
+
+The ablation command writes `ablation_runs.csv`, `ablation_summary.csv`, and
+`ablation_report.md`. Mock ablation validates workflow shape and reporting only;
+it is not evidence of paper-score reproduction.
 
 ## Documentation Tree
 

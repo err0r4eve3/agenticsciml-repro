@@ -15,15 +15,23 @@ class RetrieverAgent(AgentBase):
         kb: KnowledgeBase,
         query: str,
         enabled: bool = True,
+        random_mode: bool = False,
+        random_seed: int = 0,
     ) -> KnowledgeBaseEntry | None:
         self.require_inputs({"solution_id": solution_id, "query": query, "enabled": enabled})
         prompt = (
             "Select at most one KB entry relevant to the parent weakness. "
-            f"Query: {query}"
+            f"Mode: {'random' if random_mode else 'lexical'}. Query: {query}"
         )
-        entry = retrieve_top_entry(kb, query, threshold=1.0) if enabled else None
+        if not enabled:
+            entry = None
+        elif random_mode:
+            entry = kb.random_entry(seed=random_seed, salt=query)
+        else:
+            entry = retrieve_top_entry(kb, query, threshold=1.0)
         response = entry.entry_id if entry else "none"
         self._save_messages(solution_id, [AgentMessage(self.role, prompt, response)])
+        self.storage.save_solution_text(solution_id, "retrieval_query.txt", query)
         if entry:
             self.storage.save_solution_text(
                 solution_id,

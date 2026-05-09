@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
+
+from agenticsciml.config import DataConfig, EvaluationContract
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -26,6 +29,88 @@ class BenchmarkSpec:
             "metric": self.metric,
             "description": self.description,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class ProblemBundle:
+    benchmark_name: str
+    benchmark_spec: BenchmarkSpec
+    problem_md: str
+    requirements_md: str
+    evaluation_md: str
+    data_config: DataConfig
+    benchmark_dir: Path
+
+    @classmethod
+    def load(cls, benchmark_dir: Path) -> "ProblemBundle":
+        path = benchmark_dir.resolve()
+        spec = benchmark_for_path(path)
+        if spec is None:
+            raise ValueError(f"Unknown benchmark: {benchmark_dir}")
+        data_config_path = path / "Data_config.json"
+        return cls(
+            benchmark_name=spec.name,
+            benchmark_spec=spec,
+            problem_md=(path / "Problem.md").read_text(encoding="utf-8"),
+            requirements_md=(path / "Requirements.md").read_text(encoding="utf-8"),
+            evaluation_md=(path / "Evaluation.md").read_text(encoding="utf-8"),
+            data_config=DataConfig.from_dict(json.loads(data_config_path.read_text(encoding="utf-8"))),
+            benchmark_dir=path,
+        )
+
+    def summary(self) -> str:
+        return (
+            f"benchmark_name: {self.benchmark_name}\n"
+            f"family: {self.benchmark_spec.family}\n"
+            f"metric: {self.benchmark_spec.metric}\n"
+            f"description: {self.benchmark_spec.description}\n"
+        )
+
+
+class BenchmarkContractFactory:
+    @staticmethod
+    def create_contract(problem_bundle: ProblemBundle) -> EvaluationContract:
+        data_config = problem_bundle.data_config
+        train_path = data_config.train_path or "train_data.npz"
+        validation_path = data_config.validation_path or "val_data.npz"
+        contract = EvaluationContract(
+            metric_name=problem_bundle.benchmark_spec.metric,
+            higher_is_better=False,
+            validate_command=["python", "solution.py", "--mode=validate"],
+            train_command=["python", "solution.py", "--mode=train"],
+            evaluate_command=["python", ".evaluator/evaluate.py"],
+            checkpoint_path="model.pkl",
+            benchmark_name=problem_bundle.benchmark_name,
+            allowed_train_files=[
+                "Problem.md",
+                "Requirements.md",
+                "Evaluation.md",
+                "Data_config.json",
+                "generate_data.py",
+                "guidelines.md",
+                train_path,
+            ],
+            evaluator_only_files=[
+                ".evaluator/evaluate.py",
+                f".evaluator/{validation_path}",
+            ],
+        )
+        return contract.with_computed_hash()
+
+    @staticmethod
+    def create_guidelines(problem_bundle: ProblemBundle, contract: EvaluationContract) -> str:
+        return (
+            "# Evaluation Contract\n\n"
+            f"- benchmark: {contract.benchmark_name}\n"
+            f"- metric: {contract.metric_name}\n"
+            f"- higher_is_better: {contract.higher_is_better}\n"
+            f"- checkpoint: {contract.checkpoint_path}\n"
+            f"- contract_hash: `{contract.contract_hash}`\n"
+            f"- allowed_train_files: {', '.join(contract.allowed_train_files)}\n"
+            f"- evaluator_only_files: {', '.join(contract.evaluator_only_files)}\n\n"
+            "## Benchmark Summary\n\n"
+            f"{problem_bundle.summary()}"
+        )
 
 
 BENCHMARKS: dict[str, BenchmarkSpec] = {
@@ -82,3 +167,11 @@ BENCHMARKS: dict[str, BenchmarkSpec] = {
 
 def list_benchmarks() -> list[BenchmarkSpec]:
     return list(BENCHMARKS.values())
+
+
+def benchmark_for_path(path: Path) -> BenchmarkSpec | None:
+    resolved = path.resolve()
+    for spec in BENCHMARKS.values():
+        if resolved == spec.path.resolve():
+            return spec
+    return BENCHMARKS.get(path.name)

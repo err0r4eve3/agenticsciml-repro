@@ -16,16 +16,16 @@ BENCHMARK_FILES = [
     "Evaluation.md",
     "Data_config.json",
     "generate_data.py",
-    "evaluate.py",
     "guidelines.md",
 ]
 
 GUARDED_FILES = (
     "evaluate.py",
+    ".evaluator/evaluate.py",
+    ".evaluator/val_data.npz",
     "guidelines.md",
     "Evaluation.md",
     "Data_config.json",
-    "val_data.npz",
 )
 
 BLOCKED_IMPORT_ROOTS = {
@@ -60,15 +60,22 @@ def _normalize_command(command: list[str]) -> list[str]:
 
 def prepare_solution_workspace(benchmark_dir: Path, workspace: Path) -> None:
     workspace.mkdir(parents=True, exist_ok=True)
+    evaluator_dir = workspace / ".evaluator"
+    evaluator_dir.mkdir(exist_ok=True)
     for filename in BENCHMARK_FILES:
         source = benchmark_dir / filename
         if source.exists():
             shutil.copy2(source, workspace / filename)
-    for data_file in ["train_data.npz", "val_data.npz"]:
-        source = benchmark_dir / data_file
-        if source.exists():
-            shutil.copy2(source, workspace / data_file)
-    if not (workspace / "train_data.npz").exists() or not (workspace / "val_data.npz").exists():
+    evaluate_source = benchmark_dir / "evaluate.py"
+    if evaluate_source.exists():
+        shutil.copy2(evaluate_source, evaluator_dir / "evaluate.py")
+    train_source = benchmark_dir / "train_data.npz"
+    if train_source.exists():
+        shutil.copy2(train_source, workspace / "train_data.npz")
+    validation_source = benchmark_dir / "val_data.npz"
+    if validation_source.exists():
+        shutil.copy2(validation_source, evaluator_dir / "val_data.npz")
+    if not (workspace / "train_data.npz").exists() or not (evaluator_dir / "val_data.npz").exists():
         result = run_command(
             workspace,
             [sys.executable, "generate_data.py", "--seed", "0", "--output-dir", "."],
@@ -76,6 +83,11 @@ def prepare_solution_workspace(benchmark_dir: Path, workspace: Path) -> None:
         )
         if result.exit_code != 0:
             raise RuntimeError(result.combined_output)
+        generated_validation = workspace / "val_data.npz"
+        if generated_validation.exists():
+            shutil.move(str(generated_validation), evaluator_dir / "val_data.npz")
+    if (workspace / "val_data.npz").exists():
+        (workspace / "val_data.npz").unlink()
 
 
 def _file_digest(path: Path) -> str | None:
@@ -143,6 +155,11 @@ def _static_solution_guardrail_violations(solution_path: Path) -> list[str]:
                     violations.append(f"blocked absolute path: {path_value}")
             if call_name in {"Path.home", "Path.expanduser", "os.path.expanduser"}:
                 violations.append(f"blocked home-directory path helper: {call_name}")
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if "val_data.npz" in node.value or ".evaluator" in node.value:
+                violations.append("blocked validation data reference")
+            if "AGENTICSCIML_VALIDATION_DATA" in node.value:
+                violations.append("blocked validation data environment reference")
     return sorted(set(violations))
 
 
@@ -175,15 +192,32 @@ def train_and_evaluate(
     total_duration = 0.0
     last_command: list[str] = []
 
-    for command in [
-        contract.validate_command,
-        contract.train_command,
-        contract.evaluate_command,
-    ]:
+    commands = [
+        ("validate", contract.validate_command),
+        ("train", contract.train_command),
+        ("evaluate", contract.evaluate_command),
+    ]
+    validation_path = workspace / ".evaluator" / "val_data.npz"
+
+    for phase, command in commands:
+        if phase in {"validate", "train"} and (workspace / "val_data.npz").exists():
+            message = "Guardrail violation: validation data is exposed during generated solution execution."
+            all_stderr.append(message)
+            (workspace / "train.log").write_text("\n".join(all_stdout), encoding="utf-8")
+            return RunResult(
+                command=command,
+                exit_code=125,
+                stdout="\n".join(all_stdout),
+                stderr="\n".join(all_stderr),
+                duration_s=total_duration,
+            )
         guarded_before = _guarded_fingerprints(workspace)
         normalized = _normalize_command(command)
         last_command = normalized
-        result = run_command(workspace, normalized, timeout_s=timeout_s)
+        env = None
+        if phase == "evaluate":
+            env = {"AGENTICSCIML_VALIDATION_DATA": validation_path}
+        result = run_command(workspace, normalized, timeout_s=timeout_s, env=env)
         total_duration += result.duration_s
         all_stdout.append(result.combined_output)
         if result.stderr:

@@ -100,6 +100,38 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   results, but scores must come from code.
 - New benchmarks must be added to `agenticsciml.benchmarks.BENCHMARKS`, linked
   from `docs/benchmark_plan.md`, and validated by `tests/test_benchmark_catalog.py`.
+- Validation data is evaluator-only. Generated `solution.py` must not see
+  `val_data.npz` during validate/train; keep validation data under `.evaluator/`
+  and preserve static guardrails against obvious validation-data reads.
+- Evaluation contracts must be benchmark-aware and hash-stable. Do not reintroduce
+  silent `function_approx` defaults for non-`function_approx` benchmarks.
+- RootEngineer and Engineer prompts must include the relevant `ProblemBundle`,
+  `EvaluationContract` JSON, `guidelines.md`, and available analysis context.
+- Engineer mutations must verify the parent solution digest and apply a
+  structured patch or explicit file map through Python. Do not blindly replace
+  `solution.py` with unverified raw LLM text.
+- Parent selection must preserve a deterministic policy layer before any LLM
+  selector output: include the best available valid node, prefer recent
+  improving nodes, preserve underexplored/diverse method tags, and never select
+  nodes at `max_children_per_node`.
+- Retrieval queries must be benchmark-aware. Build them from `ProblemBundle`,
+  parent analysis, failure kind, method tags, score trend, and top leaderboard
+  context rather than fixed benchmark-specific keywords.
+- `use_kb=False` must mean no KB entry is injected into proposal context.
+  `random_kb=True` must use deterministic seed-controlled random retrieval for
+  ablation, not lexical retrieval disguised as random.
+- Ablation variants must map to real workflow switches. `no_critic` must skip
+  `CriticAgent` calls; `no_debugger` must skip the debugger loop instead of only
+  changing report labels.
+- Ablation outputs must include per-run rows and aggregate rows with champion
+  score, root score, champion/root improvement, valid solution rate, timeout
+  count, debug success count, LLM call count, wall time, and example run dirs.
+- Ablation tests use mock mode only. Do not claim scientific improvement from
+  mock ablation results.
+- `SolutionNode` metadata used by selector/retriever/ablation must stay
+  persisted in `tree.json` and `checkpoint.json`: `benchmark_name`,
+  `contract_hash`, `method_tags`, `failure_kind`, `score_delta_from_parent`,
+  and `num_debug_attempts`.
 
 ## Boundaries
 

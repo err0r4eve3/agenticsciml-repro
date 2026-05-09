@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -39,3 +40,10 @@ class KnowledgeBase:
 
     def all(self) -> list[KnowledgeBaseEntry]:
         return list(self.entries.values())
+
+    def random_entry(self, seed: int, salt: str = "") -> KnowledgeBaseEntry | None:
+        entries = sorted(self.entries.values(), key=lambda entry: entry.entry_id)
+        if not entries:
+            return None
+        rng = random.Random(f"{seed}:{salt}")
+        return entries[rng.randrange(len(entries))]

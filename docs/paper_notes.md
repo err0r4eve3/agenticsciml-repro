@@ -47,8 +47,12 @@ Every solution must be evaluated by the same script and metric. This MVP uses:
 - `python solution.py --mode=validate`
 - `python solution.py --mode=train`
 - training writes `model.pkl`
-- `python evaluate.py` writes `eval.json`
+- `python .evaluator/evaluate.py` writes `eval.json`
 - metric: benchmark-specific scalar loss, lower is better
+
+The local implementation keeps validation data evaluator-only: `solution.py`
+sees training data during validate/train, while `.evaluator/evaluate.py` receives
+the validation data path through a controlled environment variable.
 
 ## Benchmark Coverage
 

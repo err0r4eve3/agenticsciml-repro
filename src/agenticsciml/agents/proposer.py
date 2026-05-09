@@ -15,6 +15,7 @@ class ProposerAgent(AgentBase):
         parent_summary: str,
         kb_entry: str | None,
         related_reports: list[str],
+        use_critic: bool = True,
     ) -> Proposal:
         self.require_inputs(
             {
@@ -31,7 +32,7 @@ class ProposerAgent(AgentBase):
             f"KB entry:\n{kb_entry or 'none'}\n\n"
             f"Related reports:\n{chr(10).join(related_reports) if related_reports else 'none'}"
         )
-        critic = CriticAgent(self.llm, self.storage)
+        critic = CriticAgent(self.llm, self.storage) if use_critic else None
         proposal_hint = "No proposal yet; critique the diagnostic framing."
         for round_index in range(1, 5):
             if round_index < 3:
@@ -66,7 +67,7 @@ class ProposerAgent(AgentBase):
                 proposal = Proposal.from_dict(data)
             messages.append(AgentMessage(self.role, prompt, response, {"round": round_index}))
 
-            if round_index < 4:
+            if round_index < 4 and critic is not None:
                 critic_response = critic.critique(
                     solution_id=solution_id,
                     proposal_summary=proposal_hint,
@@ -79,6 +80,12 @@ class ProposerAgent(AgentBase):
                 )
 
         self.storage.save_solution_text(solution_id, "proposal.md", proposal.to_markdown())
+        if critic is None:
+            self.storage.save_solution_text(
+                solution_id,
+                "critic.md",
+                "# Critic Disabled\n\nThis ablation run skipped CriticAgent calls.\n",
+            )
         self.require_artifacts(solution_id, ("proposal.md", "critic.md"))
         self._save_messages(solution_id, messages, "proposal_debate")
         return proposal

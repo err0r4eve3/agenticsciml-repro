@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from agenticsciml.llm.base import LLMClient
+from agenticsciml.patching import make_unified_patch, solution_digest
 
 
 ROOT_SOLUTION = r'''
@@ -178,9 +180,18 @@ class MockLLMClient(LLMClient):
                 "code": ROOT_SOLUTION,
             }
         if name == "engineer":
+            match = re.search(r"parent_digest:\s*([a-f0-9]{64})", prompt)
+            parent_digest = match.group(1) if match else solution_digest(ROOT_SOLUTION + "\n")
             return {
-                "summary": "Mutated the baseline into Fourier ridge regression.",
-                "code": FOURIER_RIDGE_SOLUTION,
+                "mutation_summary": "Mutated the baseline into Fourier ridge regression.",
+                "expected_effect": "Lower validation error on smooth, oscillatory, and multi-output proxy tasks.",
+                "risks": ["The fixed feature basis may underfit high-dimensional targets."],
+                "parent_digest": parent_digest,
+                "patch": make_unified_patch(
+                    prompt.split("Parent code:\n", 1)[1] if "Parent code:\n" in prompt else ROOT_SOLUTION + "\n",
+                    FOURIER_RIDGE_SOLUTION + "\n",
+                ),
+                "files_changed": ["solution.py"],
             }
         if name == "analysis":
             return {

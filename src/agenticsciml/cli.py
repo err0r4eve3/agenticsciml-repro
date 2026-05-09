@@ -7,6 +7,7 @@ import time
 import json
 from pathlib import Path
 
+from agenticsciml.ablation import DEFAULT_VARIANTS, run_ablation
 from agenticsciml.benchmarks import list_benchmarks
 from agenticsciml.config import EvolutionConfig, ExperimentConfig
 from agenticsciml.llm.mock import MockLLMClient
@@ -63,6 +64,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         parallel_mutations=args.parallel_mutations,
         timeout_s=args.timeout_s,
         use_kb=not args.no_kb,
+        random_kb=args.random_kb,
+        random_seed=args.random_seed,
     )
     config = ExperimentConfig(
         experiment_id=args.experiment_id or _default_experiment_id(args.mock),
@@ -100,6 +103,19 @@ def cmd_trace_summary(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ablate(args: argparse.Namespace) -> int:
+    variants = [item.strip() for item in args.variants.split(",") if item.strip()]
+    result = run_ablation(
+        benchmark_dir=Path(args.benchmark_dir).resolve(),
+        output_dir=Path(args.output_dir).resolve(),
+        seeds=args.seeds,
+        variants=variants,
+        mock=True,
+    )
+    print(result.summary_csv.resolve())
+    return 0
+
+
 def cmd_benchmarks(args: argparse.Namespace) -> int:
     specs = list_benchmarks()
     if args.json:
@@ -128,6 +144,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--experiment-id")
     run.add_argument("--dry-run", action="store_true")
     run.add_argument("--no-kb", action="store_true")
+    run.add_argument("--random-kb", action="store_true")
+    run.add_argument("--random-seed", type=int, default=0)
     run.add_argument("--resume", action="store_true")
     run.set_defaults(func=cmd_run)
 
@@ -143,6 +161,13 @@ def build_parser() -> argparse.ArgumentParser:
     trace_summary = sub.add_parser("trace-summary")
     trace_summary.add_argument("run_dir")
     trace_summary.set_defaults(func=cmd_trace_summary)
+
+    ablate = sub.add_parser("ablate")
+    ablate.add_argument("benchmark_dir")
+    ablate.add_argument("--seeds", nargs="+", type=int, default=[0])
+    ablate.add_argument("--variants", default=",".join(DEFAULT_VARIANTS))
+    ablate.add_argument("--output-dir", default="runs/ablation")
+    ablate.set_defaults(func=cmd_ablate)
 
     benchmarks = sub.add_parser("benchmarks")
     benchmarks.add_argument("--json", action="store_true")

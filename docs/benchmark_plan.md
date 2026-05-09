@@ -16,12 +16,22 @@
 - `evaluate.py`
 - `guidelines.md`
 - optional `kb/`
-- `train_data.npz` / `val_data.npz`
+- train-time data: `train_data.npz`
+- evaluator-only data: `.evaluator/val_data.npz` inside solution workspaces
 - `x_train` / `u_train` / `x_val` / `u_val`
 - `solution.py --mode=validate`
 - `solution.py --mode=train`
 - training writes `model.pkl`
 - evaluator writes `eval.json`
+- `evaluation_contract.json` records `benchmark_name`, `contract_hash`,
+  `allowed_train_files`, and `evaluator_only_files`
+- mutation output records `parent_digest` and applies a Python-verified patch or
+  explicit `solution.py` file map
+- solution tree nodes record `method_tags`, `failure_kind`,
+  `score_delta_from_parent`, `num_debug_attempts`, `benchmark_name`, and
+  `contract_hash`
+- retrieval query is built from benchmark metadata, parent analysis, failure
+  kind, method tags, score trend, and leaderboard top-k context
 
 ## Benchmark Catalog
 
@@ -53,10 +63,18 @@ uv run --python 3.11 --extra dev pytest tests/test_benchmark_catalog.py -q
 
 - catalog 是否包含论文 6 类任务；
 - 每个 benchmark 是否有必需 artifact；
+- `ProblemBundle` 是否能按 benchmark 加载；
+- `BenchmarkContractFactory` 是否生成 hash-stable 的 benchmark-aware contract；
 - 数据生成是否 deterministic；
 - 每个 evaluator 是否接受 generic baseline；
+- solution train/validate workspace 是否不暴露验证集；
 - 每个 benchmark 是否能跑 root-only mock；
 - 每个 benchmark 是否能跑 1 轮 mock evolution。
+
+验证集泄漏是 P0 约束：`solution.py` 训练/验证阶段不能读取
+`val_data.npz`，明显的 `val_data.npz` / `.evaluator` 字符串引用会被
+static guardrail 拦截。只有 evaluator 阶段通过受控环境变量访问
+`.evaluator/val_data.npz`。
 
 ## 真实 LLM 实验顺序
 
@@ -64,9 +82,13 @@ uv run --python 3.11 --extra dev pytest tests/test_benchmark_catalog.py -q
 
 1. 每个 benchmark 先跑 `--max-iterations 0`，只验证 root baseline。
 2. 每个 benchmark 跑 `--max-iterations 1 --parallel-mutations 1`，验证 proposal/critic/engineer/debugger 链路。
-3. 对 `function_approx`、`poisson_lshape`、`burgers_pinn` 跑 root-only / no-KB / KB ablation。
-4. 对 operator benchmarks 增加 multi-seed 重复。
-5. 最后再跑 `cylinder_wake_reconstruction`，因为输出维度更高，debug 成本更大。
+3. 对 `function_approx`、`poisson_lshape`、`burgers_pinn` 跑
+   `root_only` / `no_kb` / `kb` / `random_kb` / `no_critic` / `no_debugger`
+   ablation。
+4. 对 KB ablation 同时比较 `use_kb=False`、lexical KB 和 deterministic
+   `random_kb`，并用 `ablation_summary.csv` 的 median/IQR 判断稳定性。
+5. 对 operator benchmarks 增加 multi-seed 重复。
+6. 最后再跑 `cylinder_wake_reconstruction`，因为输出维度更高，debug 成本更大。
 
 示例：
 

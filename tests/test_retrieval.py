@@ -1,7 +1,12 @@
 from pathlib import Path
 
+from agenticsciml.agents.retriever import RetrieverAgent
+from agenticsciml.benchmarks import ProblemBundle
 from agenticsciml.retrieval.kb_store import KnowledgeBase
 from agenticsciml.retrieval.lexical import retrieve_top_entry
+from agenticsciml.retrieval.query_builder import RetrievalQueryBuilder
+from agenticsciml.state import AnalysisReport, SolutionNode, SolutionScore
+from agenticsciml.storage import ExperimentStorage
 
 
 def test_kb_loads_entries() -> None:
@@ -22,3 +27,77 @@ def test_lexical_retrieval_is_deterministic() -> None:
     assert first is not None
     assert first.entry_id == second.entry_id
     assert first.entry_id in {"mixture_of_experts", "fourier_features", "weighted_loss", "gradient_clipping"}
+
+
+def test_retrieval_query_differs_across_benchmarks() -> None:
+    parent = SolutionNode(
+        node_id="solution_000",
+        parent_id=None,
+        workspace="/tmp/solution_000",
+        score=SolutionScore(metric="relative_l2", value=0.4, higher_is_better=False),
+        method_tags=["mlp", "smooth_activation"],
+        failure_kind="underfit",
+    )
+    report = AnalysisReport(
+        node_id="solution_000",
+        summary="The model smooths sharp residual regions and misses local structure.",
+    )
+    function_query = RetrievalQueryBuilder.build(
+        ProblemBundle.load(Path("examples/function_approx")),
+        parent=parent,
+        parent_analysis=report,
+        leaderboard=[parent],
+    )
+    poisson_query = RetrievalQueryBuilder.build(
+        ProblemBundle.load(Path("examples/poisson_lshape")),
+        parent=parent,
+        parent_analysis=report,
+        leaderboard=[parent],
+    )
+
+    assert function_query != poisson_query
+    assert "function_approx" in function_query
+    assert "poisson_lshape" in poisson_query
+    assert "underfit" in function_query
+    assert "smooth_activation" in function_query
+
+
+def test_retriever_respects_no_kb_mode(tmp_path: Path) -> None:
+    kb = KnowledgeBase.load(Path("examples/function_approx/kb"))
+    storage = ExperimentStorage.create(tmp_path, "no-kb")
+    storage.create_solution_workspace("solution_001")
+    agent = RetrieverAgent(llm=None, storage=storage)  # type: ignore[arg-type]
+
+    entry = agent.retrieve("solution_001", kb, "discontinuity oscillation", enabled=False)
+
+    assert entry is None
+    assert not (storage.run_dir / "solutions" / "solution_001" / "retrieved_kb.md").exists()
+
+
+def test_retriever_random_kb_is_deterministic(tmp_path: Path) -> None:
+    kb = KnowledgeBase.load(Path("examples/function_approx/kb"))
+    storage = ExperimentStorage.create(tmp_path, "random-kb")
+    storage.create_solution_workspace("solution_001")
+    storage.create_solution_workspace("solution_002")
+    agent = RetrieverAgent(llm=None, storage=storage)  # type: ignore[arg-type]
+
+    first = agent.retrieve(
+        "solution_001",
+        kb,
+        "same query",
+        enabled=True,
+        random_mode=True,
+        random_seed=17,
+    )
+    second = agent.retrieve(
+        "solution_002",
+        kb,
+        "same query",
+        enabled=True,
+        random_mode=True,
+        random_seed=17,
+    )
+
+    assert first is not None
+    assert second is not None
+    assert first.entry_id == second.entry_id

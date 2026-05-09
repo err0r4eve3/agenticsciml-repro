@@ -44,6 +44,12 @@ class SolutionNode:
     proposal_path: str | None = None
     analysis_path: str | None = None
     error: str | None = None
+    benchmark_name: str | None = None
+    contract_hash: str | None = None
+    method_tags: list[str] = field(default_factory=list)
+    failure_kind: str | None = None
+    score_delta_from_parent: float | None = None
+    num_debug_attempts: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -56,6 +62,12 @@ class SolutionNode:
             "proposal_path": self.proposal_path,
             "analysis_path": self.analysis_path,
             "error": self.error,
+            "benchmark_name": self.benchmark_name,
+            "contract_hash": self.contract_hash,
+            "method_tags": self.method_tags,
+            "failure_kind": self.failure_kind,
+            "score_delta_from_parent": self.score_delta_from_parent,
+            "num_debug_attempts": self.num_debug_attempts,
         }
 
     @classmethod
@@ -70,6 +82,16 @@ class SolutionNode:
             proposal_path=data.get("proposal_path"),
             analysis_path=data.get("analysis_path"),
             error=data.get("error"),
+            benchmark_name=data.get("benchmark_name"),
+            contract_hash=data.get("contract_hash"),
+            method_tags=[str(item) for item in data.get("method_tags", [])],
+            failure_kind=data.get("failure_kind"),
+            score_delta_from_parent=(
+                float(data["score_delta_from_parent"])
+                if data.get("score_delta_from_parent") is not None
+                else None
+            ),
+            num_debug_attempts=int(data.get("num_debug_attempts", 0)),
         )
 
 

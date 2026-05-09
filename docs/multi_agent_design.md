@@ -165,6 +165,11 @@ Phase 4: Champion export
 - `AgentBase.complete_json_checked()` 默认使用 `AgentSpec.output_schema` 校验代码消费的 LLM 输出。
 - `CriticAgent` 已从 `ProposerAgent` 中拆出，单独写入 `critic.md` 和 critic transcript。
 - `ProposerAgent` 仍负责 4-round proposal flow，但 critic 调用通过独立 Agent 完成。
+- `RootEngineerAgent` 和 `EngineerAgent` 的 prompt 已包含 benchmark、contract、guidelines 和分析上下文，避免脱离评估契约生成代码。
+- `EngineerAgent` 使用 `parent_digest` 校验和 unified diff patch / file map 应用，Python 端负责落盘，避免无校验整文件替换。
+- `SearchPolicy` 在 LLM selector 之前执行确定性 parent selection：包含 best available node、recent improvement、diverse underexplored node，并强制 `max_children_per_node`。
+- `RetrievalQueryBuilder` 用 benchmark metadata、parent analysis、failure kind、method tags、score trend 和 leaderboard top-k 构造 KB query；`use_kb` 与 `random_kb` 可用于 ablation。
+- `SolutionNode` 持久化 selector/retriever 需要的结构化元数据，包括 `method_tags`、`failure_kind`、`score_delta_from_parent`、`num_debug_attempts`、`benchmark_name` 和 `contract_hash`。
 - `trace_summary.json` 汇总 `trace.jsonl`，用 required span types 和 guardrail failures 形成最小 trace quality gate。
 - `run_metadata.json` 汇总 wall time、champion、solution count 和按 role 聚合的 LLM 调用统计。
 

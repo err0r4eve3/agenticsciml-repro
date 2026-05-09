@@ -16,17 +16,20 @@ from agenticsciml.agents import (
     RootEngineerAgent,
     SelectorAgent,
 )
+from agenticsciml.benchmarks import ProblemBundle
 from agenticsciml.config import EvaluationContract, ExperimentConfig
 from agenticsciml.execution.sandbox import prepare_solution_workspace, train_and_evaluate
 from agenticsciml.llm.base import LLMClient
 from agenticsciml.retrieval.kb_store import KnowledgeBase
+from agenticsciml.retrieval.query_builder import RetrievalQueryBuilder
 from agenticsciml.reporting import (
     write_leaderboard,
     write_trace_summary,
     write_tree_json,
     write_tree_mermaid,
 )
-from agenticsciml.state import AnalysisReport, SolutionNode, SolutionScore
+from agenticsciml.search_policy import SearchPolicy
+from agenticsciml.state import AnalysisReport, Proposal, SolutionNode, SolutionScore
 from agenticsciml.storage import ExperimentStorage
 
 
@@ -49,6 +52,7 @@ class AgenticSciMLOrchestrator:
         self.debugger = DebuggerAgent(llm, self.storage)
         self.result_analyst = ResultAnalystAgent(llm, self.storage)
         self.selector = SelectorAgent(llm, self.storage)
+        self.problem_bundle = ProblemBundle.load(config.benchmark_dir)
 
     def run(self) -> Path:
         started = time.monotonic()
@@ -67,9 +71,9 @@ class AgenticSciMLOrchestrator:
             contract = self._load_or_create_contract()
         else:
             data_report = self.data_analyst.analyze(self.config.benchmark_dir)
-            contract = self.evaluator.create_contract(data_report)
+            contract = self.evaluator.create_contract(self.problem_bundle, data_report)
 
-            root = self._create_root(contract)
+            root = self._create_root(contract, data_report)
             self.nodes.append(root)
             self._save_checkpoint("root_created")
 
@@ -105,7 +109,7 @@ class AgenticSciMLOrchestrator:
         data_report_path = self.storage.run_dir / "reports" / "data_analysis.md"
         if data_report_path.exists():
             data_report = data_report_path.read_text(encoding="utf-8")
-        return self.evaluator.create_contract(data_report)
+        return self.evaluator.create_contract(self.problem_bundle, data_report)
 
     def _load_checkpoint_if_requested(self) -> bool:
         if not self.config.resume:
@@ -142,6 +146,7 @@ class AgenticSciMLOrchestrator:
             {
                 "phase": phase,
                 "experiment_id": self.config.experiment_id,
+                "benchmark_name": self.problem_bundle.benchmark_name,
                 "nodes": [node.to_dict() for node in self.nodes],
                 "analysis_node_ids": sorted(self.analysis_by_node),
             },
@@ -158,12 +163,29 @@ class AgenticSciMLOrchestrator:
     def _next_solution_id(self) -> str:
         return f"solution_{len(self.nodes):03d}"
 
-    def _create_root(self, contract: EvaluationContract) -> SolutionNode:
+    def _guidelines_text(self) -> str:
+        path = self.config.benchmark_dir / "guidelines.md"
+        return path.read_text(encoding="utf-8") if path.exists() else ""
+
+    def _create_root(self, contract: EvaluationContract, data_report: str | None) -> SolutionNode:
         solution_id = self._next_solution_id()
         workspace = self.storage.create_solution_workspace(solution_id)
         prepare_solution_workspace(self.config.benchmark_dir, workspace)
-        self.root_engineer.generate(solution_id)
-        return self._execute_analyze_node(solution_id, None, workspace, contract)
+        self.root_engineer.generate(
+            solution_id,
+            problem_bundle=self.problem_bundle,
+            contract=contract,
+            guidelines=self._guidelines_text(),
+            data_report=data_report,
+        )
+        return self._execute_analyze_node(
+            solution_id,
+            None,
+            workspace,
+            contract,
+            parent_node=None,
+            method_tags=["root_baseline"],
+        )
 
     def _create_child(self, parent: SolutionNode, contract: EvaluationContract) -> SolutionNode:
         solution_id = self._next_solution_id()
@@ -175,24 +197,53 @@ class AgenticSciMLOrchestrator:
         parent_summary = parent_analysis.summary if parent_analysis else parent.status
         related_reports = self._related_reports(parent)
         kb_text = None
+        kb_entry = None
+        query = RetrievalQueryBuilder.build(
+            self.problem_bundle,
+            parent=parent,
+            parent_analysis=parent_analysis,
+            leaderboard=self.nodes,
+        )
         if self.config.evolution.use_kb:
             kb_dir = self.config.benchmark_dir / "kb"
             kb = KnowledgeBase.load(kb_dir)
-            query = f"{parent_summary} discontinuity oscillation instability"
-            entry = self.retriever.retrieve(solution_id, kb, query, enabled=True)
-            kb_text = entry.content if entry else None
+            kb_entry = self.retriever.retrieve(
+                solution_id,
+                kb,
+                query,
+                enabled=True,
+                random_mode=self.config.evolution.random_kb,
+                random_seed=self.config.evolution.random_seed,
+            )
+            kb_text = kb_entry.content if kb_entry else None
         else:
-            self.retriever.retrieve(solution_id, KnowledgeBase({}), "", enabled=False)
+            self.retriever.retrieve(solution_id, KnowledgeBase({}), query, enabled=False)
 
         proposal = self.proposer.debate(
             solution_id=solution_id,
             parent_summary=parent_summary,
             kb_entry=kb_text,
             related_reports=related_reports,
+            use_critic=self.config.evolution.use_critic,
         )
         parent_code = self.engineer.read_parent_code(parent_workspace)
-        self.engineer.mutate(solution_id, parent_code, proposal)
-        return self._execute_analyze_node(solution_id, parent.node_id, workspace, contract)
+        self.engineer.mutate(
+            solution_id,
+            parent_code,
+            proposal,
+            problem_bundle=self.problem_bundle,
+            contract=contract,
+            guidelines=self._guidelines_text(),
+            parent_analysis=parent_analysis,
+        )
+        return self._execute_analyze_node(
+            solution_id,
+            parent.node_id,
+            workspace,
+            contract,
+            parent_node=parent,
+            method_tags=self._method_tags(proposal, kb_entry.entry_id if kb_entry else None),
+        )
 
     def _execute_analyze_node(
         self,
@@ -200,6 +251,8 @@ class AgenticSciMLOrchestrator:
         parent_id: str | None,
         workspace: Path,
         contract: EvaluationContract,
+        parent_node: SolutionNode | None = None,
+        method_tags: list[str] | None = None,
     ) -> SolutionNode:
         result = train_and_evaluate(workspace, contract, timeout_s=self.config.evolution.timeout_s)
         self.storage.record_trace(
@@ -213,7 +266,11 @@ class AgenticSciMLOrchestrator:
             },
         )
         retries = 0
-        while result.exit_code != 0 and retries < self.config.evolution.max_debug_retries:
+        while (
+            self.config.evolution.use_debugger
+            and result.exit_code != 0
+            and retries < self.config.evolution.max_debug_retries
+        ):
             changed = self.debugger.debug(solution_id, workspace, result.stdout + "\n" + result.stderr)
             if not changed:
                 break
@@ -248,6 +305,9 @@ class AgenticSciMLOrchestrator:
 
         report = self.result_analyst.analyze(solution_id, workspace)
         self.analysis_by_node[solution_id] = report
+        score_delta = None
+        if parent_node and parent_node.score and score:
+            score_delta = score.value - parent_node.score.value
         return SolutionNode(
             node_id=solution_id,
             parent_id=parent_id,
@@ -257,6 +317,12 @@ class AgenticSciMLOrchestrator:
             proposal_path=str(workspace / "proposal.md"),
             analysis_path=str(workspace / "analysis.md"),
             error=error,
+            benchmark_name=contract.benchmark_name,
+            contract_hash=contract.contract_hash,
+            method_tags=method_tags or [],
+            failure_kind=self._failure_kind(result.timed_out, status, error),
+            score_delta_from_parent=score_delta,
+            num_debug_attempts=retries,
         )
 
     def _select_parents(self) -> list[SolutionNode]:
@@ -267,26 +333,80 @@ class AgenticSciMLOrchestrator:
         ]
         if not available:
             return []
+        policy = SearchPolicy(
+            max_children_per_node=self.config.evolution.max_children_per_node,
+            random_seed=self.config.evolution.random_seed,
+            include_random=True,
+        )
+        selected = policy.select(self.nodes, max_to_select=self.config.evolution.parallel_mutations)
         if len(self.nodes) < self.config.evolution.parallel_mutations:
-            return available
+            return selected
 
-        best = self._best_node()
-        selected_ids = self.selector.select(
+        best = selected[0] if selected else self._best_node(available)
+        llm_selected_ids = self.selector.select(
             candidates=[node.to_dict() for node in available],
             best_node_id=best.node_id,
             max_to_select=self.config.evolution.parallel_mutations,
         )
         by_id = {node.node_id: node for node in available}
-        return [by_id[node_id] for node_id in selected_ids if node_id in by_id]
+        selected_ids = {node.node_id for node in selected}
+        for node_id in llm_selected_ids:
+            if len(selected) >= self.config.evolution.parallel_mutations:
+                break
+            node = by_id.get(node_id)
+            if node and node.node_id not in selected_ids:
+                selected.append(node)
+                selected_ids.add(node.node_id)
+        return selected[: self.config.evolution.parallel_mutations]
 
-    def _best_node(self) -> SolutionNode:
+    def _best_node(self, nodes: list[SolutionNode] | None = None) -> SolutionNode:
+        candidates = nodes or self.nodes
         best: SolutionNode | None = None
-        for node in self.nodes:
+        for node in candidates:
             if node.score is None:
                 continue
             if best is None or node.score.better_than(best.score):
                 best = node
-        return best or self.nodes[0]
+        return best or candidates[0]
+
+    def _failure_kind(self, timed_out: bool, status: str, error: str | None) -> str | None:
+        if status == "evaluated":
+            return None
+        if timed_out:
+            return "timeout"
+        text = (error or "").lower()
+        if "contract violation" in text or "validate" in text:
+            return "contract_error"
+        if "syntaxerror" in text:
+            return "invalid_code"
+        return "runtime_error"
+
+    def _method_tags(self, proposal: Proposal, kb_entry_id: str | None) -> list[str]:
+        tags: list[str] = []
+        if kb_entry_id:
+            tags.append(kb_entry_id)
+        text = " ".join(
+            [
+                proposal.title,
+                proposal.diagnosis,
+                proposal.expected_effect,
+                " ".join(proposal.mutation_plan),
+                " ".join(proposal.risks),
+            ]
+        ).lower()
+        keyword_tags = {
+            "fourier": "fourier_features",
+            "mixture": "mixture_of_experts",
+            "expert": "mixture_of_experts",
+            "weighted": "weighted_loss",
+            "weighting": "weighted_loss",
+            "clip": "gradient_clipping",
+            "adaptive": "adaptive_activation",
+        }
+        for keyword, tag in keyword_tags.items():
+            if keyword in text and tag not in tags:
+                tags.append(tag)
+        return tags or ["mutation"]
 
     def _related_reports(self, parent: SolutionNode) -> list[str]:
         reports: list[str] = []
@@ -325,6 +445,7 @@ class AgenticSciMLOrchestrator:
             "run_metadata.json",
             {
                 "wall_time_s": time.monotonic() - started,
+                "benchmark_name": self.problem_bundle.benchmark_name,
                 "solution_count": len(self.nodes),
                 "champion": best.node_id,
                 "llm_calls": self._llm_call_summary(),

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import importlib
+import os
+import sys
 import json
 import pickle
 from pathlib import Path
+
+sys.path.insert(0, str(Path.cwd()))
 
 import numpy as np
 
@@ -32,7 +36,7 @@ def main() -> None:
     if not MODEL_CHECKPOINT.exists():
         raise FileNotFoundError("Expected model.pkl from training.")
 
-    data = np.load("val_data.npz")
+    data = np.load(os.environ.get("AGENTICSCIML_VALIDATION_DATA", "val_data.npz"))
     x_val = data["x_val"]
     u_val = data["u_val"]
     model = load_model()
