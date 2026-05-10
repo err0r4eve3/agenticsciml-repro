@@ -132,6 +132,12 @@ def test_problem_bundle_and_contract_are_benchmark_aware() -> None:
         assert contract.evaluator_digest
         assert contract.data_config_digest
         assert contract.problem_bundle_digest
+        assert contract.benchmark_source_manifest_digest
+        manifest = contract.benchmark_source_manifest
+        assert manifest["artifacts"]["generate_data.py"]
+        assert manifest["artifacts"]["guidelines.md"]
+        assert manifest["artifacts"]["train_data.npz"]
+        assert manifest["artifacts"]["val_data.npz"]
         assert "train_data.npz" in contract.allowed_train_files
         assert any(path.endswith("val_data.npz") for path in contract.evaluator_only_files)
         assert contract.contract_hash == BenchmarkContractFactory.create_contract(bundle).contract_hash
@@ -194,6 +200,68 @@ def test_contract_verify_reloads_problem_bundle_from_disk(tmp_path: Path) -> Non
         assert "stale" in str(exc)
     else:
         raise AssertionError("Expected stale problem bundle verification to fail.")
+
+
+def test_contract_verify_detects_stale_guidelines_source(tmp_path: Path) -> None:
+    spec = BENCHMARKS["function_approx"]
+    benchmark_dir = tmp_path / "function_approx"
+    shutil.copytree(spec.path, benchmark_dir)
+    bundle = _problem_bundle_from_dir(benchmark_dir, spec)
+    contract = BenchmarkContractFactory.create_contract(bundle)
+
+    guidelines_path = benchmark_dir / "guidelines.md"
+    guidelines_path.write_text(
+        guidelines_path.read_text(encoding="utf-8") + "\n\nStale guideline detail.\n",
+        encoding="utf-8",
+    )
+
+    try:
+        BenchmarkContractFactory.verify_contract(bundle, contract)
+    except ValueError as exc:
+        assert "stale" in str(exc)
+    else:
+        raise AssertionError("Expected stale guidelines verification to fail.")
+
+
+def test_contract_verify_detects_stale_generate_data_source(tmp_path: Path) -> None:
+    spec = BENCHMARKS["function_approx"]
+    benchmark_dir = tmp_path / "function_approx"
+    shutil.copytree(spec.path, benchmark_dir)
+    bundle = _problem_bundle_from_dir(benchmark_dir, spec)
+    contract = BenchmarkContractFactory.create_contract(bundle)
+
+    generator_path = benchmark_dir / "generate_data.py"
+    generator_path.write_text(
+        generator_path.read_text(encoding="utf-8") + "\n# stale generator detail\n",
+        encoding="utf-8",
+    )
+
+    try:
+        BenchmarkContractFactory.verify_contract(bundle, contract)
+    except ValueError as exc:
+        assert "stale" in str(exc)
+    else:
+        raise AssertionError("Expected stale generate_data verification to fail.")
+
+
+def test_contract_verify_detects_stale_existing_data_artifact(tmp_path: Path) -> None:
+    spec = BENCHMARKS["function_approx"]
+    benchmark_dir = tmp_path / "function_approx"
+    shutil.copytree(spec.path, benchmark_dir)
+    module = _load_generate_module(benchmark_dir / "generate_data.py")
+    module.generate(seed=0, output_dir=benchmark_dir)
+
+    bundle = _problem_bundle_from_dir(benchmark_dir, spec)
+    contract = BenchmarkContractFactory.create_contract(bundle)
+
+    (benchmark_dir / "train_data.npz").write_bytes(b"tampered train data")
+
+    try:
+        BenchmarkContractFactory.verify_contract(bundle, contract)
+    except ValueError as exc:
+        assert "stale" in str(exc)
+    else:
+        raise AssertionError("Expected stale train data verification to fail.")
 
 
 def test_unknown_benchmark_bundle_fails_clearly(tmp_path: Path) -> None:

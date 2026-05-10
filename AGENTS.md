@@ -169,13 +169,16 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
 - Evaluation contracts must be benchmark-aware and hash-stable. Do not reintroduce
   silent `function_approx` defaults for non-`function_approx` benchmarks.
 - Evaluation contract hashes must cover benchmark source digests, including
-  `evaluate.py`, `Data_config.json`, and the problem bundle. Resume/load paths
-  must reject stale or tampered `evaluation_contract.json` instead of silently
-  continuing. Resume must also fail if `evaluation_contract.json` is missing;
-  do not regenerate a contract for an existing checkpoint. `checkpoint.json`
-  must persist `contract_hash`, and resume must reject checkpoint/node contract
-  mismatches. Node `benchmark_name` and `contract_hash` are required on resume;
-  missing values must fail closed.
+  `evaluate.py`, `Data_config.json`, the problem bundle, `generate_data.py`,
+  `guidelines.md`, and deterministic train/validation data artifacts. Store
+  these in `BenchmarkSourceManifest` and include its digest in the contract
+  hash. Resume/load paths must reject stale or tampered
+  `evaluation_contract.json` instead of silently continuing. Resume must also
+  fail if `evaluation_contract.json` is missing; do not regenerate a contract
+  for an existing checkpoint. `checkpoint.json` must persist `contract_hash`,
+  and resume must reject checkpoint/node contract mismatches. Node
+  `benchmark_name` and `contract_hash` are required on resume; missing values
+  must fail closed.
 - RootEngineer and Engineer prompts must include the relevant `ProblemBundle`,
   `EvaluationContract` JSON, `guidelines.md`, and available analysis context.
 - Engineer mutations must verify the parent solution digest and apply a

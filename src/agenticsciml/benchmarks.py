@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
+import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from agenticsciml.config import DataConfig, EvaluationContract
 
@@ -68,12 +72,31 @@ class ProblemBundle:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class BenchmarkSourceManifest:
+    artifacts: dict[str, str]
+    data_generated: bool
+    data_seed: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "artifacts": dict(sorted(self.artifacts.items())),
+            "data_generated": self.data_generated,
+            "data_seed": self.data_seed,
+        }
+
+    def digest(self) -> str:
+        encoded = json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+
 class BenchmarkContractFactory:
     @staticmethod
     def create_contract(problem_bundle: ProblemBundle) -> EvaluationContract:
         data_config = problem_bundle.data_config
         train_path = data_config.train_path or "train_data.npz"
         validation_path = data_config.validation_path or "val_data.npz"
+        manifest = _benchmark_source_manifest(problem_bundle, train_path, validation_path)
         contract = EvaluationContract(
             metric_name=problem_bundle.benchmark_spec.metric,
             higher_is_better=False,
@@ -107,6 +130,8 @@ class BenchmarkContractFactory:
             evaluator_digest=_file_digest(problem_bundle.benchmark_dir / "evaluate.py"),
             data_config_digest=_file_digest(problem_bundle.benchmark_dir / "Data_config.json"),
             problem_bundle_digest=_problem_bundle_digest(problem_bundle),
+            benchmark_source_manifest=manifest.to_dict(),
+            benchmark_source_manifest_digest=manifest.digest(),
         )
         return contract.with_computed_hash()
 
@@ -122,6 +147,7 @@ class BenchmarkContractFactory:
             f"- evaluator_digest: `{contract.evaluator_digest}`\n"
             f"- data_config_digest: `{contract.data_config_digest}`\n"
             f"- problem_bundle_digest: `{contract.problem_bundle_digest}`\n"
+            f"- benchmark_source_manifest_digest: `{contract.benchmark_source_manifest_digest}`\n"
             f"- predict_command: `{' '.join(contract.predict_command)}`\n"
             f"- allowed_train_files: {', '.join(contract.allowed_train_files)}\n"
             f"- evaluator_only_files: {', '.join(contract.evaluator_only_files)}\n\n"
@@ -209,6 +235,9 @@ def benchmark_for_path(path: Path) -> BenchmarkSpec | None:
     return BENCHMARKS.get(path.name)
 
 
+_GENERATED_DATA_DIGEST_CACHE: dict[tuple[str, str, str, str, str], dict[str, str]] = {}
+
+
 def _file_digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -228,3 +257,85 @@ def _problem_bundle_digest(problem_bundle: ProblemBundle) -> str:
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _benchmark_source_manifest(
+    problem_bundle: ProblemBundle,
+    train_path: str,
+    validation_path: str,
+) -> BenchmarkSourceManifest:
+    benchmark_dir = problem_bundle.benchmark_dir
+    artifacts = {
+        "Problem.md": _text_digest(problem_bundle.problem_md),
+        "Requirements.md": _text_digest(problem_bundle.requirements_md),
+        "Evaluation.md": _text_digest(problem_bundle.evaluation_md),
+        "Data_config.json": _file_digest(benchmark_dir / "Data_config.json"),
+        "evaluate.py": _file_digest(benchmark_dir / "evaluate.py"),
+        "generate_data.py": _file_digest(benchmark_dir / "generate_data.py"),
+        "guidelines.md": _file_digest(benchmark_dir / "guidelines.md"),
+    }
+
+    train_file = benchmark_dir / train_path
+    validation_file = benchmark_dir / validation_path
+    if train_file.exists() and validation_file.exists():
+        artifacts[train_path] = _file_digest(train_file)
+        artifacts[validation_path] = _file_digest(validation_file)
+        return BenchmarkSourceManifest(artifacts=artifacts, data_generated=False)
+
+    generated_data = _generated_data_digests(problem_bundle, train_path, validation_path)
+    artifacts.update(generated_data)
+    return BenchmarkSourceManifest(artifacts=artifacts, data_generated=True)
+
+
+def _generated_data_digests(
+    problem_bundle: ProblemBundle,
+    train_path: str,
+    validation_path: str,
+) -> dict[str, str]:
+    benchmark_dir = problem_bundle.benchmark_dir
+    generate_digest = _file_digest(benchmark_dir / "generate_data.py")
+    data_config_digest = _file_digest(benchmark_dir / "Data_config.json")
+    cache_key = (
+        str(benchmark_dir.resolve()),
+        generate_digest,
+        data_config_digest,
+        train_path,
+        validation_path,
+    )
+    if cache_key in _GENERATED_DATA_DIGEST_CACHE:
+        return dict(_GENERATED_DATA_DIGEST_CACHE[cache_key])
+
+    with tempfile.TemporaryDirectory(prefix="agenticsciml-manifest-") as tmp:
+        tmp_path = Path(tmp)
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(benchmark_dir / "generate_data.py"),
+                "--seed",
+                "0",
+                "--output-dir",
+                str(tmp_path),
+            ],
+            cwd=benchmark_dir,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                "Failed to generate deterministic benchmark data for contract manifest: "
+                f"{result.stderr or result.stdout}"
+            )
+        train_file = tmp_path / train_path
+        validation_file = tmp_path / validation_path
+        if not train_file.exists() or not validation_file.exists():
+            raise RuntimeError(
+                "Benchmark data generator did not produce expected files: "
+                f"{train_path}, {validation_path}"
+            )
+        digests = {
+            train_path: _file_digest(train_file),
+            validation_path: _file_digest(validation_file),
+        }
+        _GENERATED_DATA_DIGEST_CACHE[cache_key] = digests
+        return dict(digests)

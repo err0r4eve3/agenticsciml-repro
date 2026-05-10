@@ -91,6 +91,8 @@ class EvaluationContract:
     evaluator_digest: str = ""
     data_config_digest: str = ""
     problem_bundle_digest: str = ""
+    benchmark_source_manifest: dict[str, Any] = field(default_factory=dict)
+    benchmark_source_manifest_digest: str = ""
     contract_hash: str = ""
 
     @classmethod
@@ -129,6 +131,7 @@ class EvaluationContract:
             "evaluator_digest": self.evaluator_digest,
             "data_config_digest": self.data_config_digest,
             "problem_bundle_digest": self.problem_bundle_digest,
+            "benchmark_source_manifest_digest": self.benchmark_source_manifest_digest,
         }
 
     def compute_hash(self) -> str:
@@ -154,6 +157,8 @@ class EvaluationContract:
             "evaluator_digest": self.evaluator_digest,
             "data_config_digest": self.data_config_digest,
             "problem_bundle_digest": self.problem_bundle_digest,
+            "benchmark_source_manifest": self.benchmark_source_manifest,
+            "benchmark_source_manifest_digest": self.benchmark_source_manifest_digest,
             "contract_hash": self.contract_hash,
         }
 
@@ -191,6 +196,8 @@ class EvaluationContract:
             evaluator_digest=str(data.get("evaluator_digest", "")),
             data_config_digest=str(data.get("data_config_digest", "")),
             problem_bundle_digest=str(data.get("problem_bundle_digest", "")),
+            benchmark_source_manifest=dict(data.get("benchmark_source_manifest", {})),
+            benchmark_source_manifest_digest=str(data.get("benchmark_source_manifest_digest", "")),
             contract_hash=str(data.get("contract_hash", "")),
         )
         if contract.contract_hash:
