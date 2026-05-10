@@ -76,6 +76,13 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
 - After completing implementation, validation, and GitHub push for this
   project, consult the user's ChatGPT Pro web session before the final response
   whenever the browser session is available.
+- The user has granted standing authorization for this project to send public
+  repository audit briefs to ChatGPT Pro without per-change approval. Continue
+  autonomously when the prompt contains only public repo/commit URLs, changed
+  file summaries, validation results, and non-sensitive risk notes.
+- Use the Codex Chrome plugin workflow from `codex-chatgpt-pro-research` for
+  ChatGPT Pro communication. Do not use the legacy macOS Accessibility wrapper
+  unless the user explicitly requests that fallback.
 - Send ChatGPT Pro a concise audit brief with: repository URL or commit URL,
   goal, changed files summary, validation commands/results, known boundaries,
   and specific risks where review is requested.
@@ -84,6 +91,9 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   general advice.
 - Do not paste secrets, credentials, private datasets, raw `.env` values,
   private tokens, or excessive generated artifacts into ChatGPT Pro.
+- Stop and ask before sending private logs, secrets, credentials, cookies,
+  customer data, private datasets, browser/session contents, or anything outside
+  the public-repository audit boundary.
 - If ChatGPT Pro returns actionable findings that are in scope and low-risk,
   address them before the final response, then validate and push again. If the
   findings are larger follow-up work, summarize them as next steps.
