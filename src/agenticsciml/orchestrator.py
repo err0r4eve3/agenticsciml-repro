@@ -186,12 +186,12 @@ class AgenticSciMLOrchestrator:
                 f"stored {payload.get('contract_hash')}, expected {contract.contract_hash}"
             )
         for node in self.nodes:
-            if node.benchmark_name and node.benchmark_name != contract.benchmark_name:
+            if node.benchmark_name != contract.benchmark_name:
                 raise ValueError(
                     f"Node {node.node_id} benchmark mismatch: "
                     f"{node.benchmark_name} != {contract.benchmark_name}"
                 )
-            if node.contract_hash and node.contract_hash != contract.contract_hash:
+            if node.contract_hash != contract.contract_hash:
                 raise ValueError(
                     f"Node {node.node_id} contract hash mismatch: "
                     f"{node.contract_hash} != {contract.contract_hash}"
