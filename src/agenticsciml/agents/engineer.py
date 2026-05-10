@@ -67,6 +67,7 @@ class EngineerAgent(AgentBase):
                 "expected_effect",
                 "risks",
                 "parent_digest",
+                "patch",
                 "files_changed",
             ),
         )

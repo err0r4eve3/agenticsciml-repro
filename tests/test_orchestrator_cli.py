@@ -70,6 +70,27 @@ class MalformedDebuggerLLM(MockLLMClient):
         return super().complete_json(prompt, schema_name, system=system, temperature=temperature)
 
 
+class MalformedEngineerLLM(MockLLMClient):
+    def complete_json(
+        self,
+        prompt: str,
+        schema_name: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+    ) -> dict[str, Any]:
+        if schema_name == "engineer":
+            match = re.search(r"parent_digest:\s*([a-f0-9]{64})", prompt)
+            return {
+                "mutation_summary": "malformed patch fixture",
+                "expected_effect": "none",
+                "risks": ["fixture intentionally malformed"],
+                "parent_digest": match.group(1) if match else "",
+                "patch": "not a unified patch",
+                "files_changed": ["solution.py"],
+            }
+        return super().complete_json(prompt, schema_name, system=system, temperature=temperature)
+
+
 def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     config = ExperimentConfig(
         experiment_id="mock-run",
@@ -291,4 +312,29 @@ def test_debugger_patch_error_is_recorded_without_aborting_run(tmp_path: Path) -
     assert tree["nodes"][0]["num_debug_attempts"] == 1
     assert debugger_error.exists()
     assert "PatchApplicationError" in debugger_error.read_text(encoding="utf-8")
+    assert "not a unified patch" in (
+        run_dir / "solutions" / "solution_000" / "transcripts" / "debugger.json"
+    ).read_text(encoding="utf-8")
     assert "debugger:patch_application" in trace_text
+
+
+def test_engineer_patch_error_creates_failed_child_without_aborting_run(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="bad-engineer-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=1, parallel_mutations=1, max_debug_retries=1),
+        use_mock=True,
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, MalformedEngineerLLM()).run()
+    tree = json.loads((run_dir / "tree.json").read_text(encoding="utf-8"))
+    child = next(node for node in tree["nodes"] if node["parent_id"] is not None)
+    engineering_error = run_dir / "solutions" / child["node_id"] / "engineering_error.md"
+    trace_text = (run_dir / "trace.jsonl").read_text(encoding="utf-8")
+
+    assert child["status"] == "failed"
+    assert child["failure_kind"] == "engineering_error"
+    assert engineering_error.exists()
+    assert "PatchApplicationError" in engineering_error.read_text(encoding="utf-8")
+    assert "engineer:patch_application" in trace_text

@@ -129,6 +129,9 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
 - Use structured outputs for code-consumed LLM responses. Validate required
   fields, retry within a small budget, and fail closed when validation still
   fails.
+- LLM JSON parse/API/schema failures must be converted to `StructuredOutputError`
+  at the agent boundary so orchestrator loops can record guardrail failures and
+  continue when the failed child can be represented as a failed node.
 - Treat `AgentSpec` as a runtime contract, not only documentation. New agent
   methods must call input-schema validation before LLM/tool work and use the
   spec output schema for code-consumed JSON.
@@ -169,7 +172,8 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   `EvaluationContract` JSON, `guidelines.md`, and available analysis context.
 - Engineer mutations must verify the parent solution digest and apply a
   structured patch or explicit file map through Python. Do not blindly replace
-  `solution.py` with unverified raw LLM text.
+  `solution.py` with unverified raw LLM text. Engineer output schema must
+  include the fields required by the Python patch application path.
 - Debugger repairs must be contract-aware and patch-only by default. Include
   the current `solution.py`, `parent_digest`, `ProblemBundle`,
   `EvaluationContract` JSON, `guidelines.md`, failure phase, and error log in

@@ -120,12 +120,69 @@ class AgentBase:
         last_error = ""
         for attempt in range(retries + 1):
             started = time.monotonic()
-            data = self.llm.complete_json(
-                current_prompt,
-                schema_name,
-                system=system,
-                temperature=temperature,
-            )
+            try:
+                data = self.llm.complete_json(
+                    current_prompt,
+                    schema_name,
+                    system=system,
+                    temperature=temperature,
+                )
+            except Exception as exc:
+                last_error = (
+                    f"LLM JSON call failed for {schema_name}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                self.storage.record_trace(
+                    "generation_span",
+                    self.role,
+                    {
+                        "mode": "json",
+                        **self._spec_metadata(),
+                        "schema_name": schema_name,
+                        "attempt": attempt + 1,
+                        "prompt_chars": len(current_prompt),
+                        "response_chars": 0,
+                        "prompt_token_estimate": self._estimate_tokens(current_prompt),
+                        "response_token_estimate": 0,
+                        "duration_s": time.monotonic() - started,
+                        "field_count": 0,
+                        "error_type": type(exc).__name__,
+                    },
+                )
+                self.storage.record_trace(
+                    "guardrail_span",
+                    f"{self.role}:{schema_name}:structured_output",
+                    {
+                        **self._spec_metadata(),
+                        "passed": False,
+                        "attempt": attempt + 1,
+                        "required_fields": list(required_fields),
+                        "error": last_error,
+                    },
+                )
+                current_prompt = (
+                    f"{prompt}\n\nPrevious output failed schema validation: {last_error}. "
+                    "Return corrected JSON only."
+                )
+                continue
+            if not isinstance(data, dict):
+                last_error = f"{schema_name} output must be a JSON object."
+                self.storage.record_trace(
+                    "guardrail_span",
+                    f"{self.role}:{schema_name}:structured_output",
+                    {
+                        **self._spec_metadata(),
+                        "passed": False,
+                        "attempt": attempt + 1,
+                        "required_fields": list(required_fields),
+                        "error": last_error,
+                    },
+                )
+                current_prompt = (
+                    f"{prompt}\n\nPrevious output failed schema validation: {last_error}. "
+                    "Return corrected JSON only."
+                )
+                continue
             response_text = json.dumps(data, sort_keys=True, default=str)
             self.storage.record_trace(
                 "generation_span",

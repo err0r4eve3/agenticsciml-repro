@@ -74,8 +74,8 @@ class DebuggerAgent(AgentBase):
                 "risks",
             ),
         )
-        changed = self.apply_debug_output(solution_id, current_code, response)
         self._save_messages(solution_id, [AgentMessage(self.role, prompt, str(response))])
+        changed = self.apply_debug_output(solution_id, current_code, response)
         return changed
 
     def apply_debug_output(

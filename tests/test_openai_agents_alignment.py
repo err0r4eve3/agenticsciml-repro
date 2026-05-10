@@ -50,6 +50,26 @@ class AlwaysInvalidJsonLLM(FlakyJsonLLM):
         return {"title": "still invalid"}
 
 
+class RaisingThenValidJsonLLM(FlakyJsonLLM):
+    def complete_json(
+        self,
+        prompt: str,
+        schema_name: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+    ) -> dict[str, Any]:
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("invalid json payload")
+        return {
+            "title": "Valid proposal",
+            "diagnosis": "Root underfits.",
+            "mutation_plan": ["Add features."],
+            "expected_effect": "Lower validation MSE.",
+            "risks": ["May overfit."],
+        }
+
+
 class RecordingProposalLLM(LLMClient):
     def __init__(self):
         self.final_prompt = ""
@@ -100,6 +120,29 @@ def test_agent_json_output_fails_closed_after_retry_budget(tmp_path: Path) -> No
             required_fields=("title", "diagnosis", "mutation_plan", "expected_effect", "risks"),
             retries=1,
         )
+
+
+def test_agent_json_exception_is_retried_and_traced(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    agent = ProposerAgent(RaisingThenValidJsonLLM(), storage)
+
+    data = agent.complete_json_checked(
+        prompt="return a proposal",
+        schema_name="proposal",
+        retries=1,
+    )
+    events = [
+        json.loads(line)
+        for line in (storage.run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert data["diagnosis"] == "Root underfits."
+    assert any(
+        event["event_type"] == "guardrail_span"
+        and event["metadata"].get("passed") is False
+        and "invalid json payload" in event["metadata"].get("error", "")
+        for event in events
+    )
 
 
 def test_proposer_final_round_uses_critic_feedback(tmp_path: Path) -> None:

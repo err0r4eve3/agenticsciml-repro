@@ -229,22 +229,58 @@ class AgenticSciMLOrchestrator:
             use_critic=self.config.evolution.use_critic,
         )
         parent_code = self.engineer.read_parent_code(parent_workspace)
-        self.engineer.mutate(
-            solution_id,
-            parent_code,
-            proposal,
-            problem_bundle=self.problem_bundle,
-            contract=contract,
-            guidelines=self._guidelines_text(),
-            parent_analysis=parent_analysis,
-        )
+        method_tags = self._method_tags(proposal, kb_entry.entry_id if kb_entry else None)
+        try:
+            self.engineer.mutate(
+                solution_id,
+                parent_code,
+                proposal,
+                problem_bundle=self.problem_bundle,
+                contract=contract,
+                guidelines=self._guidelines_text(),
+                parent_analysis=parent_analysis,
+            )
+        except (PatchApplicationError, StructuredOutputError) as exc:
+            self.storage.save_solution_text(
+                solution_id,
+                "engineering_error.md",
+                f"# Engineering Error\n\n{type(exc).__name__}: {exc}\n",
+            )
+            self.storage.record_trace(
+                "guardrail_span",
+                "engineer:patch_application",
+                {
+                    "solution_id": solution_id,
+                    "passed": False,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
+            report = self.result_analyst.analyze(solution_id, workspace)
+            self.analysis_by_node[solution_id] = report
+            return SolutionNode(
+                node_id=solution_id,
+                parent_id=parent.node_id,
+                workspace=str(workspace),
+                score=None,
+                status="failed",
+                proposal_path=str(workspace / "proposal.md"),
+                analysis_path=str(workspace / "analysis.md"),
+                error=str(exc),
+                benchmark_name=contract.benchmark_name,
+                contract_hash=contract.contract_hash,
+                method_tags=method_tags,
+                failure_kind="engineering_error",
+                score_delta_from_parent=None,
+                num_debug_attempts=0,
+            )
         return self._execute_analyze_node(
             solution_id,
             parent.node_id,
             workspace,
             contract,
             parent_node=parent,
-            method_tags=self._method_tags(proposal, kb_entry.entry_id if kb_entry else None),
+            method_tags=method_tags,
         )
 
     def _execute_analyze_node(
