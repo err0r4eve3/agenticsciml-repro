@@ -71,6 +71,26 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
 - Final responses after a push should include the commit SHA, GitHub URL,
   validation commands/results, and any unverified risk.
 
+## External ChatGPT Pro Audit Policy
+
+- After completing implementation, validation, and GitHub push for this
+  project, consult the user's ChatGPT Pro web session before the final response
+  whenever the browser session is available.
+- Send ChatGPT Pro a concise audit brief with: repository URL or commit URL,
+  goal, changed files summary, validation commands/results, known boundaries,
+  and specific risks where review is requested.
+- Ask ChatGPT Pro to provide an audit conclusion, concrete issues, and
+  prioritized improvement guidance. Prefer direct, actionable findings over
+  general advice.
+- Do not paste secrets, credentials, private datasets, raw `.env` values,
+  private tokens, or excessive generated artifacts into ChatGPT Pro.
+- If ChatGPT Pro returns actionable findings that are in scope and low-risk,
+  address them before the final response, then validate and push again. If the
+  findings are larger follow-up work, summarize them as next steps.
+- If the ChatGPT Pro web session is unavailable, blocked, or not authenticated,
+  state that explicitly in the final response and include the local validation
+  results instead of inventing an external audit.
+
 ## Multi-Agent Design Rules
 
 - Design the task state machine first, then choose which nodes need LLM calls,
