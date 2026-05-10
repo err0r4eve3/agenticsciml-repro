@@ -78,7 +78,7 @@ class BenchmarkContractFactory:
             higher_is_better=False,
             validate_command=["python", "solution.py", "--mode=validate"],
             train_command=["python", "solution.py", "--mode=train"],
-            evaluate_command=["python", ".evaluator/evaluate.py"],
+            evaluate_command=["python", "<private_eval>/evaluate.py"],
             checkpoint_path="model.pkl",
             benchmark_name=problem_bundle.benchmark_name,
             allowed_train_files=[
@@ -91,8 +91,8 @@ class BenchmarkContractFactory:
                 train_path,
             ],
             evaluator_only_files=[
-                ".evaluator/evaluate.py",
-                f".evaluator/{validation_path}",
+                "private_eval/{solution_id}/evaluate.py",
+                f"private_eval/{{solution_id}}/{validation_path}",
             ],
         )
         return contract.with_computed_hash()

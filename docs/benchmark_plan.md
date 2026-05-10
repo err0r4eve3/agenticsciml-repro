@@ -17,7 +17,8 @@
 - `guidelines.md`
 - optional `kb/`
 - train-time data: `train_data.npz`
-- evaluator-only data: `.evaluator/val_data.npz` inside solution workspaces
+- evaluator-only data: `private_eval/solution_*/val_data.npz` outside solution
+  workspaces
 - `x_train` / `u_train` / `x_val` / `u_val`
 - `solution.py --mode=validate`
 - `solution.py --mode=train`
@@ -71,10 +72,11 @@ uv run --python 3.11 --extra dev pytest tests/test_benchmark_catalog.py -q
 - 每个 benchmark 是否能跑 root-only mock；
 - 每个 benchmark 是否能跑 1 轮 mock evolution。
 
-验证集泄漏是 P0 约束：`solution.py` 训练/验证阶段不能读取
-`val_data.npz`，明显的 `val_data.npz` / `.evaluator` 字符串引用会被
-static guardrail 拦截。只有 evaluator 阶段通过受控环境变量访问
-`.evaluator/val_data.npz`。
+验证集泄漏是 P0 约束：`solution.py` 训练/验证阶段的 cwd 下不能存在
+`val_data.npz` 或 evaluator-private 目录；`Path(".").rglob("*.npz")` 和
+`glob.glob("**/*.npz", recursive=True)` 只能发现训练数据。明显的
+`val_data.npz` / `.evaluator` 字符串引用仍会被 static guardrail 拦截。
+只有 evaluator 阶段通过受控环境变量访问 run-private validation path。
 
 ## 真实 LLM 实验顺序
 

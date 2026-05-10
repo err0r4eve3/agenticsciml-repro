@@ -85,7 +85,7 @@ class EvaluationContract:
     benchmark_name: str = "function_approx"
     allowed_train_files: list[str] = field(default_factory=lambda: ["train_data.npz"])
     evaluator_only_files: list[str] = field(
-        default_factory=lambda: [".evaluator/evaluate.py", ".evaluator/val_data.npz"]
+        default_factory=lambda: ["private_eval/{solution_id}/evaluate.py", "private_eval/{solution_id}/val_data.npz"]
     )
     contract_hash: str = ""
 
@@ -96,7 +96,7 @@ class EvaluationContract:
             higher_is_better=False,
             validate_command=["python", "solution.py", "--mode=validate"],
             train_command=["python", "solution.py", "--mode=train"],
-            evaluate_command=["python", ".evaluator/evaluate.py"],
+            evaluate_command=["python", "<private_eval>/evaluate.py"],
             checkpoint_path="model.pkl",
             benchmark_name="function_approx",
         ).with_computed_hash()
@@ -148,7 +148,10 @@ class EvaluationContract:
             benchmark_name=str(data.get("benchmark_name", "function_approx")),
             allowed_train_files=list(data.get("allowed_train_files", ["train_data.npz"])),
             evaluator_only_files=list(
-                data.get("evaluator_only_files", [".evaluator/evaluate.py", ".evaluator/val_data.npz"])
+                data.get(
+                    "evaluator_only_files",
+                    ["private_eval/{solution_id}/evaluate.py", "private_eval/{solution_id}/val_data.npz"],
+                )
             ),
             contract_hash=str(data.get("contract_hash", "")),
         )

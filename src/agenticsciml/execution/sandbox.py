@@ -21,8 +21,6 @@ BENCHMARK_FILES = [
 
 GUARDED_FILES = (
     "evaluate.py",
-    ".evaluator/evaluate.py",
-    ".evaluator/val_data.npz",
     "guidelines.md",
     "Evaluation.md",
     "Data_config.json",
@@ -58,10 +56,19 @@ def _normalize_command(command: list[str]) -> list[str]:
     return command
 
 
+def private_eval_dir_for_workspace(workspace: Path) -> Path:
+    if workspace.parent.name == "solutions":
+        return workspace.parent.parent / "private_eval" / workspace.name
+    return workspace.parent / "private_eval" / workspace.name
+
+
 def prepare_solution_workspace(benchmark_dir: Path, workspace: Path) -> None:
     workspace.mkdir(parents=True, exist_ok=True)
-    evaluator_dir = workspace / ".evaluator"
-    evaluator_dir.mkdir(exist_ok=True)
+    old_evaluator_dir = workspace / ".evaluator"
+    if old_evaluator_dir.exists():
+        shutil.rmtree(old_evaluator_dir)
+    evaluator_dir = private_eval_dir_for_workspace(workspace)
+    evaluator_dir.mkdir(parents=True, exist_ok=True)
     for filename in BENCHMARK_FILES:
         source = benchmark_dir / filename
         if source.exists():
@@ -97,7 +104,11 @@ def _file_digest(path: Path) -> str | None:
 
 
 def _guarded_fingerprints(workspace: Path) -> dict[str, str | None]:
-    return {filename: _file_digest(workspace / filename) for filename in GUARDED_FILES}
+    fingerprints = {filename: _file_digest(workspace / filename) for filename in GUARDED_FILES}
+    evaluator_dir = private_eval_dir_for_workspace(workspace)
+    fingerprints["private_eval/evaluate.py"] = _file_digest(evaluator_dir / "evaluate.py")
+    fingerprints["private_eval/val_data.npz"] = _file_digest(evaluator_dir / "val_data.npz")
+    return fingerprints
 
 
 def _guardrail_violation(
@@ -156,11 +167,24 @@ def _static_solution_guardrail_violations(solution_path: Path) -> list[str]:
             if call_name in {"Path.home", "Path.expanduser", "os.path.expanduser"}:
                 violations.append(f"blocked home-directory path helper: {call_name}")
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if "val_data.npz" in node.value or ".evaluator" in node.value:
+            if "val_data.npz" in node.value or ".evaluator" in node.value or "private_eval" in node.value:
                 violations.append("blocked validation data reference")
             if "AGENTICSCIML_VALIDATION_DATA" in node.value:
                 violations.append("blocked validation data environment reference")
     return sorted(set(violations))
+
+
+def _validation_exposure(workspace: Path) -> str | None:
+    if (workspace / ".evaluator").exists():
+        return "Guardrail violation: evaluator-private directory is exposed during generated solution execution."
+    exposed = [
+        path
+        for path in workspace.rglob("*.npz")
+        if path.name == "val_data.npz"
+    ]
+    if exposed:
+        return "Guardrail violation: validation data is exposed during generated solution execution."
+    return None
 
 
 def _static_guardrail_result(workspace: Path) -> RunResult | None:
@@ -197,11 +221,24 @@ def train_and_evaluate(
         ("train", contract.train_command),
         ("evaluate", contract.evaluate_command),
     ]
-    validation_path = workspace / ".evaluator" / "val_data.npz"
+    evaluator_dir = private_eval_dir_for_workspace(workspace)
+    validation_path = evaluator_dir / "val_data.npz"
 
     for phase, command in commands:
-        if phase in {"validate", "train"} and (workspace / "val_data.npz").exists():
-            message = "Guardrail violation: validation data is exposed during generated solution execution."
+        if phase in {"validate", "train"}:
+            message = _validation_exposure(workspace)
+            if message:
+                all_stderr.append(message)
+                (workspace / "train.log").write_text("\n".join(all_stdout), encoding="utf-8")
+                return RunResult(
+                    command=command,
+                    exit_code=125,
+                    stdout="\n".join(all_stdout),
+                    stderr="\n".join(all_stderr),
+                    duration_s=total_duration,
+                )
+        if phase == "evaluate" and not validation_path.exists():
+            message = "Guardrail violation: evaluator-private validation data is missing."
             all_stderr.append(message)
             (workspace / "train.log").write_text("\n".join(all_stdout), encoding="utf-8")
             return RunResult(
@@ -212,7 +249,7 @@ def train_and_evaluate(
                 duration_s=total_duration,
             )
         guarded_before = _guarded_fingerprints(workspace)
-        normalized = _normalize_command(command)
+        normalized = _phase_command(phase, command, evaluator_dir)
         last_command = normalized
         env = None
         if phase == "evaluate":
@@ -253,3 +290,13 @@ def train_and_evaluate(
         stderr="\n".join(all_stderr),
         duration_s=total_duration,
     )
+
+
+def _phase_command(phase: str, command: list[str], evaluator_dir: Path) -> list[str]:
+    normalized = _normalize_command(command)
+    if phase != "evaluate" or len(normalized) < 2:
+        return normalized
+    script = normalized[1]
+    if script in {"evaluate.py", ".evaluator/evaluate.py", "<private_eval>/evaluate.py"}:
+        return [normalized[0], str(evaluator_dir / "evaluate.py"), *normalized[2:]]
+    return normalized

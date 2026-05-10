@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from dataclasses import dataclass
@@ -27,13 +28,15 @@ def run_command(
     command: list[str],
     timeout_s: int,
     env: Mapping[str, str | PathLike[str]] | None = None,
+    clean_env: bool = True,
 ) -> RunResult:
     started = time.monotonic()
+    subprocess_env = _subprocess_env(cwd, env, clean_env=clean_env)
     try:
         completed = subprocess.run(
             command,
             cwd=cwd,
-            env={str(key): str(value) for key, value in env.items()} if env is not None else None,
+            env=subprocess_env,
             text=True,
             capture_output=True,
             timeout=timeout_s,
@@ -55,3 +58,29 @@ def run_command(
             duration_s=time.monotonic() - started,
             timed_out=True,
         )
+
+
+def _subprocess_env(
+    cwd: Path,
+    env: Mapping[str, str | PathLike[str]] | None,
+    *,
+    clean_env: bool,
+) -> dict[str, str] | None:
+    if not clean_env:
+        return {str(key): str(value) for key, value in env.items()} if env is not None else None
+    home = cwd / ".home"
+    tmp = cwd / ".tmp"
+    home.mkdir(exist_ok=True)
+    tmp.mkdir(exist_ok=True)
+    safe = {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": str(home),
+        "TMPDIR": str(tmp),
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONUNBUFFERED": "1",
+    }
+    if os.environ.get("LANG"):
+        safe["LANG"] = os.environ["LANG"]
+    if env:
+        safe.update({str(key): str(value) for key, value in env.items()})
+    return safe

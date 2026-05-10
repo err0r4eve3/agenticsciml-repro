@@ -48,6 +48,29 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
 - Version notes should describe verified commands, known boundaries, and next
   version suggestions without implying paper-score reproduction.
 
+## GitHub And Versioning Policy
+
+- Every completed repository change must be committed and pushed to the GitHub
+  remote before the final response, unless the user explicitly asks not to push.
+- Before pushing, run the smallest relevant validation for the change. For
+  cross-cutting runtime or orchestration changes, run
+  `uv run --python 3.11 --extra dev pytest -q`.
+- Do not commit generated run artifacts, secrets, credentials, local caches, or
+  private datasets. Verify `git status --short` before staging.
+- If normal `git push` fails because of local network/TLS issues, use an
+  authenticated `gh` / GitHub API fallback only after confirming the update is a
+  fast-forward of the configured remote branch.
+- Large milestones, release-like changes, benchmark additions, security
+  boundary changes, public CLI changes, or workflow contract changes must update
+  `docs/version_notes.md` in the same commit.
+- Version notes for large milestones should include: implemented capabilities,
+  verified commands, known boundaries, remaining risks, and suggested next
+  version work.
+- Do not create Git tags, GitHub releases, or release artifacts unless the user
+  explicitly asks for them.
+- Final responses after a push should include the commit SHA, GitHub URL,
+  validation commands/results, and any unverified risk.
+
 ## Multi-Agent Design Rules
 
 - Design the task state machine first, then choose which nodes need LLM calls,
@@ -101,8 +124,13 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
 - New benchmarks must be added to `agenticsciml.benchmarks.BENCHMARKS`, linked
   from `docs/benchmark_plan.md`, and validated by `tests/test_benchmark_catalog.py`.
 - Validation data is evaluator-only. Generated `solution.py` must not see
-  `val_data.npz` during validate/train; keep validation data under `.evaluator/`
-  and preserve static guardrails against obvious validation-data reads.
+  `val_data.npz` during validate/train; keep validation data outside
+  `solutions/solution_*/` under run-private evaluator directories and preserve
+  static guardrails against obvious validation-data reads.
+- Generated solution subprocesses must use a sanitized environment. Do not let
+  validate/train inherit host secrets or arbitrary variables such as
+  `OPENAI_API_KEY`, `GITHUB_TOKEN`, proxy settings, `SSH_AUTH_SOCK`, or the
+  user's real `HOME`.
 - Evaluation contracts must be benchmark-aware and hash-stable. Do not reintroduce
   silent `function_approx` defaults for non-`function_approx` benchmarks.
 - RootEngineer and Engineer prompts must include the relevant `ProblemBundle`,

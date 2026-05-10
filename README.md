@@ -21,7 +21,8 @@ available, so this project implements a source-grounded approximation:
 - engineer and debugger roles around generated code
 - digest-checked patch mutation for generated `solution.py`
 - per-solution workspaces, logs, scores, prompts, responses, and reports
-- evaluator-only validation data kept outside the generated solution train path
+- evaluator-only validation data kept outside generated solution workspaces
+- sanitized subprocess environments for generated solution execution
 - champion export
 
 ## Quick Start
