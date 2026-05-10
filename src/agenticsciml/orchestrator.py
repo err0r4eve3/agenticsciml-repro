@@ -55,6 +55,8 @@ class AgenticSciMLOrchestrator:
         self.result_analyst = ResultAnalystAgent(llm, self.storage)
         self.selector = SelectorAgent(llm, self.storage)
         self.problem_bundle = ProblemBundle.load(config.benchmark_dir)
+        self.contract: EvaluationContract | None = None
+        self.loaded_checkpoint: dict[str, object] | None = None
 
     def run(self) -> Path:
         started = time.monotonic()
@@ -71,9 +73,12 @@ class AgenticSciMLOrchestrator:
         resumed = self._load_checkpoint_if_requested()
         if resumed:
             contract = self._load_or_create_contract()
+            self.contract = contract
+            self._validate_loaded_checkpoint(contract)
         else:
             data_report = self.data_analyst.analyze(self.config.benchmark_dir)
             contract = self.evaluator.create_contract(self.problem_bundle, data_report)
+            self.contract = contract
 
             root = self._create_root(contract, data_report)
             self.nodes.append(root)
@@ -124,6 +129,7 @@ class AgenticSciMLOrchestrator:
         if not checkpoint_path.exists():
             raise FileNotFoundError(f"Cannot resume without checkpoint: {checkpoint_path}")
         payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        self.loaded_checkpoint = payload
         self.nodes = [SolutionNode.from_dict(node) for node in payload.get("nodes", [])]
         self.analysis_by_node = self._load_analysis_reports(self.nodes)
         self.storage.record_trace(
@@ -153,6 +159,7 @@ class AgenticSciMLOrchestrator:
                 "phase": phase,
                 "experiment_id": self.config.experiment_id,
                 "benchmark_name": self.problem_bundle.benchmark_name,
+                "contract_hash": self.contract.contract_hash if self.contract else "",
                 "nodes": [node.to_dict() for node in self.nodes],
                 "analysis_node_ids": sorted(self.analysis_by_node),
             },
@@ -165,6 +172,30 @@ class AgenticSciMLOrchestrator:
                 "node_count": len(self.nodes),
             },
         )
+
+    def _validate_loaded_checkpoint(self, contract: EvaluationContract) -> None:
+        payload = self.loaded_checkpoint or {}
+        if payload.get("benchmark_name") != self.problem_bundle.benchmark_name:
+            raise ValueError(
+                "Checkpoint benchmark mismatch: "
+                f"stored {payload.get('benchmark_name')}, expected {self.problem_bundle.benchmark_name}"
+            )
+        if payload.get("contract_hash") != contract.contract_hash:
+            raise ValueError(
+                "Checkpoint contract hash mismatch: "
+                f"stored {payload.get('contract_hash')}, expected {contract.contract_hash}"
+            )
+        for node in self.nodes:
+            if node.benchmark_name and node.benchmark_name != contract.benchmark_name:
+                raise ValueError(
+                    f"Node {node.node_id} benchmark mismatch: "
+                    f"{node.benchmark_name} != {contract.benchmark_name}"
+                )
+            if node.contract_hash and node.contract_hash != contract.contract_hash:
+                raise ValueError(
+                    f"Node {node.node_id} contract hash mismatch: "
+                    f"{node.contract_hash} != {contract.contract_hash}"
+                )
 
     def _next_solution_id(self) -> str:
         return f"solution_{len(self.nodes):03d}"

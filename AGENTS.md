@@ -172,7 +172,9 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   `evaluate.py`, `Data_config.json`, and the problem bundle. Resume/load paths
   must reject stale or tampered `evaluation_contract.json` instead of silently
   continuing. Resume must also fail if `evaluation_contract.json` is missing;
-  do not regenerate a contract for an existing checkpoint.
+  do not regenerate a contract for an existing checkpoint. `checkpoint.json`
+  must persist `contract_hash`, and resume must reject checkpoint/node contract
+  mismatches.
 - RootEngineer and Engineer prompts must include the relevant `ProblemBundle`,
   `EvaluationContract` JSON, `guidelines.md`, and available analysis context.
 - Engineer mutations must verify the parent solution digest and apply a
