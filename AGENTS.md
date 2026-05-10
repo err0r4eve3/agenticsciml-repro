@@ -168,6 +168,10 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   user's real `HOME`.
 - Evaluation contracts must be benchmark-aware and hash-stable. Do not reintroduce
   silent `function_approx` defaults for non-`function_approx` benchmarks.
+- Evaluation contract hashes must cover benchmark source digests, including
+  `evaluate.py`, `Data_config.json`, and the problem bundle. Resume/load paths
+  must reject stale or tampered `evaluation_contract.json` instead of silently
+  continuing.
 - RootEngineer and Engineer prompts must include the relevant `ProblemBundle`,
   `EvaluationContract` JSON, `guidelines.md`, and available analysis context.
 - Engineer mutations must verify the parent solution digest and apply a

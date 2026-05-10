@@ -1,9 +1,12 @@
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from agenticsciml.config import ExperimentConfig, EvolutionConfig
 from agenticsciml.llm.mock import MockLLMClient
@@ -158,6 +161,36 @@ def test_resume_continues_existing_solution_tree_without_rebuilding_root(tmp_pat
     assert root_solution.stat().st_mtime_ns == root_mtime
     assert len(tree["nodes"]) == 2
     assert "agenticsciml.resume.loaded" in trace_text
+
+
+def test_resume_rejects_stale_evaluation_contract(tmp_path: Path) -> None:
+    benchmark_dir = tmp_path / "benchmarks" / "function_approx"
+    shutil.copytree(Path("examples/function_approx").resolve(), benchmark_dir)
+    first_config = ExperimentConfig(
+        experiment_id="stale-contract-run",
+        benchmark_dir=benchmark_dir,
+        output_dir=tmp_path / "runs",
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+    )
+    AgenticSciMLOrchestrator(first_config, MockLLMClient()).run()
+
+    evaluate_path = benchmark_dir / "evaluate.py"
+    evaluate_path.write_text(
+        evaluate_path.read_text(encoding="utf-8") + "\n# stale contract detector\n",
+        encoding="utf-8",
+    )
+    resume_config = ExperimentConfig(
+        experiment_id="stale-contract-run",
+        benchmark_dir=benchmark_dir,
+        output_dir=tmp_path / "runs",
+        evolution=EvolutionConfig(max_iterations=1, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+        resume=True,
+    )
+
+    with pytest.raises(ValueError, match="stale"):
+        AgenticSciMLOrchestrator(resume_config, MockLLMClient()).run()
 
 
 def test_cli_run_mock_pipeline(tmp_path: Path, cli_env: dict[str, str]) -> None:

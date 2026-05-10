@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -103,6 +104,9 @@ class BenchmarkContractFactory:
                 "private_eval/{solution_id}/evaluate.py",
                 f"private_eval/{{solution_id}}/{validation_path}",
             ],
+            evaluator_digest=_file_digest(problem_bundle.benchmark_dir / "evaluate.py"),
+            data_config_digest=_file_digest(problem_bundle.benchmark_dir / "Data_config.json"),
+            problem_bundle_digest=_problem_bundle_digest(problem_bundle),
         )
         return contract.with_computed_hash()
 
@@ -115,6 +119,9 @@ class BenchmarkContractFactory:
             f"- higher_is_better: {contract.higher_is_better}\n"
             f"- checkpoint: {contract.checkpoint_path}\n"
             f"- contract_hash: `{contract.contract_hash}`\n"
+            f"- evaluator_digest: `{contract.evaluator_digest}`\n"
+            f"- data_config_digest: `{contract.data_config_digest}`\n"
+            f"- problem_bundle_digest: `{contract.problem_bundle_digest}`\n"
             f"- predict_command: `{' '.join(contract.predict_command)}`\n"
             f"- allowed_train_files: {', '.join(contract.allowed_train_files)}\n"
             f"- evaluator_only_files: {', '.join(contract.evaluator_only_files)}\n\n"
@@ -126,6 +133,15 @@ class BenchmarkContractFactory:
             "## Benchmark Summary\n\n"
             f"{problem_bundle.summary()}"
         )
+
+    @staticmethod
+    def verify_contract(problem_bundle: ProblemBundle, contract: EvaluationContract) -> None:
+        expected = BenchmarkContractFactory.create_contract(problem_bundle)
+        if contract.contract_hash != expected.contract_hash:
+            raise ValueError(
+                "EvaluationContract is stale for current benchmark files: "
+                f"stored {contract.contract_hash}, expected {expected.contract_hash}"
+            )
 
 
 BENCHMARKS: dict[str, BenchmarkSpec] = {
@@ -190,3 +206,24 @@ def benchmark_for_path(path: Path) -> BenchmarkSpec | None:
         if resolved == spec.path.resolve():
             return spec
     return BENCHMARKS.get(path.name)
+
+
+def _file_digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _text_digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _problem_bundle_digest(problem_bundle: ProblemBundle) -> str:
+    spec_payload = problem_bundle.benchmark_spec.to_dict()
+    spec_payload.pop("path", None)
+    payload = {
+        "benchmark_spec": spec_payload,
+        "Problem.md": _text_digest(problem_bundle.problem_md),
+        "Requirements.md": _text_digest(problem_bundle.requirements_md),
+        "Evaluation.md": _text_digest(problem_bundle.evaluation_md),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()

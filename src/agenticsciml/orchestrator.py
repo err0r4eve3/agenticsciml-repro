@@ -17,7 +17,7 @@ from agenticsciml.agents import (
     SelectorAgent,
 )
 from agenticsciml.agents.base import StructuredOutputError
-from agenticsciml.benchmarks import ProblemBundle
+from agenticsciml.benchmarks import BenchmarkContractFactory, ProblemBundle
 from agenticsciml.config import EvaluationContract, ExperimentConfig
 from agenticsciml.execution.sandbox import prepare_solution_workspace, train_and_evaluate
 from agenticsciml.llm.base import LLMClient
@@ -106,7 +106,9 @@ class AgenticSciMLOrchestrator:
     def _load_or_create_contract(self) -> EvaluationContract:
         contract_path = self.storage.run_dir / "evaluation_contract.json"
         if contract_path.exists():
-            return EvaluationContract.from_dict(json.loads(contract_path.read_text(encoding="utf-8")))
+            contract = EvaluationContract.from_dict(json.loads(contract_path.read_text(encoding="utf-8")))
+            BenchmarkContractFactory.verify_contract(self.problem_bundle, contract)
+            return contract
         data_report = ""
         data_report_path = self.storage.run_dir / "reports" / "data_analysis.md"
         if data_report_path.exists():

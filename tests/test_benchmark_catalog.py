@@ -1,13 +1,14 @@
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import numpy as np
 
-from agenticsciml.benchmarks import BENCHMARKS, BenchmarkContractFactory, ProblemBundle
-from agenticsciml.config import EvaluationContract, EvolutionConfig, ExperimentConfig
+from agenticsciml.benchmarks import BENCHMARKS, BenchmarkContractFactory, BenchmarkSpec, ProblemBundle
+from agenticsciml.config import DataConfig, EvaluationContract, EvolutionConfig, ExperimentConfig
 from agenticsciml.execution.sandbox import prepare_solution_workspace, train_and_evaluate
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
@@ -79,6 +80,19 @@ def _load_generate_module(path: Path):
     return module
 
 
+def _problem_bundle_from_dir(path: Path, spec: BenchmarkSpec) -> ProblemBundle:
+    data_config_path = path / "Data_config.json"
+    return ProblemBundle(
+        benchmark_name=spec.name,
+        benchmark_spec=spec,
+        problem_md=(path / "Problem.md").read_text(encoding="utf-8"),
+        requirements_md=(path / "Requirements.md").read_text(encoding="utf-8"),
+        evaluation_md=(path / "Evaluation.md").read_text(encoding="utf-8"),
+        data_config=DataConfig.from_dict(json.loads(data_config_path.read_text(encoding="utf-8"))),
+        benchmark_dir=path,
+    )
+
+
 def test_benchmark_catalog_lists_all_paper_benchmarks() -> None:
     assert set(BENCHMARKS) == EXPECTED_BENCHMARKS
     for name, spec in BENCHMARKS.items():
@@ -115,12 +129,50 @@ def test_problem_bundle_and_contract_are_benchmark_aware() -> None:
         assert contract.benchmark_name == name
         assert contract.metric_name == spec.metric
         assert contract.contract_hash
+        assert contract.evaluator_digest
+        assert contract.data_config_digest
+        assert contract.problem_bundle_digest
         assert "train_data.npz" in contract.allowed_train_files
         assert any(path.endswith("val_data.npz") for path in contract.evaluator_only_files)
         assert contract.contract_hash == BenchmarkContractFactory.create_contract(bundle).contract_hash
         hashes.add(contract.contract_hash)
 
     assert len(hashes) == len(BENCHMARKS)
+
+
+def test_contract_from_dict_rejects_hash_mismatch() -> None:
+    bundle = ProblemBundle.load(BENCHMARKS["function_approx"].path)
+    payload = BenchmarkContractFactory.create_contract(bundle).to_dict()
+    payload["metric_name"] = "tampered_metric"
+
+    try:
+        EvaluationContract.from_dict(payload)
+    except ValueError as exc:
+        assert "hash mismatch" in str(exc)
+    else:
+        raise AssertionError("Expected tampered EvaluationContract hash to fail.")
+
+
+def test_contract_verify_detects_stale_evaluator_source(tmp_path: Path) -> None:
+    spec = BENCHMARKS["function_approx"]
+    benchmark_dir = tmp_path / "function_approx"
+    shutil.copytree(spec.path, benchmark_dir)
+    bundle = _problem_bundle_from_dir(benchmark_dir, spec)
+    contract = BenchmarkContractFactory.create_contract(bundle)
+
+    evaluate_path = benchmark_dir / "evaluate.py"
+    evaluate_path.write_text(
+        evaluate_path.read_text(encoding="utf-8") + "\n# stale contract detector\n",
+        encoding="utf-8",
+    )
+    changed_bundle = _problem_bundle_from_dir(benchmark_dir, spec)
+
+    try:
+        BenchmarkContractFactory.verify_contract(changed_bundle, contract)
+    except ValueError as exc:
+        assert "stale" in str(exc)
+    else:
+        raise AssertionError("Expected stale contract verification to fail.")
 
 
 def test_unknown_benchmark_bundle_fails_clearly(tmp_path: Path) -> None:

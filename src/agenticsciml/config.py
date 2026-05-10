@@ -88,6 +88,9 @@ class EvaluationContract:
     evaluator_only_files: list[str] = field(
         default_factory=lambda: ["private_eval/{solution_id}/evaluate.py", "private_eval/{solution_id}/val_data.npz"]
     )
+    evaluator_digest: str = ""
+    data_config_digest: str = ""
+    problem_bundle_digest: str = ""
     contract_hash: str = ""
 
     @classmethod
@@ -123,6 +126,9 @@ class EvaluationContract:
             "benchmark_name": self.benchmark_name,
             "allowed_train_files": self.allowed_train_files,
             "evaluator_only_files": self.evaluator_only_files,
+            "evaluator_digest": self.evaluator_digest,
+            "data_config_digest": self.data_config_digest,
+            "problem_bundle_digest": self.problem_bundle_digest,
         }
 
     def compute_hash(self) -> str:
@@ -145,6 +151,9 @@ class EvaluationContract:
             "benchmark_name": self.benchmark_name,
             "allowed_train_files": self.allowed_train_files,
             "evaluator_only_files": self.evaluator_only_files,
+            "evaluator_digest": self.evaluator_digest,
+            "data_config_digest": self.data_config_digest,
+            "problem_bundle_digest": self.problem_bundle_digest,
             "contract_hash": self.contract_hash,
         }
 
@@ -179,9 +188,20 @@ class EvaluationContract:
                     ["private_eval/{solution_id}/evaluate.py", "private_eval/{solution_id}/val_data.npz"],
                 )
             ),
+            evaluator_digest=str(data.get("evaluator_digest", "")),
+            data_config_digest=str(data.get("data_config_digest", "")),
+            problem_bundle_digest=str(data.get("problem_bundle_digest", "")),
             contract_hash=str(data.get("contract_hash", "")),
         )
-        return contract if contract.contract_hash else contract.with_computed_hash()
+        if contract.contract_hash:
+            computed = contract.compute_hash()
+            if contract.contract_hash != computed:
+                raise ValueError(
+                    "EvaluationContract hash mismatch: "
+                    f"stored {contract.contract_hash}, computed {computed}"
+                )
+            return contract
+        return contract.with_computed_hash()
 
 
 @dataclass(slots=True)
