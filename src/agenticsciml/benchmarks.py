@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -10,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from agenticsciml.config import DataConfig, EvaluationContract
+from agenticsciml.execution.runner import run_command
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -307,7 +307,8 @@ def _generated_data_digests(
 
     with tempfile.TemporaryDirectory(prefix="agenticsciml-manifest-") as tmp:
         tmp_path = Path(tmp)
-        result = subprocess.run(
+        result = run_command(
+            tmp_path,
             [
                 sys.executable,
                 str(benchmark_dir / "generate_data.py"),
@@ -316,12 +317,9 @@ def _generated_data_digests(
                 "--output-dir",
                 str(tmp_path),
             ],
-            cwd=benchmark_dir,
-            text=True,
-            capture_output=True,
-            timeout=20,
+            timeout_s=20,
         )
-        if result.returncode != 0:
+        if result.exit_code != 0:
             raise RuntimeError(
                 "Failed to generate deterministic benchmark data for contract manifest: "
                 f"{result.stderr or result.stdout}"

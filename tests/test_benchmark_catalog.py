@@ -159,6 +159,19 @@ def test_contract_from_dict_rejects_hash_mismatch() -> None:
         raise AssertionError("Expected tampered EvaluationContract hash to fail.")
 
 
+def test_contract_from_dict_rejects_manifest_digest_mismatch() -> None:
+    bundle = ProblemBundle.load(BENCHMARKS["function_approx"].path)
+    payload = BenchmarkContractFactory.create_contract(bundle).to_dict()
+    payload["benchmark_source_manifest"]["artifacts"]["guidelines.md"] = "0" * 64
+
+    try:
+        EvaluationContract.from_dict(payload)
+    except ValueError as exc:
+        assert "manifest hash mismatch" in str(exc)
+    else:
+        raise AssertionError("Expected tampered manifest payload to fail.")
+
+
 def test_contract_verify_detects_stale_evaluator_source(tmp_path: Path) -> None:
     spec = BENCHMARKS["function_approx"]
     benchmark_dir = tmp_path / "function_approx"
@@ -242,6 +255,27 @@ def test_contract_verify_detects_stale_generate_data_source(tmp_path: Path) -> N
         assert "stale" in str(exc)
     else:
         raise AssertionError("Expected stale generate_data verification to fail.")
+
+
+def test_contract_manifest_generation_uses_clean_environment(tmp_path: Path, monkeypatch) -> None:
+    spec = BENCHMARKS["function_approx"]
+    benchmark_dir = tmp_path / "function_approx"
+    shutil.copytree(spec.path, benchmark_dir)
+    generator_path = benchmark_dir / "generate_data.py"
+    generator_path.write_text(
+        generator_path.read_text(encoding="utf-8").replace(
+            "import argparse\n",
+            "import argparse\nimport os\n\n"
+            "if os.environ.get('OPENAI_API_KEY'):\n"
+            "    raise RuntimeError('secret leaked into manifest data generation')\n",
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-secret-that-must-not-leak")
+
+    contract = BenchmarkContractFactory.create_contract(_problem_bundle_from_dir(benchmark_dir, spec))
+
+    assert contract.benchmark_source_manifest_digest
 
 
 def test_contract_verify_detects_stale_existing_data_artifact(tmp_path: Path) -> None:

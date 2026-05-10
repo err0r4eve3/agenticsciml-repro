@@ -172,7 +172,10 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   `evaluate.py`, `Data_config.json`, the problem bundle, `generate_data.py`,
   `guidelines.md`, and deterministic train/validation data artifacts. Store
   these in `BenchmarkSourceManifest` and include its digest in the contract
-  hash. Resume/load paths must reject stale or tampered
+  hash. `EvaluationContract.from_dict()` must recompute the manifest digest
+  and reject mismatched human-readable manifest contents. Manifest data
+  generation must use the same sanitized subprocess environment policy as
+  generated solution execution. Resume/load paths must reject stale or tampered
   `evaluation_contract.json` instead of silently continuing. Resume must also
   fail if `evaluation_contract.json` is missing; do not regenerate a contract
   for an existing checkpoint. `checkpoint.json` must persist `contract_hash`,

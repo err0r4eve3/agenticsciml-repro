@@ -13,6 +13,11 @@ def _path_or_none(value: str | Path | None) -> Path | None:
     return Path(value)
 
 
+def _hash_json_payload(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 @dataclass(slots=True)
 class AgentConfig:
     role: str
@@ -135,8 +140,7 @@ class EvaluationContract:
         }
 
     def compute_hash(self) -> str:
-        payload = json.dumps(self.hash_payload(), sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        return _hash_json_payload(self.hash_payload())
 
     def with_computed_hash(self) -> "EvaluationContract":
         self.contract_hash = self.compute_hash()
@@ -200,6 +204,18 @@ class EvaluationContract:
             benchmark_source_manifest_digest=str(data.get("benchmark_source_manifest_digest", "")),
             contract_hash=str(data.get("contract_hash", "")),
         )
+        if contract.benchmark_source_manifest_digest:
+            if not contract.benchmark_source_manifest:
+                raise ValueError("EvaluationContract benchmark source manifest missing")
+            computed_manifest_digest = _hash_json_payload(contract.benchmark_source_manifest)
+            if computed_manifest_digest != contract.benchmark_source_manifest_digest:
+                raise ValueError(
+                    "EvaluationContract benchmark source manifest hash mismatch: "
+                    f"stored {contract.benchmark_source_manifest_digest}, "
+                    f"computed {computed_manifest_digest}"
+                )
+        elif contract.benchmark_source_manifest:
+            raise ValueError("EvaluationContract benchmark source manifest digest missing")
         if contract.contract_hash:
             computed = contract.compute_hash()
             if contract.contract_hash != computed:
