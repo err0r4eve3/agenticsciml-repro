@@ -136,7 +136,8 @@ class BenchmarkContractFactory:
 
     @staticmethod
     def verify_contract(problem_bundle: ProblemBundle, contract: EvaluationContract) -> None:
-        expected = BenchmarkContractFactory.create_contract(problem_bundle)
+        fresh_bundle = ProblemBundle.load(problem_bundle.benchmark_dir)
+        expected = BenchmarkContractFactory.create_contract(fresh_bundle)
         if contract.contract_hash != expected.contract_hash:
             raise ValueError(
                 "EvaluationContract is stale for current benchmark files: "

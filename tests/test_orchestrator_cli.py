@@ -193,6 +193,29 @@ def test_resume_rejects_stale_evaluation_contract(tmp_path: Path) -> None:
         AgenticSciMLOrchestrator(resume_config, MockLLMClient()).run()
 
 
+def test_resume_requires_existing_evaluation_contract(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="missing-contract-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+    )
+    run_dir = AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+    (run_dir / "evaluation_contract.json").unlink()
+    resume_config = ExperimentConfig(
+        experiment_id="missing-contract-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=1, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+        resume=True,
+    )
+
+    with pytest.raises(ValueError, match="Cannot resume without evaluation contract"):
+        AgenticSciMLOrchestrator(resume_config, MockLLMClient()).run()
+
+
 def test_cli_run_mock_pipeline(tmp_path: Path, cli_env: dict[str, str]) -> None:
     result = subprocess.run(
         [

@@ -175,6 +175,27 @@ def test_contract_verify_detects_stale_evaluator_source(tmp_path: Path) -> None:
         raise AssertionError("Expected stale contract verification to fail.")
 
 
+def test_contract_verify_reloads_problem_bundle_from_disk(tmp_path: Path) -> None:
+    spec = BENCHMARKS["function_approx"]
+    benchmark_dir = tmp_path / "function_approx"
+    shutil.copytree(spec.path, benchmark_dir)
+    bundle = _problem_bundle_from_dir(benchmark_dir, spec)
+    contract = BenchmarkContractFactory.create_contract(bundle)
+
+    problem_path = benchmark_dir / "Problem.md"
+    problem_path.write_text(
+        problem_path.read_text(encoding="utf-8") + "\n\nAdditional stale-contract detail.\n",
+        encoding="utf-8",
+    )
+
+    try:
+        BenchmarkContractFactory.verify_contract(bundle, contract)
+    except ValueError as exc:
+        assert "stale" in str(exc)
+    else:
+        raise AssertionError("Expected stale problem bundle verification to fail.")
+
+
 def test_unknown_benchmark_bundle_fails_clearly(tmp_path: Path) -> None:
     for filename in ["Problem.md", "Requirements.md", "Evaluation.md", "Data_config.json"]:
         (tmp_path / filename).write_text("{}", encoding="utf-8")

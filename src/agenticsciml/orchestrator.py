@@ -109,6 +109,8 @@ class AgenticSciMLOrchestrator:
             contract = EvaluationContract.from_dict(json.loads(contract_path.read_text(encoding="utf-8")))
             BenchmarkContractFactory.verify_contract(self.problem_bundle, contract)
             return contract
+        if self.config.resume:
+            raise ValueError(f"Cannot resume without evaluation contract: {contract_path}")
         data_report = ""
         data_report_path = self.storage.run_dir / "reports" / "data_analysis.md"
         if data_report_path.exists():
