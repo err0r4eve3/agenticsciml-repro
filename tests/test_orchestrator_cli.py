@@ -77,7 +77,7 @@ def test_resume_continues_existing_solution_tree_without_rebuilding_root(tmp_pat
     assert "agenticsciml.resume.loaded" in trace_text
 
 
-def test_cli_run_mock_pipeline(tmp_path: Path) -> None:
+def test_cli_run_mock_pipeline(tmp_path: Path, cli_env: dict[str, str]) -> None:
     result = subprocess.run(
         [
             sys.executable,
@@ -94,13 +94,14 @@ def test_cli_run_mock_pipeline(tmp_path: Path) -> None:
         check=True,
         text=True,
         capture_output=True,
+        env=cli_env,
     )
 
     run_dir = Path(result.stdout.strip().splitlines()[-1])
     assert (run_dir / "leaderboard.csv").exists()
 
 
-def test_cli_resume_existing_run(tmp_path: Path) -> None:
+def test_cli_resume_existing_run(tmp_path: Path, cli_env: dict[str, str]) -> None:
     base_cmd = [
         sys.executable,
         "-m",
@@ -115,7 +116,7 @@ def test_cli_resume_existing_run(tmp_path: Path) -> None:
         "--experiment-id",
         "cli-resume",
     ]
-    subprocess.run(base_cmd, check=True, text=True, capture_output=True)
+    subprocess.run(base_cmd, check=True, text=True, capture_output=True, env=cli_env)
     resumed = subprocess.run(
         [
             sys.executable,
@@ -135,6 +136,7 @@ def test_cli_resume_existing_run(tmp_path: Path) -> None:
         check=True,
         text=True,
         capture_output=True,
+        env=cli_env,
     )
 
     run_dir = Path(resumed.stdout.strip().splitlines()[-1])
@@ -142,7 +144,7 @@ def test_cli_resume_existing_run(tmp_path: Path) -> None:
     assert len(tree["nodes"]) == 2
 
 
-def test_cli_trace_summary_prints_quality_gate(tmp_path: Path) -> None:
+def test_cli_trace_summary_prints_quality_gate(tmp_path: Path, cli_env: dict[str, str]) -> None:
     config = ExperimentConfig(
         experiment_id="trace-run",
         benchmark_dir=Path("examples/function_approx").resolve(),
@@ -157,6 +159,7 @@ def test_cli_trace_summary_prints_quality_gate(tmp_path: Path) -> None:
         check=True,
         text=True,
         capture_output=True,
+        env=cli_env,
     )
     summary = json.loads(result.stdout)
 

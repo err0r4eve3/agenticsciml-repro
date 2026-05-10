@@ -4,7 +4,10 @@
 - Define a class named `MODEL`.
 - Support `python solution.py --mode=validate`.
 - Support `python solution.py --mode=train`.
+- Support `python solution.py --mode=predict --input predict_input.npz --output predictions.npz`.
 - Training must write `model.pkl`.
+- Predict mode receives only `x_val` features and must write `predictions.npz`
+  with a `predictions` array.
 - Real SciML submissions may use PyTorch, NumPy, or the Python standard library.
 - Do not require internet access.
 - Keep runtime short enough for local iteration.

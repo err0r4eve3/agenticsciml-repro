@@ -48,7 +48,9 @@ class RootEngineerAgent(AgentBase):
             "Forbidden actions: do not read validation data, do not modify evaluator files, "
             "do not use network or subprocess calls.\n"
             "Contract reminder: solution.py must define class MODEL and support "
-            "--mode=validate / --mode=train."
+            "--mode=validate / --mode=train / --mode=predict. Predict mode receives "
+            "only `--input predict_input.npz` with x_val and must write `--output "
+            "predictions.npz` containing a `predictions` array."
         )
         response = self.complete_json_checked(
             prompt,

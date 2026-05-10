@@ -45,7 +45,9 @@ Objective: run generated solutions in isolated workspaces with timeouts.
 
 Files: `src/agenticsciml/execution/`, `examples/function_approx/evaluate.py`.
 
-Acceptance: a trivial handwritten solution trains and produces `eval.json`.
+Acceptance: a trivial handwritten solution validates, trains, writes
+`predictions.npz` from `predict_input.npz`, and produces `eval.json` through
+prediction-only evaluation.
 
 ## Task 5: Agent Wrappers
 

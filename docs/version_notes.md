@@ -17,7 +17,8 @@
 - evaluator contract guardrail：检测 generated solution 是否篡改 `evaluate.py` 等受保护评估文件。
 - benchmark-aware contract：`ProblemBundle` 和 `BenchmarkContractFactory` 为每个 benchmark 生成 hash-stable `evaluation_contract.json`，不再对所有任务静默使用 function approximation 默认值。
 - validation leak guardrail：`val_data.npz` 放在 run-private `private_eval/solution_*/` 目录，generated `solution.py` 的 validate/train cwd 下不存在 evaluator-private 目录或验证集。
-- clean subprocess env：generated solution validate/train/evaluate 使用最小安全环境，不继承宿主 API key、代理、SSH agent、真实 `HOME` 等变量。
+- prediction-only evaluation：可信代码只把 `x_val` 写入 `predict_input.npz`，generated `solution.py --mode=predict` 写 `predictions.npz`，`evaluate.py` 使用私有 `u_val` 计算分数且不 import `solution.py`。
+- clean subprocess env：generated solution validate/train/predict/evaluate 使用最小安全环境，不继承宿主 API key、代理、SSH agent、真实 `HOME` 等变量。
 - agent context hardening：RootEngineer / Engineer prompt 显式包含 `ProblemBundle`、`EvaluationContract` JSON、`guidelines.md` 和可用分析上下文。
 - patch-based mutation：Engineer 输出包含 `parent_digest` 和 patch/file map；Python 端校验 parent digest 后才写入 `solution.py`。
 - search policy metadata：`SolutionNode` 持久化 `method_tags`、`failure_kind`、`score_delta_from_parent`、`num_debug_attempts`、`benchmark_name` 和 `contract_hash`，供 selector、retriever 和 ablation 使用。
@@ -31,7 +32,7 @@
 - trace summary：每次 orchestrator 完成后写入 `trace_summary.json`，并提供 `agenticsciml trace-summary <run_dir>` 重新生成和检查 trace quality gate。
 - run metadata：`run_metadata.json` 记录 wall time、champion、solution count，以及按 role 汇总的 LLM 调用次数和 prompt/response token 估算占位。
 - benchmark catalog：6 类论文任务家族都有本地 deterministic engineering proxy，包括 `function_approx`、`poisson_lshape`、`burgers_pinn`、`antiderivative_operator`、`reaction_diffusion_operator`、`cylinder_wake_reconstruction`。
-- evaluation contract：`solution.py` 定义 `MODEL`，支持 validate/train，`evaluate.py` 输出 `eval.json`。
+- evaluation contract：`solution.py` 定义 `MODEL`，支持 validate/train/predict，predict 写 `predictions.npz`，`evaluate.py` 输出 `eval.json`。
 - per-solution workspace 和 artifact persistence。
 - solution tree、leaderboard、Mermaid tree 和 champion export。
 - DataAnalyst、Evaluator、RootEngineer、Retriever、Proposer、Critic、Engineer、Debugger、ResultAnalyst、Selector 等角色 wrapper。
@@ -60,6 +61,7 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --dry
 - mock mode 只验证 workflow shape，不代表真实 SciML 表现。
 - 新增 benchmark 是小规模工程代理，不是论文原始全预算实验。
 - 当前 sandbox 是本地 workspace 隔离，不是强安全容器。
+- prediction-only protocol 降低验证标签泄漏风险，但还不是 OS/container 级强隔离；同用户进程仍不能视为恶意代码安全沙箱。
 
 后续版本建议：
 

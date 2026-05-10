@@ -25,10 +25,18 @@ class MODEL:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["validate", "train"], required=True)
+    parser.add_argument("--mode", choices=["validate", "train", "predict"], required=True)
+    parser.add_argument("--input", default="predict_input.npz")
+    parser.add_argument("--output", default="predictions.npz")
     args = parser.parse_args()
     if args.mode == "validate":
         assert hasattr(MODEL(), "predict")
+        return
+    if args.mode == "predict":
+        with open(MODEL_CHECKPOINT, "rb") as f:
+            model = pickle.load(f)
+        data = np.load(args.input)
+        np.savez(args.output, predictions=model.predict(data["x_val"]))
         return
     data = np.load("train_data.npz")
     model = MODEL()
@@ -54,7 +62,9 @@ class MODEL:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["validate", "train"], required=True)
+    parser.add_argument("--mode", choices=["validate", "train", "predict"], required=True)
+    parser.add_argument("--input", default="predict_input.npz")
+    parser.add_argument("--output", default="predictions.npz")
     args = parser.parse_args()
     if args.mode == "train":
         np.load("val_data.npz")
@@ -79,7 +89,9 @@ class MODEL:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["validate", "train"], required=True)
+    parser.add_argument("--mode", choices=["validate", "train", "predict"], required=True)
+    parser.add_argument("--input", default="predict_input.npz")
+    parser.add_argument("--output", default="predictions.npz")
     args = parser.parse_args()
     if args.mode == "train":
         open("val_data.npz", "rb").read(1)
@@ -120,21 +132,126 @@ def assert_no_private_data_visible():
         raise RuntimeError("validation data was discoverable")
     if Path(dynamic_name).exists():
         raise RuntimeError("dynamic validation path exists")
+    validation_key = "AGENTICSCIML_" + "VALIDATION_DATA"
+    if os.environ.get(validation_key):
+        raise RuntimeError("validation path leaked into generated process env")
     if os.environ.get("OPENAI_API_KEY"):
         raise RuntimeError("host secret leaked into generated process")
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["validate", "train"], required=True)
+    parser.add_argument("--mode", choices=["validate", "train", "predict"], required=True)
+    parser.add_argument("--input", default="predict_input.npz")
+    parser.add_argument("--output", default="predictions.npz")
     args = parser.parse_args()
     assert_no_private_data_visible()
     if args.mode == "validate":
+        return
+    if args.mode == "predict":
+        assert_no_private_data_visible()
+        with open(MODEL_CHECKPOINT, "rb") as f:
+            model = pickle.load(f)
+        data = np.load(args.input)
+        if "u_val" in data:
+            raise RuntimeError("validation labels leaked into prediction input")
+        np.savez(args.output, predictions=model.predict(data["x_val"]))
         return
     data = np.load("train_data.npz")
     model = MODEL()
     model.fit(data["x_train"], data["u_train"])
     with open(MODEL_CHECKPOINT, "wb") as f:
         pickle.dump(model, f)
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+PARENT_TRAVERSAL_SOLUTION = '''
+import argparse
+import pickle
+from pathlib import Path
+
+import numpy as np
+
+MODEL_CHECKPOINT = "model.pkl"
+
+class MODEL:
+    def predict(self, x):
+        return np.zeros((len(x), 1))
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["validate", "train", "predict"], required=True)
+    parser.add_argument("--input", default="predict_input.npz")
+    parser.add_argument("--output", default="predictions.npz")
+    args = parser.parse_args()
+    if args.mode == "train":
+        discovered = [path for path in Path("../..").rglob("*.npz")]
+        if discovered:
+            raise RuntimeError("parent traversal discovered npz files")
+        with open(MODEL_CHECKPOINT, "wb") as f:
+            pickle.dump(MODEL(), f)
+    elif args.mode == "predict":
+        data = np.load(args.input)
+        np.savez(args.output, predictions=np.zeros((len(data["x_val"]), 1)))
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+PREDICT_LEAK_PROBE_SOLUTION = '''
+import argparse
+import json
+import os
+import pickle
+
+import numpy as np
+
+MODEL_CHECKPOINT = "model.pkl"
+
+class MODEL:
+    def __init__(self):
+        self.mean = 0.0
+
+    def fit(self, x, y):
+        self.mean = float(np.mean(y))
+
+    def predict(self, x):
+        return np.full((len(x), 1), self.mean, dtype=float)
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["validate", "train", "predict"], required=True)
+    parser.add_argument("--input", default="predict_input.npz")
+    parser.add_argument("--output", default="predictions.npz")
+    args = parser.parse_args()
+    if args.mode == "validate":
+        return
+    if args.mode == "train":
+        data = np.load("train_data.npz")
+        model = MODEL()
+        model.fit(data["x_train"], data["u_train"])
+        with open(MODEL_CHECKPOINT, "wb") as f:
+            pickle.dump(model, f)
+        return
+    with open(MODEL_CHECKPOINT, "rb") as f:
+        model = pickle.load(f)
+    data = np.load(args.input)
+    validation_key = "AGENTICSCIML_" + "VALIDATION_DATA"
+    leak_report = {
+        "input_keys": sorted(data.files),
+        "has_validation_env": validation_key in os.environ,
+        "validation_env_values": [
+            value for key, value in os.environ.items()
+            if "VALIDATION" in key or "val_data" in value
+        ],
+    }
+    open("predict_leak_report.json", "w", encoding="utf-8").write(json.dumps(leak_report, sort_keys=True))
+    if "u_val" in data or leak_report["has_validation_env"] or leak_report["validation_env_values"]:
+        raise RuntimeError("validation labels or paths leaked into predict")
+    np.savez(args.output, predictions=model.predict(data["x_val"]))
 
 if __name__ == "__main__":
     main()
@@ -207,6 +324,33 @@ def test_solution_cannot_discover_validation_data_or_host_secret_during_train(
     assert not any(path.name == "val_data.npz" for path in workspace.rglob("*.npz"))
     eval_data = json.loads((workspace / "eval.json").read_text(encoding="utf-8"))
     assert eval_data["metric"] == "validation_mse"
+
+
+def test_solution_cannot_parent_traverse_to_validation_data(tmp_path: Path) -> None:
+    benchmark = Path("examples/function_approx").resolve()
+    workspace = tmp_path / "parent_traversal"
+    prepare_solution_workspace(benchmark, workspace)
+    (workspace / "solution.py").write_text(PARENT_TRAVERSAL_SOLUTION, encoding="utf-8")
+
+    result = train_and_evaluate(workspace, EvaluationContract.default_function_approx(), timeout_s=20)
+
+    assert result.exit_code != 0
+    assert "parent traversal" in result.stderr.lower()
+
+
+def test_predict_phase_sees_features_but_not_validation_labels_or_path(tmp_path: Path) -> None:
+    benchmark = Path("examples/function_approx").resolve()
+    workspace = tmp_path / "predict_probe"
+    prepare_solution_workspace(benchmark, workspace)
+    (workspace / "solution.py").write_text(PREDICT_LEAK_PROBE_SOLUTION, encoding="utf-8")
+
+    result = train_and_evaluate(workspace, EvaluationContract.default_function_approx(), timeout_s=20)
+
+    assert result.exit_code == 0, result.stderr
+    leak_report = json.loads((workspace / "predict_leak_report.json").read_text(encoding="utf-8"))
+    assert leak_report["input_keys"] == ["x_val"]
+    assert leak_report["has_validation_env"] is False
+    assert leak_report["validation_env_values"] == []
 
 
 def test_solution_cannot_open_validation_data_during_train(tmp_path: Path) -> None:

@@ -80,6 +80,7 @@ class EvaluationContract:
     higher_is_better: bool
     validate_command: list[str]
     train_command: list[str]
+    predict_command: list[str]
     evaluate_command: list[str]
     checkpoint_path: str = "model.pkl"
     benchmark_name: str = "function_approx"
@@ -96,7 +97,16 @@ class EvaluationContract:
             higher_is_better=False,
             validate_command=["python", "solution.py", "--mode=validate"],
             train_command=["python", "solution.py", "--mode=train"],
-            evaluate_command=["python", "<private_eval>/evaluate.py"],
+            predict_command=[
+                "python",
+                "solution.py",
+                "--mode=predict",
+                "--input",
+                "predict_input.npz",
+                "--output",
+                "predictions.npz",
+            ],
+            evaluate_command=["python", "<private_eval>/evaluate.py", "--predictions", "predictions.npz"],
             checkpoint_path="model.pkl",
             benchmark_name="function_approx",
         ).with_computed_hash()
@@ -107,6 +117,7 @@ class EvaluationContract:
             "higher_is_better": self.higher_is_better,
             "validate_command": self.validate_command,
             "train_command": self.train_command,
+            "predict_command": self.predict_command,
             "evaluate_command": self.evaluate_command,
             "checkpoint_path": self.checkpoint_path,
             "benchmark_name": self.benchmark_name,
@@ -128,6 +139,7 @@ class EvaluationContract:
             "higher_is_better": self.higher_is_better,
             "validate_command": self.validate_command,
             "train_command": self.train_command,
+            "predict_command": self.predict_command,
             "evaluate_command": self.evaluate_command,
             "checkpoint_path": self.checkpoint_path,
             "benchmark_name": self.benchmark_name,
@@ -143,6 +155,20 @@ class EvaluationContract:
             higher_is_better=bool(data["higher_is_better"]),
             validate_command=list(data["validate_command"]),
             train_command=list(data["train_command"]),
+            predict_command=list(
+                data.get(
+                    "predict_command",
+                    [
+                        "python",
+                        "solution.py",
+                        "--mode=predict",
+                        "--input",
+                        "predict_input.npz",
+                        "--output",
+                        "predictions.npz",
+                    ],
+                )
+            ),
             evaluate_command=list(data["evaluate_command"]),
             checkpoint_path=str(data.get("checkpoint_path", "model.pkl")),
             benchmark_name=str(data.get("benchmark_name", "function_approx")),

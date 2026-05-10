@@ -56,7 +56,7 @@ AgenticSciML 的主流程需要固定 evaluator、solution tree、sandbox 和日
 - `parallelization`：用于并行生成或评估多个 child solution；必须受 `parallel_mutations`、`timeout_s` 和预算约束。
 - `orchestrator-workers`：Python orchestrator 维护全局状态，DataAnalyst、Evaluator、Retriever、Proposer、Critic、Engineer、Debugger、ResultAnalyst 作为 worker。
 - `handoff`：不作为主流程模式。SciML 评估需要强控制，不能让某个 Agent 自由接管全流程。
-- `evaluator-optimizer`：Engineer 生成代码，Runner 执行 validate/train/evaluate，Debugger 修复失败，ResultAnalyst 汇总结果，下一轮基于报告继续优化。
+- `evaluator-optimizer`：Engineer 生成代码，Runner 执行 validate/train/predict/evaluate，Debugger 修复失败，ResultAnalyst 汇总结果，下一轮基于报告继续优化。
 - `SOP pipeline`：每轮 mutation 固化为 parent selection、KB retrieval、proposal、critique、implementation、validation、training、evaluation、analysis、tree update。
 
 ## Agent 通信方式
@@ -183,6 +183,9 @@ Phase 4: Champion export
 - Specialist agent 作为 bounded tool 使用，不能自行改变全局状态转移、score 或 champion。
 - 代码消费的 LLM 输出必须使用 structured outputs：校验字段、有限 retry、失败后 fail closed。
 - 每个 tool-like 边界必须有 guardrail：LLM JSON 输出、artifact 写入、生成代码执行、evaluator contract 完整性。
-- generated solution 在进入 validate/train/evaluate 前必须通过静态 sandbox 检查。
+- generated solution 在进入 validate/train/predict/evaluate 前必须通过静态 sandbox 检查。
+- evaluation 默认使用 prediction-only protocol：generated solution 只接收
+  `predict_input.npz` 中的 `x_val`，可信 evaluator 用私有标签计算分数，
+  不在持有验证标签的进程中 import `solution.py`。
 - 每次运行必须产生 trace：`workflow_span`、`agent_span`、`generation_span`、`tool_span`、`guardrail_span`。
 - Trace 和 artifacts 是后续 trace grading / evals 的输入，不把未验证的 LLM 总结当作实验事实。

@@ -32,12 +32,20 @@ class MODEL:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["validate", "train"], required=True)
+    parser.add_argument("--mode", choices=["validate", "train", "predict"], required=True)
+    parser.add_argument("--input", default="predict_input.npz")
+    parser.add_argument("--output", default="predictions.npz")
     args = parser.parse_args()
     if args.mode == "validate":
         model = MODEL()
         probe = model.predict(np.zeros((3, 1)))
         assert probe.shape == (3, 1)
+        return
+    if args.mode == "predict":
+        with open(MODEL_CHECKPOINT, "rb") as f:
+            model = pickle.load(f)
+        data = np.load(args.input)
+        np.savez(args.output, predictions=model.predict(data["x_val"]))
         return
 
     data = np.load("train_data.npz")
@@ -107,7 +115,9 @@ class MODEL:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["validate", "train"], required=True)
+    parser.add_argument("--mode", choices=["validate", "train", "predict"], required=True)
+    parser.add_argument("--input", default="predict_input.npz")
+    parser.add_argument("--output", default="predictions.npz")
     args = parser.parse_args()
     if args.mode == "validate":
         model = MODEL()
@@ -116,6 +126,12 @@ def main():
         model.coef = np.zeros((model._features(np.zeros((2, 1))).shape[1], 1))
         probe = model.predict(np.zeros((2, 1)))
         assert probe.shape == (2, 1)
+        return
+    if args.mode == "predict":
+        with open(MODEL_CHECKPOINT, "rb") as f:
+            model = pickle.load(f)
+        data = np.load(args.input)
+        np.savez(args.output, predictions=model.predict(data["x_val"]))
         return
 
     data = np.load("train_data.npz")

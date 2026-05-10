@@ -44,12 +44,20 @@ class MODEL:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["validate", "train"], required=True)
+    parser.add_argument("--mode", choices=["validate", "train", "predict"], required=True)
+    parser.add_argument("--input", default="predict_input.npz")
+    parser.add_argument("--output", default="predictions.npz")
     args = parser.parse_args()
     if args.mode == "validate":
         model = MODEL()
         model.mean = np.zeros((1, 1))
         assert model.predict(np.zeros((2, 1))).shape[0] == 2
+        return
+    if args.mode == "predict":
+        with open(MODEL_CHECKPOINT, "rb") as f:
+            model = pickle.load(f)
+        data = np.load(args.input)
+        np.savez(args.output, predictions=model.predict(data["x_val"]))
         return
     data = np.load("train_data.npz")
     model = MODEL()
@@ -168,12 +176,13 @@ def test_all_benchmark_evaluators_accept_generic_baseline(tmp_path: Path) -> Non
         assert isinstance(eval_data["score"], float)
 
 
-def test_cli_lists_benchmarks() -> None:
+def test_cli_lists_benchmarks(cli_env: dict[str, str]) -> None:
     result = subprocess.run(
         [sys.executable, "-m", "agenticsciml.cli", "benchmarks", "--json"],
         check=True,
         text=True,
         capture_output=True,
+        env=cli_env,
     )
     payload = json.loads(result.stdout)
     assert {item["name"] for item in payload["benchmarks"]} == EXPECTED_BENCHMARKS

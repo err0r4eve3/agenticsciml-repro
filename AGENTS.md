@@ -144,11 +144,13 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
 - New benchmarks must be added to `agenticsciml.benchmarks.BENCHMARKS`, linked
   from `docs/benchmark_plan.md`, and validated by `tests/test_benchmark_catalog.py`.
 - Validation data is evaluator-only. Generated `solution.py` must not see
-  `val_data.npz` during validate/train; keep validation data outside
-  `solutions/solution_*/` under run-private evaluator directories and preserve
-  static guardrails against obvious validation-data reads.
+  `val_data.npz`, validation labels, or validation file paths during
+  validate/train/predict. Prediction-only evaluation is the default: trusted
+  Python code writes `predict_input.npz` containing only `x_val`, generated
+  code writes `predictions.npz`, and `evaluate.py` computes scores from private
+  labels without importing `solution.py`.
 - Generated solution subprocesses must use a sanitized environment. Do not let
-  validate/train inherit host secrets or arbitrary variables such as
+  validate/train/predict inherit host secrets or arbitrary variables such as
   `OPENAI_API_KEY`, `GITHUB_TOKEN`, proxy settings, `SSH_AUTH_SOCK`, or the
   user's real `HOME`.
 - Evaluation contracts must be benchmark-aware and hash-stable. Do not reintroduce

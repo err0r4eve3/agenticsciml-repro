@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 runs/
+build/
 *.egg-info/
 examples/function_approx/train_data.npz
 examples/function_approx/val_data.npz

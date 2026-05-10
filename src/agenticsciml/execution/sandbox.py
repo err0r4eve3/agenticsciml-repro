@@ -6,6 +6,8 @@ import shutil
 import sys
 from pathlib import Path
 
+import numpy as np
+
 from agenticsciml.config import EvaluationContract
 from agenticsciml.execution.runner import RunResult, run_command
 
@@ -160,10 +162,13 @@ def _static_solution_guardrail_violations(solution_path: Path) -> list[str]:
             call_name = _call_name(node.func)
             if call_name in BLOCKED_CALLS:
                 violations.append(f"blocked call: {call_name}")
-            if call_name in {"open", "Path", "pathlib.Path"} and node.args:
+            if call_name in {"open", "Path", "pathlib.Path", "glob", "glob.glob"} and node.args:
                 path_value = _constant_string(node.args[0])
-                if path_value and Path(path_value).is_absolute():
-                    violations.append(f"blocked absolute path: {path_value}")
+                if path_value:
+                    if Path(path_value).is_absolute():
+                        violations.append(f"blocked absolute path: {path_value}")
+                    if path_value == ".." or path_value.startswith("../") or "/../" in path_value:
+                        violations.append(f"blocked parent traversal path: {path_value}")
             if call_name in {"Path.home", "Path.expanduser", "os.path.expanduser"}:
                 violations.append(f"blocked home-directory path helper: {call_name}")
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -202,6 +207,32 @@ def _static_guardrail_result(workspace: Path) -> RunResult | None:
     )
 
 
+def _prepare_prediction_input(workspace: Path, validation_path: Path) -> Path:
+    data = np.load(validation_path)
+    if "x_val" not in data:
+        raise ValueError("Validation data must contain x_val for prediction-only evaluation.")
+    predict_input = workspace / "predict_input.npz"
+    np.savez(predict_input, x_val=data["x_val"])
+    return predict_input
+
+
+def _prediction_output_path(command: list[str]) -> Path:
+    if "--output" in command:
+        index = command.index("--output")
+        if index + 1 < len(command):
+            return Path(command[index + 1])
+    return Path("predictions.npz")
+
+
+def _missing_prediction_output(workspace: Path, command: list[str]) -> str | None:
+    output_path = _prediction_output_path(command)
+    if output_path.is_absolute():
+        return f"Guardrail violation: prediction output path must be relative: {output_path}"
+    if not (workspace / output_path).exists():
+        return f"Prediction output was not created: {output_path}"
+    return None
+
+
 def train_and_evaluate(
     workspace: Path,
     contract: EvaluationContract,
@@ -219,6 +250,7 @@ def train_and_evaluate(
     commands = [
         ("validate", contract.validate_command),
         ("train", contract.train_command),
+        ("predict", contract.predict_command),
         ("evaluate", contract.evaluate_command),
     ]
     evaluator_dir = private_eval_dir_for_workspace(workspace)
@@ -248,6 +280,20 @@ def train_and_evaluate(
                 stderr="\n".join(all_stderr),
                 duration_s=total_duration,
             )
+        if phase == "predict":
+            try:
+                _prepare_prediction_input(workspace, validation_path)
+            except Exception as exc:
+                message = f"Guardrail violation: could not prepare prediction input: {exc}"
+                all_stderr.append(message)
+                (workspace / "train.log").write_text("\n".join(all_stdout), encoding="utf-8")
+                return RunResult(
+                    command=command,
+                    exit_code=125,
+                    stdout="\n".join(all_stdout),
+                    stderr="\n".join(all_stderr),
+                    duration_s=total_duration,
+                )
         guarded_before = _guarded_fingerprints(workspace)
         normalized = _phase_command(phase, command, evaluator_dir)
         last_command = normalized
@@ -269,6 +315,18 @@ def train_and_evaluate(
                 duration_s=total_duration,
                 timed_out=result.timed_out,
             )
+        if phase == "predict":
+            missing_prediction = _missing_prediction_output(workspace, normalized)
+            if missing_prediction:
+                all_stderr.append(missing_prediction)
+                (workspace / "train.log").write_text("\n".join(all_stdout), encoding="utf-8")
+                return RunResult(
+                    command=normalized,
+                    exit_code=125,
+                    stdout="\n".join(all_stdout),
+                    stderr="\n".join(all_stderr),
+                    duration_s=total_duration,
+                )
         violation = _guardrail_violation(workspace, guarded_before)
         if violation:
             all_stderr.append(violation)

@@ -47,7 +47,7 @@ def test_ablation_runner_writes_summary_and_report(tmp_path: Path) -> None:
     assert no_debugger_config["evolution"]["use_debugger"] is False
 
 
-def test_cli_ablate_command_runs_mock_pipeline(tmp_path: Path) -> None:
+def test_cli_ablate_command_runs_mock_pipeline(tmp_path: Path, cli_env: dict[str, str]) -> None:
     result = subprocess.run(
         [
             sys.executable,
@@ -65,6 +65,7 @@ def test_cli_ablate_command_runs_mock_pipeline(tmp_path: Path) -> None:
         check=True,
         text=True,
         capture_output=True,
+        env=cli_env,
     )
 
     summary_path = Path(result.stdout.strip().splitlines()[-1])

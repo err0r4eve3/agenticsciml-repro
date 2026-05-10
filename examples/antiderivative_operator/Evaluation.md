@@ -1,6 +1,8 @@
 # Evaluation
 
-The evaluator loads `model.pkl`, calls `MODEL.predict(x_val)`, and compares the
-predicted antiderivative grid values with `u_val` using relative L2 error.
+The trusted runner writes only validation input-function features to
+`predict_input.npz`. `solution.py --mode=predict` writes `predictions.npz`;
+the evaluator reads private antiderivative labels and computes relative L2
+error without importing generated `solution.py`.
 
 Lower score is better.

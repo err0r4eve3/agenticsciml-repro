@@ -1,6 +1,8 @@
 # Evaluation
 
-The evaluator loads `model.pkl`, calls `MODEL.predict(x_val)`, and computes
-relative L2 error over validation `(x, t)` points.
+The trusted runner writes only validation `(x, t)` features to
+`predict_input.npz`. `solution.py --mode=predict` writes `predictions.npz`;
+the evaluator reads private labels and computes relative L2 error without
+importing generated `solution.py`.
 
 Lower score is better.

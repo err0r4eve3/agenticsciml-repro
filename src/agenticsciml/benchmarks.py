@@ -78,7 +78,16 @@ class BenchmarkContractFactory:
             higher_is_better=False,
             validate_command=["python", "solution.py", "--mode=validate"],
             train_command=["python", "solution.py", "--mode=train"],
-            evaluate_command=["python", "<private_eval>/evaluate.py"],
+            predict_command=[
+                "python",
+                "solution.py",
+                "--mode=predict",
+                "--input",
+                "predict_input.npz",
+                "--output",
+                "predictions.npz",
+            ],
+            evaluate_command=["python", "<private_eval>/evaluate.py", "--predictions", "predictions.npz"],
             checkpoint_path="model.pkl",
             benchmark_name=problem_bundle.benchmark_name,
             allowed_train_files=[
@@ -106,8 +115,14 @@ class BenchmarkContractFactory:
             f"- higher_is_better: {contract.higher_is_better}\n"
             f"- checkpoint: {contract.checkpoint_path}\n"
             f"- contract_hash: `{contract.contract_hash}`\n"
+            f"- predict_command: `{' '.join(contract.predict_command)}`\n"
             f"- allowed_train_files: {', '.join(contract.allowed_train_files)}\n"
             f"- evaluator_only_files: {', '.join(contract.evaluator_only_files)}\n\n"
+            "## Prediction-Only Evaluation\n\n"
+            "- `validate` and `train` must not read validation data.\n"
+            "- `predict` receives only public validation features in `predict_input.npz`.\n"
+            "- `predict` must write `predictions.npz` with a `predictions` array.\n"
+            "- `evaluate.py` computes the metric from private labels and must not import `solution.py`.\n\n"
             "## Benchmark Summary\n\n"
             f"{problem_bundle.summary()}"
         )

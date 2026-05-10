@@ -52,6 +52,8 @@ class EngineerAgent(AgentBase):
             f"{parent_analysis.summary if parent_analysis else 'No parent analysis available.'}\n\n"
             "## Forbidden Actions\n\n"
             "- Do not read validation data.\n"
+            "- Predict mode may read only `predict_input.npz` and must write `predictions.npz` "
+            "with a `predictions` array.\n"
             "- Do not modify evaluator files.\n"
             "- Do not use network, subprocess, absolute paths, or home-directory helpers.\n\n"
             f"parent_digest: {parent_digest}\n\n"

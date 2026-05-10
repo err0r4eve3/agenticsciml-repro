@@ -22,7 +22,9 @@
 - `x_train` / `u_train` / `x_val` / `u_val`
 - `solution.py --mode=validate`
 - `solution.py --mode=train`
+- `solution.py --mode=predict --input predict_input.npz --output predictions.npz`
 - training writes `model.pkl`
+- predict writes `predictions.npz` with a `predictions` array
 - evaluator writes `eval.json`
 - `evaluation_contract.json` records `benchmark_name`, `contract_hash`,
   `allowed_train_files`, and `evaluator_only_files`
@@ -73,10 +75,12 @@ uv run --python 3.11 --extra dev pytest tests/test_benchmark_catalog.py -q
 - 每个 benchmark 是否能跑 1 轮 mock evolution。
 
 验证集泄漏是 P0 约束：`solution.py` 训练/验证阶段的 cwd 下不能存在
-`val_data.npz` 或 evaluator-private 目录；`Path(".").rglob("*.npz")` 和
-`glob.glob("**/*.npz", recursive=True)` 只能发现训练数据。明显的
-`val_data.npz` / `.evaluator` 字符串引用仍会被 static guardrail 拦截。
-只有 evaluator 阶段通过受控环境变量访问 run-private validation path。
+`val_data.npz` 或 evaluator-private 目录；predict 阶段只能读取
+`predict_input.npz` 中的 `x_val`，不能看到 `u_val`、validation path 或
+evaluator env。`evaluate.py` 只读取 `predictions.npz` 和私有标签计算分数，
+不得 import generated `solution.py`。明显的 `val_data.npz`、parent
+traversal、`.evaluator` / `private_eval` 字符串引用仍会被 static guardrail
+拦截。
 
 ## 真实 LLM 实验顺序
 

@@ -4,3 +4,7 @@
 - `u_train` has shape `(n, 32)`.
 - `MODEL.predict(x)` should return `(n, 32)`.
 - The metric is relative L2 error.
+- `solution.py` must support `--mode=validate`, `--mode=train`, and
+  `--mode=predict --input predict_input.npz --output predictions.npz`.
+  Predict mode receives only `x_val` and must write `predictions.npz` with a
+  `predictions` array.

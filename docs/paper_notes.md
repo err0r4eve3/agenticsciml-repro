@@ -46,14 +46,15 @@ Every solution must be evaluated by the same script and metric. This MVP uses:
 - `solution.py` defines class `MODEL`
 - `python solution.py --mode=validate`
 - `python solution.py --mode=train`
+- `python solution.py --mode=predict --input predict_input.npz --output predictions.npz`
 - training writes `model.pkl`
 - `python <private_eval>/evaluate.py` writes `eval.json`
 - metric: benchmark-specific scalar loss, lower is better
 
-The local implementation keeps validation data evaluator-only: `solution.py`
-sees only training data during validate/train, while run-private `private_eval/`
-directories outside `solutions/solution_*/` hold `evaluate.py` and validation
-data for evaluation time.
+The local implementation uses prediction-only evaluation. `solution.py` sees
+training data during validate/train and only `x_val` during predict. It writes
+`predictions.npz`; trusted evaluator code reads private `u_val` labels and
+computes the metric without importing `solution.py`.
 
 ## Benchmark Coverage
 

@@ -41,6 +41,7 @@ def test_contract_serialization_preserves_commands() -> None:
         higher_is_better=False,
         validate_command=["python", "solution.py", "--mode=validate"],
         train_command=["python", "solution.py", "--mode=train"],
+        predict_command=["python", "solution.py", "--mode=predict"],
         evaluate_command=["python", "evaluate.py"],
     )
 
