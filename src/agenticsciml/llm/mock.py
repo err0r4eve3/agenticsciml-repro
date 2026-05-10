@@ -223,5 +223,15 @@ class MockLLMClient(LLMClient):
                 "checkpoint_path": "model.pkl",
             }
         if name == "debugger":
-            return {"summary": "No patch produced in mock mode.", "code": ""}
+            match = re.search(r"parent_digest:\s*([a-f0-9]{64})", prompt)
+            parent_digest = match.group(1) if match else ""
+            return {
+                "summary": "No deterministic patch produced in mock mode.",
+                "failure_kind": "runtime_error",
+                "minimal_fix": True,
+                "parent_digest": parent_digest,
+                "patch": "",
+                "files_changed": ["solution.py"],
+                "risks": [],
+            }
         return {"text": json.dumps({"schema_name": schema_name, "mock": True})}

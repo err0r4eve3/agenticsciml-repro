@@ -160,6 +160,11 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
 - Engineer mutations must verify the parent solution digest and apply a
   structured patch or explicit file map through Python. Do not blindly replace
   `solution.py` with unverified raw LLM text.
+- Debugger repairs must be contract-aware and patch-only by default. Include
+  the current `solution.py`, `parent_digest`, `ProblemBundle`,
+  `EvaluationContract` JSON, `guidelines.md`, failure phase, and error log in
+  the prompt; reject wrong digests, malformed patches, and files other than
+  `solution.py`.
 - Parent selection must preserve a deterministic policy layer before any LLM
   selector output: include the best available valid node, prefer recent
   improving nodes, preserve underexplored/diverse method tags, and never select

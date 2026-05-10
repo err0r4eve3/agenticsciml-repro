@@ -20,6 +20,7 @@ available, so this project implements a source-grounded approximation:
 - proposer/critic debate with concise rationale summaries
 - engineer and debugger roles around generated code
 - digest-checked patch mutation for generated `solution.py`
+- contract-aware debugger repairs using digest-checked unified diff patches
 - per-solution workspaces, logs, scores, prompts, responses, and reports
 - prediction-only evaluation: generated code sees validation features only,
   while trusted evaluator code keeps labels and validation paths private

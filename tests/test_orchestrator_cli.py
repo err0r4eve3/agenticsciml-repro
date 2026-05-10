@@ -1,11 +1,73 @@
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from agenticsciml.config import ExperimentConfig, EvolutionConfig
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
+
+
+FAILING_TRAIN_SOLUTION = r'''
+from __future__ import annotations
+
+import argparse
+
+import numpy as np
+
+MODEL_CHECKPOINT = "model.pkl"
+
+
+class MODEL:
+    def predict(self, x):
+        return np.zeros((len(x), 1), dtype=float)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["validate", "train", "predict"], required=True)
+    parser.add_argument("--input", default="predict_input.npz")
+    parser.add_argument("--output", default="predictions.npz")
+    args = parser.parse_args()
+    if args.mode == "validate":
+        MODEL().predict(np.zeros((2, 1)))
+        return
+    if args.mode == "train":
+        raise RuntimeError("boom during train")
+    if args.mode == "predict":
+        data = np.load(args.input)
+        np.savez(args.output, predictions=MODEL().predict(data["x_val"]))
+
+
+if __name__ == "__main__":
+    main()
+'''.strip()
+
+
+class MalformedDebuggerLLM(MockLLMClient):
+    def complete_json(
+        self,
+        prompt: str,
+        schema_name: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+    ) -> dict[str, Any]:
+        if schema_name == "root_engineer":
+            return {"proposal": "failing train fixture", "code": FAILING_TRAIN_SOLUTION}
+        if schema_name == "debugger":
+            match = re.search(r"parent_digest:\s*([a-f0-9]{64})", prompt)
+            return {
+                "summary": "malformed patch fixture",
+                "failure_kind": "runtime_error",
+                "minimal_fix": True,
+                "parent_digest": match.group(1) if match else "",
+                "patch": "not a unified patch",
+                "files_changed": ["solution.py"],
+                "risks": ["fixture intentionally malformed"],
+            }
+        return super().complete_json(prompt, schema_name, system=system, temperature=temperature)
 
 
 def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
@@ -209,3 +271,24 @@ def test_orchestrator_random_kb_is_deterministic_for_same_seed(tmp_path: Path) -
         )
 
     assert run("random-kb-a") == run("random-kb-b")
+
+
+def test_debugger_patch_error_is_recorded_without_aborting_run(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="bad-debugger-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=1),
+        use_mock=True,
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, MalformedDebuggerLLM()).run()
+    tree = json.loads((run_dir / "tree.json").read_text(encoding="utf-8"))
+    debugger_error = run_dir / "solutions" / "solution_000" / "debugger_error.md"
+    trace_text = (run_dir / "trace.jsonl").read_text(encoding="utf-8")
+
+    assert tree["nodes"][0]["status"] == "failed"
+    assert tree["nodes"][0]["num_debug_attempts"] == 1
+    assert debugger_error.exists()
+    assert "PatchApplicationError" in debugger_error.read_text(encoding="utf-8")
+    assert "debugger:patch_application" in trace_text

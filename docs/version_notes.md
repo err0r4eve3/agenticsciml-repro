@@ -21,6 +21,7 @@
 - clean subprocess env：generated solution validate/train/predict/evaluate 使用最小安全环境，不继承宿主 API key、代理、SSH agent、真实 `HOME` 等变量。
 - agent context hardening：RootEngineer / Engineer prompt 显式包含 `ProblemBundle`、`EvaluationContract` JSON、`guidelines.md` 和可用分析上下文。
 - patch-based mutation：Engineer 输出包含 `parent_digest` 和 patch/file map；Python 端校验 parent digest 后才写入 `solution.py`。
+- contract-aware debugger：Debugger prompt 显式包含当前代码、`parent_digest`、`ProblemBundle`、`EvaluationContract` JSON、`guidelines.md`、失败阶段和错误日志；修复只能通过 digest-checked unified diff patch 修改 `solution.py`。
 - search policy metadata：`SolutionNode` 持久化 `method_tags`、`failure_kind`、`score_delta_from_parent`、`num_debug_attempts`、`benchmark_name` 和 `contract_hash`，供 selector、retriever 和 ablation 使用。
 - deterministic parent selection：先由 Python `SearchPolicy` 保证 best available node、recent improvement、diverse underexplored node 和 `max_children_per_node` 约束，再允许 LLM selector 做补充。
 - benchmark-aware retrieval query：`RetrievalQueryBuilder` 使用 benchmark family/metric/description、parent analysis、failure kind、method tags 和 leaderboard top-k 生成检索 query。
@@ -46,6 +47,7 @@
 ```bash
 uv run --python 3.11 --extra dev pytest -q
 uv run --python 3.11 --extra dev pytest tests/test_benchmark_catalog.py -q
+uv run --python 3.11 --extra dev pytest tests/test_patch_mutation.py tests/test_orchestrator_cli.py -q
 uv run --python 3.11 --extra dev agenticsciml benchmarks
 uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --mock --max-iterations 1
 uv run --python 3.11 --extra dev agenticsciml trace-summary runs/<experiment_id>

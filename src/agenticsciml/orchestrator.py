@@ -16,10 +16,12 @@ from agenticsciml.agents import (
     RootEngineerAgent,
     SelectorAgent,
 )
+from agenticsciml.agents.base import StructuredOutputError
 from agenticsciml.benchmarks import ProblemBundle
 from agenticsciml.config import EvaluationContract, ExperimentConfig
 from agenticsciml.execution.sandbox import prepare_solution_workspace, train_and_evaluate
 from agenticsciml.llm.base import LLMClient
+from agenticsciml.patching import PatchApplicationError
 from agenticsciml.retrieval.kb_store import KnowledgeBase
 from agenticsciml.retrieval.query_builder import RetrievalQueryBuilder
 from agenticsciml.reporting import (
@@ -265,13 +267,43 @@ class AgenticSciMLOrchestrator:
                 "timed_out": result.timed_out,
             },
         )
-        retries = 0
+        debug_attempts = 0
         while (
             self.config.evolution.use_debugger
             and result.exit_code != 0
-            and retries < self.config.evolution.max_debug_retries
+            and debug_attempts < self.config.evolution.max_debug_retries
         ):
-            changed = self.debugger.debug(solution_id, workspace, result.stdout + "\n" + result.stderr)
+            attempt_index = debug_attempts + 1
+            try:
+                changed = self.debugger.debug(
+                    solution_id,
+                    workspace,
+                    result.stdout + "\n" + result.stderr,
+                    problem_bundle=self.problem_bundle,
+                    contract=contract,
+                    guidelines=self._guidelines_text(),
+                    failure_phase=_failure_phase(result.command),
+                )
+            except (PatchApplicationError, StructuredOutputError) as exc:
+                self.storage.save_solution_text(
+                    solution_id,
+                    "debugger_error.md",
+                    f"# Debugger Error\n\n{type(exc).__name__}: {exc}\n",
+                )
+                self.storage.record_trace(
+                    "guardrail_span",
+                    "debugger:patch_application",
+                    {
+                        "solution_id": solution_id,
+                        "attempt": attempt_index,
+                        "passed": False,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
+                )
+                debug_attempts = attempt_index
+                break
+            debug_attempts = attempt_index
             if not changed:
                 break
             result = train_and_evaluate(workspace, contract, timeout_s=self.config.evolution.timeout_s)
@@ -280,13 +312,12 @@ class AgenticSciMLOrchestrator:
                 "train_and_evaluate.retry",
                 {
                     "solution_id": solution_id,
-                    "retry": retries + 1,
+                    "retry": attempt_index,
                     "exit_code": result.exit_code,
                     "duration_s": result.duration_s,
                     "timed_out": result.timed_out,
                 },
             )
-            retries += 1
 
         score = None
         status = "failed"
@@ -322,7 +353,7 @@ class AgenticSciMLOrchestrator:
             method_tags=method_tags or [],
             failure_kind=self._failure_kind(result.timed_out, status, error),
             score_delta_from_parent=score_delta,
-            num_debug_attempts=retries,
+            num_debug_attempts=debug_attempts,
         )
 
     def _select_parents(self) -> list[SolutionNode]:
@@ -493,3 +524,16 @@ class AgenticSciMLOrchestrator:
             "response_token_estimate": response_token_estimate,
             "duration_s": duration_s,
         }
+
+
+def _failure_phase(command: list[str]) -> str:
+    joined = " ".join(command)
+    if "--mode=validate" in joined:
+        return "validate"
+    if "--mode=train" in joined:
+        return "train"
+    if "--mode=predict" in joined:
+        return "predict"
+    if "evaluate.py" in joined:
+        return "evaluate"
+    return "unknown"
