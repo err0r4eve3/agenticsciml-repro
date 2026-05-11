@@ -341,7 +341,7 @@ def _check_solution_artifact_consistency(
     node_ids = set((tree_nodes or checkpoint_nodes or {}).keys())
     if node_ids:
         trace_node_reference_counts = _check_trace_node_references(issues, events, node_ids)
-        if trace_node_reference_counts["checked"] == 0:
+        if _requires_solution_artifacts(run_metadata) and trace_node_reference_counts["checked"] == 0:
             issues.append("no solution-reference trace events were checked for exported node set")
     return trace_node_reference_counts
 

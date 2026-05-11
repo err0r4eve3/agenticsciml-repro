@@ -510,6 +510,36 @@ def test_trace_summary_fails_when_exported_run_checks_zero_solution_reference_ev
     assert any("no solution-reference trace events" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
+def test_trace_summary_allows_partial_run_with_zero_solution_reference_events(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    metadata["run_state"] = "partial"
+    del metadata["solution_count"]
+    (run_dir / "run_metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    events = [
+        event
+        for event in events
+        if event.get("name") not in {"train_and_evaluate", "agenticsciml.run.end"}
+    ]
+    for event in events:
+        event.pop("event_seq", None)
+    events.append({"event_type": "workflow_span", "name": "agenticsciml.run.end", "metadata": {"run_state": "partial"}})
+    events.append({"event_type": "tool_span", "name": "process.spawn", "metadata": {}})
+    _write_events(run_dir / "trace.jsonl", events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is True
+    assert summary["quality_gate"]["passed"] is True
+    assert summary["artifact_consistency"]["trace_node_reference_events_checked"] == 0
+    assert not any("no solution-reference trace events" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
 def _write_consistent_run_artifacts(run_dir: Path) -> Path:
     run_dir.mkdir()
     contract_hash = "a" * 64
