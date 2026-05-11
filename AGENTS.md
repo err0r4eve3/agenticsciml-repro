@@ -32,6 +32,8 @@ import `agenticsciml`, use the module form for local CLI checks:
 
 ```bash
 PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli run examples/function_approx --mock --max-iterations 1
+PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli smoke-llm examples/function_approx --variants branch_context,no_branch_context --dry-run --max-iterations 1 --parallel-mutations 2 --output-dir "runs/real llm smoke"
+PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli verify-smoke-llm "runs/real llm smoke"
 ```
 
 ## Source Of Truth

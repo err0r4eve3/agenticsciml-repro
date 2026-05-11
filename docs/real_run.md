@@ -46,6 +46,19 @@ The dry run writes `real_llm_smoke_plan.json` and
 `real_llm_smoke_report.md`; it does not call an API and does not require
 `OPENAI_API_KEY`.
 
+If a local checkout path contains spaces and the editable console script cannot
+import `agenticsciml`, use the module form. This is especially useful for smoke
+artifact paths that also contain spaces:
+
+```bash
+PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli smoke-llm examples/function_approx \
+  --variants branch_context,no_branch_context \
+  --dry-run \
+  --max-iterations 1 \
+  --parallel-mutations 2 \
+  --output-dir "runs/real llm smoke"
+```
+
 With credentials, the same command without `--dry-run` runs a minimal real LLM
 smoke only when `--real` is explicit. Treat the output as prompt-delivery /
 behavioral-difference evidence only, not as paper-scale SciML reproduction:
@@ -80,6 +93,12 @@ directory:
 
 ```bash
 uv run --python 3.11 --extra dev agenticsciml verify-smoke-llm runs/real-llm-smoke
+```
+
+The same verifier can be invoked through the module form:
+
+```bash
+PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli verify-smoke-llm "runs/real llm smoke"
 ```
 
 The verifier rejects dry-run-only artifacts, recomputes the paired
