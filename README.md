@@ -36,6 +36,13 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
 uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --mock --max-iterations 1 --random-kb --random-seed 11
 ```
 
+If an editable install is being used from a checkout path with spaces and the
+console script cannot import `agenticsciml`, use the module form:
+
+```bash
+PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli run examples/function_approx --mock --max-iterations 1
+```
+
 Inspect the trace quality gate for a completed run:
 
 ```bash

@@ -29,6 +29,9 @@ agenticsciml = "agenticsciml.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-dir]
+"" = "src"
+
 [tool.setuptools.package-data]
 agenticsciml = ["prompts/*.md"]
 

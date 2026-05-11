@@ -27,6 +27,13 @@ uv run --python 3.11 --extra dev pytest -q
 uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --mock --max-iterations 1
 ```
 
+If the workspace path contains spaces and the editable console script cannot
+import `agenticsciml`, use the module form for local CLI checks:
+
+```bash
+PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli run examples/function_approx --mock --max-iterations 1
+```
+
 ## Source Of Truth
 
 - Current source code and tests define implementation behavior.
