@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from agenticsciml.benchmarks import BENCHMARKS, BenchmarkContractFactory, BenchmarkSpec, ProblemBundle
 from agenticsciml.config import DataConfig, EvaluationContract, EvolutionConfig, ExperimentConfig
@@ -264,13 +265,43 @@ def test_public_catalog_only_fields_do_not_change_contract_hash(monkeypatch) -> 
     assert after.contract_hash == before.contract_hash
 
 
-def test_contract_bound_benchmark_fields_change_contract_hash() -> None:
+def _changed_contract_bound_spec(spec: BenchmarkSpec, field_name: str) -> BenchmarkSpec:
+    changes: dict[str, object] = {
+        "name": "changed_function_approx",
+        "paper_section": "S1.changed",
+        "paper_task_name": "Changed paper task",
+        "family": "changed family",
+        "metric": "changed_contract_metric",
+        "description": "Changed benchmark description.",
+        "fidelity_level": "faithful-small",
+        "expected_runtime_s": spec.expected_runtime_s + 1,
+        "requires_torch": not spec.requires_torch,
+        "requires_gpu": not spec.requires_gpu,
+        "paper_gap_notes": "Changed contract-bound paper gap notes.",
+    }
+    return replace(spec, **{field_name: changes[field_name]})
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "name",
+        "paper_section",
+        "paper_task_name",
+        "family",
+        "metric",
+        "description",
+        "fidelity_level",
+        "expected_runtime_s",
+        "requires_torch",
+        "requires_gpu",
+        "paper_gap_notes",
+    ],
+)
+def test_contract_bound_benchmark_fields_change_contract_hash(field_name: str) -> None:
     bundle = ProblemBundle.load(BENCHMARKS["function_approx"].path)
     before = BenchmarkContractFactory.create_contract(bundle)
-    changed_bundle = replace(
-        bundle,
-        benchmark_spec=replace(bundle.benchmark_spec, metric="changed_contract_metric"),
-    )
+    changed_bundle = replace(bundle, benchmark_spec=_changed_contract_bound_spec(bundle.benchmark_spec, field_name))
 
     after = BenchmarkContractFactory.create_contract(changed_bundle)
     assert after.problem_bundle_digest != before.problem_bundle_digest
