@@ -11,6 +11,21 @@ from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm_smoke import _paired_contrast_gate, _smoke_gate, run_llm_smoke, verify_llm_smoke_output
 
 
+def _rewrite_parallel_child_max_workers(run_dir: Path, value: object) -> None:
+    trace_path = run_dir / "trace.jsonl"
+    events = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    changed = False
+    for event in events:
+        if event.get("name") == "agenticsciml.parallel_children.start":
+            event.setdefault("metadata", {})["max_workers"] = value
+            changed = True
+    assert changed, "expected parallel_children.start trace event"
+    trace_path.write_text(
+        "\n".join(json.dumps(event, sort_keys=True) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+
 def test_llm_smoke_dry_run_writes_plan_without_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
@@ -310,6 +325,31 @@ def test_verify_llm_smoke_output_rejects_missing_expected_call_range_bounds(tmp_
     assert any("expected_llm_call_range.max is required" in issue for issue in payload["issues"])
 
 
+def test_verify_llm_smoke_output_reports_manifest_schema_when_rows_are_damaged(tmp_path: Path) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    rows_path = tmp_path / "real_llm_smoke_runs.csv"
+    header = rows_path.read_text(encoding="utf-8").splitlines()[0]
+    rows_path.write_text(header + "\n", encoding="utf-8")
+    manifest_path = tmp_path / "real_llm_smoke_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["expected_llm_call_range"] = {"min": "bad", "max": 0}
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("must contain paired run rows" in issue for issue in payload["issues"])
+    assert any("expected_llm_call_range.min must be an integer string" in issue for issue in payload["issues"])
+    assert any("expected_llm_call_range.max must be >= 1" in issue for issue in payload["issues"])
+
+
 @pytest.mark.parametrize("bad_value", [1.5, True])
 def test_verify_llm_smoke_output_rejects_non_integer_parallel_mutations(
     tmp_path: Path,
@@ -334,6 +374,27 @@ def test_verify_llm_smoke_output_rejects_non_integer_parallel_mutations(
 
     assert verification.passed is False
     assert any("branch_context: plan parallel_mutations must be an integer" in issue for issue in payload["issues"])
+
+
+@pytest.mark.parametrize("bad_value", ["abc", True])
+def test_verify_llm_smoke_output_rejects_malformed_trace_max_workers(
+    tmp_path: Path,
+    bad_value: object,
+) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    _rewrite_parallel_child_max_workers(tmp_path / "runs" / "smoke-branch_context-seed-0", bad_value)
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("branch_context: trace max_workers must be an integer" in issue for issue in payload["issues"])
 
 
 def test_cli_verify_smoke_llm_command(tmp_path: Path, cli_env: dict[str, str]) -> None:

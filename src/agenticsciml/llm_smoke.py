@@ -346,6 +346,10 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
     rows = _read_rows(runs_csv, issues) if runs_csv.exists() else []
     if runs_csv.exists() and not rows:
         issues.append("real_llm_smoke_runs.csv must contain paired run rows")
+    manifest_call_range: tuple[int, int] | None = None
+    if manifest:
+        manifest_issues, manifest_call_range = _manifest_schema_issues(manifest, output_dir)
+        issues.extend(manifest_issues)
     if plan:
         expected_hash = _hash_payload(plan)
         if manifest and manifest.get("plan_hash") != expected_hash:
@@ -356,16 +360,6 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
             issues.append("plan execution_mode must be real for smoke verification")
         if Path(str(plan.get("output_dir", ""))).resolve() != output_dir.resolve():
             issues.append("plan output_dir does not match verification bundle")
-        if manifest and manifest.get("execution_mode") != "real":
-            issues.append("manifest execution_mode must be real for smoke verification")
-        if manifest and Path(str(manifest.get("output_dir", ""))).resolve() != output_dir.resolve():
-            issues.append("manifest output_dir does not match verification bundle")
-        if manifest and manifest.get("real_mode_explicit") is not True:
-            issues.append("manifest real_mode_explicit must be true for smoke verification")
-        if manifest and not manifest.get("provider"):
-            issues.append("manifest provider is required")
-        if manifest and not manifest.get("model"):
-            issues.append("manifest model is required")
         variants = [str(entry.get("variant")) for entry in plan.get("runs", []) if isinstance(entry, dict)]
         try:
             _require_paired_contrast(variants)
@@ -418,31 +412,11 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
         issues.append(f"paired contrast gate failed: {'; '.join(paired_gate['issues'])}")
     if manifest and recomputed_rows:
         call_count = sum(int(row.get("llm_calls", 0) or 0) for row in recomputed_rows)
-        call_range = manifest.get("expected_llm_call_range", {})
-        if not isinstance(call_range, dict):
-            issues.append("manifest expected_llm_call_range must be an object")
-            min_calls = None
-            max_calls = None
-        else:
-            if "min" not in call_range:
-                issues.append("manifest expected_llm_call_range.min is required")
-            if "max" not in call_range:
-                issues.append("manifest expected_llm_call_range.max is required")
-            min_calls = _parse_strict_int(
-                call_range.get("min"), "manifest expected_llm_call_range.min", issues
-            )
-            max_calls = _parse_strict_int(
-                call_range.get("max"), "manifest expected_llm_call_range.max", issues
-            )
-            if min_calls is not None and min_calls < 1:
-                issues.append("manifest expected_llm_call_range.min must be >= 1")
-            if max_calls is not None and max_calls < 1:
-                issues.append("manifest expected_llm_call_range.max must be >= 1")
-            if min_calls is not None and max_calls is not None and max_calls < min_calls:
-                issues.append("manifest expected_llm_call_range.max must be >= min")
         if call_count <= 0:
             issues.append("recomputed LLM call count must be positive")
-        if min_calls is not None and max_calls is not None and max_calls > 0 and not (min_calls <= call_count <= max_calls):
+        if manifest_call_range is not None:
+            min_calls, max_calls = manifest_call_range
+        if manifest_call_range is not None and not (min_calls <= call_count <= max_calls):
             issues.append(
                 f"recomputed LLM call count {call_count} is outside expected range [{min_calls}, {max_calls}]"
             )
@@ -485,6 +459,42 @@ def _read_rows(path: Path, issues: list[str]) -> list[dict[str, str]]:
         return []
 
 
+def _manifest_schema_issues(manifest: dict[str, Any], output_dir: Path) -> tuple[list[str], tuple[int, int] | None]:
+    issues: list[str] = []
+    call_range_bounds: tuple[int, int] | None = None
+    if manifest.get("execution_mode") != "real":
+        issues.append("manifest execution_mode must be real for smoke verification")
+    if Path(str(manifest.get("output_dir", ""))).resolve() != output_dir.resolve():
+        issues.append("manifest output_dir does not match verification bundle")
+    if manifest.get("real_mode_explicit") is not True:
+        issues.append("manifest real_mode_explicit must be true for smoke verification")
+    if not manifest.get("provider"):
+        issues.append("manifest provider is required")
+    if not manifest.get("model"):
+        issues.append("manifest model is required")
+
+    call_range = manifest.get("expected_llm_call_range", {})
+    if not isinstance(call_range, dict):
+        issues.append("manifest expected_llm_call_range must be an object")
+        return issues, None
+
+    if "min" not in call_range:
+        issues.append("manifest expected_llm_call_range.min is required")
+    if "max" not in call_range:
+        issues.append("manifest expected_llm_call_range.max is required")
+    min_calls = _parse_strict_int(call_range.get("min"), "manifest expected_llm_call_range.min", issues)
+    max_calls = _parse_strict_int(call_range.get("max"), "manifest expected_llm_call_range.max", issues)
+    if min_calls is not None and min_calls < 1:
+        issues.append("manifest expected_llm_call_range.min must be >= 1")
+    if max_calls is not None and max_calls < 1:
+        issues.append("manifest expected_llm_call_range.max must be >= 1")
+    if min_calls is not None and max_calls is not None and max_calls < min_calls:
+        issues.append("manifest expected_llm_call_range.max must be >= min")
+    if min_calls is not None and max_calls is not None and min_calls >= 1 and max_calls >= min_calls:
+        call_range_bounds = (min_calls, max_calls)
+    return issues, call_range_bounds
+
+
 def _parallel_trace_issues(run_dir: Path, variant: str, plan: dict[str, Any]) -> list[str]:
     parallel_mutations = 1
     issues: list[str] = []
@@ -508,13 +518,17 @@ def _parallel_trace_issues(run_dir: Path, variant: str, plan: dict[str, Any]) ->
     ]
     if not starts:
         return [f"{variant}: missing parallel_children.start trace"]
-    if not any(
-        event.get("metadata", {}).get("execution_mode") == "parallel"
-        and int(event.get("metadata", {}).get("max_workers", 0) or 0) >= 2
-        for event in starts
-    ):
-        return [f"{variant}: no parallel child trace with max_workers >= 2"]
-    return []
+    has_parallel_workers = False
+    for event in starts:
+        metadata = event.get("metadata", {})
+        if not isinstance(metadata, dict) or metadata.get("execution_mode") != "parallel":
+            continue
+        max_workers = _parse_strict_int(metadata.get("max_workers", 0), f"{variant}: trace max_workers", issues)
+        if max_workers is not None and max_workers >= 2:
+            has_parallel_workers = True
+    if not has_parallel_workers:
+        issues.append(f"{variant}: no parallel child trace with max_workers >= 2")
+    return issues
 
 
 def _parse_strict_int(value: Any, label: str, issues: list[str]) -> int | None:
