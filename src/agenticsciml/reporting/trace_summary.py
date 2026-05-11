@@ -21,6 +21,9 @@ EVIDENCE_METADATA_KEYS = (
     "scientific_claim",
 )
 
+RUN_STATES = {"partial", "completed", "exported", "finalized"}
+EXPORTED_RUN_STATES = {"completed", "exported", "finalized"}
+
 
 def load_trace_events(run_dir: Path) -> list[dict[str, Any]]:
     path = run_dir / "trace.jsonl"
@@ -85,6 +88,7 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
     contract = _read_json_file(contract_path, issues)
     run_metadata = _read_json_file(metadata_path, issues)
     workflow_metadata = _workflow_start_metadata(events)
+    workflow_end_metadata = _workflow_end_metadata(events)
     tree_path = run_dir / "tree.json"
     checkpoint_path = run_dir / "checkpoint.json"
     if _requires_solution_artifacts(run_metadata):
@@ -122,6 +126,7 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
     elif run_metadata is not None and events:
         issues.append("trace workflow start metadata is missing")
 
+    _check_run_state_consistency(issues, run_metadata, workflow_end_metadata)
     _check_solution_artifact_consistency(issues, contract, run_metadata, tree, checkpoint)
 
     return {"checked": True, "passed": not issues, "issues": issues}
@@ -153,8 +158,30 @@ def _requires_solution_artifacts(run_metadata: dict[str, Any] | None) -> bool:
         return False
     run_state = run_metadata.get("run_state")
     if run_state is not None:
-        return run_state in {"completed", "exported", "finalized"}
+        return run_state in EXPORTED_RUN_STATES
     return "solution_count" in run_metadata
+
+
+def _check_run_state_consistency(
+    issues: list[str],
+    run_metadata: dict[str, Any] | None,
+    workflow_end_metadata: dict[str, Any] | None,
+) -> None:
+    run_state = run_metadata.get("run_state") if run_metadata else None
+    workflow_end_state = workflow_end_metadata.get("run_state") if workflow_end_metadata else None
+    if run_state is not None and run_state not in RUN_STATES:
+        issues.append(f"run_metadata.json run_state is invalid: {run_state!r}")
+    if workflow_end_state is not None and workflow_end_state not in RUN_STATES:
+        issues.append(f"trace workflow end run_state is invalid: {workflow_end_state!r}")
+    if run_state is not None and workflow_end_metadata is not None:
+        _compare_metadata_value(
+            issues,
+            "run_state",
+            run_state,
+            workflow_end_state,
+            "run_metadata.json",
+            "trace workflow end",
+        )
 
 
 def _check_solution_artifact_consistency(
@@ -263,6 +290,14 @@ def _nodes_by_id(
 def _workflow_start_metadata(events: list[dict[str, Any]]) -> dict[str, Any] | None:
     for event in events:
         if event.get("event_type") == "workflow_span" and event.get("name") == "agenticsciml.run.start":
+            metadata = event.get("metadata", {})
+            return metadata if isinstance(metadata, dict) else {}
+    return None
+
+
+def _workflow_end_metadata(events: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for event in reversed(events):
+        if event.get("event_type") == "workflow_span" and event.get("name") == "agenticsciml.run.end":
             metadata = event.get("metadata", {})
             return metadata if isinstance(metadata, dict) else {}
     return None

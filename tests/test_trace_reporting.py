@@ -250,6 +250,15 @@ def test_trace_summary_does_not_require_solution_artifacts_for_partial_run_state
     metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
     metadata["run_state"] = "partial"
     (run_dir / "run_metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    for event in events:
+        if event.get("name") == "agenticsciml.run.end":
+            event["metadata"]["run_state"] = "partial"
+    _write_events(run_dir / "trace.jsonl", events)
     (run_dir / "tree.json").unlink()
     (run_dir / "checkpoint.json").unlink()
 
@@ -257,6 +266,42 @@ def test_trace_summary_does_not_require_solution_artifacts_for_partial_run_state
 
     assert summary["artifact_consistency"]["passed"] is True
     assert summary["quality_gate"]["passed"] is True
+
+
+def test_trace_summary_fails_on_unknown_run_state(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    metadata["run_state"] = "done-ish"
+    (run_dir / "run_metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("run_state" in issue and "invalid" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
+def test_trace_summary_fails_on_workflow_end_run_state_mismatch(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    events.append(
+        {
+            "event_type": "workflow_span",
+            "name": "agenticsciml.run.end",
+            "metadata": {"run_state": "partial"},
+        }
+    )
+    _write_events(run_dir / "trace.jsonl", events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("run_state" in issue and "workflow end" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
 def _write_consistent_run_artifacts(run_dir: Path) -> Path:
@@ -326,6 +371,7 @@ def _write_consistent_run_artifacts(run_dir: Path) -> Path:
         run_dir / "trace.jsonl",
         [
             {"event_type": "workflow_span", "name": "agenticsciml.run.start", "metadata": metadata},
+            {"event_type": "workflow_span", "name": "agenticsciml.run.end", "metadata": {"run_state": "exported"}},
             {"event_type": "agent_span", "name": "proposer", "metadata": {}},
             {"event_type": "generation_span", "name": "proposer", "metadata": {}},
             {"event_type": "tool_span", "name": "train_and_evaluate", "metadata": {}},

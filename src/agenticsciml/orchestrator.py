@@ -103,6 +103,7 @@ class AgenticSciMLOrchestrator:
             "agenticsciml.run.end",
             {
                 "experiment_id": self.config.experiment_id,
+                "run_state": "exported",
                 "solution_count": len(self.nodes),
                 "wall_time_s": time.monotonic() - started,
             },
