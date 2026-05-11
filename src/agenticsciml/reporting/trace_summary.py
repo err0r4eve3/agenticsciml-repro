@@ -149,7 +149,12 @@ def _read_optional_json_file(path: Path, issues: list[str]) -> dict[str, Any] | 
 
 
 def _requires_solution_artifacts(run_metadata: dict[str, Any] | None) -> bool:
-    return run_metadata is not None and "solution_count" in run_metadata
+    if run_metadata is None:
+        return False
+    run_state = run_metadata.get("run_state")
+    if run_state is not None:
+        return run_state in {"completed", "exported", "finalized"}
+    return "solution_count" in run_metadata
 
 
 def _check_solution_artifact_consistency(

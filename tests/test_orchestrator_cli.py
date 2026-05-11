@@ -129,6 +129,7 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert (run_dir / "tree.mmd").exists()
     assert (run_dir / "trace_summary.json").exists()
     run_metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    assert run_metadata["run_state"] == "exported"
     assert run_metadata["evidence_mode"] == EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE
     assert run_metadata["scientific_claim"] == SCIENTIFIC_CLAIM_NOT_SUPPORTED
     assert run_metadata["benchmark_fidelity_level"] == "proxy"

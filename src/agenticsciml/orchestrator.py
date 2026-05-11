@@ -705,6 +705,7 @@ class AgenticSciMLOrchestrator:
         self.storage.save_json(
             "run_metadata.json",
             {
+                "run_state": "exported",
                 "wall_time_s": time.monotonic() - started,
                 "benchmark_name": self.problem_bundle.benchmark_name,
                 "solution_count": len(self.nodes),

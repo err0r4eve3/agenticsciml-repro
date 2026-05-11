@@ -157,9 +157,11 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   evidence fields must agree. When `tree.json` or `checkpoint.json` exists,
   node IDs, node `contract_hash`, node `benchmark_name`, checkpoint contract
   metadata, and run `solution_count` must also be consistent with the frozen
-  evaluation contract, or the quality gate fails closed. A run with
-  `run_metadata.solution_count` is treated as an exported run; `tree.json` and
-  `checkpoint.json` are required and missing files must fail the quality gate.
+  evaluation contract, or the quality gate fails closed.
+  `run_metadata.run_state` is the primary exported-run signal; values
+  `completed`, `exported`, or `finalized` require `tree.json` and
+  `checkpoint.json`. For legacy metadata without `run_state`,
+  `run_metadata.solution_count` is the fallback exported-run signal.
 - Preserve resume semantics. When changing orchestration, keep `checkpoint.json`
   current after root creation, child creation, and final report export.
 - Keep evaluator and benchmark contracts deterministic. LLM judges may summarize
