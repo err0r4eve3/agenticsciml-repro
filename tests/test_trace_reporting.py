@@ -481,6 +481,33 @@ def test_trace_summary_reports_trace_node_reference_check_counts(tmp_path: Path)
 
     assert summary["artifact_consistency"]["trace_node_reference_events_checked"] == 1
     assert summary["artifact_consistency"]["trace_node_reference_events_skipped"] == 5
+    assert summary["artifact_consistency"]["trace_node_reference_events_checked_by_name"] == {
+        "train_and_evaluate": 1
+    }
+    assert summary["artifact_consistency"]["trace_node_reference_events_skipped_by_name"] == {
+        "agenticsciml.run.end": 1,
+        "agenticsciml.run.start": 1,
+        "guard": 1,
+        "proposer": 2,
+    }
+
+
+def test_trace_summary_fails_when_exported_run_checks_zero_solution_reference_events(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    events = [event for event in events if event.get("name") != "train_and_evaluate"]
+    _write_events(run_dir / "trace.jsonl", events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert summary["artifact_consistency"]["trace_node_reference_events_checked"] == 0
+    assert any("no solution-reference trace events" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
 def _write_consistent_run_artifacts(run_dir: Path) -> Path:

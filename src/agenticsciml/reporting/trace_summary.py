@@ -156,6 +156,8 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
         "issues": issues,
         "trace_node_reference_events_checked": trace_node_reference_counts["checked"],
         "trace_node_reference_events_skipped": trace_node_reference_counts["skipped"],
+        "trace_node_reference_events_checked_by_name": trace_node_reference_counts["checked_by_name"],
+        "trace_node_reference_events_skipped_by_name": trace_node_reference_counts["skipped_by_name"],
     }
 
 
@@ -261,8 +263,13 @@ def _check_solution_artifact_consistency(
     tree: dict[str, Any] | None,
     checkpoint: dict[str, Any] | None,
     events: list[dict[str, Any]],
-) -> dict[str, int]:
-    trace_node_reference_counts = {"checked": 0, "skipped": 0}
+) -> dict[str, Any]:
+    trace_node_reference_counts: dict[str, Any] = {
+        "checked": 0,
+        "skipped": 0,
+        "checked_by_name": {},
+        "skipped_by_name": {},
+    }
     expected_contract_hash = contract.get("contract_hash") if contract else None
     expected_benchmark_name = contract.get("benchmark_name") if contract else None
 
@@ -334,6 +341,8 @@ def _check_solution_artifact_consistency(
     node_ids = set((tree_nodes or checkpoint_nodes or {}).keys())
     if node_ids:
         trace_node_reference_counts = _check_trace_node_references(issues, events, node_ids)
+        if trace_node_reference_counts["checked"] == 0:
+            issues.append("no solution-reference trace events were checked for exported node set")
     return trace_node_reference_counts
 
 
@@ -368,14 +377,21 @@ def _check_trace_node_references(
     issues: list[str],
     events: list[dict[str, Any]],
     node_ids: set[str],
-) -> dict[str, int]:
-    counts = {"checked": 0, "skipped": 0}
+) -> dict[str, Any]:
+    counts: dict[str, Any] = {
+        "checked": 0,
+        "skipped": 0,
+        "checked_by_name": {},
+        "skipped_by_name": {},
+    }
     for event in events:
         event_name = str(event.get("name", ""))
         if event_name not in TRACE_NODE_REFERENCE_EVENT_NAMES:
             counts["skipped"] += 1
+            counts["skipped_by_name"][event_name] = counts["skipped_by_name"].get(event_name, 0) + 1
             continue
         counts["checked"] += 1
+        counts["checked_by_name"][event_name] = counts["checked_by_name"].get(event_name, 0) + 1
         metadata = event.get("metadata", {})
         if not isinstance(metadata, dict):
             continue
