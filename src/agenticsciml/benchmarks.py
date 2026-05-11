@@ -75,14 +75,21 @@ class ProblemBundle:
 @dataclass(frozen=True, slots=True)
 class BenchmarkSourceManifest:
     artifacts: dict[str, str]
-    data_generated: bool
+    data_source_mode: str
     data_seed: int = 0
+    generator_command: list[str] | None = None
+    schema_version: int = 1
+    digest_algorithm: str = "sha256"
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "schema_version": self.schema_version,
+            "digest_algorithm": self.digest_algorithm,
             "artifacts": dict(sorted(self.artifacts.items())),
-            "data_generated": self.data_generated,
+            "data_source_mode": self.data_source_mode,
+            "data_generated": self.data_source_mode == "generated_seed0",
             "data_seed": self.data_seed,
+            "generator_command": list(self.generator_command or []),
         }
 
     def digest(self) -> str:
@@ -280,11 +287,26 @@ def _benchmark_source_manifest(
     if train_file.exists() and validation_file.exists():
         artifacts[train_path] = _file_digest(train_file)
         artifacts[validation_path] = _file_digest(validation_file)
-        return BenchmarkSourceManifest(artifacts=artifacts, data_generated=False)
+        return BenchmarkSourceManifest(
+            artifacts=artifacts,
+            data_source_mode="repo_existing",
+            generator_command=[],
+        )
+    if train_file.exists() != validation_file.exists():
+        existing = train_path if train_file.exists() else validation_path
+        missing = validation_path if train_file.exists() else train_path
+        raise ValueError(
+            "Partial benchmark data artifacts are not allowed: "
+            f"found {existing}, missing {missing}."
+        )
 
     generated_data = _generated_data_digests(problem_bundle, train_path, validation_path)
     artifacts.update(generated_data)
-    return BenchmarkSourceManifest(artifacts=artifacts, data_generated=True)
+    return BenchmarkSourceManifest(
+        artifacts=artifacts,
+        data_source_mode="generated_seed0",
+        generator_command=["python", "generate_data.py", "--seed", "0", "--output-dir", "<tmp>"],
+    )
 
 
 def _generated_data_digests(

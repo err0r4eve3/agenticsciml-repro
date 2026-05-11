@@ -134,6 +134,18 @@ def test_problem_bundle_and_contract_are_benchmark_aware() -> None:
         assert contract.problem_bundle_digest
         assert contract.benchmark_source_manifest_digest
         manifest = contract.benchmark_source_manifest
+        assert manifest["schema_version"] == 1
+        assert manifest["digest_algorithm"] == "sha256"
+        assert manifest["data_source_mode"] in {"repo_existing", "generated_seed0"}
+        if manifest["data_source_mode"] == "generated_seed0":
+            assert manifest["generator_command"] == [
+                "python",
+                "generate_data.py",
+                "--seed",
+                "0",
+                "--output-dir",
+                "<tmp>",
+            ]
         assert manifest["artifacts"]["generate_data.py"]
         assert manifest["artifacts"]["guidelines.md"]
         assert manifest["artifacts"]["train_data.npz"]
@@ -296,6 +308,23 @@ def test_contract_verify_detects_stale_existing_data_artifact(tmp_path: Path) ->
         assert "stale" in str(exc)
     else:
         raise AssertionError("Expected stale train data verification to fail.")
+
+
+def test_contract_manifest_rejects_partial_data_artifacts(tmp_path: Path) -> None:
+    spec = BENCHMARKS["function_approx"]
+    benchmark_dir = tmp_path / "function_approx"
+    shutil.copytree(spec.path, benchmark_dir)
+    module = _load_generate_module(benchmark_dir / "generate_data.py")
+    generated_dir = tmp_path / "generated"
+    module.generate(seed=0, output_dir=generated_dir)
+    shutil.copy2(generated_dir / "train_data.npz", benchmark_dir / "train_data.npz")
+
+    try:
+        BenchmarkContractFactory.create_contract(_problem_bundle_from_dir(benchmark_dir, spec))
+    except ValueError as exc:
+        assert "Partial benchmark data artifacts" in str(exc)
+    else:
+        raise AssertionError("Expected partial benchmark data artifacts to fail.")
 
 
 def test_unknown_benchmark_bundle_fails_clearly(tmp_path: Path) -> None:

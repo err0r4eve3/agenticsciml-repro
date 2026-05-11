@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -35,7 +37,7 @@ class ExperimentStorage:
     def save_json(self, relative_path: str | Path, data: Any) -> Path:
         path = self.run_dir / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+        _atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True))
         return path
 
     def load_json(self, relative_path: str | Path) -> Any:
@@ -56,13 +58,13 @@ class ExperimentStorage:
     def save_text(self, relative_path: str | Path, text: str) -> Path:
         path = self.run_dir / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        _atomic_write_text(path, text)
         return path
 
     def save_solution_text(self, solution_id: str, filename: str, text: str) -> Path:
         workspace = self.create_solution_workspace(solution_id)
         path = workspace / filename
-        path.write_text(text, encoding="utf-8")
+        _atomic_write_text(path, text)
         return path
 
     def save_transcript(
@@ -76,5 +78,40 @@ class ExperimentStorage:
         else:
             path = self.create_solution_workspace(solution_id) / "transcripts" / f"{agent_name}.json"
         payload = [message.to_dict() for message in messages]
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        _atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True))
         return path
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp:
+            tmp_path = Path(tmp.name)
+            tmp.write(text)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_path, path)
+        _fsync_directory(path.parent)
+    finally:
+        if tmp_path is not None and tmp_path.exists():
+            tmp_path.unlink()
+
+
+def _fsync_directory(path: Path) -> None:
+    try:
+        flags = getattr(os, "O_DIRECTORY", 0)
+        fd = os.open(path, os.O_RDONLY | flags)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)

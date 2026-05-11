@@ -35,6 +35,18 @@ def test_storage_creates_solution_workspace_and_transcript(tmp_path: Path) -> No
     assert (workspace / "transcripts" / "proposer.json").exists()
 
 
+def test_storage_atomic_writes_do_not_leave_temp_files(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo-run")
+
+    storage.save_json("config.json", {"value": 1})
+    storage.save_json("config.json", {"value": 2})
+    storage.save_text("reports/report.md", "report")
+    storage.save_solution_text("solution_000", "analysis.md", "analysis")
+
+    assert storage.load_json("config.json") == {"value": 2}
+    assert not list(storage.run_dir.rglob("*.tmp"))
+
+
 def test_contract_serialization_preserves_commands() -> None:
     contract = EvaluationContract(
         metric_name="validation_mse",
