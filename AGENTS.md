@@ -178,12 +178,15 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   `parent_id` / `child_id` metadata on unrelated events as solution-tree
   references without extending the allowlist and tests. `trace_summary.json`
   must expose total and per-event-name counts for checked and skipped trace
-  node-reference events so the allowlist behavior is auditable. Exported runs
-  with a final node set but zero checked solution-reference trace events must
-  fail the quality gate; otherwise the trace could appear complete while
-  silently skipping all solution lifecycle references. This zero-checked
-  fail-closed rule applies only to exported/completed/finalized run artifacts,
-  not partial or in-progress resume checkpoints.
+  node-reference events so the allowlist behavior is auditable. It must also
+  report actual solution node references checked, events carrying at least one
+  node reference, and per-event-name reference counts. Exported runs with a
+  final node set but zero checked solution-reference trace events, or zero
+  actual checked solution node references, must fail the quality gate; otherwise
+  the trace could appear complete while silently skipping all solution
+  lifecycle references. This zero-checked fail-closed rule applies only to
+  exported/completed/finalized run artifacts, not partial or in-progress resume
+  checkpoints.
 - Preserve resume semantics. When changing orchestration, keep `checkpoint.json`
   current after root creation, child creation, and final report export.
 - Keep evaluator and benchmark contracts deterministic. LLM judges may summarize

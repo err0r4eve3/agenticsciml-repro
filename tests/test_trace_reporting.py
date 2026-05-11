@@ -481,6 +481,11 @@ def test_trace_summary_reports_trace_node_reference_check_counts(tmp_path: Path)
 
     assert summary["artifact_consistency"]["trace_node_reference_events_checked"] == 1
     assert summary["artifact_consistency"]["trace_node_reference_events_skipped"] == 5
+    assert summary["artifact_consistency"]["trace_node_references_checked"] == 1
+    assert summary["artifact_consistency"]["trace_node_reference_events_with_references"] == 1
+    assert summary["artifact_consistency"]["trace_node_references_checked_by_name"] == {
+        "train_and_evaluate": 1
+    }
     assert summary["artifact_consistency"]["trace_node_reference_events_checked_by_name"] == {
         "train_and_evaluate": 1
     }
@@ -510,6 +515,27 @@ def test_trace_summary_fails_when_exported_run_checks_zero_solution_reference_ev
     assert any("no solution-reference trace events" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
+def test_trace_summary_fails_when_exported_run_checks_no_actual_solution_node_references(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    for event in events:
+        if event.get("name") == "train_and_evaluate":
+            event["metadata"] = {}
+    _write_events(run_dir / "trace.jsonl", events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert summary["artifact_consistency"]["trace_node_reference_events_checked"] == 1
+    assert summary["artifact_consistency"]["trace_node_references_checked"] == 0
+    assert any("no solution node references were checked" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
 def test_trace_summary_allows_partial_run_with_zero_solution_reference_events(tmp_path: Path) -> None:
     run_dir = _write_consistent_run_artifacts(tmp_path / "run")
     metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
@@ -537,6 +563,7 @@ def test_trace_summary_allows_partial_run_with_zero_solution_reference_events(tm
     assert summary["artifact_consistency"]["passed"] is True
     assert summary["quality_gate"]["passed"] is True
     assert summary["artifact_consistency"]["trace_node_reference_events_checked"] == 0
+    assert summary["artifact_consistency"]["trace_node_references_checked"] == 0
     assert not any("no solution-reference trace events" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
@@ -614,7 +641,11 @@ def _write_consistent_run_artifacts(run_dir: Path) -> Path:
             {"event_type": "workflow_span", "name": "agenticsciml.run.end", "metadata": {"run_state": "exported"}},
             {"event_type": "agent_span", "name": "proposer", "metadata": {}},
             {"event_type": "generation_span", "name": "proposer", "metadata": {}},
-            {"event_type": "tool_span", "name": "train_and_evaluate", "metadata": {}},
+            {
+                "event_type": "tool_span",
+                "name": "train_and_evaluate",
+                "metadata": {"solution_id": "solution_000"},
+            },
             {"event_type": "guardrail_span", "name": "guard", "metadata": {"passed": True}},
         ],
     )
