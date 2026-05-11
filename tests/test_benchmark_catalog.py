@@ -27,6 +27,21 @@ EXPECTED_BENCHMARKS = {
 }
 
 
+CONTRACT_BOUND_BENCHMARK_FIELDS = [
+    "name",
+    "paper_section",
+    "paper_task_name",
+    "family",
+    "metric",
+    "description",
+    "fidelity_level",
+    "expected_runtime_s",
+    "requires_torch",
+    "requires_gpu",
+    "paper_gap_notes",
+]
+
+
 GENERIC_BASELINE = '''
 import argparse
 import pickle
@@ -265,6 +280,12 @@ def test_public_catalog_only_fields_do_not_change_contract_hash(monkeypatch) -> 
     assert after.contract_hash == before.contract_hash
 
 
+def test_contract_bound_field_list_matches_digest_metadata() -> None:
+    spec = BENCHMARKS["function_approx"]
+
+    assert set(CONTRACT_BOUND_BENCHMARK_FIELDS) == set(spec.contract_digest_metadata())
+
+
 def _changed_contract_bound_spec(spec: BenchmarkSpec, field_name: str) -> BenchmarkSpec:
     changes: dict[str, object] = {
         "name": "changed_function_approx",
@@ -282,22 +303,7 @@ def _changed_contract_bound_spec(spec: BenchmarkSpec, field_name: str) -> Benchm
     return replace(spec, **{field_name: changes[field_name]})
 
 
-@pytest.mark.parametrize(
-    "field_name",
-    [
-        "name",
-        "paper_section",
-        "paper_task_name",
-        "family",
-        "metric",
-        "description",
-        "fidelity_level",
-        "expected_runtime_s",
-        "requires_torch",
-        "requires_gpu",
-        "paper_gap_notes",
-    ],
-)
+@pytest.mark.parametrize("field_name", CONTRACT_BOUND_BENCHMARK_FIELDS)
 def test_contract_bound_benchmark_fields_change_contract_hash(field_name: str) -> None:
     bundle = ProblemBundle.load(BENCHMARKS["function_approx"].path)
     before = BenchmarkContractFactory.create_contract(bundle)
