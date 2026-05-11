@@ -55,6 +55,7 @@
 - trace event sequence：`ExperimentStorage.record_trace()` 为新 trace event 写入连续递增的 `event_seq`；trace summary 对 exported run artifact 校验 `event_seq` 必须完整且单调。
 - trace node reference integrity：trace summary 会在 allowlisted solution lifecycle events 上检查 trace metadata 中的 `solution_id`、`parent_id`、`child_id`、ID 列表和 `parent_to_child` 映射是否都能在最终 `tree.json` / `checkpoint.json` node set 中找到，避免误伤非 solution 语义 metadata。
 - trace node reference audit counters：`trace_summary.json` 输出 allowlist 中被检查的 solution-reference event 数、被跳过的非 solution event 数、携带实际 node reference 的 event 数、实际 checked node reference 数，以及按 event name 聚合的分布；exported/completed/finalized run 若有最终 node set 但没有任何 checked solution-reference event 或实际 checked node reference，会使 quality gate fail closed，partial/resume run 不因 zero checked 被误伤。
+- trace node coverage gate：`trace_summary.json` 输出最终 node set 的 referenced/unreferenced 覆盖情况；exported/completed/finalized run 中任何 final node 没有 allowlisted trace reference 都会使 quality gate fail closed。
 - benchmark catalog：6 类论文任务家族都有本地 deterministic engineering proxy，包括 `function_approx`、`poisson_lshape`、`burgers_pinn`、`antiderivative_operator`、`reaction_diffusion_operator`、`cylinder_wake_reconstruction`；每个 catalog entry 记录 `fidelity_level`、expected runtime、dependency flags 和 paper-gap notes。
 - benchmark metadata validation：`BenchmarkSpec` 构造时校验 `fidelity_level`、expected runtime、dependency flags、paper task name 和 proxy paper-gap notes。
 - fidelity levels document：`docs/fidelity_levels.md` 定义 `proxy`、`faithful-small`、`paper-like` 的准入标准和 claim rules。
@@ -76,6 +77,7 @@ uv run --python 3.11 --extra dev pytest tests/test_patch_mutation.py tests/test_
 uv run --python 3.11 --extra dev pytest tests/test_ablation.py -q
 uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trace_summary_reports_trace_node_reference_check_counts tests/test_trace_reporting.py::test_trace_summary_fails_when_exported_run_checks_zero_solution_reference_events -q
 uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trace_summary_fails_when_exported_run_checks_no_actual_solution_node_references -q
+uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trace_summary_fails_when_exported_node_is_not_referenced_by_trace -q
 uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trace_summary_allows_partial_run_with_zero_solution_reference_events -q
 uv run --python 3.11 --extra dev agenticsciml benchmarks
 uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --mock --max-iterations 1

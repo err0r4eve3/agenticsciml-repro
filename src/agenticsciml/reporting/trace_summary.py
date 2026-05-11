@@ -163,6 +163,7 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
             "events_with_references"
         ],
         "trace_node_references_checked_by_name": trace_node_reference_counts["references_checked_by_name"],
+        "trace_node_reference_node_coverage": trace_node_reference_counts["node_coverage"],
     }
 
 
@@ -277,6 +278,7 @@ def _check_solution_artifact_consistency(
         "references_checked": 0,
         "events_with_references": 0,
         "references_checked_by_name": {},
+        "node_coverage": {"total_nodes": 0, "referenced": [], "unreferenced": []},
     }
     expected_contract_hash = contract.get("contract_hash") if contract else None
     expected_benchmark_name = contract.get("benchmark_name") if contract else None
@@ -354,6 +356,11 @@ def _check_solution_artifact_consistency(
                 issues.append("no solution-reference trace events were checked for exported node set")
             elif trace_node_reference_counts["references_checked"] == 0:
                 issues.append("no solution node references were checked for exported node set")
+            elif trace_node_reference_counts["node_coverage"]["unreferenced"]:
+                issues.append(
+                    "solution nodes have no allowlisted trace references: "
+                    + ", ".join(trace_node_reference_counts["node_coverage"]["unreferenced"])
+                )
     return trace_node_reference_counts
 
 
@@ -397,7 +404,9 @@ def _check_trace_node_references(
         "references_checked": 0,
         "events_with_references": 0,
         "references_checked_by_name": {},
+        "node_coverage": {"total_nodes": len(node_ids), "referenced": [], "unreferenced": sorted(node_ids)},
     }
+    referenced_node_ids: set[str] = set()
     for event in events:
         event_name = str(event.get("name", ""))
         if event_name not in TRACE_NODE_REFERENCE_EVENT_NAMES:
@@ -421,6 +430,13 @@ def _check_trace_node_references(
                 issues.append(
                     f"trace event {event_name} references unknown solution node via {key}: {node_id}"
                 )
+            else:
+                referenced_node_ids.add(node_id)
+    counts["node_coverage"] = {
+        "total_nodes": len(node_ids),
+        "referenced": sorted(referenced_node_ids),
+        "unreferenced": sorted(node_ids - referenced_node_ids),
+    }
     return counts
 
 

@@ -186,7 +186,9 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   the trace could appear complete while silently skipping all solution
   lifecycle references. This zero-checked fail-closed rule applies only to
   exported/completed/finalized run artifacts, not partial or in-progress resume
-  checkpoints.
+  checkpoints. Exported/completed/finalized runs must also report node coverage
+  and fail when any final `tree.json` / `checkpoint.json` node has no
+  allowlisted trace reference.
 - Preserve resume semantics. When changing orchestration, keep `checkpoint.json`
   current after root creation, child creation, and final report export.
 - Keep evaluator and benchmark contracts deterministic. LLM judges may summarize
