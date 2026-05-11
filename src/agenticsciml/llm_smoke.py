@@ -353,8 +353,12 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
             issues.append("manifest config_hash does not match plan payload")
         if plan.get("execution_mode") != "real":
             issues.append("plan execution_mode must be real for smoke verification")
+        if Path(str(plan.get("output_dir", ""))).resolve() != output_dir.resolve():
+            issues.append("plan output_dir does not match verification bundle")
         if manifest and manifest.get("execution_mode") != "real":
             issues.append("manifest execution_mode must be real for smoke verification")
+        if manifest and Path(str(manifest.get("output_dir", ""))).resolve() != output_dir.resolve():
+            issues.append("manifest output_dir does not match verification bundle")
         if manifest and manifest.get("real_mode_explicit") is not True:
             issues.append("manifest real_mode_explicit must be true for smoke verification")
         if manifest and not manifest.get("provider"):
@@ -382,12 +386,15 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
     for row in rows:
         variant = str(row.get("variant", ""))
         run_dir = Path(str(row.get("run_dir", "")))
-        seed = int(row.get("seed", 0) or 0)
+        seed = _parse_int(row.get("seed", 0), f"{variant}: row seed", issues)
+        if seed is None:
+            continue
         plan_entry = plan_runs.get(variant)
         if plan_entry is None:
             issues.append(f"{variant}: row variant is not present in plan")
             continue
-        if seed != int(plan.get("seed", -1)):
+        plan_seed = _parse_int(plan.get("seed", -1), "plan seed", issues)
+        if plan_seed is not None and seed != plan_seed:
             issues.append(f"{variant}: row seed {seed} does not match plan seed {plan.get('seed')}")
         expected_run_dir = (Path(str(plan.get("output_dir", ""))) / "runs" / str(plan_entry.get("experiment_id"))).resolve()
         if run_dir.resolve() != expected_run_dir:
@@ -411,11 +418,16 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
     if manifest and recomputed_rows:
         call_count = sum(int(row.get("llm_calls", 0) or 0) for row in recomputed_rows)
         call_range = manifest.get("expected_llm_call_range", {})
-        min_calls = int(call_range.get("min", 1) or 1) if isinstance(call_range, dict) else 1
-        max_calls = int(call_range.get("max", 0) or 0) if isinstance(call_range, dict) else 0
+        if not isinstance(call_range, dict):
+            issues.append("manifest expected_llm_call_range must be an object")
+            min_calls = 1
+            max_calls = 0
+        else:
+            min_calls = _parse_int(call_range.get("min", 1), "manifest expected_llm_call_range.min", issues)
+            max_calls = _parse_int(call_range.get("max", 0), "manifest expected_llm_call_range.max", issues)
         if call_count <= 0:
             issues.append("recomputed LLM call count must be positive")
-        if max_calls > 0 and not (min_calls <= call_count <= max_calls):
+        if min_calls is not None and max_calls is not None and max_calls > 0 and not (min_calls <= call_count <= max_calls):
             issues.append(
                 f"recomputed LLM call count {call_count} is outside expected range [{min_calls}, {max_calls}]"
             )
@@ -462,7 +474,10 @@ def _parallel_trace_issues(run_dir: Path, variant: str, plan: dict[str, Any]) ->
     parallel_mutations = 1
     for entry in plan.get("runs", []):
         if isinstance(entry, dict) and entry.get("variant") == variant:
-            parallel_mutations = int(entry.get("parallel_mutations", 1) or 1)
+            try:
+                parallel_mutations = int(entry.get("parallel_mutations", 1) or 1)
+            except (TypeError, ValueError):
+                return [f"{variant}: plan parallel_mutations is not an integer"]
             break
     if parallel_mutations <= 1:
         return []
@@ -480,6 +495,18 @@ def _parallel_trace_issues(run_dir: Path, variant: str, plan: dict[str, Any]) ->
     ):
         return [f"{variant}: no parallel child trace with max_workers >= 2"]
     return []
+
+
+def _parse_int(value: Any, label: str, issues: list[str]) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        issues.append(f"{label} must be an integer")
+        return None
+    if isinstance(value, bool):
+        issues.append(f"{label} must be an integer, not bool")
+        return None
+    return parsed
 
 
 def _validate_smoke_variants(variants: list[str]) -> None:

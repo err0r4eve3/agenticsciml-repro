@@ -185,6 +185,49 @@ def test_verify_llm_smoke_output_rejects_manifest_mode_mismatch(tmp_path: Path) 
     assert any("manifest execution_mode must be real" in issue for issue in payload["issues"])
 
 
+def test_verify_llm_smoke_output_rejects_output_dir_mismatch(tmp_path: Path) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    plan_path = tmp_path / "real_llm_smoke_plan.json"
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    plan["output_dir"] = str(tmp_path / "other-bundle")
+    plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True), encoding="utf-8")
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("plan output_dir does not match" in issue for issue in payload["issues"])
+
+
+def test_verify_llm_smoke_output_reports_malformed_seed_without_crashing(tmp_path: Path) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    rows_path = tmp_path / "real_llm_smoke_runs.csv"
+    rows = list(csv.DictReader(rows_path.open(encoding="utf-8")))
+    rows[0]["seed"] = "not-an-int"
+    with rows_path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("row seed must be an integer" in issue for issue in payload["issues"])
+
+
 def test_cli_verify_smoke_llm_command(tmp_path: Path, cli_env: dict[str, str]) -> None:
     run_llm_smoke(
         benchmark_dir=Path("examples/function_approx").resolve(),
