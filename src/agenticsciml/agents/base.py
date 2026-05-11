@@ -97,6 +97,7 @@ class AgentBase:
                 "response_token_estimate": self._estimate_tokens(response),
                 "duration_s": time.monotonic() - started,
                 "temperature": temperature,
+                **self._llm_call_metadata(),
             },
         )
         return response
@@ -147,6 +148,7 @@ class AgentBase:
                         "duration_s": time.monotonic() - started,
                         "field_count": 0,
                         "error_type": type(exc).__name__,
+                        **self._llm_call_metadata(),
                     },
                 )
                 self.storage.record_trace(
@@ -198,6 +200,7 @@ class AgentBase:
                     "response_token_estimate": self._estimate_tokens(response_text),
                     "duration_s": time.monotonic() - started,
                     "field_count": len(data),
+                    **self._llm_call_metadata(),
                 },
             )
             missing = [field for field in required_fields if field not in data]
@@ -252,3 +255,10 @@ class AgentBase:
             raise ArtifactMissingError(
                 f"{self.role} did not create required artifact(s): {', '.join(missing)}"
             )
+
+    def _llm_call_metadata(self) -> dict[str, Any]:
+        metadata = getattr(self.llm, "last_call_metadata", None)
+        if not isinstance(metadata, dict):
+            return {}
+        allowed = {"llm_call_id", "span_kind", "provider", "model", "method", "schema_name"}
+        return {key: value for key, value in metadata.items() if key in allowed}

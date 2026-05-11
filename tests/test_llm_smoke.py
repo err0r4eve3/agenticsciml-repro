@@ -26,6 +26,22 @@ def _rewrite_parallel_child_max_workers(run_dir: Path, value: object) -> None:
     )
 
 
+def _rewrite_first_generation_span_metadata(run_dir: Path, field: str, value: object) -> None:
+    trace_path = run_dir / "trace.jsonl"
+    events = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    changed = False
+    for event in events:
+        if event.get("event_type") == "generation_span":
+            event.setdefault("metadata", {})[field] = value
+            changed = True
+            break
+    assert changed, "expected generation_span trace event"
+    trace_path.write_text(
+        "\n".join(json.dumps(event, sort_keys=True) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _rewrite_run_metadata_llm_calls_total(run_dir: Path, value: object) -> None:
     metadata_path = run_dir / "run_metadata.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -172,6 +188,8 @@ def test_llm_smoke_real_gate_with_scripted_llm(tmp_path: Path) -> None:
         assert int(row["llm_ledger_calls"]) == int(row["llm_calls"])
         assert int(row["generation_span_count"]) == int(row["llm_calls"])
         assert row["llm_ledger_providers"] == "MockLLMClient"
+        assert row["llm_ledger_call_ids"] == row["llm_trace_call_ids"]
+        assert row["llm_ledger_methods"] == row["llm_trace_methods"]
 
 
 def test_verify_llm_smoke_output_rejects_dry_run_only(tmp_path: Path) -> None:
@@ -622,8 +640,50 @@ def test_verify_llm_smoke_output_rejects_duplicate_ledger_call_id(tmp_path: Path
     payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
 
     assert verification.passed is False
-    assert any("call_id must be llm_call_000002" in issue for issue in payload["issues"])
     assert any("call_id must be unique" in issue for issue in payload["issues"])
+    assert any("call_id sequence must be contiguous" in issue for issue in payload["issues"])
+
+
+def test_verify_llm_smoke_output_rejects_trace_call_id_mismatch(tmp_path: Path) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    _rewrite_first_generation_span_metadata(
+        tmp_path / "runs" / "smoke-branch_context-seed-0",
+        "llm_call_id",
+        "llm_call_999999",
+    )
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("ledger call_ids do not exactly match trace" in issue for issue in payload["issues"])
+
+
+def test_verify_llm_smoke_output_rejects_trace_provider_mismatch(tmp_path: Path) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    _rewrite_first_generation_span_metadata(
+        tmp_path / "runs" / "smoke-branch_context-seed-0",
+        "provider",
+        "OtherProvider",
+    )
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("ledger providers" in issue and "trace providers" in issue for issue in payload["issues"])
 
 
 def test_cli_verify_smoke_llm_command(tmp_path: Path, cli_env: dict[str, str]) -> None:

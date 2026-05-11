@@ -8,6 +8,7 @@ import math
 import os
 import re
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,6 +45,13 @@ class _RecordingLLMClient(LLMClient):
         self.provider = type(inner).__name__
         self.model = getattr(inner, "model", None) or os.environ.get("OPENAI_MODEL", "gpt-5-mini")
         self._call_count = 0
+        self._lock = threading.Lock()
+        self._local = threading.local()
+
+    @property
+    def last_call_metadata(self) -> dict[str, Any] | None:
+        metadata = getattr(self._local, "last_call_metadata", None)
+        return metadata if isinstance(metadata, dict) else None
 
     def complete_text(
         self,
@@ -86,8 +94,9 @@ class _RecordingLLMClient(LLMClient):
         temperature: float,
         call: Any,
     ) -> Any:
-        self._call_count += 1
-        call_id = f"llm_call_{self._call_count:06d}"
+        with self._lock:
+            self._call_count += 1
+            call_id = f"llm_call_{self._call_count:06d}"
         started_wall = time.time()
         started = time.monotonic()
         record: dict[str, Any] = {
@@ -113,6 +122,7 @@ class _RecordingLLMClient(LLMClient):
                     "duration_s": time.monotonic() - started,
                 }
             )
+            self._local.last_call_metadata = _trace_call_metadata(record)
             self._append_ledger(record)
             raise
         record.update(
@@ -122,13 +132,16 @@ class _RecordingLLMClient(LLMClient):
                 "duration_s": time.monotonic() - started,
             }
         )
+        self._local.last_call_metadata = _trace_call_metadata(record)
         self._append_ledger(record)
         return response
 
     def _append_ledger(self, record: dict[str, Any]) -> None:
         self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.ledger_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
+        line = json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"
+        with self._lock:
+            with self.ledger_path.open("a", encoding="utf-8") as f:
+                f.write(line)
 
 
 def run_llm_smoke(
@@ -334,7 +347,8 @@ def _smoke_row(run_dir: Path, variant: str, seed: int) -> dict[str, Any]:
     llm_calls_total = _llm_call_count(metadata, variant, [])
     ledger_entries, ledger_issues = _read_llm_call_ledger(run_dir, variant)
     ledger_call_count = len(ledger_entries)
-    generation_span_count = _generation_span_count(run_dir)
+    generation_spans = _generation_span_metadata(run_dir)
+    generation_span_count = len(generation_spans)
     gate = _smoke_gate(
         run_dir,
         variant,
@@ -358,8 +372,16 @@ def _smoke_row(run_dir: Path, variant: str, seed: int) -> dict[str, Any]:
         "proposal_titles": " | ".join(proposal_titles),
         "llm_calls": llm_calls_total if llm_calls_total is not None else 0,
         "llm_ledger_calls": ledger_call_count,
+        "llm_ledger_call_ids": _join_sequence(entry.get("call_id") for entry in ledger_entries),
         "llm_ledger_providers": ",".join(sorted({str(entry.get("provider", "")) for entry in ledger_entries})),
         "llm_ledger_models": ",".join(sorted({str(entry.get("model", "")) for entry in ledger_entries})),
+        "llm_ledger_methods": _join_sequence(entry.get("method") for entry in ledger_entries),
+        "llm_ledger_schema_names": _join_sequence(entry.get("schema_name") for entry in ledger_entries),
+        "llm_trace_call_ids": _join_sequence(event.get("llm_call_id") for event in generation_spans),
+        "llm_trace_providers": ",".join(sorted({str(event.get("provider", "")) for event in generation_spans})),
+        "llm_trace_models": ",".join(sorted({str(event.get("model", "")) for event in generation_spans})),
+        "llm_trace_methods": _join_sequence(event.get("method") for event in generation_spans),
+        "llm_trace_schema_names": _join_sequence(event.get("schema_name") for event in generation_spans),
         "generation_span_count": generation_span_count,
         "trace_quality_gate_passed": bool(trace_summary.get("quality_gate", {}).get("passed", False)),
         "smoke_gate_passed": gate["passed"],
@@ -602,17 +624,17 @@ def _read_llm_call_ledger(run_dir: Path, variant: str) -> tuple[list[dict[str, A
         if not isinstance(entry, dict):
             issues.append(f"{variant}: ledger line {line_number} must be a JSON object")
             continue
-        expected_call_id = f"llm_call_{len(entries) + 1:06d}"
-        issues.extend(_validate_llm_call_ledger_entry(entry, expected_call_id, seen_call_ids, line_number, variant))
+        issues.extend(_validate_llm_call_ledger_entry(entry, seen_call_ids, line_number, variant))
         entries.append(entry)
     if not entries:
         issues.append(f"{variant}: llm_call_ledger.jsonl must contain at least one call")
+    else:
+        issues.extend(_ledger_call_id_sequence_issues(entries, variant))
     return entries, issues
 
 
 def _validate_llm_call_ledger_entry(
     entry: dict[str, Any],
-    expected_call_id: str,
     seen_call_ids: set[str],
     line_number: int,
     variant: str,
@@ -656,8 +678,8 @@ def _validate_llm_call_ledger_entry(
     if entry.get("schema_version") != 1:
         issues.append(f"{prefix} schema_version must be 1")
     call_id = entry.get("call_id")
-    if call_id != expected_call_id:
-        issues.append(f"{prefix} call_id must be {expected_call_id}")
+    if not isinstance(call_id, str) or re.fullmatch(r"llm_call_\d{6}", call_id) is None:
+        issues.append(f"{prefix} call_id must match llm_call_000001 format")
     if isinstance(call_id, str):
         if call_id in seen_call_ids:
             issues.append(f"{prefix} call_id must be unique")
@@ -687,6 +709,21 @@ def _validate_llm_call_ledger_entry(
     _validate_non_negative_finite_number(entry.get("duration_s"), f"{prefix} duration_s", issues)
     _validate_positive_finite_number(entry.get("started_at_unix"), f"{prefix} started_at_unix", issues)
     return issues
+
+
+def _ledger_call_id_sequence_issues(entries: list[dict[str, Any]], variant: str) -> list[str]:
+    numbers: list[int] = []
+    for entry in entries:
+        call_id = entry.get("call_id")
+        if not isinstance(call_id, str):
+            continue
+        match = re.fullmatch(r"llm_call_(\d{6})", call_id)
+        if match:
+            numbers.append(int(match.group(1)))
+    expected = list(range(1, len(entries) + 1))
+    if sorted(numbers) != expected:
+        return [f"{variant}: ledger call_id sequence must be contiguous from llm_call_000001"]
+    return []
 
 
 def _validate_sha256_hex(value: Any, label: str, issues: list[str]) -> None:
@@ -721,8 +758,24 @@ def _parse_finite_number(value: Any, label: str, issues: list[str]) -> float | N
     return number
 
 
-def _generation_span_count(run_dir: Path) -> int:
-    return sum(1 for event in _read_trace_events(run_dir) if event.get("event_type") == "generation_span")
+def _generation_span_metadata(run_dir: Path) -> list[dict[str, Any]]:
+    spans: list[dict[str, Any]] = []
+    for event in _read_trace_events(run_dir):
+        if event.get("event_type") != "generation_span":
+            continue
+        metadata = event.get("metadata", {})
+        spans.append(metadata if isinstance(metadata, dict) else {})
+    return spans
+
+
+def _join_sequence(values: Any) -> str:
+    return ",".join("__none__" if value is None else str(value) for value in values)
+
+
+def _split_sequence(value: Any) -> list[str]:
+    if not value:
+        return []
+    return [item for item in str(value).split(",")]
 
 
 def _verify_row_ledger(row: dict[str, Any], manifest: dict[str, Any], issues: list[str]) -> None:
@@ -736,16 +789,30 @@ def _verify_row_ledger(row: dict[str, Any], manifest: dict[str, Any], issues: li
         issues.append(
             f"{variant}: ledger call count {ledger_calls} does not match generation span count {generation_spans}"
         )
+    ledger_call_ids = _split_sequence(row.get("llm_ledger_call_ids"))
+    trace_call_ids = _split_sequence(row.get("llm_trace_call_ids"))
+    if ledger_call_ids != trace_call_ids:
+        issues.append(f"{variant}: ledger call_ids do not exactly match trace llm_call_id sequence")
+    if _split_sequence(row.get("llm_ledger_methods")) != _split_sequence(row.get("llm_trace_methods")):
+        issues.append(f"{variant}: ledger methods do not match trace methods")
+    if _split_sequence(row.get("llm_ledger_schema_names")) != _split_sequence(row.get("llm_trace_schema_names")):
+        issues.append(f"{variant}: ledger schema_names do not match trace schema_names")
     expected_provider = manifest.get("provider")
     expected_model = manifest.get("model")
     providers = {item for item in str(row.get("llm_ledger_providers", "")).split(",") if item}
     models = {item for item in str(row.get("llm_ledger_models", "")).split(",") if item}
+    trace_providers = {item for item in str(row.get("llm_trace_providers", "")).split(",") if item}
+    trace_models = {item for item in str(row.get("llm_trace_models", "")).split(",") if item}
     if expected_provider and providers != {expected_provider}:
         issues.append(
             f"{variant}: ledger providers {sorted(providers)} do not match manifest provider {expected_provider}"
         )
     if expected_model and models != {expected_model}:
         issues.append(f"{variant}: ledger models {sorted(models)} do not match manifest model {expected_model}")
+    if providers != trace_providers:
+        issues.append(f"{variant}: ledger providers {sorted(providers)} do not match trace providers {sorted(trace_providers)}")
+    if models != trace_models:
+        issues.append(f"{variant}: ledger models {sorted(models)} do not match trace models {sorted(trace_models)}")
 
 
 def _manifest_schema_issues(manifest: dict[str, Any], output_dir: Path) -> tuple[list[str], tuple[int, int] | None]:
@@ -1093,6 +1160,17 @@ def _hash_payload(payload: dict[str, Any]) -> str:
 
 def _hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _trace_call_metadata(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "llm_call_id": record["call_id"],
+        "span_kind": record["span_kind"],
+        "provider": record["provider"],
+        "model": record["model"],
+        "method": record["method"],
+        "schema_name": record["schema_name"],
+    }
 
 
 def _package_versions() -> dict[str, str]:
