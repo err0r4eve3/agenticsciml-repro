@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import csv
+import hashlib
+import importlib.metadata
 import json
+import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,6 +24,7 @@ DEFAULT_SMOKE_VARIANTS = ("branch_context", "no_branch_context")
 class LLMSmokeResult:
     plan_json: Path
     report_md: Path
+    manifest_json: Path
     runs_csv: Path | None = None
 
 
@@ -52,13 +57,21 @@ def run_llm_smoke(
     )
     plan_path = output_dir / "real_llm_smoke_plan.json"
     plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True), encoding="utf-8")
+    manifest = _build_manifest(plan, llm_client=llm_client)
+    manifest_path = output_dir / "real_llm_smoke_manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
 
     if dry_run:
         report_path = output_dir / "real_llm_smoke_report.md"
         report_path.write_text(_render_dry_run_report(plan), encoding="utf-8")
-        return LLMSmokeResult(plan_json=plan_path, report_md=report_path)
+        return LLMSmokeResult(plan_json=plan_path, report_md=report_path, manifest_json=manifest_path)
 
-    llm = llm_client or OpenAIAdapter()
+    try:
+        llm = llm_client or OpenAIAdapter()
+    except Exception as exc:
+        report_path = output_dir / "real_llm_smoke_report.md"
+        report_path.write_text(_render_failure_report(plan, "adapter_init_error", exc), encoding="utf-8")
+        raise
 
     rows: list[dict[str, Any]] = []
     gate_issues: list[str] = []
@@ -77,7 +90,12 @@ def run_llm_smoke(
             ),
             use_mock=False,
         )
-        run_dir = AgenticSciMLOrchestrator(config, llm).run()
+        try:
+            run_dir = AgenticSciMLOrchestrator(config, llm).run()
+        except Exception as exc:
+            report_path = output_dir / "real_llm_smoke_report.md"
+            report_path.write_text(_render_failure_report(plan, "orchestrator_error", exc), encoding="utf-8")
+            raise
         row = _smoke_row(run_dir, variant, seed)
         rows.append(row)
         if not _truthy(row["smoke_gate_passed"]):
@@ -92,7 +110,7 @@ def run_llm_smoke(
     report_path.write_text(_render_real_report(plan, rows, paired_gate), encoding="utf-8")
     if gate_issues:
         raise RuntimeError(f"Real LLM smoke gate failed; see {report_path}: {'; '.join(gate_issues)}")
-    return LLMSmokeResult(plan_json=plan_path, report_md=report_path, runs_csv=runs_csv)
+    return LLMSmokeResult(plan_json=plan_path, report_md=report_path, manifest_json=manifest_path, runs_csv=runs_csv)
 
 
 def _build_plan(
@@ -242,6 +260,8 @@ def _render_dry_run_report(plan: dict[str, Any]) -> str:
         f"- Scientific claim: `{plan['scientific_claim']}`\n"
         f"- Execution mode: `{plan['execution_mode']}`\n"
         "- API calls: none; dry run only.\n\n"
+        "## Manifest\n\n"
+        "- `real_llm_smoke_manifest.json`\n\n"
         "## Planned Runs\n\n"
         f"{run_lines}\n\n"
         "## Boundary\n\n"
@@ -260,11 +280,28 @@ def _render_real_report(plan: dict[str, Any], rows: list[dict[str, Any]], paired
         "# Real LLM Smoke Report\n\n"
         f"- Evidence mode: `{plan['evidence_mode']}`\n"
         f"- Scientific claim: `{plan['scientific_claim']}`\n\n"
+        "## Manifest\n\n"
+        "- `real_llm_smoke_manifest.json`\n\n"
         "## Runs\n\n"
         f"{row_lines}\n\n"
         "## Paired Contrast Gate\n\n"
         f"- paired_contrast_passed: `{paired_gate['passed']}`\n"
         f"- issues: `{'; '.join(paired_gate['issues']) or 'none'}`\n\n"
+        "## Boundary\n\n"
+        f"{plan['claim_boundary']}\n"
+    )
+
+
+def _render_failure_report(plan: dict[str, Any], failure_kind: str, exc: Exception) -> str:
+    return (
+        "# Real LLM Smoke Failed\n\n"
+        f"- Evidence mode: `{plan['evidence_mode']}`\n"
+        f"- Scientific claim: `{plan['scientific_claim']}`\n"
+        f"- failure_kind: `{failure_kind}`\n"
+        f"- error_type: `{type(exc).__name__}`\n"
+        f"- error: `{exc}`\n\n"
+        "## Manifest\n\n"
+        "- `real_llm_smoke_manifest.json`\n\n"
         "## Boundary\n\n"
         f"{plan['claim_boundary']}\n"
     )
@@ -291,11 +328,20 @@ def _validate_smoke_variants(variants: list[str]) -> None:
 def _require_paired_contrast(variants: list[str]) -> None:
     required = set(DEFAULT_SMOKE_VARIANTS)
     present = set(variants)
-    if not required.issubset(present):
+    if present != required or len(variants) != len(DEFAULT_SMOKE_VARIANTS):
         missing = ", ".join(sorted(required - present))
+        extra = ", ".join(sorted(present - required))
+        duplicate = len(variants) != len(set(variants))
+        details = []
+        if missing:
+            details.append(f"missing: {missing}")
+        if extra:
+            details.append(f"extra: {extra}")
+        if duplicate:
+            details.append("duplicates are not allowed")
         raise ValueError(
-            "Real LLM smoke requires paired branch_context and no_branch_context variants. "
-            f"Missing: {missing}"
+            "Real LLM smoke requires the exact paired variants "
+            f"{', '.join(DEFAULT_SMOKE_VARIANTS)}. " + "; ".join(details)
         )
 
 
@@ -322,28 +368,51 @@ def _smoke_gate(
         if event.get("name") == "agenticsciml.child_mutation.start"
     ]
     if expected_branch_context:
-        transcript_text = _child_transcript_text(run_dir, nodes)
         if not branch_tags:
             issues.append("branch_context variant produced no branch method tags")
         if not child_events:
             issues.append("branch_context variant produced no child mutation trace events")
         if not any(event.get("metadata", {}).get("branch_context", {}).get("branch_intent") for event in child_events):
             issues.append("branch_context trace has no branch_intent evidence")
-        required_tokens = ("branch_intent", "sibling_branch_ids", "diversity_instruction")
-        missing_tokens = [token for token in required_tokens if token not in transcript_text]
-        if missing_tokens:
-            issues.append(f"branch_context transcripts missing tokens: {', '.join(missing_tokens)}")
+        issues.extend(_branch_prompt_delivery_issues(run_dir, nodes))
     else:
         if branch_tags:
             issues.append("no_branch_context variant produced branch method tags")
         if any(event.get("metadata", {}).get("branch_context") for event in child_events):
             issues.append("no_branch_context trace contains branch context")
         forbidden = ("branch_intent", "sibling_branch_ids", "diversity_instruction")
-        transcript_text = _child_transcript_text(run_dir, nodes)
+        transcript_text = _child_transcript_prompts(run_dir, nodes)
         leaked = [token for token in forbidden if token in transcript_text]
         if leaked:
             issues.append(f"no_branch_context transcripts leaked tokens: {', '.join(leaked)}")
     return {"passed": not issues, "issues": issues}
+
+
+def _branch_prompt_delivery_issues(run_dir: Path, nodes: list[dict[str, Any]]) -> list[str]:
+    issues: list[str] = []
+    for node in nodes:
+        if node.get("parent_id") is None:
+            continue
+        node_id = str(node["node_id"])
+        context_path = run_dir / "solutions" / node_id / "branch_context.json"
+        if not context_path.exists():
+            issues.append(f"{node_id} missing branch_context.json")
+            continue
+        context = json.loads(context_path.read_text(encoding="utf-8"))
+        prompt_text = _node_request_prompts(run_dir, node_id)
+        missing: list[str] = []
+        branch_intent = context.get("branch_intent")
+        if not isinstance(branch_intent, str) or branch_intent not in prompt_text:
+            missing.append("branch_intent")
+        siblings = context.get("sibling_branch_ids")
+        if not isinstance(siblings, list) or not all(str(sibling) in prompt_text for sibling in siblings):
+            missing.append("sibling_branch_ids")
+        diversity_instruction = context.get("diversity_instruction")
+        if not isinstance(diversity_instruction, str) or diversity_instruction not in prompt_text:
+            missing.append("diversity_instruction")
+        if missing:
+            issues.append(f"{node_id} request prompts missing branch context fields: {', '.join(missing)}")
+    return issues
 
 
 def _paired_contrast_gate(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -386,17 +455,31 @@ def _read_trace_events(run_dir: Path) -> list[dict[str, Any]]:
     return events
 
 
-def _child_transcript_text(run_dir: Path, nodes: list[dict[str, Any]]) -> str:
+def _child_transcript_prompts(run_dir: Path, nodes: list[dict[str, Any]]) -> str:
     parts: list[str] = []
     for node in nodes:
         if node.get("parent_id") is None:
             continue
-        transcript_dir = run_dir / "solutions" / str(node["node_id"]) / "transcripts"
-        for name in ("proposal_debate.json", "engineer.json"):
-            path = transcript_dir / name
-            if path.exists():
-                parts.append(path.read_text(encoding="utf-8"))
+        parts.append(_node_request_prompts(run_dir, str(node["node_id"])))
     return "\n".join(parts)
+
+
+def _node_request_prompts(run_dir: Path, node_id: str) -> str:
+    transcript_dir = run_dir / "solutions" / node_id / "transcripts"
+    prompts: list[str] = []
+    for name in ("proposal_debate.json", "engineer.json"):
+        path = transcript_dir / name
+        if not path.exists():
+            continue
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, list):
+            continue
+        for item in payload:
+            if isinstance(item, dict) and item.get("role") in {"proposer", "engineer"}:
+                prompt = item.get("prompt")
+                if isinstance(prompt, str):
+                    prompts.append(prompt)
+    return "\n".join(prompts)
 
 
 def _truthy(value: Any) -> bool:
@@ -405,3 +488,53 @@ def _truthy(value: Any) -> bool:
     if isinstance(value, str):
         return value.lower() in {"true", "1", "yes"}
     return bool(value)
+
+
+def _build_manifest(plan: dict[str, Any], *, llm_client: LLMClient | None) -> dict[str, Any]:
+    plan_hash = _hash_payload(plan)
+    model = getattr(llm_client, "model", None) or os.environ.get("OPENAI_MODEL", "gpt-5-mini")
+    provider = type(llm_client).__name__ if llm_client is not None else "OpenAIAdapter"
+    run_count = len(plan.get("runs", []))
+    return {
+        "schema_version": 1,
+        "execution_mode": plan["execution_mode"],
+        "real_mode_explicit": plan["real_mode_explicit"],
+        "provider": provider,
+        "model": model,
+        "python_version": sys.version.split()[0],
+        "package_versions": _package_versions(),
+        "seed": plan["seed"],
+        "max_iterations": [entry["max_iterations"] for entry in plan["runs"]],
+        "parallel_mutations": [entry["parallel_mutations"] for entry in plan["runs"]],
+        "timeout_s": plan["timeout_s"],
+        "timeout_scope": plan["timeout_scope"],
+        "output_dir": plan["output_dir"],
+        "plan_hash": plan_hash,
+        "config_hash": plan_hash,
+        "token_budget": {
+            "prompt_token_ceiling": "not_configured",
+            "completion_token_ceiling": "not_configured",
+            "cost_ceiling_usd": "not_configured",
+        },
+        "expected_llm_call_range": {
+            "min": max(1, run_count * 8),
+            "max": max(1, run_count * 80),
+        },
+        "claim_boundary": plan["claim_boundary"],
+    }
+
+
+def _hash_payload(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _package_versions() -> dict[str, str]:
+    names = ["agenticsciml-repro", "numpy", "openai"]
+    versions: dict[str, str] = {}
+    for name in names:
+        try:
+            versions[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            versions[name] = "not_installed"
+    return versions

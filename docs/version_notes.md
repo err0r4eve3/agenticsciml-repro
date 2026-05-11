@@ -45,7 +45,7 @@
 - branch-context ablation switch：`EvolutionConfig.use_branch_context`、CLI `--no-branch-context` 和 ablation variants `branch_context` / `no_branch_context` 支持后续真实 LLM smoke 对比；mock ablation 只验证开关与 artifact。
 - branch-context evidence flag：`run_metadata.json`、workflow-start trace 和 child mutation trace 显式记录 `branch_context_enabled`，避免把存在但为空的 `branch_context` 字段误读为启用了分支上下文。
 - real LLM smoke scaffold：`agenticsciml smoke-llm` 默认 dry-run，无 key 生成 `real_llm_smoke_plan.json` / `real_llm_smoke_report.md`；真实模式必须显式 `--real`，会要求 `OPENAI_API_KEY` 并运行 branch_context/no_branch_context 最小对比。
-- real LLM smoke gate：真实 smoke 是 paired contrast，必须同时包含 `branch_context` 和 `no_branch_context`；会读取 `trace_summary.json`、要求两侧正数 LLM call count，验证 branch-context prompt-delivery 证据，并检查 no-branch transcript 不泄漏分支字段。gate 失败时 CLI non-zero，而不是只输出正常报告。
+- real LLM smoke gate：真实 smoke 是 exact paired contrast，必须且只能包含 `branch_context` 和 `no_branch_context`；会先写 `real_llm_smoke_manifest.json`，读取 `trace_summary.json`、要求两侧正数 LLM call count，验证 request-side branch-context prompt-delivery 证据，并检查 no-branch request prompt 不泄漏分支字段。gate 失败时 CLI non-zero，而不是只输出正常报告。
 - faithful-small benchmark seed：新增 `examples/poisson_lshape_faithful_small`，在 L-shaped Poisson 任务中加入 boundary/residual collocation 数据，用于缩小 proxy 与论文 PINN 任务结构的差距；仍不声明 paper-like 分数。
 - benchmark-aware retrieval query：`RetrievalQueryBuilder` 使用 benchmark family/metric/description、parent analysis、failure kind、method tags 和 leaderboard top-k 生成检索 query。
 - KB ablation switches：`use_kb=False` 不注入 KB，`random_kb=True` 使用 seed-controlled random KB retrieval。

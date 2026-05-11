@@ -375,6 +375,11 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   both `branch_context` and `no_branch_context`, and the paired contrast gate
   must fail if either side is missing, has zero LLM calls, or contradicts its
   branch-context setting.
+- Real LLM smoke must write `real_llm_smoke_manifest.json` before provider
+  calls. The manifest should record provider/model, package versions, seed,
+  iteration/mutation budgets, timeout semantics, output dir, config hash, and
+  token/cost budget placeholders so failed and completed real runs remain
+  auditable.
 - Every benchmark entry must include fidelity metadata: `fidelity_level`,
   expected runtime, dependency flags, paper task name, and paper-gap notes. A
   `proxy` benchmark is allowed for workflow validation but must not be described

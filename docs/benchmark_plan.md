@@ -52,6 +52,10 @@
 | `reaction_diffusion_operator` | `S1.5` | `proxy` | `examples/reaction_diffusion_operator` | `relative_l2` | 多输入 reaction-diffusion operator proxy |
 | `cylinder_wake_reconstruction` | `S1.6` | `proxy` | `examples/cylinder_wake_reconstruction` | `relative_l2` | 稀疏传感器到 2D 涡量场重建 proxy |
 
+`poisson_lshape_faithful_small` is a residual-aware data interface, not a
+residual-scored PINN evaluator: the current trusted score is still
+prediction-only relative L2 on private labels.
+
 `fidelity_level` 的含义：
 
 - `proxy`：本地 NumPy 小规模代理任务，只验证 workflow / evaluator / artifact shape。

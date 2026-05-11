@@ -24,6 +24,7 @@ def test_llm_smoke_dry_run_writes_plan_without_api_key(tmp_path: Path, monkeypat
     report = result.report_md.read_text(encoding="utf-8")
 
     assert result.runs_csv is None
+    assert result.manifest_json.exists()
     assert plan["evidence_mode"] == EVIDENCE_MODE_REAL_LLM_SMOKE
     assert plan["scientific_claim"] == "not_supported"
     assert [entry["variant"] for entry in plan["runs"]] == ["branch_context", "no_branch_context"]
@@ -32,6 +33,9 @@ def test_llm_smoke_dry_run_writes_plan_without_api_key(tmp_path: Path, monkeypat
     assert plan["runs"][0]["experiment_id"] == "smoke-branch_context-seed-0"
     assert "runs/smoke-branch_context-seed-0/tree.json" in plan["expected_artifacts"]
     assert "API calls: none" in report
+    manifest = json.loads(result.manifest_json.read_text(encoding="utf-8"))
+    assert manifest["execution_mode"] == "dry_run"
+    assert manifest["expected_llm_call_range"]["min"] > 0
 
 
 def test_llm_smoke_dry_run_rejects_unknown_variant(tmp_path: Path) -> None:
@@ -57,11 +61,22 @@ def test_llm_smoke_real_mode_requires_api_key(tmp_path: Path, monkeypatch: pytes
 
 
 def test_llm_smoke_real_mode_requires_paired_variants(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="paired branch_context and no_branch_context"):
+    with pytest.raises(ValueError, match="exact paired variants"):
         run_llm_smoke(
             benchmark_dir=Path("examples/function_approx").resolve(),
             output_dir=tmp_path,
             variants=["branch_context"],
+            dry_run=False,
+            llm_client=MockLLMClient(),
+        )
+
+
+def test_llm_smoke_real_mode_rejects_duplicate_variants(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="duplicates are not allowed"):
+        run_llm_smoke(
+            benchmark_dir=Path("examples/function_approx").resolve(),
+            output_dir=tmp_path,
+            variants=["branch_context", "no_branch_context", "branch_context"],
             dry_run=False,
             llm_client=MockLLMClient(),
         )
@@ -81,6 +96,7 @@ def test_llm_smoke_real_gate_with_scripted_llm(tmp_path: Path) -> None:
     assert all(row["smoke_gate_passed"] == "True" for row in rows)
     assert all(row["trace_quality_gate_passed"] == "True" for row in rows)
     assert all(int(row["llm_calls"]) > 0 for row in rows)
+    assert result.manifest_json.exists()
     no_branch = next(row for row in rows if row["variant"] == "no_branch_context")
     assert no_branch["branch_context_enabled"] == "False"
     assert no_branch["branch_intents"] == ""
@@ -90,7 +106,29 @@ def test_smoke_gate_requires_branch_context_prompt_delivery(tmp_path: Path) -> N
     run_dir = tmp_path
     child = run_dir / "solutions" / "solution_001" / "transcripts"
     child.mkdir(parents=True)
-    (child / "proposal_debate.json").write_text("[]", encoding="utf-8")
+    (run_dir / "solutions" / "solution_001" / "branch_context.json").write_text(
+        json.dumps(
+            {
+                "branch_intent": "features_or_architecture",
+                "sibling_branch_ids": ["solution_002"],
+                "diversity_instruction": "distinct branch",
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (child / "proposal_debate.json").write_text(
+        json.dumps(
+            [
+                {
+                    "role": "proposer",
+                    "prompt": "No branch context was delivered in this request.",
+                    "response": "branch_intent sibling_branch_ids diversity_instruction",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
     (child / "engineer.json").write_text("[]", encoding="utf-8")
     (run_dir / "trace.jsonl").write_text(
         json.dumps(
@@ -114,7 +152,7 @@ def test_smoke_gate_requires_branch_context_prompt_delivery(tmp_path: Path) -> N
     )
 
     assert gate["passed"] is False
-    assert any("transcripts missing" in issue for issue in gate["issues"])
+    assert any("request prompts missing" in issue for issue in gate["issues"])
 
 
 def test_paired_contrast_gate_rejects_single_variant() -> None:
