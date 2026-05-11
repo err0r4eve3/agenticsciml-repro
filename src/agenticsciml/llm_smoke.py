@@ -343,23 +343,55 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
         issues.append("missing real_llm_smoke_runs.csv; dry-run outputs are not real-smoke evidence")
 
     rows = _read_rows(runs_csv, issues) if runs_csv.exists() else []
+    if runs_csv.exists() and not rows:
+        issues.append("real_llm_smoke_runs.csv must contain paired run rows")
     if plan:
         expected_hash = _hash_payload(plan)
         if manifest and manifest.get("plan_hash") != expected_hash:
             issues.append("manifest plan_hash does not match plan payload")
+        if manifest and manifest.get("config_hash") != expected_hash:
+            issues.append("manifest config_hash does not match plan payload")
         if plan.get("execution_mode") != "real":
             issues.append("plan execution_mode must be real for smoke verification")
+        if manifest and manifest.get("execution_mode") != "real":
+            issues.append("manifest execution_mode must be real for smoke verification")
+        if manifest and manifest.get("real_mode_explicit") is not True:
+            issues.append("manifest real_mode_explicit must be true for smoke verification")
+        if manifest and not manifest.get("provider"):
+            issues.append("manifest provider is required")
+        if manifest and not manifest.get("model"):
+            issues.append("manifest model is required")
         variants = [str(entry.get("variant")) for entry in plan.get("runs", []) if isinstance(entry, dict)]
         try:
             _require_paired_contrast(variants)
         except ValueError as exc:
             issues.append(str(exc))
+        row_variants = [str(row.get("variant", "")) for row in rows]
+        if row_variants:
+            try:
+                _require_paired_contrast(row_variants)
+            except ValueError as exc:
+                issues.append(f"runs CSV variants invalid: {exc}")
 
+    plan_runs = {
+        str(entry.get("variant")): entry
+        for entry in plan.get("runs", [])
+        if isinstance(entry, dict)
+    }
     recomputed_rows: list[dict[str, Any]] = []
     for row in rows:
         variant = str(row.get("variant", ""))
         run_dir = Path(str(row.get("run_dir", "")))
         seed = int(row.get("seed", 0) or 0)
+        plan_entry = plan_runs.get(variant)
+        if plan_entry is None:
+            issues.append(f"{variant}: row variant is not present in plan")
+            continue
+        if seed != int(plan.get("seed", -1)):
+            issues.append(f"{variant}: row seed {seed} does not match plan seed {plan.get('seed')}")
+        expected_run_dir = (Path(str(plan.get("output_dir", ""))) / "runs" / str(plan_entry.get("experiment_id"))).resolve()
+        if run_dir.resolve() != expected_run_dir:
+            issues.append(f"{variant}: run_dir {run_dir} does not match expected {expected_run_dir}")
         if not run_dir.exists():
             issues.append(f"{variant}: run_dir does not exist: {run_dir}")
             continue
@@ -373,10 +405,20 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
             issues.append(f"{variant}: smoke gate failed: {recomputed['smoke_gate_issues']}")
         issues.extend(_parallel_trace_issues(run_dir, variant, plan))
 
-    if recomputed_rows:
-        paired_gate = _paired_contrast_gate(recomputed_rows)
-        if not paired_gate["passed"]:
-            issues.append(f"paired contrast gate failed: {'; '.join(paired_gate['issues'])}")
+    paired_gate = _paired_contrast_gate(recomputed_rows)
+    if not paired_gate["passed"]:
+        issues.append(f"paired contrast gate failed: {'; '.join(paired_gate['issues'])}")
+    if manifest and recomputed_rows:
+        call_count = sum(int(row.get("llm_calls", 0) or 0) for row in recomputed_rows)
+        call_range = manifest.get("expected_llm_call_range", {})
+        min_calls = int(call_range.get("min", 1) or 1) if isinstance(call_range, dict) else 1
+        max_calls = int(call_range.get("max", 0) or 0) if isinstance(call_range, dict) else 0
+        if call_count <= 0:
+            issues.append("recomputed LLM call count must be positive")
+        if max_calls > 0 and not (min_calls <= call_count <= max_calls):
+            issues.append(
+                f"recomputed LLM call count {call_count} is outside expected range [{min_calls}, {max_calls}]"
+            )
 
     return {
         "schema_version": 1,

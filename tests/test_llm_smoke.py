@@ -123,6 +123,68 @@ def test_verify_llm_smoke_output_rejects_dry_run_only(tmp_path: Path) -> None:
     assert any("dry-run outputs are not real-smoke evidence" in issue for issue in payload["issues"])
 
 
+def test_verify_llm_smoke_output_rejects_header_only_runs_csv(tmp_path: Path) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    rows_path = tmp_path / "real_llm_smoke_runs.csv"
+    header = rows_path.read_text(encoding="utf-8").splitlines()[0]
+    rows_path.write_text(header + "\n", encoding="utf-8")
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("must contain paired run rows" in issue for issue in payload["issues"])
+
+
+def test_verify_llm_smoke_output_rejects_stale_external_run_dir(tmp_path: Path) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    rows_path = tmp_path / "real_llm_smoke_runs.csv"
+    rows = list(csv.DictReader(rows_path.open(encoding="utf-8")))
+    rows[0]["run_dir"] = str(tmp_path / "external-run")
+    with rows_path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("does not match expected" in issue for issue in payload["issues"])
+
+
+def test_verify_llm_smoke_output_rejects_manifest_mode_mismatch(tmp_path: Path) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    manifest_path = tmp_path / "real_llm_smoke_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["execution_mode"] = "dry_run"
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("manifest execution_mode must be real" in issue for issue in payload["issues"])
+
+
 def test_cli_verify_smoke_llm_command(tmp_path: Path, cli_env: dict[str, str]) -> None:
     run_llm_smoke(
         benchmark_dir=Path("examples/function_approx").resolve(),

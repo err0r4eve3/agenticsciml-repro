@@ -37,6 +37,17 @@ def _sample_lshape(rng: np.random.Generator, n: int) -> np.ndarray:
     return np.concatenate(samples, axis=0)[:n]
 
 
+def _sample_residual_centers(rng: np.random.Generator, n: int, h: float) -> np.ndarray:
+    samples: list[np.ndarray] = []
+    offsets = np.array([[h, 0.0], [-h, 0.0], [0.0, h], [0.0, -h]])
+    while sum(len(part) for part in samples) < n:
+        candidate = rng.uniform(-0.92, 0.92, size=(max(n * 2, 512), 2))
+        masks = [_in_lshape(candidate)]
+        masks.extend(_in_lshape(candidate + offset) for offset in offsets)
+        samples.append(candidate[np.logical_and.reduce(masks)])
+    return np.concatenate(samples, axis=0)[:n]
+
+
 def _boundary_points(n_per_edge: int) -> np.ndarray:
     t = np.linspace(-1.0, 1.0, n_per_edge)
     nonpos = t[t <= 0.0]
@@ -71,7 +82,22 @@ def generate(seed: int, output_dir: Path) -> None:
     axis = np.linspace(-1.0, 1.0, 58)
     xx, yy = np.meshgrid(axis, axis)
     grid = np.column_stack([xx.ravel(), yy.ravel()])
-    x_val = grid[_in_lshape(grid)]
+    x_solution = grid[_in_lshape(grid)]
+    x_boundary_val = _boundary_points(56)
+    h = 1e-3
+    x_residual_val = _sample_residual_centers(rng, 320, h)
+    x_val = np.concatenate(
+        [
+            x_solution,
+            x_boundary_val,
+            x_residual_val,
+            x_residual_val + np.array([h, 0.0]),
+            x_residual_val - np.array([h, 0.0]),
+            x_residual_val + np.array([0.0, h]),
+            x_residual_val - np.array([0.0, h]),
+        ],
+        axis=0,
+    )
     u_val = target_solution(x_val)
 
     np.savez(
@@ -83,7 +109,16 @@ def generate(seed: int, output_dir: Path) -> None:
         x_residual=x_residual,
         f_residual=f_residual,
     )
-    np.savez(output_dir / "val_data.npz", x_val=x_val, u_val=u_val)
+    np.savez(
+        output_dir / "val_data.npz",
+        x_val=x_val,
+        u_val=u_val,
+        n_solution=np.array([len(x_solution)], dtype=np.int64),
+        n_boundary=np.array([len(x_boundary_val)], dtype=np.int64),
+        n_residual=np.array([len(x_residual_val)], dtype=np.int64),
+        finite_difference_h=np.array([h], dtype=float),
+        f_residual_val=forcing_term(x_residual_val),
+    )
 
 
 def main() -> None:

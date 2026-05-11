@@ -46,15 +46,16 @@
 | --- | --- | --- | --- | --- | --- |
 | `function_approx` | `S1.1` | `proxy` | `examples/function_approx` | `validation_mse` | 不连续振荡函数拟合 |
 | `poisson_lshape` | `S1.2` | `proxy` | `examples/poisson_lshape` | `relative_l2` | L-shaped Poisson / corner singularity proxy |
-| `poisson_lshape_faithful_small` | `S1.2` | `faithful-small` | `examples/poisson_lshape_faithful_small` | `relative_l2` | L-shaped Poisson with boundary/residual collocation data |
+| `poisson_lshape_faithful_small` | `S1.2` | `faithful-small` | `examples/poisson_lshape_faithful_small` | `poisson_residual_composite` | L-shaped Poisson with boundary/residual collocation scoring |
 | `burgers_pinn` | `S1.3` | `proxy` | `examples/burgers_pinn` | `relative_l2` | Burgers-style time-dependent PINN proxy |
 | `antiderivative_operator` | `S1.4` | `proxy` | `examples/antiderivative_operator` | `relative_l2` | 函数到反导数的 operator learning |
 | `reaction_diffusion_operator` | `S1.5` | `proxy` | `examples/reaction_diffusion_operator` | `relative_l2` | 多输入 reaction-diffusion operator proxy |
 | `cylinder_wake_reconstruction` | `S1.6` | `proxy` | `examples/cylinder_wake_reconstruction` | `relative_l2` | 稀疏传感器到 2D 涡量场重建 proxy |
 
-`poisson_lshape_faithful_small` is a residual-aware data interface, not a
-residual-scored PINN evaluator: the current trusted score is still
-prediction-only relative L2 on private labels.
+`poisson_lshape_faithful_small` is residual-scored but still prediction-only:
+the trusted evaluator asks generated code for function values at solution,
+boundary, residual-center, and finite-difference stencil points, then computes
+a private composite score without importing `solution.py`.
 
 `fidelity_level` 的含义：
 
