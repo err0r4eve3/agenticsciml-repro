@@ -319,7 +319,10 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   `unique_parent_ids` carries the de-duplicated parent list. Keep
   `parent_to_child` only as legacy compatibility when fanout creates multiple
   children for one parent; canonical audit should use `parent_child_edges` and
-  `parent_to_children`.
+  `parent_to_children`. `parallel_children.start/end` trace events must include
+  the full canonical fanout schema (`parent_ids`, `unique_parent_ids`,
+  `child_ids`, `parent_child_edges`, and `parent_to_children`) or trace summary
+  must fail closed.
 - Retrieval queries must be benchmark-aware. Build them from `ProblemBundle`,
   parent analysis, failure kind, method tags, score trend, and top leaderboard
   context rather than fixed benchmark-specific keywords.

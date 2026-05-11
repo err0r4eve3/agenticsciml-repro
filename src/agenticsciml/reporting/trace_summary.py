@@ -789,13 +789,21 @@ def _validate_parent_child_trace_metadata(
     metadata: dict[str, Any],
     issues: list[str],
 ) -> None:
+    canonical_event = event_name in {
+        "agenticsciml.parallel_children.start",
+        "agenticsciml.parallel_children.end",
+    }
     if not {
         "parent_to_children",
         "parent_child_edges",
         "parent_to_child",
         "unique_parent_ids",
-    }.intersection(metadata):
+    }.intersection(metadata) and not canonical_event:
         return
+    if canonical_event or "parent_to_children" in metadata or "parent_child_edges" in metadata:
+        for key in ("parent_ids", "child_ids", "unique_parent_ids", "parent_child_edges", "parent_to_children"):
+            if key not in metadata:
+                issues.append(f"trace event {event_name} fanout metadata requires {key}")
     parent_ids = _string_list_metadata(metadata, "parent_ids", event_name, issues)
     child_ids = _string_list_metadata(metadata, "child_ids", event_name, issues)
     unique_parent_ids = _string_list_metadata(metadata, "unique_parent_ids", event_name, issues)
@@ -817,6 +825,10 @@ def _validate_parent_child_trace_metadata(
 
     edges = _parent_child_edges_metadata(metadata, event_name, issues)
     parent_to_children = _parent_to_children_metadata(metadata, event_name, issues)
+    if "parent_to_child" in metadata and parent_to_children is None:
+        issues.append(
+            f"trace event {event_name} parent_to_child requires canonical parent_to_children metadata"
+        )
 
     if edges is not None:
         edge_parent_ids = [edge["parent_id"] for edge in edges]
