@@ -126,7 +126,7 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
     elif run_metadata is not None and events:
         issues.append("trace workflow start metadata is missing")
 
-    _check_run_state_consistency(issues, run_metadata, workflow_end_metadata)
+    _check_run_state_consistency(issues, run_metadata, workflow_metadata, workflow_end_metadata)
     _check_solution_artifact_consistency(issues, contract, run_metadata, tree, checkpoint)
 
     return {"checked": True, "passed": not issues, "issues": issues}
@@ -165,14 +165,20 @@ def _requires_solution_artifacts(run_metadata: dict[str, Any] | None) -> bool:
 def _check_run_state_consistency(
     issues: list[str],
     run_metadata: dict[str, Any] | None,
+    workflow_start_metadata: dict[str, Any] | None,
     workflow_end_metadata: dict[str, Any] | None,
 ) -> None:
     run_state = run_metadata.get("run_state") if run_metadata else None
+    workflow_start_state = workflow_start_metadata.get("run_state") if workflow_start_metadata else None
     workflow_end_state = workflow_end_metadata.get("run_state") if workflow_end_metadata else None
     if run_state is not None and run_state not in RUN_STATES:
         issues.append(f"run_metadata.json run_state is invalid: {run_state!r}")
+    if workflow_start_state is not None and workflow_start_state not in RUN_STATES:
+        issues.append(f"trace workflow start run_state is invalid: {workflow_start_state!r}")
     if workflow_end_state is not None and workflow_end_state not in RUN_STATES:
         issues.append(f"trace workflow end run_state is invalid: {workflow_end_state!r}")
+    if run_state in EXPORTED_RUN_STATES and workflow_end_metadata is None:
+        issues.append("trace workflow end run_state is required for exported run_state")
     if run_state is not None and workflow_end_metadata is not None:
         _compare_metadata_value(
             issues,

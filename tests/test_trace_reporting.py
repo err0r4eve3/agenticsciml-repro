@@ -304,6 +304,23 @@ def test_trace_summary_fails_on_workflow_end_run_state_mismatch(tmp_path: Path) 
     assert any("run_state" in issue and "workflow end" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
+def test_trace_summary_fails_when_exported_run_is_missing_workflow_end(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    events = [event for event in events if event.get("name") != "agenticsciml.run.end"]
+    _write_events(run_dir / "trace.jsonl", events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("workflow end" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
 def _write_consistent_run_artifacts(run_dir: Path) -> Path:
     run_dir.mkdir()
     contract_hash = "a" * 64
@@ -370,7 +387,11 @@ def _write_consistent_run_artifacts(run_dir: Path) -> Path:
     _write_events(
         run_dir / "trace.jsonl",
         [
-            {"event_type": "workflow_span", "name": "agenticsciml.run.start", "metadata": metadata},
+            {
+                "event_type": "workflow_span",
+                "name": "agenticsciml.run.start",
+                "metadata": {**metadata, "run_state": "partial"},
+            },
             {"event_type": "workflow_span", "name": "agenticsciml.run.end", "metadata": {"run_state": "exported"}},
             {"event_type": "agent_span", "name": "proposer", "metadata": {}},
             {"event_type": "generation_span", "name": "proposer", "metadata": {}},

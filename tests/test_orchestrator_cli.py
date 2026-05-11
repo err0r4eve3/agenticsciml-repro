@@ -116,6 +116,7 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
         for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     event_types = {event["event_type"] for event in trace_events}
+    run_start = next(event for event in trace_events if event["name"] == "agenticsciml.run.start")
     run_end = next(event for event in trace_events if event["name"] == "agenticsciml.run.end")
 
     assert len(tree["nodes"]) >= 2
@@ -139,6 +140,7 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert run_metadata["llm_calls"]["prompt_token_estimate"] > 0
     assert run_metadata["llm_calls"]["response_token_estimate"] > 0
     assert {"workflow_span", "tool_span", "agent_span", "generation_span", "guardrail_span"} <= event_types
+    assert run_start["metadata"]["run_state"] == "partial"
     assert run_end["metadata"]["run_state"] == "exported"
     checkpoint = json.loads((run_dir / "checkpoint.json").read_text(encoding="utf-8"))
     assert checkpoint["phase"] == "completed"

@@ -69,6 +69,7 @@ class AgenticSciMLOrchestrator:
             "agenticsciml.run.start",
             {
                 "experiment_id": self.config.experiment_id,
+                "run_state": "partial",
                 "benchmark_dir": str(self.config.benchmark_dir),
                 "max_iterations": self.config.evolution.max_iterations,
                 **self._evidence_metadata(),
