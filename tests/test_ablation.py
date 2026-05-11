@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from agenticsciml.ablation import run_ablation
+from agenticsciml.evidence import EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE, SCIENTIFIC_CLAIM_NOT_SUPPORTED
 
 
 def test_ablation_runner_writes_summary_and_report(tmp_path: Path) -> None:
@@ -26,11 +27,11 @@ def test_ablation_runner_writes_summary_and_report(tmp_path: Path) -> None:
     assert result.report_md.exists()
     assert "champion/root improvement" in rows[0]
     assert "valid_runs" in rows[0]
-    assert rows[0]["evidence_mode"] == "mock_workflow_shape"
-    assert rows[0]["scientific_claim"] == "not_supported"
+    assert rows[0]["evidence_mode"] == EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE
+    assert rows[0]["scientific_claim"] == SCIENTIFIC_CLAIM_NOT_SUPPORTED
     assert "Champion/root improvement" in report
     assert "Valid runs" in report
-    assert "mock_workflow_shape" in report
+    assert EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE in report
     assert "cannot prove emergent discovery" in report
     for row in rows:
         assert Path(row["example_run_dir"]).exists()

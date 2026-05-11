@@ -117,6 +117,9 @@ def _validate_benchmark_fidelity(metadata: dict[str, Any]) -> None:
         "requires_gpu",
         "paper_gap_notes",
     }
+    unknown = sorted(set(metadata) - required)
+    if unknown:
+        raise ValueError("Benchmark fidelity metadata unknown field(s): " + ", ".join(unknown))
     missing = sorted(required - set(metadata))
     if missing:
         raise ValueError("Benchmark fidelity metadata missing required field(s): " + ", ".join(missing))

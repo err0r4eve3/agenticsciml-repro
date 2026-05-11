@@ -151,7 +151,10 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
 - Preserve trace summary semantics. Completed orchestrator runs should write
   `trace_summary.json`; `agenticsciml trace-summary <run_dir>` should report a
   passing `quality_gate` only when required span types exist and no guardrail
-  failure is present.
+  failure is present. Trace summary must also check artifact consistency when
+  `evaluation_contract.json` or `run_metadata.json` exists: contract
+  `benchmark_fidelity.fidelity_level`, run metadata, and workflow-start trace
+  evidence fields must agree, or the quality gate fails closed.
 - Preserve resume semantics. When changing orchestration, keep `checkpoint.json`
   current after root creation, child creation, and final report export.
 - Keep evaluator and benchmark contracts deterministic. LLM judges may summarize
@@ -177,7 +180,8 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   hash. Benchmark fidelity metadata (`fidelity_level`, paper task name,
   expected runtime, dependency flags, and paper-gap notes) must also be stored
   in `EvaluationContract` and included in `contract_hash`. New contracts must
-  fail closed when `benchmark_fidelity` is missing.
+  fail closed when `benchmark_fidelity` is missing, has unknown fields, or uses
+  an unsupported future `schema_version`.
   `EvaluationContract.from_dict()` must recompute the manifest digest and
   reject mismatched human-readable manifest contents. Manifest data generation
   must use the same sanitized subprocess environment policy as generated

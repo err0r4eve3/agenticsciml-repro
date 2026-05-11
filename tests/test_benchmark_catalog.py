@@ -251,6 +251,34 @@ def test_contract_from_dict_rejects_invalid_benchmark_fidelity_strings() -> None
         raise AssertionError("Expected invalid benchmark_fidelity paper_section to fail.")
 
 
+def test_contract_from_dict_rejects_unknown_benchmark_fidelity_fields() -> None:
+    bundle = ProblemBundle.load(BENCHMARKS["function_approx"].path)
+    payload = BenchmarkContractFactory.create_contract(bundle).to_dict()
+    payload["benchmark_fidelity"]["unexpected_field"] = "must fail closed"
+    payload["contract_hash"] = ""
+
+    try:
+        EvaluationContract.from_dict(payload)
+    except ValueError as exc:
+        assert "unknown field" in str(exc)
+    else:
+        raise AssertionError("Expected unknown benchmark_fidelity field to fail.")
+
+
+def test_contract_from_dict_rejects_future_benchmark_fidelity_schema() -> None:
+    bundle = ProblemBundle.load(BENCHMARKS["function_approx"].path)
+    payload = BenchmarkContractFactory.create_contract(bundle).to_dict()
+    payload["benchmark_fidelity"]["schema_version"] = 2
+    payload["contract_hash"] = ""
+
+    try:
+        EvaluationContract.from_dict(payload)
+    except ValueError as exc:
+        assert "schema_version" in str(exc)
+    else:
+        raise AssertionError("Expected future benchmark_fidelity schema_version to fail.")
+
+
 def test_contract_from_dict_rejects_hash_mismatch() -> None:
     bundle = ProblemBundle.load(BENCHMARKS["function_approx"].path)
     payload = BenchmarkContractFactory.create_contract(bundle).to_dict()
