@@ -108,6 +108,28 @@ def test_benchmark_catalog_lists_all_paper_benchmarks() -> None:
         assert spec.paper_gap_notes
 
 
+def test_benchmark_spec_rejects_invalid_fidelity_metadata() -> None:
+    try:
+        BenchmarkSpec(
+            name="bad",
+            path=Path("examples/function_approx"),
+            paper_section="S1.x",
+            paper_task_name="Bad task",
+            family="bad",
+            metric="bad_metric",
+            description="bad",
+            fidelity_level="paper",
+            expected_runtime_s=0,
+            requires_torch=False,
+            requires_gpu=False,
+            paper_gap_notes="",
+        )
+    except ValueError as exc:
+        assert "fidelity_level" in str(exc)
+    else:
+        raise AssertionError("Expected invalid fidelity metadata to fail.")
+
+
 def test_all_benchmarks_have_required_artifacts() -> None:
     for name, spec in BENCHMARKS.items():
         required = [
@@ -140,6 +162,8 @@ def test_problem_bundle_and_contract_are_benchmark_aware() -> None:
         assert contract.data_config_digest
         assert contract.problem_bundle_digest
         assert contract.benchmark_source_manifest_digest
+        assert contract.benchmark_fidelity["fidelity_level"] == "proxy"
+        assert contract.benchmark_fidelity["paper_task_name"] == spec.paper_task_name
         manifest = contract.benchmark_source_manifest
         assert manifest["schema_version"] == 1
         assert manifest["digest_algorithm"] == "sha256"
@@ -163,6 +187,19 @@ def test_problem_bundle_and_contract_are_benchmark_aware() -> None:
         hashes.add(contract.contract_hash)
 
     assert len(hashes) == len(BENCHMARKS)
+
+
+def test_contract_hash_binds_benchmark_fidelity_metadata() -> None:
+    bundle = ProblemBundle.load(BENCHMARKS["function_approx"].path)
+    payload = BenchmarkContractFactory.create_contract(bundle).to_dict()
+    payload["benchmark_fidelity"]["fidelity_level"] = "faithful-small"
+
+    try:
+        EvaluationContract.from_dict(payload)
+    except ValueError as exc:
+        assert "hash mismatch" in str(exc)
+    else:
+        raise AssertionError("Expected tampered fidelity metadata to fail contract hash.")
 
 
 def test_contract_from_dict_rejects_hash_mismatch() -> None:

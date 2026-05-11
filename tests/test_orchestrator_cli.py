@@ -8,9 +8,11 @@ from typing import Any
 
 import pytest
 
+from agenticsciml.benchmarks import BenchmarkContractFactory
 from agenticsciml.config import ExperimentConfig, EvolutionConfig
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
+from agenticsciml.state import SolutionNode, SolutionScore
 
 
 FAILING_TRAIN_SOLUTION = r'''
@@ -123,6 +125,9 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert (run_dir / "tree.mmd").exists()
     assert (run_dir / "trace_summary.json").exists()
     run_metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    assert run_metadata["evidence_mode"] == "mock_workflow_shape"
+    assert run_metadata["scientific_claim"] == "not_supported"
+    assert run_metadata["benchmark_fidelity_level"] == "proxy"
     assert run_metadata["llm_calls"]["total"] >= 1
     assert run_metadata["llm_calls"]["by_role"]["proposer"] >= 1
     assert run_metadata["llm_calls"]["prompt_token_estimate"] > 0
@@ -161,6 +166,91 @@ def test_parallel_mutations_run_as_parallel_child_jobs(tmp_path: Path) -> None:
     assert parallel_starts
     assert parallel_starts[-1]["metadata"]["child_count"] == 2
     assert parallel_starts[-1]["metadata"]["max_workers"] == 2
+
+
+def test_parallel_child_jobs_respect_parallel_mutation_budget(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = ExperimentConfig(
+        experiment_id="parallel-budget-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=2, max_debug_retries=0),
+        use_mock=True,
+    )
+    orchestrator = AgenticSciMLOrchestrator(config, MockLLMClient())
+    contract = BenchmarkContractFactory.create_contract(orchestrator.problem_bundle)
+    orchestrator.contract = contract
+    orchestrator.nodes = [
+        SolutionNode(
+            node_id=f"solution_{index:03d}",
+            parent_id=None,
+            workspace=str(tmp_path / f"solution_{index:03d}"),
+            score=SolutionScore("validation_mse", float(index + 1), higher_is_better=False),
+            status="evaluated",
+            benchmark_name=contract.benchmark_name,
+            contract_hash=contract.contract_hash,
+        )
+        for index in range(4)
+    ]
+
+    def fake_create_child(
+        parent: SolutionNode,
+        contract_arg,
+        solution_id: str | None = None,
+    ) -> SolutionNode:
+        assert contract_arg.contract_hash == contract.contract_hash
+        assert solution_id is not None
+        return SolutionNode(
+            node_id=solution_id,
+            parent_id=parent.node_id,
+            workspace=str(tmp_path / solution_id),
+            score=None,
+            status="failed",
+            benchmark_name=contract.benchmark_name,
+            contract_hash=contract.contract_hash,
+        )
+
+    monkeypatch.setattr(orchestrator, "_create_child", fake_create_child)
+
+    children = orchestrator._create_children_for_parents(orchestrator.nodes, contract)
+    trace_events = [
+        json.loads(line)
+        for line in (orchestrator.storage.run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    start = next(event for event in trace_events if event["name"] == "agenticsciml.parallel_children.start")
+
+    assert len(children) == 2
+    assert [child.node_id for _, child in children] == ["solution_004", "solution_005"]
+    assert start["metadata"]["child_count"] == 2
+    assert start["metadata"]["max_workers"] == 2
+
+
+def test_failed_child_exception_writes_minimum_artifacts(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="failed-child-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+    )
+    orchestrator = AgenticSciMLOrchestrator(config, MockLLMClient())
+    contract = BenchmarkContractFactory.create_contract(orchestrator.problem_bundle)
+    parent = SolutionNode(
+        node_id="solution_000",
+        parent_id=None,
+        workspace=str(tmp_path / "solution_000"),
+        score=None,
+        status="evaluated",
+        benchmark_name=contract.benchmark_name,
+        contract_hash=contract.contract_hash,
+    )
+
+    child = orchestrator._failed_child_from_exception(parent, "solution_001", contract, RuntimeError("boom"))
+
+    assert child.status == "failed"
+    assert child.failure_kind == "orchestration_error"
+    assert Path(child.proposal_path).exists()
+    assert Path(child.analysis_path).exists()
+    assert (Path(child.workspace) / "orchestration_error.md").exists()
 
 
 def test_resume_continues_existing_solution_tree_without_rebuilding_root(tmp_path: Path) -> None:

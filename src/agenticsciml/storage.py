@@ -45,7 +45,8 @@ class ExperimentStorage:
             return path
 
     def load_json(self, relative_path: str | Path) -> Any:
-        return json.loads((self.run_dir / relative_path).read_text(encoding="utf-8"))
+        with self._lock:
+            return json.loads((self.run_dir / relative_path).read_text(encoding="utf-8"))
 
     def record_trace(self, event_type: str, name: str, metadata: dict[str, Any] | None = None) -> Path:
         path = self.run_dir / "trace.jsonl"

@@ -31,6 +31,24 @@ class BenchmarkSpec:
     requires_gpu: bool
     paper_gap_notes: str
 
+    def __post_init__(self) -> None:
+        if self.fidelity_level not in {"proxy", "faithful-small", "paper-like"}:
+            raise ValueError(f"Invalid fidelity_level for {self.name}: {self.fidelity_level}")
+        if (
+            not isinstance(self.expected_runtime_s, int)
+            or isinstance(self.expected_runtime_s, bool)
+            or self.expected_runtime_s <= 0
+        ):
+            raise ValueError(f"Invalid expected_runtime_s for {self.name}: {self.expected_runtime_s}")
+        if not isinstance(self.requires_torch, bool):
+            raise ValueError(f"requires_torch must be a bool for {self.name}")
+        if not isinstance(self.requires_gpu, bool):
+            raise ValueError(f"requires_gpu must be a bool for {self.name}")
+        if not self.paper_task_name.strip():
+            raise ValueError(f"paper_task_name is required for {self.name}")
+        if self.fidelity_level == "proxy" and not self.paper_gap_notes.strip():
+            raise ValueError(f"paper_gap_notes is required for proxy benchmark {self.name}")
+
     def to_dict(self) -> dict[str, object]:
         return {
             "name": self.name,
@@ -40,6 +58,17 @@ class BenchmarkSpec:
             "family": self.family,
             "metric": self.metric,
             "description": self.description,
+            "fidelity_level": self.fidelity_level,
+            "expected_runtime_s": self.expected_runtime_s,
+            "requires_torch": self.requires_torch,
+            "requires_gpu": self.requires_gpu,
+            "paper_gap_notes": self.paper_gap_notes,
+        }
+
+    def fidelity_metadata(self) -> dict[str, object]:
+        return {
+            "paper_task_name": self.paper_task_name,
+            "paper_section": self.paper_section,
             "fidelity_level": self.fidelity_level,
             "expected_runtime_s": self.expected_runtime_s,
             "requires_torch": self.requires_torch,
@@ -151,6 +180,7 @@ class BenchmarkContractFactory:
             evaluator_digest=_file_digest(problem_bundle.benchmark_dir / "evaluate.py"),
             data_config_digest=_file_digest(problem_bundle.benchmark_dir / "Data_config.json"),
             problem_bundle_digest=_problem_bundle_digest(problem_bundle),
+            benchmark_fidelity=problem_bundle.benchmark_spec.fidelity_metadata(),
             benchmark_source_manifest=manifest.to_dict(),
             benchmark_source_manifest_digest=manifest.digest(),
         )
@@ -168,6 +198,7 @@ class BenchmarkContractFactory:
             f"- evaluator_digest: `{contract.evaluator_digest}`\n"
             f"- data_config_digest: `{contract.data_config_digest}`\n"
             f"- problem_bundle_digest: `{contract.problem_bundle_digest}`\n"
+            f"- fidelity_level: `{contract.benchmark_fidelity.get('fidelity_level', 'unknown')}`\n"
             f"- benchmark_source_manifest_digest: `{contract.benchmark_source_manifest_digest}`\n"
             f"- predict_command: `{' '.join(contract.predict_command)}`\n"
             f"- allowed_train_files: {', '.join(contract.allowed_train_files)}\n"

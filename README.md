@@ -71,7 +71,8 @@ The mock run writes a directory under `runs/` with:
 - `trace.jsonl`
 - `trace_summary.json`
 - `run_metadata.json` with wall time, champion, solution count, and LLM call
-  count/token-estimate placeholders
+  count/token-estimate placeholders, plus `llm_mode`,
+  `benchmark_fidelity_level`, `evidence_mode`, and `scientific_claim`
 - `champion/solution.py`
 - `champion/analysis.md`
 

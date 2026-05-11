@@ -172,10 +172,13 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   `evaluate.py`, `Data_config.json`, the problem bundle, `generate_data.py`,
   `guidelines.md`, and deterministic train/validation data artifacts. Store
   these in `BenchmarkSourceManifest` and include its digest in the contract
-  hash. `EvaluationContract.from_dict()` must recompute the manifest digest
-  and reject mismatched human-readable manifest contents. Manifest data
-  generation must use the same sanitized subprocess environment policy as
-  generated solution execution. Manifest payloads must include
+  hash. Benchmark fidelity metadata (`fidelity_level`, paper task name,
+  expected runtime, dependency flags, and paper-gap notes) must also be stored
+  in `EvaluationContract` and included in `contract_hash`.
+  `EvaluationContract.from_dict()` must recompute the manifest digest and
+  reject mismatched human-readable manifest contents. Manifest data generation
+  must use the same sanitized subprocess environment policy as generated
+  solution execution. Manifest payloads must include
   `schema_version`, `digest_algorithm`, `data_source_mode`, and a normalized
   `generator_command` when data is generated. `EvaluationContract.from_dict()`
   must semantically validate those manifest fields, required artifact digests,
@@ -212,10 +215,13 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   improving nodes, preserve underexplored/diverse method tags, and never select
   nodes at `max_children_per_node`.
 - `parallel_mutations` must represent actual bounded parallel child creation
-  when more than one parent is selected. Keep solution IDs deterministic,
-  preserve checkpoint/resume semantics after child insertion, and record
-  `agenticsciml.parallel_children.start/end` trace events with execution mode,
-  child count, worker count, parent IDs, and child IDs.
+  when more than one parent is selected. It caps both mutation jobs per
+  iteration and worker count unless a future config explicitly splits those
+  concepts. Keep solution IDs deterministic, preserve checkpoint/resume
+  semantics after child insertion, and record
+  `agenticsciml.parallel_children.start/end` and
+  `agenticsciml.child_mutation.start/end` trace events with execution mode,
+  child count, worker count, parent IDs, child IDs, duration, and status.
 - Retrieval queries must be benchmark-aware. Build them from `ProblemBundle`,
   parent analysis, failure kind, method tags, score trend, and top leaderboard
   context rather than fixed benchmark-specific keywords.
@@ -231,6 +237,10 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
 - Ablation outputs must explicitly label mock evidence boundaries with fields
   such as `evidence_mode=mock_workflow_shape` and
   `scientific_claim=not_supported`.
+- Run-level metadata and workflow-start traces must also include `llm_mode`,
+  `benchmark_fidelity_level`, `evidence_mode`, and `scientific_claim`, so a
+  standalone run artifact cannot be mistaken for a scientific reproduction
+  claim.
 - Ablation tests use mock mode only. Do not claim scientific improvement or
   emergent discovery from mock ablation results.
 - Every benchmark entry must include fidelity metadata: `fidelity_level`,

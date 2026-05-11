@@ -106,6 +106,33 @@ def _validate_benchmark_source_manifest(
         raise ValueError("BenchmarkSourceManifest repo_existing mode must not include generator_command")
 
 
+def _validate_benchmark_fidelity(metadata: dict[str, Any]) -> None:
+    required = {
+        "paper_task_name",
+        "paper_section",
+        "fidelity_level",
+        "expected_runtime_s",
+        "requires_torch",
+        "requires_gpu",
+        "paper_gap_notes",
+    }
+    missing = sorted(required - set(metadata))
+    if missing:
+        raise ValueError("Benchmark fidelity metadata missing required field(s): " + ", ".join(missing))
+    if metadata.get("fidelity_level") not in {"proxy", "faithful-small", "paper-like"}:
+        raise ValueError("Benchmark fidelity metadata fidelity_level is invalid")
+    expected_runtime_s = metadata.get("expected_runtime_s")
+    if not isinstance(expected_runtime_s, int) or isinstance(expected_runtime_s, bool) or expected_runtime_s <= 0:
+        raise ValueError("Benchmark fidelity metadata expected_runtime_s must be a positive integer")
+    for key in ("requires_torch", "requires_gpu"):
+        if not isinstance(metadata.get(key), bool):
+            raise ValueError(f"Benchmark fidelity metadata {key} must be a boolean")
+    if metadata.get("fidelity_level") == "proxy" and not str(metadata.get("paper_gap_notes", "")).strip():
+        raise ValueError("Benchmark fidelity metadata paper_gap_notes is required for proxy benchmarks")
+    if not str(metadata.get("paper_task_name", "")).strip():
+        raise ValueError("Benchmark fidelity metadata paper_task_name is required")
+
+
 @dataclass(slots=True)
 class AgentConfig:
     role: str
@@ -184,6 +211,7 @@ class EvaluationContract:
     evaluator_digest: str = ""
     data_config_digest: str = ""
     problem_bundle_digest: str = ""
+    benchmark_fidelity: dict[str, Any] = field(default_factory=dict)
     benchmark_source_manifest: dict[str, Any] = field(default_factory=dict)
     benchmark_source_manifest_digest: str = ""
     contract_hash: str = ""
@@ -207,6 +235,15 @@ class EvaluationContract:
             evaluate_command=["python", "<private_eval>/evaluate.py", "--predictions", "predictions.npz"],
             checkpoint_path="model.pkl",
             benchmark_name="function_approx",
+            benchmark_fidelity={
+                "paper_task_name": "Discontinuous function fitting",
+                "paper_section": "S1.1",
+                "fidelity_level": "proxy",
+                "expected_runtime_s": 20,
+                "requires_torch": False,
+                "requires_gpu": False,
+                "paper_gap_notes": "Default lightweight function approximation proxy.",
+            },
         ).with_computed_hash()
 
     def hash_payload(self) -> dict[str, Any]:
@@ -224,6 +261,7 @@ class EvaluationContract:
             "evaluator_digest": self.evaluator_digest,
             "data_config_digest": self.data_config_digest,
             "problem_bundle_digest": self.problem_bundle_digest,
+            "benchmark_fidelity": self.benchmark_fidelity,
             "benchmark_source_manifest_digest": self.benchmark_source_manifest_digest,
         }
 
@@ -249,6 +287,7 @@ class EvaluationContract:
             "evaluator_digest": self.evaluator_digest,
             "data_config_digest": self.data_config_digest,
             "problem_bundle_digest": self.problem_bundle_digest,
+            "benchmark_fidelity": self.benchmark_fidelity,
             "benchmark_source_manifest": self.benchmark_source_manifest,
             "benchmark_source_manifest_digest": self.benchmark_source_manifest_digest,
             "contract_hash": self.contract_hash,
@@ -288,10 +327,13 @@ class EvaluationContract:
             evaluator_digest=str(data.get("evaluator_digest", "")),
             data_config_digest=str(data.get("data_config_digest", "")),
             problem_bundle_digest=str(data.get("problem_bundle_digest", "")),
+            benchmark_fidelity=dict(data.get("benchmark_fidelity", {})),
             benchmark_source_manifest=dict(data.get("benchmark_source_manifest", {})),
             benchmark_source_manifest_digest=str(data.get("benchmark_source_manifest_digest", "")),
             contract_hash=str(data.get("contract_hash", "")),
         )
+        if contract.benchmark_fidelity:
+            _validate_benchmark_fidelity(contract.benchmark_fidelity)
         if contract.benchmark_source_manifest_digest:
             if not contract.benchmark_source_manifest:
                 raise ValueError("EvaluationContract benchmark source manifest missing")

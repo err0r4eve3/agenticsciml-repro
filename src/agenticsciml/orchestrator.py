@@ -70,6 +70,7 @@ class AgenticSciMLOrchestrator:
                 "experiment_id": self.config.experiment_id,
                 "benchmark_dir": str(self.config.benchmark_dir),
                 "max_iterations": self.config.evolution.max_iterations,
+                **self._evidence_metadata(),
             },
         )
         self.storage.save_json("config.json", self.config.to_dict())
@@ -237,12 +238,16 @@ class AgenticSciMLOrchestrator:
         if not available:
             return []
 
-        max_workers = min(len(available), max(1, self.config.evolution.parallel_mutations))
+        mutation_budget = max(1, self.config.evolution.parallel_mutations)
+        selected = available[:mutation_budget]
+        max_workers = min(len(selected), mutation_budget)
         jobs = [
             (parent, f"solution_{len(self.nodes) + index:03d}")
-            for index, parent in enumerate(available)
+            for index, parent in enumerate(selected)
         ]
         execution_mode = "parallel" if max_workers > 1 else "sequential"
+        batch_started = time.monotonic()
+        parent_to_child = {parent.node_id: solution_id for parent, solution_id in jobs}
         self.storage.record_trace(
             "workflow_span",
             "agenticsciml.parallel_children.start",
@@ -251,18 +256,20 @@ class AgenticSciMLOrchestrator:
                 "child_count": len(jobs),
                 "max_workers": max_workers,
                 "parent_ids": [parent.node_id for parent, _ in jobs],
+                "child_ids": [solution_id for _, solution_id in jobs],
+                "parent_to_child": parent_to_child,
             },
         )
 
         if max_workers == 1:
             children = [
-                (parent, self._create_child(parent, contract, solution_id=solution_id))
+                (parent, self._run_child_job(parent, contract, solution_id))
                 for parent, solution_id in jobs
             ]
         else:
             with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="agenticsciml-child") as executor:
                 futures = [
-                    executor.submit(self._create_child, parent, contract, solution_id)
+                    executor.submit(self._run_child_job, parent, contract, solution_id)
                     for parent, solution_id in jobs
                 ]
                 children = []
@@ -281,9 +288,43 @@ class AgenticSciMLOrchestrator:
                 "child_count": len(children),
                 "max_workers": max_workers,
                 "child_ids": [child.node_id for _, child in children],
+                "duration_s": time.monotonic() - batch_started,
+                "parent_to_child": parent_to_child,
             },
         )
         return children
+
+    def _run_child_job(
+        self,
+        parent: SolutionNode,
+        contract: EvaluationContract,
+        solution_id: str,
+    ) -> SolutionNode:
+        started = time.monotonic()
+        self.storage.record_trace(
+            "workflow_span",
+            "agenticsciml.child_mutation.start",
+            {
+                "solution_id": solution_id,
+                "parent_id": parent.node_id,
+            },
+        )
+        try:
+            child = self._create_child(parent, contract, solution_id=solution_id)
+        except Exception as exc:  # pragma: no cover - defensive guard for real LLM/tool failures.
+            child = self._failed_child_from_exception(parent, solution_id, contract, exc)
+        self.storage.record_trace(
+            "workflow_span",
+            "agenticsciml.child_mutation.end",
+            {
+                "solution_id": child.node_id,
+                "parent_id": parent.node_id,
+                "status": child.status,
+                "failure_kind": child.failure_kind,
+                "duration_s": time.monotonic() - started,
+            },
+        )
+        return child
 
     def _failed_child_from_exception(
         self,
@@ -297,6 +338,11 @@ class AgenticSciMLOrchestrator:
             solution_id,
             "orchestration_error.md",
             f"# Orchestration Error\n\n{type(exc).__name__}: {exc}\n",
+        )
+        self.storage.save_solution_text(
+            solution_id,
+            "proposal.md",
+            "# Proposal Unavailable\n\nChild creation failed before a proposal could be completed.\n",
         )
         self.storage.record_trace(
             "guardrail_span",
@@ -662,6 +708,7 @@ class AgenticSciMLOrchestrator:
                 "benchmark_name": self.problem_bundle.benchmark_name,
                 "solution_count": len(self.nodes),
                 "champion": best.node_id,
+                **self._evidence_metadata(),
                 "llm_calls": self._llm_call_summary(),
             },
         )
@@ -706,6 +753,23 @@ class AgenticSciMLOrchestrator:
             "prompt_token_estimate": prompt_token_estimate,
             "response_token_estimate": response_token_estimate,
             "duration_s": duration_s,
+        }
+
+    def _evidence_metadata(self) -> dict[str, object]:
+        fidelity_level = self.problem_bundle.benchmark_spec.fidelity_level
+        if self.config.use_mock:
+            evidence_mode = "mock_workflow_shape"
+            llm_mode = "mock"
+            scientific_claim = "not_supported"
+        else:
+            evidence_mode = f"real_llm_{fidelity_level}_benchmark"
+            llm_mode = "real"
+            scientific_claim = "proxy_workflow_only" if fidelity_level == "proxy" else "not_validated"
+        return {
+            "llm_mode": llm_mode,
+            "benchmark_fidelity_level": fidelity_level,
+            "evidence_mode": evidence_mode,
+            "scientific_claim": scientific_claim,
         }
 
 

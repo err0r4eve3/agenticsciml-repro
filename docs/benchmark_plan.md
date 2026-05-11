@@ -28,6 +28,8 @@
 - evaluator writes `eval.json`
 - `evaluation_contract.json` records `benchmark_name`, `contract_hash`,
   `allowed_train_files`, and `evaluator_only_files`
+- `evaluation_contract.json` records benchmark fidelity metadata and binds it
+  into `contract_hash`
 - mutation output records `parent_digest` and applies a Python-verified patch or
   explicit `solution.py` file map
 - solution tree nodes record `method_tags`, `failure_kind`,
@@ -117,6 +119,7 @@ uv run --python 3.11 --extra real-llm agenticsciml run examples/poisson_lshape -
 - 这些 benchmark 是论文任务家族的 deterministic engineering proxies。
 - 当前数据规模刻意较小，优先验证 workflow 和 evaluator 稳定性。
 - 当前 `fidelity_level=proxy` 明确表示不是论文全量 SciML 实验。
+- `fidelity_level` 必须进入 `EvaluationContract` 和 `contract_hash`，不能只写在 README 或 catalog 展示层。
 - 不保证论文 improvement factor。
 - 不把 mock-mode 分数当作 SciML 结论。
 - 后续如要追论文数值，应替换为更完整的 PDE/operator 数据和训练预算。
