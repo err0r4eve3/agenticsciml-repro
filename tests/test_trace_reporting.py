@@ -499,6 +499,14 @@ def test_trace_summary_reports_trace_node_reference_check_counts(tmp_path: Path)
             }
         },
     }
+    assert summary["artifact_consistency"]["trace_node_lifecycle_stage_coverage"] == {
+        "nodes": {
+            "solution_000": {
+                "stages": ["evaluated"],
+                "stage_events": {"evaluated": ["train_and_evaluate"]},
+            }
+        }
+    }
     assert summary["artifact_consistency"]["trace_node_reference_events_checked_by_name"] == {
         "train_and_evaluate": 1
     }
@@ -617,6 +625,36 @@ def test_trace_summary_fails_when_exported_node_only_has_relation_reference(tmp_
     assert child_detail["relation_reference_count"] == 1
     assert child_detail["self_reference_count"] == 0
     assert any("solution nodes have no self trace references" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
+def test_trace_summary_fails_when_evaluated_node_has_no_evaluated_stage(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    events = [event for event in events if event.get("name") != "train_and_evaluate"]
+    for event in events:
+        event.pop("event_seq", None)
+    events.append(
+        {
+            "event_type": "workflow_span",
+            "name": "agenticsciml.child_mutation.start",
+            "metadata": {"solution_id": "solution_000"},
+        }
+    )
+    events.append({"event_type": "tool_span", "name": "process.spawn", "metadata": {}})
+    _write_events(run_dir / "trace.jsonl", events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert summary["artifact_consistency"]["trace_node_lifecycle_stage_coverage"]["nodes"]["solution_000"][
+        "stages"
+    ] == ["created"]
+    assert any("evaluated solution nodes have no evaluated trace stage" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
 def test_trace_summary_fails_when_exported_run_checks_no_actual_solution_node_references(tmp_path: Path) -> None:

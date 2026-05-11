@@ -43,6 +43,15 @@ SELF_TRACE_REFERENCE_KEYS = {
     "child_ids",
     "parent_to_child.child",
 }
+TRACE_NODE_LIFECYCLE_STAGE_RULES = {
+    ("agent_span", "root_engineer"): "materialized",
+    ("agent_span", "engineer"): "materialized",
+    ("workflow_span", "agenticsciml.child_mutation.start"): "created",
+    ("workflow_span", "agenticsciml.child_mutation.end"): "completed",
+    ("workflow_span", "child_creation:exception"): "failed",
+    ("tool_span", "train_and_evaluate"): "evaluated",
+    ("tool_span", "train_and_evaluate.retry"): "evaluated",
+}
 
 
 def load_trace_events(run_dir: Path) -> list[dict[str, Any]]:
@@ -173,6 +182,7 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
         ],
         "trace_node_references_checked_by_name": trace_node_reference_counts["references_checked_by_name"],
         "trace_node_reference_node_coverage": trace_node_reference_counts["node_coverage"],
+        "trace_node_lifecycle_stage_coverage": trace_node_reference_counts["lifecycle_stage_coverage"],
     }
 
 
@@ -288,6 +298,7 @@ def _check_solution_artifact_consistency(
         "events_with_references": 0,
         "references_checked_by_name": {},
         "node_coverage": {"total_nodes": 0, "referenced": [], "unreferenced": [], "nodes": {}},
+        "lifecycle_stage_coverage": {"nodes": {}},
     }
     expected_contract_hash = contract.get("contract_hash") if contract else None
     expected_benchmark_name = contract.get("benchmark_name") if contract else None
@@ -360,6 +371,9 @@ def _check_solution_artifact_consistency(
     node_ids = set((tree_nodes or checkpoint_nodes or {}).keys())
     if node_ids:
         trace_node_reference_counts = _check_trace_node_references(issues, events, node_ids)
+        trace_node_reference_counts["lifecycle_stage_coverage"] = _check_trace_node_lifecycle_stages(
+            issues, events, node_ids
+        )
         if _requires_solution_artifacts(run_metadata):
             if trace_node_reference_counts["checked"] == 0:
                 issues.append("no solution-reference trace events were checked for exported node set")
@@ -380,6 +394,16 @@ def _check_solution_artifact_consistency(
                     issues.append(
                         "solution nodes have no self trace references: "
                         + ", ".join(nodes_without_self_references)
+                    )
+                evaluated_nodes_without_evaluated_stage = _evaluated_nodes_without_stage(
+                    tree_nodes or checkpoint_nodes or {},
+                    trace_node_reference_counts["lifecycle_stage_coverage"],
+                    "evaluated",
+                )
+                if evaluated_nodes_without_evaluated_stage:
+                    issues.append(
+                        "evaluated solution nodes have no evaluated trace stage: "
+                        + ", ".join(evaluated_nodes_without_evaluated_stage)
                     )
     return trace_node_reference_counts
 
@@ -430,6 +454,7 @@ def _check_trace_node_references(
             "unreferenced": sorted(node_ids),
             "nodes": {},
         },
+        "lifecycle_stage_coverage": {"nodes": {}},
     }
     referenced_node_ids: set[str] = set()
     node_details: dict[str, dict[str, Any]] = {
@@ -493,6 +518,62 @@ def _check_trace_node_references(
 
 def _is_self_trace_reference_key(key: str) -> bool:
     return key in SELF_TRACE_REFERENCE_KEYS
+
+
+def _check_trace_node_lifecycle_stages(
+    issues: list[str],
+    events: list[dict[str, Any]],
+    node_ids: set[str],
+) -> dict[str, Any]:
+    stage_events: dict[str, dict[str, set[str]]] = {node_id: {} for node_id in node_ids}
+    for event in events:
+        event_type = str(event.get("event_type", ""))
+        event_name = str(event.get("name", ""))
+        stage = TRACE_NODE_LIFECYCLE_STAGE_RULES.get((event_type, event_name))
+        if stage is None:
+            continue
+        metadata = event.get("metadata", {})
+        if not isinstance(metadata, dict):
+            continue
+        for key, node_id in _trace_node_references(metadata):
+            if not _is_self_trace_reference_key(key):
+                continue
+            if node_id not in node_ids:
+                issues.append(
+                    f"trace lifecycle event {event_name} references unknown solution node via {key}: {node_id}"
+                )
+                continue
+            stage_events[node_id].setdefault(stage, set()).add(event_name)
+    nodes_payload: dict[str, dict[str, Any]] = {}
+    for node_id, stage_events_for_node in sorted(stage_events.items()):
+        nodes_payload[node_id] = {
+            "stages": sorted(stage_events_for_node),
+            "stage_events": {
+                stage: sorted(event_names) for stage, event_names in sorted(stage_events_for_node.items())
+            },
+        }
+    return {
+        "nodes": nodes_payload
+    }
+
+
+def _evaluated_nodes_without_stage(
+    nodes: dict[str, dict[str, Any]],
+    lifecycle_stage_coverage: dict[str, Any],
+    stage: str,
+) -> list[str]:
+    coverage_nodes = lifecycle_stage_coverage.get("nodes", {})
+    if not isinstance(coverage_nodes, dict):
+        return []
+    missing: list[str] = []
+    for node_id, node in sorted(nodes.items()):
+        if node.get("status") != "evaluated":
+            continue
+        coverage = coverage_nodes.get(node_id, {})
+        stages = coverage.get("stages", []) if isinstance(coverage, dict) else []
+        if stage not in stages:
+            missing.append(node_id)
+    return missing
 
 
 def _trace_node_references(metadata: dict[str, Any]) -> list[tuple[str, str]]:

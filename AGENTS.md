@@ -193,7 +193,9 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   `parent_to_child.child`) from relation-only references (`parent_id`,
   parent ID lists, or `parent_to_child.parent`); completed artifacts must fail
   when a final node only appears as a relation endpoint and never has a self
-  trace reference.
+  trace reference. Trace summaries must also report per-node lifecycle stage
+  coverage from schema-defined `(event_type, name)` events; evaluated final
+  nodes must have an `evaluated` stage from a self-referenced evaluation event.
 - Preserve resume semantics. When changing orchestration, keep `checkpoint.json`
   current after root creation, child creation, and final report export.
 - Keep evaluator and benchmark contracts deterministic. LLM judges may summarize
