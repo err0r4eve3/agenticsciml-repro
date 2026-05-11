@@ -404,6 +404,52 @@ def test_trace_summary_fails_on_non_monotonic_event_seq(tmp_path: Path) -> None:
     assert any("event_seq" in issue and "monotonic" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
+def test_trace_summary_fails_when_trace_references_unknown_solution_node(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    events.append(
+        {
+            "event_type": "tool_span",
+            "name": "train_and_evaluate",
+            "metadata": {"solution_id": "solution_999"},
+        }
+    )
+    _write_events(run_dir / "trace.jsonl", events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("unknown solution node" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
+def test_trace_summary_fails_when_parent_child_map_references_unknown_node(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    events.append(
+        {
+            "event_type": "workflow_span",
+            "name": "agenticsciml.parallel_children.start",
+            "metadata": {"parent_to_child": {"solution_000": "solution_999"}},
+        }
+    )
+    _write_events(run_dir / "trace.jsonl", events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("unknown solution node" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
 def _write_consistent_run_artifacts(run_dir: Path) -> Path:
     run_dir.mkdir()
     contract_hash = "a" * 64

@@ -170,7 +170,10 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   appear before workflow-start in trace order, and multiple workflow-end events
   with conflicting `run_state` values must fail the quality gate. New trace
   events must include a contiguous, monotonic `event_seq`; exported run
-  artifacts missing valid `event_seq` values fail the quality gate.
+  artifacts missing valid `event_seq` values fail the quality gate. Trace
+  metadata fields that reference solution nodes (`node_id`, `solution_id`,
+  `parent_id`, `child_id`, plural ID lists, and `parent_to_child`) must refer
+  to nodes present in the final tree/checkpoint artifact set.
 - Preserve resume semantics. When changing orchestration, keep `checkpoint.json`
   current after root creation, child creation, and final report export.
 - Keep evaluator and benchmark contracts deterministic. LLM judges may summarize

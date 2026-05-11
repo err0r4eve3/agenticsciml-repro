@@ -130,7 +130,7 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
         _check_trace_event_sequence(issues, events)
     _check_workflow_lifecycle_sequence(issues, events)
     _check_run_state_consistency(issues, run_metadata, workflow_metadata, workflow_end_metadata)
-    _check_solution_artifact_consistency(issues, contract, run_metadata, tree, checkpoint)
+    _check_solution_artifact_consistency(issues, contract, run_metadata, tree, checkpoint, events)
 
     return {"checked": True, "passed": not issues, "issues": issues}
 
@@ -236,6 +236,7 @@ def _check_solution_artifact_consistency(
     run_metadata: dict[str, Any] | None,
     tree: dict[str, Any] | None,
     checkpoint: dict[str, Any] | None,
+    events: list[dict[str, Any]],
 ) -> None:
     expected_contract_hash = contract.get("contract_hash") if contract else None
     expected_benchmark_name = contract.get("benchmark_name") if contract else None
@@ -305,6 +306,10 @@ def _check_solution_artifact_consistency(
                     "evaluation_contract.json",
                 )
 
+    node_ids = set((tree_nodes or checkpoint_nodes or {}).keys())
+    if node_ids:
+        _check_trace_node_references(issues, events, node_ids)
+
 
 def _nodes_by_id(
     artifact_name: str,
@@ -331,6 +336,45 @@ def _nodes_by_id(
             continue
         by_id[node_id] = node
     return by_id
+
+
+def _check_trace_node_references(
+    issues: list[str],
+    events: list[dict[str, Any]],
+    node_ids: set[str],
+) -> None:
+    for event in events:
+        metadata = event.get("metadata", {})
+        if not isinstance(metadata, dict):
+            continue
+        for key, node_id in _trace_node_references(metadata):
+            if node_id not in node_ids:
+                event_name = event.get("name", "<unknown>")
+                issues.append(
+                    f"trace event {event_name} references unknown solution node via {key}: {node_id}"
+                )
+
+
+def _trace_node_references(metadata: dict[str, Any]) -> list[tuple[str, str]]:
+    references: list[tuple[str, str]] = []
+    for key in ("node_id", "solution_id", "parent_id", "child_id"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value:
+            references.append((key, value))
+    for key in ("node_ids", "solution_ids", "parent_ids", "child_ids"):
+        value = metadata.get(key)
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, str) and item:
+                    references.append((key, item))
+    parent_to_child = metadata.get("parent_to_child")
+    if isinstance(parent_to_child, dict):
+        for parent_id, child_id in parent_to_child.items():
+            if isinstance(parent_id, str) and parent_id:
+                references.append(("parent_to_child.parent", parent_id))
+            if isinstance(child_id, str) and child_id:
+                references.append(("parent_to_child.child", child_id))
+    return references
 
 
 def _workflow_start_metadata(events: list[dict[str, Any]]) -> dict[str, Any] | None:
