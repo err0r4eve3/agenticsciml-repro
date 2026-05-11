@@ -35,8 +35,9 @@
 - contract-aware debugger：Debugger prompt 显式包含当前代码、`parent_digest`、`ProblemBundle`、`EvaluationContract` JSON、`guidelines.md`、失败阶段和错误日志；修复只能通过 digest-checked unified diff patch 修改 `solution.py`。
 - search policy metadata：`SolutionNode` 持久化 `method_tags`、`failure_kind`、`score_delta_from_parent`、`num_debug_attempts`、`benchmark_name` 和 `contract_hash`，供 selector、retriever 和 ablation 使用。
 - deterministic parent selection：先由 Python `SearchPolicy` 保证 best available node、recent improvement、diverse underexplored node 和 `max_children_per_node` 约束，再允许 LLM selector 做补充。
-- parallel child mutation jobs：当 `parallel_mutations > 1` 且 selector 选出多个 parent 时，orchestrator 用 bounded `ThreadPoolExecutor` 并行创建 child solution，并写入 `agenticsciml.parallel_children.*` trace。
-- mutation budget semantics：`parallel_mutations` 同时限制每轮 child job 数和 worker 数；并行 trace 记录 parent-to-child 映射、duration、child-level start/end、status 和 failure kind。
+- parallel child mutation jobs：当 `parallel_mutations > 1` 时，orchestrator 用 bounded `ThreadPoolExecutor` 并行创建 child solution，并写入 `agenticsciml.parallel_children.*` trace。
+- early-stage mutation fanout：早期只有 root 或 selector 返回 parent 数不足时，orchestrator 会按 mutation budget 对可用 parent 做 deterministic fanout，从同一 parent 生成多个 child 分支，同时遵守 `max_children_per_node`。
+- mutation budget semantics：`parallel_mutations` 同时限制每轮 child job 数和 worker 数；并行 trace 记录 parent-to-child / parent-to-children 映射、duration、child-level start/end、status 和 failure kind。
 - benchmark-aware retrieval query：`RetrievalQueryBuilder` 使用 benchmark family/metric/description、parent analysis、failure kind、method tags 和 leaderboard top-k 生成检索 query。
 - KB ablation switches：`use_kb=False` 不注入 KB，`random_kb=True` 使用 seed-controlled random KB retrieval。
 - ablation runner：`agenticsciml ablate` 和 `scripts/run_ablation.py` 生成 `ablation_runs.csv`、`ablation_summary.csv`、`ablation_report.md`，支持 `root_only`、`no_kb`、`kb`、`random_kb`、`no_critic`、`no_debugger`。
@@ -121,7 +122,7 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --dry
 - 不假设官方完整代码、完整 prompt 或模型配置可用。
 - mock mode 只验证 workflow shape，不代表真实 SciML 表现。
 - 新增 benchmark 是 `fidelity_level=proxy` 的小规模工程代理，不是论文原始全预算实验。
-- `parallel_mutations` 已并行执行多个 child mutation job，但训练仍在本机 CPU/subprocess 资源上竞争；这不是论文完整分布式 ensemble search。
+- `parallel_mutations` 已并行执行多个 child mutation job，并支持早期单 parent fanout；但训练仍在本机 CPU/subprocess 资源上竞争，且不是论文完整分布式 ensemble search。
 - 当前 sandbox 是本地 workspace 隔离，不是强安全容器。
 - prediction-only protocol 降低验证标签泄漏风险，但还不是 OS/container 级强隔离；同用户进程仍不能视为恶意代码安全沙箱。
 

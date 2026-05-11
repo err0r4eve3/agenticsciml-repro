@@ -717,6 +717,29 @@ def test_trace_summary_fails_when_parent_child_map_references_unknown_node(tmp_p
     assert any("unknown solution node" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
+def test_trace_summary_fails_when_parent_children_map_references_unknown_node(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    events.append(
+        {
+            "event_type": "workflow_span",
+            "name": "agenticsciml.parallel_children.start",
+            "metadata": {"parent_to_children": {"solution_000": ["solution_001", "solution_999"]}},
+        }
+    )
+    _write_events(run_dir / "trace.jsonl", events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("unknown solution node" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
 def test_trace_summary_ignores_non_solution_parent_id_metadata(tmp_path: Path) -> None:
     run_dir = _write_consistent_run_artifacts(tmp_path / "run")
     events = [

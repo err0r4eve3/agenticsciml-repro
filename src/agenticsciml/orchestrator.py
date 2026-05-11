@@ -266,7 +266,7 @@ class AgenticSciMLOrchestrator:
             return []
 
         mutation_budget = max(1, self.config.evolution.parallel_mutations)
-        selected = available[:mutation_budget]
+        selected = self._mutation_parent_slots(available, mutation_budget)
         max_workers = min(len(selected), mutation_budget)
         jobs = [
             (parent, f"solution_{len(self.nodes) + index:03d}")
@@ -274,7 +274,13 @@ class AgenticSciMLOrchestrator:
         ]
         execution_mode = "parallel" if max_workers > 1 else "sequential"
         batch_started = time.monotonic()
-        parent_to_child = {parent.node_id: solution_id for parent, solution_id in jobs}
+        parent_to_children: dict[str, list[str]] = {}
+        for parent, solution_id in jobs:
+            parent_to_children.setdefault(parent.node_id, []).append(solution_id)
+        parent_to_child = {
+            parent_id: child_ids[-1]
+            for parent_id, child_ids in parent_to_children.items()
+        }
         self.storage.record_trace(
             "workflow_span",
             "agenticsciml.parallel_children.start",
@@ -285,6 +291,7 @@ class AgenticSciMLOrchestrator:
                 "parent_ids": [parent.node_id for parent, _ in jobs],
                 "child_ids": [solution_id for _, solution_id in jobs],
                 "parent_to_child": parent_to_child,
+                "parent_to_children": parent_to_children,
             },
         )
 
@@ -317,9 +324,31 @@ class AgenticSciMLOrchestrator:
                 "child_ids": [child.node_id for _, child in children],
                 "duration_s": time.monotonic() - batch_started,
                 "parent_to_child": parent_to_child,
+                "parent_to_children": parent_to_children,
             },
         )
         return children
+
+    def _mutation_parent_slots(
+        self,
+        parents: list[SolutionNode],
+        mutation_budget: int,
+    ) -> list[SolutionNode]:
+        slots: list[SolutionNode] = []
+        child_counts = {parent.node_id: len(parent.children) for parent in parents}
+        while len(slots) < mutation_budget:
+            added = False
+            for parent in parents:
+                if child_counts[parent.node_id] >= self.config.evolution.max_children_per_node:
+                    continue
+                slots.append(parent)
+                child_counts[parent.node_id] += 1
+                added = True
+                if len(slots) >= mutation_budget:
+                    break
+            if not added:
+                break
+        return slots
 
     def _run_child_job(
         self,

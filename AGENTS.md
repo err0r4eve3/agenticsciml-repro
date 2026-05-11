@@ -304,14 +304,17 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   selector output: include the best available valid node, prefer recent
   improving nodes, preserve underexplored/diverse method tags, and never select
   nodes at `max_children_per_node`.
-- `parallel_mutations` must represent actual bounded parallel child creation
-  when more than one parent is selected. It caps both mutation jobs per
-  iteration and worker count unless a future config explicitly splits those
-  concepts. Keep solution IDs deterministic, preserve checkpoint/resume
-  semantics after child insertion, and record
-  `agenticsciml.parallel_children.start/end` and
+- `parallel_mutations` must represent actual bounded child mutation budget.
+  It caps both mutation jobs per iteration and worker count unless a future
+  config explicitly splits those concepts. When deterministic parent selection
+  returns fewer parents than the mutation budget, the orchestrator may fan out
+  repeated parent slots to generate multiple child branches from the same
+  parent, while still respecting `max_children_per_node`. Keep solution IDs
+  deterministic, preserve checkpoint/resume semantics after child insertion,
+  and record `agenticsciml.parallel_children.start/end` and
   `agenticsciml.child_mutation.start/end` trace events with execution mode,
-  child count, worker count, parent IDs, child IDs, duration, and status.
+  child count, worker count, parent IDs, child IDs, parent-to-children mapping,
+  duration, and status.
 - Retrieval queries must be benchmark-aware. Build them from `ProblemBundle`,
   parent analysis, failure kind, method tags, score trend, and top leaderboard
   context rather than fixed benchmark-specific keywords.

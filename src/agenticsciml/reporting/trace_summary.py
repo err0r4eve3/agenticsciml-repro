@@ -49,6 +49,7 @@ SELF_TRACE_REFERENCE_KEYS = {
     "solution_ids",
     "child_ids",
     "parent_to_child.child",
+    "parent_to_children.child",
 }
 TRACE_NODE_LIFECYCLE_STAGE_RULES = {
     ("agent_span", "root_engineer"): "materialized",
@@ -758,6 +759,15 @@ def _trace_node_references(metadata: dict[str, Any]) -> list[tuple[str, str]]:
                 references.append(("parent_to_child.parent", parent_id))
             if isinstance(child_id, str) and child_id:
                 references.append(("parent_to_child.child", child_id))
+    parent_to_children = metadata.get("parent_to_children")
+    if isinstance(parent_to_children, dict):
+        for parent_id, child_ids in parent_to_children.items():
+            if isinstance(parent_id, str) and parent_id:
+                references.append(("parent_to_children.parent", parent_id))
+            if isinstance(child_ids, list):
+                for child_id in child_ids:
+                    if isinstance(child_id, str) and child_id:
+                        references.append(("parent_to_children.child", child_id))
     return references
 
 

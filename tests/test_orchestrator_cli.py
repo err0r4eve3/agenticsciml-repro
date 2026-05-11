@@ -177,6 +177,65 @@ def test_parallel_mutations_run_as_parallel_child_jobs(tmp_path: Path) -> None:
     assert parallel_starts[-1]["metadata"]["max_workers"] == 2
 
 
+def test_parallel_mutation_budget_fans_out_single_parent(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="parallel-fanout-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=1, parallel_mutations=2, max_debug_retries=1),
+        use_mock=True,
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+    tree = json.loads((run_dir / "tree.json").read_text(encoding="utf-8"))
+    root = next(node for node in tree["nodes"] if node["node_id"] == "solution_000")
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    start = next(event for event in trace_events if event["name"] == "agenticsciml.parallel_children.start")
+
+    assert len(tree["nodes"]) == 3
+    assert root["children"] == ["solution_001", "solution_002"]
+    assert start["metadata"]["execution_mode"] == "parallel"
+    assert start["metadata"]["child_count"] == 2
+    assert start["metadata"]["parent_ids"] == ["solution_000", "solution_000"]
+    assert start["metadata"]["parent_to_children"] == {
+        "solution_000": ["solution_001", "solution_002"]
+    }
+
+
+def test_parallel_mutation_fanout_respects_max_children_per_node(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="parallel-fanout-limit-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(
+            max_iterations=0,
+            parallel_mutations=3,
+            max_children_per_node=2,
+            max_debug_retries=0,
+        ),
+        use_mock=True,
+    )
+    orchestrator = AgenticSciMLOrchestrator(config, MockLLMClient())
+    contract = BenchmarkContractFactory.create_contract(orchestrator.problem_bundle)
+    parent = SolutionNode(
+        node_id="solution_000",
+        parent_id=None,
+        workspace=str(tmp_path / "solution_000"),
+        score=SolutionScore("validation_mse", 1.0, higher_is_better=False),
+        status="evaluated",
+        benchmark_name=contract.benchmark_name,
+        contract_hash=contract.contract_hash,
+    )
+    parent.children = ["solution_001"]
+
+    slots = orchestrator._mutation_parent_slots([parent], mutation_budget=3)
+
+    assert [slot.node_id for slot in slots] == ["solution_000"]
+
+
 def test_parallel_child_jobs_respect_parallel_mutation_budget(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config = ExperimentConfig(
         experiment_id="parallel-budget-run",
@@ -357,7 +416,9 @@ def test_resume_continues_existing_solution_tree_without_rebuilding_root(tmp_pat
 
     assert second_run_dir == first_run_dir
     assert root_solution.stat().st_mtime_ns == root_mtime
-    assert len(tree["nodes"]) == 2
+    root = next(node for node in tree["nodes"] if node["node_id"] == "solution_000")
+    assert len(tree["nodes"]) == 3
+    assert root["children"] == ["solution_001", "solution_002"]
     assert "agenticsciml.resume.loaded" in trace_text
 
 
@@ -790,7 +851,9 @@ def test_cli_resume_existing_run(tmp_path: Path, cli_env: dict[str, str]) -> Non
 
     run_dir = Path(resumed.stdout.strip().splitlines()[-1])
     tree = json.loads((run_dir / "tree.json").read_text(encoding="utf-8"))
-    assert len(tree["nodes"]) == 2
+    root = next(node for node in tree["nodes"] if node["node_id"] == "solution_000")
+    assert len(tree["nodes"]) == 3
+    assert root["children"] == ["solution_001", "solution_002"]
 
 
 def test_cli_trace_summary_prints_quality_gate(tmp_path: Path, cli_env: dict[str, str]) -> None:
