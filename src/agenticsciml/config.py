@@ -18,6 +18,94 @@ def _hash_json_payload(payload: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _validate_hex_digest(name: str, value: Any) -> None:
+    if not isinstance(value, str) or len(value) != 64:
+        raise ValueError(f"BenchmarkSourceManifest artifact has invalid sha256 digest: {name}")
+    try:
+        int(value, 16)
+    except ValueError as exc:
+        raise ValueError(f"BenchmarkSourceManifest artifact has non-hex digest: {name}") from exc
+
+
+def _manifest_artifact_name(path: str) -> str:
+    normalized = path.replace("\\", "/")
+    if "{solution_id}" in normalized:
+        normalized = normalized.replace("{solution_id}", "solution")
+    return Path(normalized).name
+
+
+def _validate_benchmark_source_manifest(
+    manifest: dict[str, Any],
+    *,
+    allowed_train_files: list[str],
+    evaluator_only_files: list[str],
+) -> None:
+    required_keys = {
+        "schema_version",
+        "digest_algorithm",
+        "artifacts",
+        "data_source_mode",
+        "data_generated",
+        "data_seed",
+        "generator_command",
+    }
+    missing = sorted(required_keys - set(manifest))
+    if missing:
+        raise ValueError("BenchmarkSourceManifest missing required field(s): " + ", ".join(missing))
+    if manifest.get("schema_version") != 1:
+        raise ValueError("BenchmarkSourceManifest schema_version must be 1")
+    if manifest.get("digest_algorithm") != "sha256":
+        raise ValueError("BenchmarkSourceManifest digest_algorithm must be sha256")
+
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, dict) or not artifacts:
+        raise ValueError("BenchmarkSourceManifest artifacts must be a non-empty object")
+    for name, digest in artifacts.items():
+        if not isinstance(name, str) or not name:
+            raise ValueError("BenchmarkSourceManifest artifact names must be non-empty strings")
+        if Path(name).is_absolute() or name == ".." or name.startswith("../") or "/../" in name:
+            raise ValueError(f"BenchmarkSourceManifest artifact path is not allowed: {name}")
+        _validate_hex_digest(name, digest)
+
+    required_artifacts = {
+        "Problem.md",
+        "Requirements.md",
+        "Evaluation.md",
+        "Data_config.json",
+        "evaluate.py",
+        "generate_data.py",
+        "guidelines.md",
+    }
+    required_artifacts.update(_manifest_artifact_name(path) for path in allowed_train_files)
+    required_artifacts.update(
+        _manifest_artifact_name(path)
+        for path in evaluator_only_files
+        if path.endswith(".npz") or path.endswith(".py")
+    )
+    missing_artifacts = sorted(required_artifacts - set(artifacts))
+    if missing_artifacts:
+        raise ValueError("BenchmarkSourceManifest missing artifact digest(s): " + ", ".join(missing_artifacts))
+
+    data_source_mode = manifest.get("data_source_mode")
+    if data_source_mode not in {"repo_existing", "generated_seed0"}:
+        raise ValueError("BenchmarkSourceManifest data_source_mode is invalid")
+    expected_generated = data_source_mode == "generated_seed0"
+    if manifest.get("data_generated") is not expected_generated:
+        raise ValueError("BenchmarkSourceManifest data_generated does not match data_source_mode")
+    data_seed = manifest.get("data_seed")
+    if not isinstance(data_seed, int) or isinstance(data_seed, bool):
+        raise ValueError("BenchmarkSourceManifest data_seed must be an integer")
+
+    generator_command = manifest.get("generator_command")
+    if not isinstance(generator_command, list) or not all(isinstance(item, str) for item in generator_command):
+        raise ValueError("BenchmarkSourceManifest generator_command must be a list of strings")
+    expected_command = ["python", "generate_data.py", "--seed", "0", "--output-dir", "<tmp>"]
+    if data_source_mode == "generated_seed0" and generator_command != expected_command:
+        raise ValueError("BenchmarkSourceManifest generated_seed0 command is invalid")
+    if data_source_mode == "repo_existing" and generator_command:
+        raise ValueError("BenchmarkSourceManifest repo_existing mode must not include generator_command")
+
+
 @dataclass(slots=True)
 class AgentConfig:
     role: str
@@ -207,6 +295,11 @@ class EvaluationContract:
         if contract.benchmark_source_manifest_digest:
             if not contract.benchmark_source_manifest:
                 raise ValueError("EvaluationContract benchmark source manifest missing")
+            _validate_benchmark_source_manifest(
+                contract.benchmark_source_manifest,
+                allowed_train_files=contract.allowed_train_files,
+                evaluator_only_files=contract.evaluator_only_files,
+            )
             computed_manifest_digest = _hash_json_payload(contract.benchmark_source_manifest)
             if computed_manifest_digest != contract.benchmark_source_manifest_digest:
                 raise ValueError(

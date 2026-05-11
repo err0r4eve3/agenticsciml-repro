@@ -177,7 +177,10 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   generation must use the same sanitized subprocess environment policy as
   generated solution execution. Manifest payloads must include
   `schema_version`, `digest_algorithm`, `data_source_mode`, and a normalized
-  `generator_command` when data is generated. Partial benchmark data artifacts
+  `generator_command` when data is generated. `EvaluationContract.from_dict()`
+  must semantically validate those manifest fields, required artifact digests,
+  data-source mode, generated-data flag consistency, and generator command
+  constraints before accepting the contract. Partial benchmark data artifacts
   are not allowed; if only train or validation data exists, fail closed instead
   of mixing repo data with generated data. Resume/load paths must reject stale or tampered
   `evaluation_contract.json` instead of silently continuing. Resume must also

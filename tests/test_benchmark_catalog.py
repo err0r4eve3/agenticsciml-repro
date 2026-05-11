@@ -184,6 +184,58 @@ def test_contract_from_dict_rejects_manifest_digest_mismatch() -> None:
         raise AssertionError("Expected tampered manifest payload to fail.")
 
 
+def test_contract_from_dict_rejects_invalid_manifest_schema() -> None:
+    bundle = ProblemBundle.load(BENCHMARKS["function_approx"].path)
+    payload = BenchmarkContractFactory.create_contract(bundle).to_dict()
+    payload["benchmark_source_manifest"]["schema_version"] = 999
+
+    try:
+        EvaluationContract.from_dict(payload)
+    except ValueError as exc:
+        assert "schema_version" in str(exc)
+    else:
+        raise AssertionError("Expected invalid manifest schema_version to fail.")
+
+
+def test_contract_from_dict_rejects_invalid_manifest_semantics() -> None:
+    bundle = ProblemBundle.load(BENCHMARKS["function_approx"].path)
+    payload = BenchmarkContractFactory.create_contract(bundle).to_dict()
+    payload["benchmark_source_manifest"]["data_generated"] = False
+
+    try:
+        EvaluationContract.from_dict(payload)
+    except ValueError as exc:
+        assert "data_generated" in str(exc)
+    else:
+        raise AssertionError("Expected inconsistent manifest data_generated flag to fail.")
+
+
+def test_contract_from_dict_rejects_invalid_generated_command() -> None:
+    bundle = ProblemBundle.load(BENCHMARKS["function_approx"].path)
+    payload = BenchmarkContractFactory.create_contract(bundle).to_dict()
+    payload["benchmark_source_manifest"]["generator_command"] = ["python", "generate_data.py"]
+
+    try:
+        EvaluationContract.from_dict(payload)
+    except ValueError as exc:
+        assert "generated_seed0 command" in str(exc)
+    else:
+        raise AssertionError("Expected invalid manifest generator command to fail.")
+
+
+def test_contract_from_dict_rejects_missing_required_manifest_artifact() -> None:
+    bundle = ProblemBundle.load(BENCHMARKS["function_approx"].path)
+    payload = BenchmarkContractFactory.create_contract(bundle).to_dict()
+    del payload["benchmark_source_manifest"]["artifacts"]["evaluate.py"]
+
+    try:
+        EvaluationContract.from_dict(payload)
+    except ValueError as exc:
+        assert "missing artifact digest" in str(exc)
+    else:
+        raise AssertionError("Expected missing required manifest artifact to fail.")
+
+
 def test_contract_verify_detects_stale_evaluator_source(tmp_path: Path) -> None:
     spec = BENCHMARKS["function_approx"]
     benchmark_dir = tmp_path / "function_approx"
@@ -325,6 +377,52 @@ def test_contract_manifest_rejects_partial_data_artifacts(tmp_path: Path) -> Non
         assert "Partial benchmark data artifacts" in str(exc)
     else:
         raise AssertionError("Expected partial benchmark data artifacts to fail.")
+
+
+def test_contract_manifest_rejects_partial_validation_artifact(tmp_path: Path) -> None:
+    spec = BENCHMARKS["function_approx"]
+    benchmark_dir = tmp_path / "function_approx"
+    shutil.copytree(spec.path, benchmark_dir)
+    module = _load_generate_module(benchmark_dir / "generate_data.py")
+    generated_dir = tmp_path / "generated"
+    module.generate(seed=0, output_dir=generated_dir)
+    shutil.copy2(generated_dir / "val_data.npz", benchmark_dir / "val_data.npz")
+
+    try:
+        BenchmarkContractFactory.create_contract(_problem_bundle_from_dir(benchmark_dir, spec))
+    except ValueError as exc:
+        assert "Partial benchmark data artifacts" in str(exc)
+    else:
+        raise AssertionError("Expected partial validation artifact to fail.")
+
+
+def test_contract_manifest_supports_custom_data_config_paths(tmp_path: Path) -> None:
+    spec = BENCHMARKS["function_approx"]
+    benchmark_dir = tmp_path / "function_approx"
+    shutil.copytree(spec.path, benchmark_dir)
+    module = _load_generate_module(benchmark_dir / "generate_data.py")
+    generated_dir = tmp_path / "generated"
+    module.generate(seed=0, output_dir=generated_dir)
+    shutil.copy2(generated_dir / "train_data.npz", benchmark_dir / "custom_train.npz")
+    shutil.copy2(generated_dir / "val_data.npz", benchmark_dir / "custom_val.npz")
+    (benchmark_dir / "Data_config.json").write_text(
+        json.dumps(
+            {
+                "train_path": "custom_train.npz",
+                "validation_path": "custom_val.npz",
+                "description": "custom test paths",
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    contract = BenchmarkContractFactory.create_contract(_problem_bundle_from_dir(benchmark_dir, spec))
+    restored = EvaluationContract.from_dict(contract.to_dict())
+
+    assert "custom_train.npz" in restored.benchmark_source_manifest["artifacts"]
+    assert "custom_val.npz" in restored.benchmark_source_manifest["artifacts"]
 
 
 def test_unknown_benchmark_bundle_fails_clearly(tmp_path: Path) -> None:
