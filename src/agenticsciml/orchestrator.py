@@ -92,6 +92,7 @@ class AgenticSciMLOrchestrator:
                 "run_state": "partial",
                 "benchmark_dir": str(self.config.benchmark_dir),
                 "max_iterations": self.config.evolution.max_iterations,
+                "branch_context_enabled": self.config.evolution.use_branch_context,
                 **self._evidence_metadata(),
             },
         )
@@ -457,6 +458,7 @@ class AgenticSciMLOrchestrator:
             {
                 "solution_id": solution_id,
                 "parent_id": parent.node_id,
+                "branch_context_enabled": self.config.evolution.use_branch_context,
                 "branch_context": branch_context or {},
             },
         )
@@ -472,6 +474,7 @@ class AgenticSciMLOrchestrator:
                 "parent_id": parent.node_id,
                 "status": child.status,
                 "failure_kind": child.failure_kind,
+                "branch_context_enabled": self.config.evolution.use_branch_context,
                 "branch_context": branch_context or {},
                 "duration_s": time.monotonic() - started,
             },
@@ -869,6 +872,7 @@ class AgenticSciMLOrchestrator:
                 "benchmark_name": self.problem_bundle.benchmark_name,
                 "solution_count": len(self.nodes),
                 "champion": best.node_id,
+                "branch_context_enabled": self.config.evolution.use_branch_context,
                 **self._evidence_metadata(),
                 "llm_calls": self._llm_call_summary(),
             },

@@ -80,6 +80,43 @@ def test_ablation_runner_writes_summary_and_report(tmp_path: Path) -> None:
         (no_branch_context_run / "config.json").read_text(encoding="utf-8")
     )
     assert no_branch_context_config["evolution"]["use_branch_context"] is False
+    no_branch_metadata = json.loads((no_branch_context_run / "run_metadata.json").read_text(encoding="utf-8"))
+    assert no_branch_metadata["branch_context_enabled"] is False
+    assert no_branch_context_row["branch_context_enabled"] == "False"
+
+    no_branch_events = [
+        json.loads(line)
+        for line in (no_branch_context_run / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    child_starts = [
+        event
+        for event in no_branch_events
+        if event["name"] == "agenticsciml.child_mutation.start"
+    ]
+    assert child_starts
+    assert all(event["metadata"]["branch_context_enabled"] is False for event in child_starts)
+    assert all(event["metadata"]["branch_context"] == {} for event in child_starts)
+
+    proposal_transcript = (
+        no_branch_context_run
+        / "solutions"
+        / "solution_001"
+        / "transcripts"
+        / "proposal_debate.json"
+    ).read_text(encoding="utf-8")
+    engineer_transcript = (
+        no_branch_context_run
+        / "solutions"
+        / "solution_001"
+        / "transcripts"
+        / "engineer.json"
+    ).read_text(encoding="utf-8")
+    assert "branch_intent" not in proposal_transcript
+    assert "sibling_branch_ids" not in proposal_transcript
+    assert "diversity_instruction" not in proposal_transcript
+    assert "branch_intent" not in engineer_transcript
+    assert "sibling_branch_ids" not in engineer_transcript
+    assert "diversity_instruction" not in engineer_transcript
 
 
 def test_cli_ablate_command_runs_mock_pipeline(tmp_path: Path, cli_env: dict[str, str]) -> None:

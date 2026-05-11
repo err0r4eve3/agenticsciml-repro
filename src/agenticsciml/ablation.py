@@ -114,6 +114,7 @@ def _run_variant(benchmark_dir: Path, output_dir: Path, variant: str, seed: int)
         "llm_mode": LLM_MODE_MOCK,
         "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
         "run_dir": str(run_dir),
+        "branch_context_enabled": bool(metadata.get("branch_context_enabled", False)),
         "champion_node_id": champion["node_id"],
         "metric_name": champion.get("score", {}).get("metric", ""),
         "higher_is_better": _higher_is_better(champion),
@@ -210,6 +211,7 @@ def _aggregate(run_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "variant": variant,
                 "evidence_mode": EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE,
                 "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
+                "branch_context_enabled": any(_truthy(row.get("branch_context_enabled")) for row in rows),
                 "higher_is_better": higher_is_better,
                 "runs": len(rows),
                 "valid_runs": sum(1 for row in rows if float(row["valid_solution_rate"]) > 0),
@@ -271,11 +273,15 @@ def _higher_is_better(node: dict[str, Any]) -> bool:
 def _variant_higher_is_better(rows: list[dict[str, Any]]) -> bool:
     for row in rows:
         value = row.get("higher_is_better")
-        if value in (True, "True", "true", "1", 1):
+        if _truthy(value):
             return True
         if value in (False, "False", "false", "0", 0):
             return False
     return False
+
+
+def _truthy(value: Any) -> bool:
+    return value in (True, "True", "true", "1", 1)
 
 
 def _best_score(values: list[float], higher_is_better: bool) -> float | str:
