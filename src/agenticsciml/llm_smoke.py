@@ -230,6 +230,7 @@ def _smoke_row(run_dir: Path, variant: str, seed: int) -> dict[str, Any]:
         }
     )
     proposal_titles = _proposal_titles(run_dir, nodes)
+    llm_calls_total = _llm_call_count(metadata, variant, [])
     gate = _smoke_gate(run_dir, variant, metadata, trace_summary, nodes, branch_tags)
     return {
         "variant": variant,
@@ -241,7 +242,7 @@ def _smoke_row(run_dir: Path, variant: str, seed: int) -> dict[str, Any]:
         "solution_count": len(nodes),
         "branch_intents": ",".join(tag.replace("branch:", "", 1) for tag in branch_tags),
         "proposal_titles": " | ".join(proposal_titles),
-        "llm_calls": metadata.get("llm_calls", {}).get("total", 0),
+        "llm_calls": llm_calls_total if llm_calls_total is not None else 0,
         "trace_quality_gate_passed": bool(trace_summary.get("quality_gate", {}).get("passed", False)),
         "smoke_gate_passed": gate["passed"],
         "smoke_gate_issues": "; ".join(gate["issues"]),
@@ -411,7 +412,12 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
     if not paired_gate["passed"]:
         issues.append(f"paired contrast gate failed: {'; '.join(paired_gate['issues'])}")
     if manifest and recomputed_rows:
-        call_count = sum(int(row.get("llm_calls", 0) or 0) for row in recomputed_rows)
+        call_count = 0
+        for row in recomputed_rows:
+            row_variant = str(row.get("variant", "unknown"))
+            row_call_count = _parse_strict_int(row.get("llm_calls"), f"{row_variant}: recomputed llm_calls", issues)
+            if row_call_count is not None:
+                call_count += row_call_count
         if call_count <= 0:
             issues.append("recomputed LLM call count must be positive")
         if manifest_call_range is not None:
@@ -468,10 +474,8 @@ def _manifest_schema_issues(manifest: dict[str, Any], output_dir: Path) -> tuple
         issues.append("manifest output_dir does not match verification bundle")
     if manifest.get("real_mode_explicit") is not True:
         issues.append("manifest real_mode_explicit must be true for smoke verification")
-    if not manifest.get("provider"):
-        issues.append("manifest provider is required")
-    if not manifest.get("model"):
-        issues.append("manifest model is required")
+    _required_non_empty_string(manifest.get("provider"), "manifest provider", issues)
+    _required_non_empty_string(manifest.get("model"), "manifest model", issues)
 
     call_range = manifest.get("expected_llm_call_range", {})
     if not isinstance(call_range, dict):
@@ -552,6 +556,27 @@ def _parse_strict_int(value: Any, label: str, issues: list[str]) -> int | None:
     return None
 
 
+def _required_non_empty_string(value: Any, label: str, issues: list[str]) -> str | None:
+    if not isinstance(value, str):
+        issues.append(f"{label} must be a non-empty string")
+        return None
+    if not value.strip():
+        issues.append(f"{label} must be a non-empty string")
+        return None
+    return value
+
+
+def _llm_call_count(metadata: dict[str, Any], variant: str, issues: list[str]) -> int | None:
+    llm_calls = metadata.get("llm_calls")
+    if not isinstance(llm_calls, dict):
+        issues.append(f"{variant}: llm_calls must be an object")
+        return None
+    total = _parse_strict_int(llm_calls.get("total"), f"{variant}: llm_calls.total", issues)
+    if total is not None and total <= 0:
+        issues.append(f"{variant}: llm_calls.total must be positive in real smoke")
+    return total
+
+
 def _validate_smoke_variants(variants: list[str]) -> None:
     allowed = set(DEFAULT_SMOKE_VARIANTS)
     unknown = sorted({variant for variant in variants if variant not in allowed})
@@ -594,8 +619,7 @@ def _smoke_gate(
         issues.append("branch_context_enabled does not match variant")
     if not trace_summary.get("quality_gate", {}).get("passed", False):
         issues.append("trace_summary quality gate failed")
-    if int(metadata.get("llm_calls", {}).get("total", 0) or 0) <= 0:
-        issues.append("llm_calls.total must be positive in real smoke")
+    _llm_call_count(metadata, variant, issues)
 
     child_events = [
         event
@@ -669,7 +693,14 @@ def _paired_contrast_gate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         issues.append("branch_context row did not enable branch context")
     if _truthy(no_branch.get("branch_context_enabled")):
         issues.append("no_branch_context row enabled branch context")
-    if int(branch.get("llm_calls", 0) or 0) <= 0 or int(no_branch.get("llm_calls", 0) or 0) <= 0:
+    branch_calls = _parse_strict_int(branch.get("llm_calls", 0), "branch_context row llm_calls", issues)
+    no_branch_calls = _parse_strict_int(no_branch.get("llm_calls", 0), "no_branch_context row llm_calls", issues)
+    if (
+        branch_calls is None
+        or no_branch_calls is None
+        or branch_calls <= 0
+        or no_branch_calls <= 0
+    ):
         issues.append("both paired variants must record positive LLM call counts")
     if not str(branch.get("branch_intents", "")):
         issues.append("branch_context row has no branch intents")

@@ -50,6 +50,7 @@
 - smoke verifier provenance：`verify-smoke-llm` 会锚定 `plan.output_dir` / `manifest.output_dir` 到当前 evidence bundle，并把 CSV/manifest 数字字段类型错误记录为 fail-closed issue，而不是让 verifier crash。
 - smoke verifier schema：`verify-smoke-llm` 对 seed、`parallel_mutations`、`expected_llm_call_range.min/max` 使用 strict integer schema，拒绝 bool、float、空缺 bounds 和不完整 call-range。
 - smoke verifier diagnostics：manifest schema 会在 run rows 损坏时仍独立报告，parallel-child trace 的 `max_workers` 也使用 strict integer schema，避免坏 evidence 让 verifier crash。
+- smoke verifier LLM-call schema：`run_metadata.json` 的 `llm_calls.total` 使用 strict positive integer schema，manifest `provider` / `model` 必须是非空字符串。
 - faithful-small benchmark seed：新增 `examples/poisson_lshape_faithful_small`，在 L-shaped Poisson 任务中加入 boundary/residual collocation 数据和 finite-difference residual composite score，用于缩小 proxy 与论文 PINN 任务结构的差距；仍不声明 paper-like 分数。
 - benchmark-aware retrieval query：`RetrievalQueryBuilder` 使用 benchmark family/metric/description、parent analysis、failure kind、method tags 和 leaderboard top-k 生成检索 query。
 - KB ablation switches：`use_kb=False` 不注入 KB，`random_kb=True` 使用 seed-controlled random KB retrieval。

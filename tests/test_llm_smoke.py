@@ -26,6 +26,13 @@ def _rewrite_parallel_child_max_workers(run_dir: Path, value: object) -> None:
     )
 
 
+def _rewrite_run_metadata_llm_calls_total(run_dir: Path, value: object) -> None:
+    metadata_path = run_dir / "run_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata.setdefault("llm_calls", {})["total"] = value
+    metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def test_llm_smoke_dry_run_writes_plan_without_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
@@ -240,6 +247,28 @@ def test_verify_llm_smoke_output_rejects_manifest_output_dir_mismatch(tmp_path: 
     assert any("manifest output_dir does not match" in issue for issue in payload["issues"])
 
 
+def test_verify_llm_smoke_output_rejects_non_string_manifest_provider_model(tmp_path: Path) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    manifest_path = tmp_path / "real_llm_smoke_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["provider"] = True
+    manifest["model"] = ""
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("manifest provider must be a non-empty string" in issue for issue in payload["issues"])
+    assert any("manifest model must be a non-empty string" in issue for issue in payload["issues"])
+
+
 def test_verify_llm_smoke_output_reports_malformed_seed_without_crashing(tmp_path: Path) -> None:
     run_llm_smoke(
         benchmark_dir=Path("examples/function_approx").resolve(),
@@ -395,6 +424,35 @@ def test_verify_llm_smoke_output_rejects_malformed_trace_max_workers(
 
     assert verification.passed is False
     assert any("branch_context: trace max_workers must be an integer" in issue for issue in payload["issues"])
+
+
+@pytest.mark.parametrize(
+    ("bad_value", "expected_issue"),
+    [
+        ("bad", "branch_context: llm_calls.total must be an integer string"),
+        (True, "branch_context: llm_calls.total must be an integer, not bool"),
+        (0, "branch_context: llm_calls.total must be positive in real smoke"),
+    ],
+)
+def test_verify_llm_smoke_output_rejects_malformed_llm_calls_total(
+    tmp_path: Path,
+    bad_value: object,
+    expected_issue: str,
+) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    _rewrite_run_metadata_llm_calls_total(tmp_path / "runs" / "smoke-branch_context-seed-0", bad_value)
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any(expected_issue in issue for issue in payload["issues"])
 
 
 def test_cli_verify_smoke_llm_command(tmp_path: Path, cli_env: dict[str, str]) -> None:
