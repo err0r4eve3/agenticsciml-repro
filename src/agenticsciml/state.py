@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -210,6 +211,57 @@ def validate_solution_tree_graph_payload(
     if cycle_nodes:
         issues.append(f"{context} parent links contain a cycle: {cycle_nodes!r}")
     return issues
+
+
+def validate_solution_node_artifact_paths(
+    data: dict[str, Any],
+    *,
+    run_dir: Path,
+    context: str,
+) -> list[str]:
+    issues: list[str] = []
+    run_root = run_dir.resolve(strict=False)
+    node_id = data.get("node_id")
+    workspace_value = data.get("workspace")
+    if not isinstance(node_id, str) or not node_id or not isinstance(workspace_value, str):
+        return issues
+
+    workspace = _resolve_artifact_path(workspace_value, run_root)
+    solutions_dir = (run_root / "solutions").resolve(strict=False)
+    if not _is_relative_to(workspace, solutions_dir):
+        issues.append(f"{context} workspace must be under run solutions directory")
+    if workspace.name != node_id:
+        issues.append(f"{context} workspace basename must match node_id")
+    if not workspace.exists():
+        issues.append(f"{context} workspace path does not exist")
+
+    for field_name in ("proposal_path", "analysis_path"):
+        value = data.get(field_name)
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            continue
+        artifact_path = _resolve_artifact_path(value, run_root)
+        if not _is_relative_to(artifact_path, workspace):
+            issues.append(f"{context} {field_name} must be inside node workspace")
+        if not artifact_path.exists():
+            issues.append(f"{context} {field_name} does not exist")
+    return issues
+
+
+def _resolve_artifact_path(value: str, run_root: Path) -> Path:
+    path = Path(value)
+    if not path.is_absolute():
+        path = run_root / path
+    return path.resolve(strict=False)
+
+
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
 
 
 def _solution_tree_cycle_nodes(nodes: dict[str, dict[str, Any]]) -> list[str]:

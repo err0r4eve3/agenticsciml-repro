@@ -39,6 +39,7 @@ from agenticsciml.state import (
     Proposal,
     SolutionNode,
     SolutionScore,
+    validate_solution_node_artifact_paths,
     validate_solution_tree_payload,
 )
 from agenticsciml.storage import ExperimentStorage
@@ -142,6 +143,17 @@ class AgenticSciMLOrchestrator:
         self.loaded_checkpoint = payload
         node_payloads = payload.get("nodes", [])
         node_issues = validate_solution_tree_payload(node_payloads, context="checkpoint.json")
+        if isinstance(node_payloads, list):
+            for node in node_payloads:
+                if isinstance(node, dict):
+                    node_id = node.get("node_id", "<unknown>")
+                    node_issues.extend(
+                        validate_solution_node_artifact_paths(
+                            node,
+                            run_dir=self.storage.run_dir,
+                            context=f"checkpoint.json node {node_id}",
+                        )
+                    )
         if node_issues:
             raise ValueError("Invalid checkpoint solution tree: " + "; ".join(node_issues))
         self.nodes = [SolutionNode.from_dict(node) for node in node_payloads]

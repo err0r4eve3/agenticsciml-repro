@@ -223,6 +223,11 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   a valid score and no `error` / `failure_kind`; `failed` nodes must not carry a
   score and must have either `error` or `failure_kind`; `created` nodes must not
   carry score, error, or failure kind.
+- Resume/load must validate solution artifact path semantics. `workspace` must
+  resolve under the run's `solutions/` directory and match `node_id`; non-null
+  `proposal_path` and `analysis_path` must resolve inside that node workspace
+  and must exist. Reject absolute external paths, `..` escapes, and symlink
+  escapes that resolve outside the run workspace.
 - JSON artifact writes must reject `NaN`, `Infinity`, and `-Infinity`; do not
   let non-standard JSON numeric constants enter run metadata, trace events,
   transcripts, checkpoint files, tree exports, or leaderboard inputs.
