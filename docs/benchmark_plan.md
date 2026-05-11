@@ -35,17 +35,25 @@
   `contract_hash`
 - retrieval query is built from benchmark metadata, parent analysis, failure
   kind, method tags, score trend, and leaderboard top-k context
+- catalog metadata records `fidelity_level`, `expected_runtime_s`,
+  `requires_torch`, `requires_gpu`, and `paper_gap_notes`
 
 ## Benchmark Catalog
 
-| Name | Paper section | Local path | Metric | Purpose |
-| --- | --- | --- | --- | --- |
-| `function_approx` | `S1.1` | `examples/function_approx` | `validation_mse` | 不连续振荡函数拟合 |
-| `poisson_lshape` | `S1.2` | `examples/poisson_lshape` | `relative_l2` | L-shaped Poisson / corner singularity proxy |
-| `burgers_pinn` | `S1.3` | `examples/burgers_pinn` | `relative_l2` | Burgers-style time-dependent PINN proxy |
-| `antiderivative_operator` | `S1.4` | `examples/antiderivative_operator` | `relative_l2` | 函数到反导数的 operator learning |
-| `reaction_diffusion_operator` | `S1.5` | `examples/reaction_diffusion_operator` | `relative_l2` | 多输入 reaction-diffusion operator proxy |
-| `cylinder_wake_reconstruction` | `S1.6` | `examples/cylinder_wake_reconstruction` | `relative_l2` | 稀疏传感器到 2D 涡量场重建 proxy |
+| Name | Paper section | Fidelity | Local path | Metric | Purpose |
+| --- | --- | --- | --- | --- | --- |
+| `function_approx` | `S1.1` | `proxy` | `examples/function_approx` | `validation_mse` | 不连续振荡函数拟合 |
+| `poisson_lshape` | `S1.2` | `proxy` | `examples/poisson_lshape` | `relative_l2` | L-shaped Poisson / corner singularity proxy |
+| `burgers_pinn` | `S1.3` | `proxy` | `examples/burgers_pinn` | `relative_l2` | Burgers-style time-dependent PINN proxy |
+| `antiderivative_operator` | `S1.4` | `proxy` | `examples/antiderivative_operator` | `relative_l2` | 函数到反导数的 operator learning |
+| `reaction_diffusion_operator` | `S1.5` | `proxy` | `examples/reaction_diffusion_operator` | `relative_l2` | 多输入 reaction-diffusion operator proxy |
+| `cylinder_wake_reconstruction` | `S1.6` | `proxy` | `examples/cylinder_wake_reconstruction` | `relative_l2` | 稀疏传感器到 2D 涡量场重建 proxy |
+
+`fidelity_level` 的含义：
+
+- `proxy`：本地 NumPy 小规模代理任务，只验证 workflow / evaluator / artifact shape。
+- `faithful-small`：后续目标，使用更接近论文的 SciML/PyTorch 训练目标，但缩小预算。
+- `paper-like`：后续目标，尽量贴近论文数据、训练预算和指标，不默认承诺复现论文分数。
 
 用 CLI 查看当前 catalog：
 
@@ -65,6 +73,7 @@ uv run --python 3.11 --extra dev pytest tests/test_benchmark_catalog.py -q
 这个测试覆盖：
 
 - catalog 是否包含论文 6 类任务；
+- catalog 是否为每个任务记录 fidelity metadata 和 paper-gap notes；
 - 每个 benchmark 是否有必需 artifact；
 - `ProblemBundle` 是否能按 benchmark 加载；
 - `BenchmarkContractFactory` 是否生成 hash-stable 的 benchmark-aware contract；
@@ -107,6 +116,7 @@ uv run --python 3.11 --extra real-llm agenticsciml run examples/poisson_lshape -
 
 - 这些 benchmark 是论文任务家族的 deterministic engineering proxies。
 - 当前数据规模刻意较小，优先验证 workflow 和 evaluator 稳定性。
+- 当前 `fidelity_level=proxy` 明确表示不是论文全量 SciML 实验。
 - 不保证论文 improvement factor。
 - 不把 mock-mode 分数当作 SciML 结论。
 - 后续如要追论文数值，应替换为更完整的 PDE/operator 数据和训练预算。

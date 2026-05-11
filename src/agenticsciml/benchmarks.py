@@ -21,18 +21,30 @@ class BenchmarkSpec:
     name: str
     path: Path
     paper_section: str
+    paper_task_name: str
     family: str
     metric: str
     description: str
+    fidelity_level: str
+    expected_runtime_s: int
+    requires_torch: bool
+    requires_gpu: bool
+    paper_gap_notes: str
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "name": self.name,
             "path": str(self.path),
             "paper_section": self.paper_section,
+            "paper_task_name": self.paper_task_name,
             "family": self.family,
             "metric": self.metric,
             "description": self.description,
+            "fidelity_level": self.fidelity_level,
+            "expected_runtime_s": self.expected_runtime_s,
+            "requires_torch": self.requires_torch,
+            "requires_gpu": self.requires_gpu,
+            "paper_gap_notes": self.paper_gap_notes,
         }
 
 
@@ -68,7 +80,9 @@ class ProblemBundle:
             f"benchmark_name: {self.benchmark_name}\n"
             f"family: {self.benchmark_spec.family}\n"
             f"metric: {self.benchmark_spec.metric}\n"
+            f"fidelity_level: {self.benchmark_spec.fidelity_level}\n"
             f"description: {self.benchmark_spec.description}\n"
+            f"paper_gap_notes: {self.benchmark_spec.paper_gap_notes}\n"
         )
 
 
@@ -178,54 +192,96 @@ class BenchmarkContractFactory:
             )
 
 
+_PROXY_GAP = (
+    "Lightweight NumPy proxy for workflow validation; not the full paper-scale "
+    "SciML training setup or reported-score reproduction."
+)
+
+
 BENCHMARKS: dict[str, BenchmarkSpec] = {
     "function_approx": BenchmarkSpec(
         name="function_approx",
         path=EXAMPLES_DIR / "function_approx",
         paper_section="S1.1",
+        paper_task_name="Discontinuous function fitting",
         family="function approximation",
         metric="validation_mse",
         description="Discontinuous oscillatory one-dimensional function approximation.",
+        fidelity_level="proxy",
+        expected_runtime_s=20,
+        requires_torch=False,
+        requires_gpu=False,
+        paper_gap_notes=_PROXY_GAP,
     ),
     "poisson_lshape": BenchmarkSpec(
         name="poisson_lshape",
         path=EXAMPLES_DIR / "poisson_lshape",
         paper_section="S1.2",
+        paper_task_name="L-shaped Poisson PINN",
         family="PINN",
         metric="relative_l2",
         description="Poisson equation surrogate on an L-shaped domain.",
+        fidelity_level="proxy",
+        expected_runtime_s=20,
+        requires_torch=False,
+        requires_gpu=False,
+        paper_gap_notes=_PROXY_GAP,
     ),
     "burgers_pinn": BenchmarkSpec(
         name="burgers_pinn",
         path=EXAMPLES_DIR / "burgers_pinn",
         paper_section="S1.3",
+        paper_task_name="Burgers PINN",
         family="PINN",
         metric="relative_l2",
         description="Time-dependent viscous Burgers equation surrogate.",
+        fidelity_level="proxy",
+        expected_runtime_s=20,
+        requires_torch=False,
+        requires_gpu=False,
+        paper_gap_notes=_PROXY_GAP,
     ),
     "antiderivative_operator": BenchmarkSpec(
         name="antiderivative_operator",
         path=EXAMPLES_DIR / "antiderivative_operator",
         paper_section="S1.4",
+        paper_task_name="Antiderivative operator learning",
         family="operator learning",
         metric="relative_l2",
         description="Operator learning from input functions to antiderivatives.",
+        fidelity_level="proxy",
+        expected_runtime_s=20,
+        requires_torch=False,
+        requires_gpu=False,
+        paper_gap_notes=_PROXY_GAP,
     ),
     "reaction_diffusion_operator": BenchmarkSpec(
         name="reaction_diffusion_operator",
         path=EXAMPLES_DIR / "reaction_diffusion_operator",
         paper_section="S1.5",
+        paper_task_name="Reaction-diffusion multiple-input operator learning",
         family="operator learning",
         metric="relative_l2",
         description="Multiple-input reaction-diffusion operator surrogate.",
+        fidelity_level="proxy",
+        expected_runtime_s=20,
+        requires_torch=False,
+        requires_gpu=False,
+        paper_gap_notes=_PROXY_GAP,
     ),
     "cylinder_wake_reconstruction": BenchmarkSpec(
         name="cylinder_wake_reconstruction",
         path=EXAMPLES_DIR / "cylinder_wake_reconstruction",
         paper_section="S1.6",
+        paper_task_name="Sparse-sensor 2D cylinder wake reconstruction",
         family="inverse reconstruction",
         metric="relative_l2",
         description="2D cylinder wake vorticity reconstruction from sparse noisy sensors.",
+        fidelity_level="proxy",
+        expected_runtime_s=20,
+        requires_torch=False,
+        requires_gpu=False,
+        paper_gap_notes=_PROXY_GAP,
     ),
 }
 

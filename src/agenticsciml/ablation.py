@@ -78,6 +78,9 @@ def _run_variant(benchmark_dir: Path, output_dir: Path, variant: str, seed: int)
     return {
         "variant": variant,
         "seed": seed,
+        "evidence_mode": "mock_workflow_shape",
+        "llm_mode": "mock",
+        "scientific_claim": "not_supported",
         "run_dir": str(run_dir),
         "champion_node_id": champion["node_id"],
         "champion_score": champion_score,
@@ -156,6 +159,8 @@ def _aggregate(run_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         summary.append(
             {
                 "variant": variant,
+                "evidence_mode": "mock_workflow_shape",
+                "scientific_claim": "not_supported",
                 "runs": len(rows),
                 "valid_runs": sum(1 for row in rows if float(row["valid_solution_rate"]) > 0),
                 "champion_score_median": _median(champion_scores),
@@ -228,7 +233,9 @@ def _render_report(summary_rows: list[dict[str, Any]]) -> str:
     lines = [
         "# Ablation Report",
         "",
-        "Mock-mode ablation report. This checks workflow behavior, not paper-score reproduction.",
+        "Evidence mode: `mock_workflow_shape`.",
+        "",
+        "Mock-mode ablation checks workflow behavior, variant switches, and artifact production. It cannot prove emergent discovery or paper-score reproduction.",
         "",
         "| Variant | Runs | Valid runs | Champion score median | Champion/root improvement median | Valid solution rate mean |",
         "| --- | ---: | ---: | ---: | ---: | ---: |",

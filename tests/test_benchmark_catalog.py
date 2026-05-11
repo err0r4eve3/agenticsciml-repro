@@ -99,6 +99,13 @@ def test_benchmark_catalog_lists_all_paper_benchmarks() -> None:
         assert spec.path.exists(), name
         assert spec.metric
         assert spec.paper_section.startswith("S1.")
+        assert spec.fidelity_level in {"proxy", "faithful-small", "paper-like"}
+        assert spec.fidelity_level == "proxy"
+        assert spec.expected_runtime_s > 0
+        assert isinstance(spec.requires_torch, bool)
+        assert isinstance(spec.requires_gpu, bool)
+        assert spec.paper_task_name
+        assert spec.paper_gap_notes
 
 
 def test_all_benchmarks_have_required_artifacts() -> None:

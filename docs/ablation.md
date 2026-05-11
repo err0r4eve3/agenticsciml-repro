@@ -47,6 +47,8 @@ uv run --python 3.11 --extra dev python scripts/run_ablation.py \
 
 run-level 指标至少包含：
 
+- evidence mode
+- scientific claim boundary
 - champion score
 - root score
 - champion/root improvement
@@ -65,4 +67,7 @@ Mock-mode ablation 只验证：
 - reporting 是否能聚合多个 seed；
 - artifact 是否足够支持后续真实 LLM 复盘。
 
-不要把 mock-mode improvement 当作 SciML 结论。真实 LLM ablation 至少需要多 seed、固定预算、成本统计和失败样本审查。
+当前 CSV 和报告会显式标注 `evidence_mode=mock_workflow_shape` 与
+`scientific_claim=not_supported`。不要把 mock-mode improvement 当作 SciML
+结论，更不能把它解释成 emergent discovery。真实 LLM ablation 至少需要多
+seed、固定预算、成本统计和失败样本审查。

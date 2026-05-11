@@ -193,6 +193,9 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   same-directory temp-file writes followed by `os.replace()`. Do not reintroduce
   direct `Path.write_text()` for JSON, transcripts, reports, or solution
   artifacts managed by storage.
+- `ExperimentStorage` writes must remain safe under parallel child jobs. Protect
+  trace append, workspace creation, JSON, transcript, report, and solution
+  artifact writes with the storage lock or an equivalent tested mechanism.
 - RootEngineer and Engineer prompts must include the relevant `ProblemBundle`,
   `EvaluationContract` JSON, `guidelines.md`, and available analysis context.
 - Engineer mutations must verify the parent solution digest and apply a
@@ -208,6 +211,11 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   selector output: include the best available valid node, prefer recent
   improving nodes, preserve underexplored/diverse method tags, and never select
   nodes at `max_children_per_node`.
+- `parallel_mutations` must represent actual bounded parallel child creation
+  when more than one parent is selected. Keep solution IDs deterministic,
+  preserve checkpoint/resume semantics after child insertion, and record
+  `agenticsciml.parallel_children.start/end` trace events with execution mode,
+  child count, worker count, parent IDs, and child IDs.
 - Retrieval queries must be benchmark-aware. Build them from `ProblemBundle`,
   parent analysis, failure kind, method tags, score trend, and top leaderboard
   context rather than fixed benchmark-specific keywords.
@@ -220,8 +228,15 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
 - Ablation outputs must include per-run rows and aggregate rows with champion
   score, root score, champion/root improvement, valid solution rate, timeout
   count, debug success count, LLM call count, wall time, and example run dirs.
-- Ablation tests use mock mode only. Do not claim scientific improvement from
-  mock ablation results.
+- Ablation outputs must explicitly label mock evidence boundaries with fields
+  such as `evidence_mode=mock_workflow_shape` and
+  `scientific_claim=not_supported`.
+- Ablation tests use mock mode only. Do not claim scientific improvement or
+  emergent discovery from mock ablation results.
+- Every benchmark entry must include fidelity metadata: `fidelity_level`,
+  expected runtime, dependency flags, paper task name, and paper-gap notes. A
+  `proxy` benchmark is allowed for workflow validation but must not be described
+  as a paper-like SciML reproduction.
 - `SolutionNode` metadata used by selector/retriever/ablation must stay
   persisted in `tree.json` and `checkpoint.json`: `benchmark_name`,
   `contract_hash`, `method_tags`, `failure_kind`, `score_delta_from_parent`,

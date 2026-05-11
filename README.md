@@ -14,7 +14,7 @@ available, so this project implements a source-grounded approximation:
 - benchmark-aware evaluation contracts with deterministic content hashes
 - root single-agent solution generation
 - solution tree with deterministic exploitation/exploration parent selection,
-  mutation, evaluation, and analysis
+  parallel child mutation jobs, evaluation, and analysis
 - benchmark-aware 0-1 knowledge-base retrieval per mutation, with deterministic
   `random_kb` mode for ablation
 - proposer/critic debate with concise rationale summaries
@@ -76,8 +76,10 @@ The mock run writes a directory under `runs/` with:
 - `champion/analysis.md`
 
 The ablation command writes `ablation_runs.csv`, `ablation_summary.csv`, and
-`ablation_report.md`. Mock ablation validates workflow shape and reporting only;
-it is not evidence of paper-score reproduction.
+`ablation_report.md`. Mock ablation rows are labeled with
+`evidence_mode=mock_workflow_shape` and `scientific_claim=not_supported`; they
+validate workflow shape and reporting only, not emergent discovery or
+paper-score reproduction.
 
 ## Documentation Tree
 
@@ -96,7 +98,9 @@ uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx 
 ```
 
 The benchmark catalog now includes all six paper task families as lightweight
-offline examples:
+offline examples. Each catalog entry records `fidelity_level`, expected runtime,
+dependency flags, and paper-gap notes so proxy tasks are not mistaken for full
+paper experiments:
 
 - `examples/function_approx`
 - `examples/poisson_lshape`

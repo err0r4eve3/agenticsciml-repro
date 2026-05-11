@@ -133,6 +133,36 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert len(checkpoint["nodes"]) == len(tree["nodes"])
 
 
+def test_parallel_mutations_run_as_parallel_child_jobs(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="parallel-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=2, parallel_mutations=2, max_debug_retries=1),
+        use_mock=True,
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+    tree = json.loads((run_dir / "tree.json").read_text(encoding="utf-8"))
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    parallel_starts = [
+        event
+        for event in trace_events
+        if event["name"] == "agenticsciml.parallel_children.start"
+        and event["metadata"].get("execution_mode") == "parallel"
+    ]
+    node_ids = [node["node_id"] for node in tree["nodes"]]
+
+    assert len(tree["nodes"]) >= 4
+    assert len(node_ids) == len(set(node_ids))
+    assert parallel_starts
+    assert parallel_starts[-1]["metadata"]["child_count"] == 2
+    assert parallel_starts[-1]["metadata"]["max_workers"] == 2
+
+
 def test_resume_continues_existing_solution_tree_without_rebuilding_root(tmp_path: Path) -> None:
     first_config = ExperimentConfig(
         experiment_id="resume-run",

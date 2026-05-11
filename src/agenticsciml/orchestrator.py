@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import shutil
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from agenticsciml.agents import (
@@ -44,6 +46,7 @@ class AgenticSciMLOrchestrator:
         self.storage = ExperimentStorage.create(config.output_dir, config.experiment_id)
         self.nodes: list[SolutionNode] = []
         self.analysis_by_node: dict[str, AnalysisReport] = {}
+        self._analysis_lock = threading.RLock()
 
         self.data_analyst = DataAnalystAgent(llm, self.storage)
         self.evaluator = EvaluatorAgent(llm, self.storage)
@@ -86,10 +89,7 @@ class AgenticSciMLOrchestrator:
 
         for _ in range(self.config.evolution.max_iterations):
             parents = self._select_parents()
-            for parent in parents:
-                if len(parent.children) >= self.config.evolution.max_children_per_node:
-                    continue
-                child = self._create_child(parent, contract)
+            for parent, child in self._create_children_for_parents(parents, contract):
                 parent.children.append(child.node_id)
                 self.nodes.append(child)
                 self._save_checkpoint("child_created")
@@ -224,8 +224,118 @@ class AgenticSciMLOrchestrator:
             method_tags=["root_baseline"],
         )
 
-    def _create_child(self, parent: SolutionNode, contract: EvaluationContract) -> SolutionNode:
-        solution_id = self._next_solution_id()
+    def _create_children_for_parents(
+        self,
+        parents: list[SolutionNode],
+        contract: EvaluationContract,
+    ) -> list[tuple[SolutionNode, SolutionNode]]:
+        available = [
+            parent
+            for parent in parents
+            if len(parent.children) < self.config.evolution.max_children_per_node
+        ]
+        if not available:
+            return []
+
+        max_workers = min(len(available), max(1, self.config.evolution.parallel_mutations))
+        jobs = [
+            (parent, f"solution_{len(self.nodes) + index:03d}")
+            for index, parent in enumerate(available)
+        ]
+        execution_mode = "parallel" if max_workers > 1 else "sequential"
+        self.storage.record_trace(
+            "workflow_span",
+            "agenticsciml.parallel_children.start",
+            {
+                "execution_mode": execution_mode,
+                "child_count": len(jobs),
+                "max_workers": max_workers,
+                "parent_ids": [parent.node_id for parent, _ in jobs],
+            },
+        )
+
+        if max_workers == 1:
+            children = [
+                (parent, self._create_child(parent, contract, solution_id=solution_id))
+                for parent, solution_id in jobs
+            ]
+        else:
+            with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="agenticsciml-child") as executor:
+                futures = [
+                    executor.submit(self._create_child, parent, contract, solution_id)
+                    for parent, solution_id in jobs
+                ]
+                children = []
+                for (parent, solution_id), future in zip(jobs, futures):
+                    try:
+                        child = future.result()
+                    except Exception as exc:  # pragma: no cover - defensive guard for real LLM/tool failures.
+                        child = self._failed_child_from_exception(parent, solution_id, contract, exc)
+                    children.append((parent, child))
+
+        self.storage.record_trace(
+            "workflow_span",
+            "agenticsciml.parallel_children.end",
+            {
+                "execution_mode": execution_mode,
+                "child_count": len(children),
+                "max_workers": max_workers,
+                "child_ids": [child.node_id for _, child in children],
+            },
+        )
+        return children
+
+    def _failed_child_from_exception(
+        self,
+        parent: SolutionNode,
+        solution_id: str,
+        contract: EvaluationContract,
+        exc: Exception,
+    ) -> SolutionNode:
+        workspace = self.storage.create_solution_workspace(solution_id)
+        self.storage.save_solution_text(
+            solution_id,
+            "orchestration_error.md",
+            f"# Orchestration Error\n\n{type(exc).__name__}: {exc}\n",
+        )
+        self.storage.record_trace(
+            "guardrail_span",
+            "child_creation:exception",
+            {
+                "solution_id": solution_id,
+                "parent_id": parent.node_id,
+                "passed": False,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+        report = self.result_analyst.analyze(solution_id, workspace)
+        with self._analysis_lock:
+            self.analysis_by_node[solution_id] = report
+        return SolutionNode(
+            node_id=solution_id,
+            parent_id=parent.node_id,
+            workspace=str(workspace),
+            score=None,
+            status="failed",
+            proposal_path=str(workspace / "proposal.md"),
+            analysis_path=str(workspace / "analysis.md"),
+            error=str(exc),
+            benchmark_name=contract.benchmark_name,
+            contract_hash=contract.contract_hash,
+            method_tags=["mutation_error"],
+            failure_kind="orchestration_error",
+            score_delta_from_parent=None,
+            num_debug_attempts=0,
+        )
+
+    def _create_child(
+        self,
+        parent: SolutionNode,
+        contract: EvaluationContract,
+        solution_id: str | None = None,
+    ) -> SolutionNode:
+        solution_id = solution_id or self._next_solution_id()
         workspace = self.storage.create_solution_workspace(solution_id)
         prepare_solution_workspace(self.config.benchmark_dir, workspace)
 
@@ -292,7 +402,8 @@ class AgenticSciMLOrchestrator:
                 },
             )
             report = self.result_analyst.analyze(solution_id, workspace)
-            self.analysis_by_node[solution_id] = report
+            with self._analysis_lock:
+                self.analysis_by_node[solution_id] = report
             return SolutionNode(
                 node_id=solution_id,
                 parent_id=parent.node_id,
@@ -406,7 +517,8 @@ class AgenticSciMLOrchestrator:
             error = result.stderr or result.stdout[-1000:]
 
         report = self.result_analyst.analyze(solution_id, workspace)
-        self.analysis_by_node[solution_id] = report
+        with self._analysis_lock:
+            self.analysis_by_node[solution_id] = report
         score_delta = None
         if parent_node and parent_node.score and score:
             score_delta = score.value - parent_node.score.value
