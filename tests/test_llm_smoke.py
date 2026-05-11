@@ -44,6 +44,28 @@ def _rewrite_first_ledger_field(run_dir: Path, field: str, value: object) -> Non
     )
 
 
+def _delete_first_ledger_field(run_dir: Path, field: str) -> None:
+    ledger_path = run_dir / "llm_call_ledger.jsonl"
+    entries = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert entries, "expected at least one ledger entry"
+    entries[0].pop(field, None)
+    ledger_path.write_text(
+        "\n".join(json.dumps(entry, sort_keys=True) for entry in entries) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _duplicate_second_ledger_call_id(run_dir: Path) -> None:
+    ledger_path = run_dir / "llm_call_ledger.jsonl"
+    entries = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(entries) >= 2, "expected at least two ledger entries"
+    entries[1]["call_id"] = entries[0]["call_id"]
+    ledger_path.write_text(
+        "\n".join(json.dumps(entry, sort_keys=True) for entry in entries) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _delete_first_ledger_entry(run_dir: Path) -> None:
     ledger_path = run_dir / "llm_call_ledger.jsonl"
     lines = [line for line in ledger_path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -529,6 +551,73 @@ def test_verify_llm_smoke_output_rejects_manifest_model_mismatch(tmp_path: Path)
 
     assert verification.passed is False
     assert any("ledger models" in issue and "manifest model" in issue for issue in payload["issues"])
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_issue"),
+    [
+        ("prompt_hash", "not-a-sha", "prompt_hash must be a lowercase sha256 hex string"),
+        ("provider", "", "provider must be a non-empty string"),
+        ("success", False, "success must be true for completed smoke evidence"),
+        ("prompt", "raw prompt text", "contains forbidden raw field"),
+        ("duration_s", float("nan"), "duration_s must be a finite number"),
+    ],
+)
+def test_verify_llm_smoke_output_rejects_invalid_ledger_entry_schema(
+    tmp_path: Path,
+    field: str,
+    value: object,
+    expected_issue: str,
+) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    _rewrite_first_ledger_field(tmp_path / "runs" / "smoke-branch_context-seed-0", field, value)
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any(expected_issue in issue for issue in payload["issues"])
+
+
+def test_verify_llm_smoke_output_rejects_missing_ledger_hash(tmp_path: Path) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    _delete_first_ledger_field(tmp_path / "runs" / "smoke-branch_context-seed-0", "response_hash")
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("response_hash must be a lowercase sha256 hex string" in issue for issue in payload["issues"])
+
+
+def test_verify_llm_smoke_output_rejects_duplicate_ledger_call_id(tmp_path: Path) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    _duplicate_second_ledger_call_id(tmp_path / "runs" / "smoke-branch_context-seed-0")
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("call_id must be llm_call_000002" in issue for issue in payload["issues"])
+    assert any("call_id must be unique" in issue for issue in payload["issues"])
 
 
 def test_cli_verify_smoke_llm_command(tmp_path: Path, cli_env: dict[str, str]) -> None:

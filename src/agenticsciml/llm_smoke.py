@@ -4,6 +4,7 @@ import csv
 import hashlib
 import importlib.metadata
 import json
+import math
 import os
 import re
 import sys
@@ -588,6 +589,7 @@ def _read_llm_call_ledger(run_dir: Path, variant: str) -> tuple[list[dict[str, A
     if not path.exists():
         return [], [f"{variant}: missing llm_call_ledger.jsonl"]
     entries: list[dict[str, Any]] = []
+    seen_call_ids: set[str] = set()
     for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip():
             continue
@@ -599,10 +601,87 @@ def _read_llm_call_ledger(run_dir: Path, variant: str) -> tuple[list[dict[str, A
         if not isinstance(entry, dict):
             issues.append(f"{variant}: ledger line {line_number} must be a JSON object")
             continue
+        expected_call_id = f"llm_call_{len(entries) + 1:06d}"
+        issues.extend(_validate_llm_call_ledger_entry(entry, expected_call_id, seen_call_ids, line_number, variant))
         entries.append(entry)
     if not entries:
         issues.append(f"{variant}: llm_call_ledger.jsonl must contain at least one call")
     return entries, issues
+
+
+def _validate_llm_call_ledger_entry(
+    entry: dict[str, Any],
+    expected_call_id: str,
+    seen_call_ids: set[str],
+    line_number: int,
+    variant: str,
+) -> list[str]:
+    issues: list[str] = []
+    prefix = f"{variant}: ledger line {line_number}"
+    forbidden = {"prompt", "system", "response", "raw_prompt", "raw_response", "messages"}
+    leaked = sorted(forbidden & set(entry))
+    if leaked:
+        issues.append(f"{prefix} contains forbidden raw field(s): {', '.join(leaked)}")
+    if entry.get("schema_version") != 1:
+        issues.append(f"{prefix} schema_version must be 1")
+    call_id = entry.get("call_id")
+    if call_id != expected_call_id:
+        issues.append(f"{prefix} call_id must be {expected_call_id}")
+    if isinstance(call_id, str):
+        if call_id in seen_call_ids:
+            issues.append(f"{prefix} call_id must be unique")
+        seen_call_ids.add(call_id)
+    _required_non_empty_string(entry.get("provider"), f"{prefix} provider", issues)
+    _required_non_empty_string(entry.get("model"), f"{prefix} model", issues)
+    method = _required_non_empty_string(entry.get("method"), f"{prefix} method", issues)
+    if method and method not in {"complete_text", "complete_json"}:
+        issues.append(f"{prefix} method must be complete_text or complete_json")
+    schema_name = entry.get("schema_name")
+    if method == "complete_text" and schema_name is not None:
+        issues.append(f"{prefix} schema_name must be null for complete_text")
+    if method == "complete_json":
+        _required_non_empty_string(schema_name, f"{prefix} schema_name", issues)
+    for field in ("prompt_hash", "system_hash"):
+        _validate_sha256_hex(entry.get(field), f"{prefix} {field}", issues)
+    success = entry.get("success")
+    if not isinstance(success, bool):
+        issues.append(f"{prefix} success must be boolean")
+    elif success:
+        _validate_sha256_hex(entry.get("response_hash"), f"{prefix} response_hash", issues)
+    else:
+        issues.append(f"{prefix} success must be true for completed smoke evidence")
+        _required_non_empty_string(entry.get("error_type"), f"{prefix} error_type", issues)
+    _validate_non_negative_finite_number(entry.get("duration_s"), f"{prefix} duration_s", issues)
+    _validate_positive_finite_number(entry.get("started_at_unix"), f"{prefix} started_at_unix", issues)
+    return issues
+
+
+def _validate_sha256_hex(value: Any, label: str, issues: list[str]) -> None:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        issues.append(f"{label} must be a lowercase sha256 hex string")
+
+
+def _validate_non_negative_finite_number(value: Any, label: str, issues: list[str]) -> None:
+    number = _parse_finite_number(value, label, issues)
+    if number is not None and number < 0:
+        issues.append(f"{label} must be >= 0")
+
+
+def _validate_positive_finite_number(value: Any, label: str, issues: list[str]) -> None:
+    number = _parse_finite_number(value, label, issues)
+    if number is not None and number <= 0:
+        issues.append(f"{label} must be > 0")
+
+
+def _parse_finite_number(value: Any, label: str, issues: list[str]) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        issues.append(f"{label} must be a finite number")
+        return None
+    number = float(value)
+    if not math.isfinite(number):
+        issues.append(f"{label} must be a finite number")
+        return None
+    return number
 
 
 def _generation_span_count(run_dir: Path) -> int:
