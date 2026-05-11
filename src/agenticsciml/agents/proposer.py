@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from typing import Any
+
 from agenticsciml.agents.base import AgentBase
 from agenticsciml.agents.critic import CriticAgent
 from agenticsciml.agents.specs import PromptTemplate
@@ -16,6 +19,7 @@ class ProposerAgent(AgentBase):
         kb_entry: str | None,
         related_reports: list[str],
         use_critic: bool = True,
+        branch_context: dict[str, Any] | None = None,
     ) -> Proposal:
         self.require_inputs(
             {
@@ -23,6 +27,7 @@ class ProposerAgent(AgentBase):
                 "parent_summary": parent_summary,
                 "kb_entry": kb_entry,
                 "related_reports": related_reports,
+                "branch_context": branch_context,
             }
         )
         messages: list[AgentMessage] = []
@@ -30,7 +35,9 @@ class ProposerAgent(AgentBase):
         context = (
             f"Parent summary:\n{parent_summary}\n\n"
             f"KB entry:\n{kb_entry or 'none'}\n\n"
-            f"Related reports:\n{chr(10).join(related_reports) if related_reports else 'none'}"
+            f"Related reports:\n{chr(10).join(related_reports) if related_reports else 'none'}\n\n"
+            "Branch context:\n"
+            f"{json.dumps(branch_context or {}, indent=2, sort_keys=True)}"
         )
         critic = CriticAgent(self.llm, self.storage) if use_critic else None
         proposal_hint = "No proposal yet; critique the diagnostic framing."

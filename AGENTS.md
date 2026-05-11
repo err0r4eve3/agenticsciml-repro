@@ -329,6 +329,11 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   must fail closed. The fanout trace schema must live in a shared typed
   contract used by both the orchestrator writer and trace-summary reader; do
   not duplicate writer-only and reader-only schema logic.
+- Same-parent fanout branches must carry explicit branch context. Persist
+  `branch_context.json`, include branch context in proposer/engineer prompts,
+  emit it in child mutation trace events, and add branch-intent tags to child
+  metadata so sibling branches can be audited for diversity instead of merely
+  counted.
 - Retrieval queries must be benchmark-aware. Build them from `ProblemBundle`,
   parent analysis, failure kind, method tags, score trend, and top leaderboard
   context rather than fixed benchmark-specific keywords.

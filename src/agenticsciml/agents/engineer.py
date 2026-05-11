@@ -23,6 +23,7 @@ class EngineerAgent(AgentBase):
         contract: EvaluationContract,
         guidelines: str,
         parent_analysis: AnalysisReport | None,
+        branch_context: dict[str, Any] | None = None,
     ) -> str:
         parent_digest = solution_digest(parent_code)
         self.require_inputs(
@@ -34,6 +35,7 @@ class EngineerAgent(AgentBase):
                 "contract": contract,
                 "guidelines": guidelines,
                 "parent_analysis": parent_analysis,
+                "branch_context": branch_context,
                 "parent_digest": parent_digest,
             }
         )
@@ -50,6 +52,8 @@ class EngineerAgent(AgentBase):
             f"{guidelines[:2500]}\n\n"
             "## Parent Analysis\n\n"
             f"{parent_analysis.summary if parent_analysis else 'No parent analysis available.'}\n\n"
+            "## Branch Context\n\n"
+            f"{json.dumps(branch_context or {}, indent=2, sort_keys=True)}\n\n"
             "## Forbidden Actions\n\n"
             "- Do not read validation data.\n"
             "- Predict mode may read only `predict_input.npz` and must write `predictions.npz` "

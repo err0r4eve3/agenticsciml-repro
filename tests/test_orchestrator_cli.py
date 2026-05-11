@@ -210,6 +210,62 @@ def test_parallel_mutation_budget_fans_out_single_parent(tmp_path: Path) -> None
     }
 
 
+def test_parallel_fanout_records_branch_context(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="branch-context-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=1, parallel_mutations=2, max_debug_retries=1),
+        use_mock=True,
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+    tree = json.loads((run_dir / "tree.json").read_text(encoding="utf-8"))
+    child_nodes = [node for node in tree["nodes"] if node["parent_id"] == "solution_000"]
+    contexts = {
+        node["node_id"]: json.loads(
+            (run_dir / "solutions" / node["node_id"] / "branch_context.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        for node in child_nodes
+    }
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    child_starts = [
+        event
+        for event in trace_events
+        if event["name"] == "agenticsciml.child_mutation.start"
+    ]
+    proposal_transcript = json.loads(
+        (
+            run_dir
+            / "solutions"
+            / "solution_001"
+            / "transcripts"
+            / "proposal_debate.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    assert contexts["solution_001"]["branch_intent"] == "features_or_architecture"
+    assert contexts["solution_002"]["branch_intent"] == "training_stability"
+    assert contexts["solution_001"]["sibling_branch_ids"] == ["solution_002"]
+    assert contexts["solution_002"]["sibling_branch_ids"] == ["solution_001"]
+    assert any(
+        node["node_id"] == "solution_001"
+        and "branch:features_or_architecture" in node["method_tags"]
+        for node in child_nodes
+    )
+    assert {event["metadata"]["branch_context"]["branch_intent"] for event in child_starts} == {
+        "features_or_architecture",
+        "training_stability",
+    }
+    assert "Branch context" in proposal_transcript[0]["prompt"]
+    assert "features_or_architecture" in proposal_transcript[0]["prompt"]
+
+
 def test_parallel_mutation_fanout_respects_max_children_per_node(tmp_path: Path) -> None:
     config = ExperimentConfig(
         experiment_id="parallel-fanout-limit-run",
@@ -360,6 +416,7 @@ def test_parallel_child_jobs_respect_parallel_mutation_budget(tmp_path: Path, mo
         parent: SolutionNode,
         contract_arg,
         solution_id: str | None = None,
+        branch_context: dict[str, object] | None = None,
     ) -> SolutionNode:
         assert contract_arg.contract_hash == contract.contract_hash
         assert solution_id is not None
@@ -448,6 +505,7 @@ def test_parallel_child_jobs_keep_mixed_success_failure_artifacts_stable(
         parent: SolutionNode,
         contract_arg,
         solution_id: str | None = None,
+        branch_context: dict[str, object] | None = None,
     ) -> SolutionNode:
         assert solution_id is not None
         if parent.node_id == "solution_000":

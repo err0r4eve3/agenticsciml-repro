@@ -49,6 +49,14 @@ from agenticsciml.storage import ExperimentStorage
 from agenticsciml.trace_contracts import FanoutTraceMetadata
 
 
+BRANCH_INTENTS = (
+    "features_or_architecture",
+    "training_stability",
+    "loss_weighting_or_sampling",
+    "regularization_or_simplicity",
+)
+
+
 class AgenticSciMLOrchestrator:
     def __init__(self, config: ExperimentConfig, llm: LLMClient):
         if config.benchmark_dir is None:
@@ -344,15 +352,23 @@ class AgenticSciMLOrchestrator:
             },
         )
 
+        branch_contexts = self._branch_contexts(fanout_trace)
+
         if max_workers == 1:
             children = [
-                (parent, self._run_child_job(parent, contract, solution_id))
+                (parent, self._run_child_job(parent, contract, solution_id, branch_contexts[solution_id]))
                 for parent, solution_id in jobs
             ]
         else:
             with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="agenticsciml-child") as executor:
                 futures = [
-                    executor.submit(self._run_child_job, parent, contract, solution_id)
+                    executor.submit(
+                        self._run_child_job,
+                        parent,
+                        contract,
+                        solution_id,
+                        branch_contexts[solution_id],
+                    )
                     for parent, solution_id in jobs
                 ]
                 children = []
@@ -397,11 +413,38 @@ class AgenticSciMLOrchestrator:
                 break
         return slots
 
+    def _branch_contexts(self, fanout_trace: FanoutTraceMetadata) -> dict[str, dict[str, object]]:
+        contexts: dict[str, dict[str, object]] = {}
+        parent_child_ids = fanout_trace.parent_to_children
+        parent_branch_offsets: dict[str, int] = {}
+        for edge in fanout_trace.parent_child_edges:
+            parent_offset = parent_branch_offsets.get(edge.parent_id, 0)
+            parent_branch_offsets[edge.parent_id] = parent_offset + 1
+            siblings = [
+                child_id
+                for child_id in parent_child_ids.get(edge.parent_id, [])
+                if child_id != edge.child_id
+            ]
+            branch_intent = BRANCH_INTENTS[parent_offset % len(BRANCH_INTENTS)]
+            contexts[edge.child_id] = {
+                "fanout_slot_index": edge.slot_index,
+                "parent_branch_index": parent_offset,
+                "parent_fanout_child_count": len(parent_child_ids.get(edge.parent_id, [])),
+                "sibling_branch_ids": siblings,
+                "branch_intent": branch_intent,
+                "diversity_instruction": (
+                    "Prefer a mutation strategy that is meaningfully distinct from sibling "
+                    "branches from the same parent while keeping the fixed evaluator contract."
+                ),
+            }
+        return contexts
+
     def _run_child_job(
         self,
         parent: SolutionNode,
         contract: EvaluationContract,
         solution_id: str,
+        branch_context: dict[str, object] | None = None,
     ) -> SolutionNode:
         started = time.monotonic()
         self.storage.record_trace(
@@ -410,10 +453,11 @@ class AgenticSciMLOrchestrator:
             {
                 "solution_id": solution_id,
                 "parent_id": parent.node_id,
+                "branch_context": branch_context or {},
             },
         )
         try:
-            child = self._create_child(parent, contract, solution_id=solution_id)
+            child = self._create_child(parent, contract, solution_id=solution_id, branch_context=branch_context)
         except Exception as exc:  # pragma: no cover - defensive guard for real LLM/tool failures.
             child = self._failed_child_from_exception(parent, solution_id, contract, exc)
         self.storage.record_trace(
@@ -424,6 +468,7 @@ class AgenticSciMLOrchestrator:
                 "parent_id": parent.node_id,
                 "status": child.status,
                 "failure_kind": child.failure_kind,
+                "branch_context": branch_context or {},
                 "duration_s": time.monotonic() - started,
             },
         )
@@ -483,10 +528,13 @@ class AgenticSciMLOrchestrator:
         parent: SolutionNode,
         contract: EvaluationContract,
         solution_id: str | None = None,
+        branch_context: dict[str, object] | None = None,
     ) -> SolutionNode:
         solution_id = solution_id or self._next_solution_id()
         workspace = self.storage.create_solution_workspace(solution_id)
         prepare_solution_workspace(self.config.benchmark_dir, workspace)
+        branch_context = branch_context or {}
+        self.storage.save_json(Path("solutions") / solution_id / "branch_context.json", branch_context)
 
         parent_workspace = Path(parent.workspace)
         parent_analysis = self.analysis_by_node.get(parent.node_id)
@@ -521,9 +569,13 @@ class AgenticSciMLOrchestrator:
             kb_entry=kb_text,
             related_reports=related_reports,
             use_critic=self.config.evolution.use_critic,
+            branch_context=branch_context,
         )
         parent_code = self.engineer.read_parent_code(parent_workspace)
         method_tags = self._method_tags(proposal, kb_entry.entry_id if kb_entry else None)
+        branch_intent = branch_context.get("branch_intent")
+        if isinstance(branch_intent, str) and branch_intent:
+            method_tags.append(f"branch:{branch_intent}")
         try:
             self.engineer.mutate(
                 solution_id,
@@ -533,6 +585,7 @@ class AgenticSciMLOrchestrator:
                 contract=contract,
                 guidelines=self._guidelines_text(),
                 parent_analysis=parent_analysis,
+                branch_context=branch_context,
             )
         except (PatchApplicationError, StructuredOutputError) as exc:
             self.storage.save_solution_text(

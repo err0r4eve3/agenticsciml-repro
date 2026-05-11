@@ -101,6 +101,7 @@ def test_agent_instances_bind_runtime_specs_and_validate_inputs(tmp_path: Path) 
             "parent_summary": "score=1.0",
             "kb_entry": None,
             "related_reports": [],
+            "branch_context": {},
         }
     )
     with pytest.raises(InputContractError) as exc:
