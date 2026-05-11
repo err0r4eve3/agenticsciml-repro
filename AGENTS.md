@@ -166,7 +166,9 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   `run_metadata.run_state` must match the workflow-end trace `run_state` when
   that event exists. Exported run states require a workflow-end trace event;
   orchestrator run-start traces should use `run_state=partial` and run-end
-  traces should use the final exported state.
+  traces should use the final exported state. Workflow-end events must not
+  appear before workflow-start in trace order, and multiple workflow-end events
+  with conflicting `run_state` values must fail the quality gate.
 - Preserve resume semantics. When changing orchestration, keep `checkpoint.json`
   current after root creation, child creation, and final report export.
 - Keep evaluator and benchmark contracts deterministic. LLM judges may summarize

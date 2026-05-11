@@ -321,6 +321,47 @@ def test_trace_summary_fails_when_exported_run_is_missing_workflow_end(tmp_path:
     assert any("workflow end" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
+def test_trace_summary_fails_when_workflow_end_precedes_start(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    events = sorted(events, key=lambda event: 0 if event.get("name") == "agenticsciml.run.end" else 1)
+    _write_events(run_dir / "trace.jsonl", events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("workflow end precedes workflow start" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
+def test_trace_summary_fails_on_conflicting_workflow_end_states(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    events.insert(
+        1,
+        {
+            "event_type": "workflow_span",
+            "name": "agenticsciml.run.end",
+            "metadata": {"run_state": "finalized"},
+        },
+    )
+    _write_events(run_dir / "trace.jsonl", events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("conflicting workflow end run_state" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
 def _write_consistent_run_artifacts(run_dir: Path) -> Path:
     run_dir.mkdir()
     contract_hash = "a" * 64

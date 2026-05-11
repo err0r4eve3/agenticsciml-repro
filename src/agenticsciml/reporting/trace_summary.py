@@ -126,6 +126,7 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
     elif run_metadata is not None and events:
         issues.append("trace workflow start metadata is missing")
 
+    _check_workflow_lifecycle_sequence(issues, events)
     _check_run_state_consistency(issues, run_metadata, workflow_metadata, workflow_end_metadata)
     _check_solution_artifact_consistency(issues, contract, run_metadata, tree, checkpoint)
 
@@ -188,6 +189,30 @@ def _check_run_state_consistency(
             "run_metadata.json",
             "trace workflow end",
         )
+
+
+def _check_workflow_lifecycle_sequence(issues: list[str], events: list[dict[str, Any]]) -> None:
+    start_indices: list[int] = []
+    end_indices: list[int] = []
+    end_states: set[str] = set()
+    for index, event in enumerate(events):
+        if event.get("event_type") != "workflow_span":
+            continue
+        metadata = event.get("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        if event.get("name") == "agenticsciml.run.start":
+            start_indices.append(index)
+        elif event.get("name") == "agenticsciml.run.end":
+            end_indices.append(index)
+            state = metadata.get("run_state")
+            if isinstance(state, str):
+                end_states.add(state)
+
+    if start_indices and end_indices and min(end_indices) < min(start_indices):
+        issues.append("workflow end precedes workflow start in trace order")
+    if len(end_states) > 1:
+        issues.append("conflicting workflow end run_state values: " + ", ".join(sorted(end_states)))
 
 
 def _check_solution_artifact_consistency(
