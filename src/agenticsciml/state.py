@@ -87,6 +87,35 @@ def validate_solution_node_payload(data: Any, *, context: str = "SolutionNode") 
         issues.append(f"{context} score_delta_from_parent must be a finite number or null")
 
     issues.extend(validate_solution_score_payload(data.get("score"), context=context))
+    issues.extend(validate_solution_node_status_semantics(data, context=context))
+    return issues
+
+
+def validate_solution_node_status_semantics(data: dict[str, Any], *, context: str) -> list[str]:
+    issues: list[str] = []
+    status = data.get("status")
+    score = data.get("score")
+    error = data.get("error")
+    failure_kind = data.get("failure_kind")
+    if status == "evaluated":
+        if score is None:
+            issues.append(f"{context} evaluated node must have a score")
+        if error is not None:
+            issues.append(f"{context} evaluated node must not have error")
+        if failure_kind is not None:
+            issues.append(f"{context} evaluated node must not have failure_kind")
+    elif status == "failed":
+        if score is not None:
+            issues.append(f"{context} failed node must not have a score")
+        if not error and not failure_kind:
+            issues.append(f"{context} failed node must have error or failure_kind")
+    elif status == "created":
+        if score is not None:
+            issues.append(f"{context} created node must not have a score")
+        if error is not None:
+            issues.append(f"{context} created node must not have error")
+        if failure_kind is not None:
+            issues.append(f"{context} created node must not have failure_kind")
     return issues
 
 

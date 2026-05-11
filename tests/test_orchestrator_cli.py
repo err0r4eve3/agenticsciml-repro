@@ -518,6 +518,32 @@ def test_resume_rejects_empty_solution_tree(tmp_path: Path) -> None:
         AgenticSciMLOrchestrator(resume_config, MockLLMClient()).run()
 
 
+def test_resume_rejects_invalid_solution_node_status_semantics(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="invalid-node-status-semantics-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+    )
+    run_dir = AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+    checkpoint_path = run_dir / "checkpoint.json"
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    checkpoint["nodes"][0]["score"] = None
+    checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
+    resume_config = ExperimentConfig(
+        experiment_id="invalid-node-status-semantics-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=1, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+        resume=True,
+    )
+
+    with pytest.raises(ValueError, match="evaluated node must have a score"):
+        AgenticSciMLOrchestrator(resume_config, MockLLMClient()).run()
+
+
 def test_resume_rejects_node_contract_mismatch(tmp_path: Path) -> None:
     config = ExperimentConfig(
         experiment_id="node-contract-run",

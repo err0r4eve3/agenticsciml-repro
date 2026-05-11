@@ -219,6 +219,10 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   `trace_summary.json` artifact checks and `SolutionNode.from_dict()` load
   paths so corrupted `tree.json` / `checkpoint.json` payloads fail closed at
   resume time, not only during post-run reporting.
+- Solution node status must be semantically consistent: `evaluated` nodes need
+  a valid score and no `error` / `failure_kind`; `failed` nodes must not carry a
+  score and must have either `error` or `failure_kind`; `created` nodes must not
+  carry score, error, or failure kind.
 - JSON artifact writes must reject `NaN`, `Infinity`, and `-Infinity`; do not
   let non-standard JSON numeric constants enter run metadata, trace events,
   transcripts, checkpoint files, tree exports, or leaderboard inputs.

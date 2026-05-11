@@ -284,6 +284,20 @@ def test_trace_summary_fails_when_solution_node_score_is_not_finite(tmp_path: Pa
     assert any("score.value must be a finite number" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
+def test_trace_summary_fails_when_solution_node_status_semantics_are_invalid(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    for artifact_name in ("tree.json", "checkpoint.json"):
+        artifact = json.loads((run_dir / artifact_name).read_text(encoding="utf-8"))
+        artifact["nodes"][0]["score"] = None
+        (run_dir / artifact_name).write_text(json.dumps(artifact), encoding="utf-8")
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("evaluated node must have a score" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
 def test_trace_summary_fails_on_invalid_solution_tree_child_link(tmp_path: Path) -> None:
     run_dir = _write_consistent_run_artifacts(tmp_path / "run")
     for artifact_name in ("tree.json", "checkpoint.json"):
@@ -318,7 +332,7 @@ def test_trace_summary_fails_on_duplicate_solution_tree_child_link(tmp_path: Pat
         "node_id": "solution_001",
         "parent_id": "solution_000",
         "workspace": str(run_dir / "solutions" / "solution_001"),
-        "score": None,
+        "score": {"metric": "validation_mse", "value": 0.2, "higher_is_better": False},
         "children": [],
         "status": "evaluated",
         "proposal_path": None,
@@ -353,7 +367,7 @@ def test_trace_summary_fails_when_child_is_missing_from_parent_children(tmp_path
         "node_id": "solution_001",
         "parent_id": "solution_000",
         "workspace": str(run_dir / "solutions" / "solution_001"),
-        "score": None,
+        "score": {"metric": "validation_mse", "value": 0.3, "higher_is_better": False},
         "children": [],
         "status": "evaluated",
         "proposal_path": None,
@@ -387,7 +401,7 @@ def test_trace_summary_fails_on_solution_tree_parent_cycle(tmp_path: Path) -> No
         "node_id": "solution_001",
         "parent_id": "solution_000",
         "workspace": str(run_dir / "solutions" / "solution_001"),
-        "score": None,
+        "score": {"metric": "validation_mse", "value": 0.4, "higher_is_better": False},
         "children": ["solution_000"],
         "status": "evaluated",
         "proposal_path": None,
@@ -796,7 +810,7 @@ def test_trace_summary_fails_when_exported_node_only_has_relation_reference(tmp_
         "node_id": "solution_001",
         "parent_id": "solution_000",
         "workspace": str(run_dir / "solutions" / "solution_001"),
-        "score": None,
+        "score": {"metric": "validation_mse", "value": 0.1, "higher_is_better": False},
         "children": [],
         "status": "evaluated",
         "proposal_path": None,
@@ -1004,7 +1018,7 @@ def _write_consistent_run_artifacts(run_dir: Path) -> Path:
         "node_id": "solution_000",
         "parent_id": None,
         "workspace": str(run_dir / "solutions" / "solution_000"),
-        "score": None,
+        "score": {"metric": "validation_mse", "value": 0.1, "higher_is_better": False},
         "children": [],
         "status": "evaluated",
         "proposal_path": None,

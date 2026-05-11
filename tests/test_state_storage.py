@@ -94,6 +94,40 @@ def test_solution_node_from_dict_rejects_non_finite_score_values() -> None:
         SolutionNode.from_dict(payload)
 
 
+def test_solution_node_from_dict_rejects_invalid_status_semantics() -> None:
+    evaluated = SolutionNode(
+        node_id="solution_000",
+        parent_id=None,
+        workspace="runs/demo/solutions/solution_000",
+        status="evaluated",
+    ).to_dict()
+
+    with pytest.raises(ValueError, match="evaluated node must have a score"):
+        SolutionNode.from_dict(evaluated)
+
+    failed = SolutionNode(
+        node_id="solution_000",
+        parent_id=None,
+        workspace="runs/demo/solutions/solution_000",
+        score=SolutionScore(metric="validation_mse", value=1.0, higher_is_better=False),
+        status="failed",
+    ).to_dict()
+
+    with pytest.raises(ValueError, match="failed node must not have a score"):
+        SolutionNode.from_dict(failed)
+
+    created = SolutionNode(
+        node_id="solution_000",
+        parent_id=None,
+        workspace="runs/demo/solutions/solution_000",
+        score=SolutionScore(metric="validation_mse", value=1.0, higher_is_better=False),
+        status="created",
+    ).to_dict()
+
+    with pytest.raises(ValueError, match="created node must not have a score"):
+        SolutionNode.from_dict(created)
+
+
 def test_solution_tree_payload_rejects_empty_node_list() -> None:
     issues = validate_solution_tree_payload([], context="checkpoint.json")
 
