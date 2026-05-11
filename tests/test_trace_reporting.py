@@ -740,6 +740,99 @@ def test_trace_summary_fails_when_parent_children_map_references_unknown_node(tm
     assert any("unknown solution node" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
+def test_trace_summary_fails_when_parent_children_map_is_malformed(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    events.append(
+        {
+            "event_type": "workflow_span",
+            "name": "agenticsciml.parallel_children.start",
+            "metadata": {
+                "parent_ids": ["solution_000"],
+                "child_ids": ["solution_001"],
+                "parent_to_children": {"solution_000": "solution_001"},
+            },
+        }
+    )
+    _write_events(run_dir / "trace.jsonl", events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("parent_to_children" in issue and "must be a list" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
+def test_trace_summary_fails_when_parent_child_edges_mismatch_child_ids(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    events.append(
+        {
+            "event_type": "workflow_span",
+            "name": "agenticsciml.parallel_children.start",
+            "metadata": {
+                "parent_ids": ["solution_000"],
+                "unique_parent_ids": ["solution_000"],
+                "child_ids": ["solution_001"],
+                "parent_child_edges": [
+                    {"slot_index": 0, "parent_id": "solution_000", "child_id": "solution_002"}
+                ],
+                "parent_to_children": {"solution_000": ["solution_001"]},
+                "parent_to_child": {"solution_000": "solution_001"},
+            },
+        }
+    )
+    _write_events(run_dir / "trace.jsonl", events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("parent_child_edges child order mismatch" in issue for issue in summary["artifact_consistency"]["issues"])
+    assert any("parent_to_children mismatch" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
+def test_trace_summary_fails_when_legacy_parent_to_child_is_not_last_child(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    events.append(
+        {
+            "event_type": "workflow_span",
+            "name": "agenticsciml.parallel_children.start",
+            "metadata": {
+                "parent_ids": ["solution_000", "solution_000"],
+                "unique_parent_ids": ["solution_000"],
+                "child_ids": ["solution_001", "solution_002"],
+                "parent_child_edges": [
+                    {"slot_index": 0, "parent_id": "solution_000", "child_id": "solution_001"},
+                    {"slot_index": 1, "parent_id": "solution_000", "child_id": "solution_002"},
+                ],
+                "parent_to_children": {"solution_000": ["solution_001", "solution_002"]},
+                "parent_to_child": {"solution_000": "solution_001"},
+            },
+        }
+    )
+    _write_events(run_dir / "trace.jsonl", events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("legacy mapping mismatch" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
 def test_trace_summary_ignores_non_solution_parent_id_metadata(tmp_path: Path) -> None:
     run_dir = _write_consistent_run_artifacts(tmp_path / "run")
     events = [

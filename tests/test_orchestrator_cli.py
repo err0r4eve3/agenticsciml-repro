@@ -200,6 +200,11 @@ def test_parallel_mutation_budget_fans_out_single_parent(tmp_path: Path) -> None
     assert start["metadata"]["execution_mode"] == "parallel"
     assert start["metadata"]["child_count"] == 2
     assert start["metadata"]["parent_ids"] == ["solution_000", "solution_000"]
+    assert start["metadata"]["unique_parent_ids"] == ["solution_000"]
+    assert start["metadata"]["parent_child_edges"] == [
+        {"slot_index": 0, "parent_id": "solution_000", "child_id": "solution_001"},
+        {"slot_index": 1, "parent_id": "solution_000", "child_id": "solution_002"},
+    ]
     assert start["metadata"]["parent_to_children"] == {
         "solution_000": ["solution_001", "solution_002"]
     }

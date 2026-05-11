@@ -314,7 +314,12 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   and record `agenticsciml.parallel_children.start/end` and
   `agenticsciml.child_mutation.start/end` trace events with execution mode,
   child count, worker count, parent IDs, child IDs, parent-to-children mapping,
-  duration, and status.
+  canonical `parent_child_edges`, duration, and status. `parent_ids` in
+  parallel-child trace events is slot ordered and may contain duplicates;
+  `unique_parent_ids` carries the de-duplicated parent list. Keep
+  `parent_to_child` only as legacy compatibility when fanout creates multiple
+  children for one parent; canonical audit should use `parent_child_edges` and
+  `parent_to_children`.
 - Retrieval queries must be benchmark-aware. Build them from `ProblemBundle`,
   parent analysis, failure kind, method tags, score trend, and top leaderboard
   context rather than fixed benchmark-specific keywords.

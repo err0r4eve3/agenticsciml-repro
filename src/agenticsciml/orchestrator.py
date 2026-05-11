@@ -277,6 +277,15 @@ class AgenticSciMLOrchestrator:
         parent_to_children: dict[str, list[str]] = {}
         for parent, solution_id in jobs:
             parent_to_children.setdefault(parent.node_id, []).append(solution_id)
+        parent_child_edges = [
+            {
+                "slot_index": index,
+                "parent_id": parent.node_id,
+                "child_id": solution_id,
+            }
+            for index, (parent, solution_id) in enumerate(jobs)
+        ]
+        unique_parent_ids = list(dict.fromkeys(parent.node_id for parent, _ in jobs))
         parent_to_child = {
             parent_id: child_ids[-1]
             for parent_id, child_ids in parent_to_children.items()
@@ -289,7 +298,9 @@ class AgenticSciMLOrchestrator:
                 "child_count": len(jobs),
                 "max_workers": max_workers,
                 "parent_ids": [parent.node_id for parent, _ in jobs],
+                "unique_parent_ids": unique_parent_ids,
                 "child_ids": [solution_id for _, solution_id in jobs],
+                "parent_child_edges": parent_child_edges,
                 "parent_to_child": parent_to_child,
                 "parent_to_children": parent_to_children,
             },
@@ -321,8 +332,11 @@ class AgenticSciMLOrchestrator:
                 "execution_mode": execution_mode,
                 "child_count": len(children),
                 "max_workers": max_workers,
+                "parent_ids": [parent.node_id for parent, _ in jobs],
+                "unique_parent_ids": unique_parent_ids,
                 "child_ids": [child.node_id for _, child in children],
                 "duration_s": time.monotonic() - batch_started,
+                "parent_child_edges": parent_child_edges,
                 "parent_to_child": parent_to_child,
                 "parent_to_children": parent_to_children,
             },

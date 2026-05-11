@@ -50,6 +50,7 @@ SELF_TRACE_REFERENCE_KEYS = {
     "child_ids",
     "parent_to_child.child",
     "parent_to_children.child",
+    "parent_child_edges.child",
 }
 TRACE_NODE_LIFECYCLE_STAGE_RULES = {
     ("agent_span", "root_engineer"): "materialized",
@@ -555,6 +556,7 @@ def _check_trace_node_references(
         metadata = event.get("metadata", {})
         if not isinstance(metadata, dict):
             continue
+        _validate_parent_child_trace_metadata(event_name, metadata, issues)
         references = _trace_node_references(metadata)
         if references:
             counts["events_with_references"] += 1
@@ -768,7 +770,208 @@ def _trace_node_references(metadata: dict[str, Any]) -> list[tuple[str, str]]:
                 for child_id in child_ids:
                     if isinstance(child_id, str) and child_id:
                         references.append(("parent_to_children.child", child_id))
+    parent_child_edges = metadata.get("parent_child_edges")
+    if isinstance(parent_child_edges, list):
+        for edge in parent_child_edges:
+            if not isinstance(edge, dict):
+                continue
+            parent_id = edge.get("parent_id")
+            child_id = edge.get("child_id")
+            if isinstance(parent_id, str) and parent_id:
+                references.append(("parent_child_edges.parent", parent_id))
+            if isinstance(child_id, str) and child_id:
+                references.append(("parent_child_edges.child", child_id))
     return references
+
+
+def _validate_parent_child_trace_metadata(
+    event_name: str,
+    metadata: dict[str, Any],
+    issues: list[str],
+) -> None:
+    if not {
+        "parent_to_children",
+        "parent_child_edges",
+        "parent_to_child",
+        "unique_parent_ids",
+    }.intersection(metadata):
+        return
+    parent_ids = _string_list_metadata(metadata, "parent_ids", event_name, issues)
+    child_ids = _string_list_metadata(metadata, "child_ids", event_name, issues)
+    unique_parent_ids = _string_list_metadata(metadata, "unique_parent_ids", event_name, issues)
+    if "parent_to_children" in metadata or "parent_child_edges" in metadata:
+        if parent_ids is None:
+            issues.append(f"trace event {event_name} fanout metadata requires parent_ids")
+        if child_ids is None:
+            issues.append(f"trace event {event_name} fanout metadata requires child_ids")
+    if unique_parent_ids is not None:
+        if len(unique_parent_ids) != len(set(unique_parent_ids)):
+            issues.append(f"trace event {event_name} unique_parent_ids contains duplicates")
+        if parent_ids is not None:
+            expected_unique_parent_ids = list(dict.fromkeys(parent_ids))
+            if unique_parent_ids != expected_unique_parent_ids:
+                issues.append(
+                    f"trace event {event_name} unique_parent_ids mismatch: "
+                    f"expected {expected_unique_parent_ids!r}, observed {unique_parent_ids!r}"
+                )
+
+    edges = _parent_child_edges_metadata(metadata, event_name, issues)
+    parent_to_children = _parent_to_children_metadata(metadata, event_name, issues)
+
+    if edges is not None:
+        edge_parent_ids = [edge["parent_id"] for edge in edges]
+        edge_child_ids = [edge["child_id"] for edge in edges]
+        if parent_ids is not None and edge_parent_ids != parent_ids:
+            issues.append(
+                f"trace event {event_name} parent_child_edges parent order mismatch: "
+                f"expected {parent_ids!r}, observed {edge_parent_ids!r}"
+            )
+        if child_ids is not None and edge_child_ids != child_ids:
+            issues.append(
+                f"trace event {event_name} parent_child_edges child order mismatch: "
+                f"expected {child_ids!r}, observed {edge_child_ids!r}"
+            )
+        derived_parent_to_children: dict[str, list[str]] = {}
+        for edge in edges:
+            derived_parent_to_children.setdefault(edge["parent_id"], []).append(edge["child_id"])
+        if parent_to_children is not None and parent_to_children != derived_parent_to_children:
+            issues.append(
+                f"trace event {event_name} parent_to_children mismatch: "
+                f"expected {derived_parent_to_children!r}, observed {parent_to_children!r}"
+            )
+
+    if parent_to_children is not None:
+        flattened_children = [
+            child_id
+            for child_ids_for_parent in parent_to_children.values()
+            for child_id in child_ids_for_parent
+        ]
+        if child_ids is not None and flattened_children != child_ids:
+            issues.append(
+                f"trace event {event_name} parent_to_children child order mismatch: "
+                f"expected {child_ids!r}, observed {flattened_children!r}"
+            )
+        parent_to_child = metadata.get("parent_to_child")
+        if parent_to_child is not None:
+            if not isinstance(parent_to_child, dict):
+                issues.append(f"trace event {event_name} parent_to_child must be an object")
+            else:
+                for parent_id, child_ids_for_parent in parent_to_children.items():
+                    expected_child_id = child_ids_for_parent[-1]
+                    observed_child_id = parent_to_child.get(parent_id)
+                    if observed_child_id != expected_child_id:
+                        issues.append(
+                            f"trace event {event_name} parent_to_child legacy mapping mismatch "
+                            f"for {parent_id}: expected {expected_child_id!r}, "
+                            f"observed {observed_child_id!r}"
+                        )
+
+
+def _string_list_metadata(
+    metadata: dict[str, Any],
+    key: str,
+    event_name: str,
+    issues: list[str],
+) -> list[str] | None:
+    if key not in metadata:
+        return None
+    value = metadata.get(key)
+    if not isinstance(value, list):
+        issues.append(f"trace event {event_name} {key} must be a list")
+        return None
+    result: list[str] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, str) or not item:
+            issues.append(f"trace event {event_name} {key}[{index}] must be a non-empty string")
+            continue
+        result.append(item)
+    return result
+
+
+def _parent_child_edges_metadata(
+    metadata: dict[str, Any],
+    event_name: str,
+    issues: list[str],
+) -> list[dict[str, Any]] | None:
+    if "parent_child_edges" not in metadata:
+        return None
+    value = metadata.get("parent_child_edges")
+    if not isinstance(value, list):
+        issues.append(f"trace event {event_name} parent_child_edges must be a list")
+        return None
+    edges: list[dict[str, Any]] = []
+    slot_indexes: set[int] = set()
+    child_ids: set[str] = set()
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            issues.append(f"trace event {event_name} parent_child_edges[{index}] must be an object")
+            continue
+        slot_index = item.get("slot_index")
+        parent_id = item.get("parent_id")
+        child_id = item.get("child_id")
+        if not isinstance(slot_index, int) or isinstance(slot_index, bool) or slot_index < 0:
+            issues.append(
+                f"trace event {event_name} parent_child_edges[{index}].slot_index "
+                "must be a non-negative integer"
+            )
+            continue
+        if slot_index in slot_indexes:
+            issues.append(f"trace event {event_name} parent_child_edges has duplicate slot_index {slot_index}")
+        slot_indexes.add(slot_index)
+        if slot_index != index:
+            issues.append(
+                f"trace event {event_name} parent_child_edges[{index}].slot_index "
+                f"must equal its list index {index}"
+            )
+        if not isinstance(parent_id, str) or not parent_id:
+            issues.append(f"trace event {event_name} parent_child_edges[{index}].parent_id is invalid")
+            continue
+        if not isinstance(child_id, str) or not child_id:
+            issues.append(f"trace event {event_name} parent_child_edges[{index}].child_id is invalid")
+            continue
+        if child_id in child_ids:
+            issues.append(f"trace event {event_name} parent_child_edges has duplicate child_id {child_id}")
+        child_ids.add(child_id)
+        edges.append({"slot_index": slot_index, "parent_id": parent_id, "child_id": child_id})
+    return edges
+
+
+def _parent_to_children_metadata(
+    metadata: dict[str, Any],
+    event_name: str,
+    issues: list[str],
+) -> dict[str, list[str]] | None:
+    if "parent_to_children" not in metadata:
+        return None
+    value = metadata.get("parent_to_children")
+    if not isinstance(value, dict):
+        issues.append(f"trace event {event_name} parent_to_children must be an object")
+        return None
+    result: dict[str, list[str]] = {}
+    seen_child_ids: set[str] = set()
+    for parent_id, child_ids in value.items():
+        if not isinstance(parent_id, str) or not parent_id:
+            issues.append(f"trace event {event_name} parent_to_children contains invalid parent_id")
+            continue
+        if not isinstance(child_ids, list):
+            issues.append(f"trace event {event_name} parent_to_children[{parent_id!r}] must be a list")
+            continue
+        parsed_child_ids: list[str] = []
+        for index, child_id in enumerate(child_ids):
+            if not isinstance(child_id, str) or not child_id:
+                issues.append(
+                    f"trace event {event_name} parent_to_children[{parent_id!r}][{index}] "
+                    "must be a non-empty string"
+                )
+                continue
+            if child_id in seen_child_ids:
+                issues.append(f"trace event {event_name} parent_to_children has duplicate child_id {child_id}")
+            seen_child_ids.add(child_id)
+            parsed_child_ids.append(child_id)
+        if not parsed_child_ids:
+            issues.append(f"trace event {event_name} parent_to_children[{parent_id!r}] must not be empty")
+        result[parent_id] = parsed_child_ids
+    return result
 
 
 def _workflow_start_metadata(events: list[dict[str, Any]]) -> dict[str, Any] | None:
