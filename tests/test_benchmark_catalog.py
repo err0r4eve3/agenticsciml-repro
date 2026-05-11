@@ -225,6 +225,26 @@ def test_contract_hash_binds_benchmark_fidelity_metadata() -> None:
         raise AssertionError("Expected tampered fidelity metadata to fail contract hash.")
 
 
+def test_claim_boundary_wording_does_not_change_contract_hash(monkeypatch) -> None:
+    bundle = ProblemBundle.load(BENCHMARKS["function_approx"].path)
+    before = BenchmarkContractFactory.create_contract(bundle)
+
+    def changed_claim_boundaries(self: BenchmarkSpec) -> dict[str, object]:
+        return {
+            "mock": {"scientific_claim": "changed_mock_claim_wording"},
+            "real_llm": {"scientific_claim": "changed_real_claim_wording"},
+            "paper_score_reproduction": "changed_wording",
+            "notes": "changed public catalog wording",
+        }
+
+    monkeypatch.setattr(BenchmarkSpec, "claim_boundaries", changed_claim_boundaries)
+    assert bundle.benchmark_spec.to_dict()["claim_boundaries"]["paper_score_reproduction"] == "changed_wording"
+
+    after = BenchmarkContractFactory.create_contract(bundle)
+    assert after.problem_bundle_digest == before.problem_bundle_digest
+    assert after.contract_hash == before.contract_hash
+
+
 def test_contract_from_dict_requires_benchmark_fidelity_metadata() -> None:
     bundle = ProblemBundle.load(BENCHMARKS["function_approx"].path)
     payload = BenchmarkContractFactory.create_contract(bundle).to_dict()

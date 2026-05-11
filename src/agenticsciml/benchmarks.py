@@ -83,6 +83,21 @@ class BenchmarkSpec:
             "paper_gap_notes": self.paper_gap_notes,
         }
 
+    def contract_digest_metadata(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "paper_section": self.paper_section,
+            "paper_task_name": self.paper_task_name,
+            "family": self.family,
+            "metric": self.metric,
+            "description": self.description,
+            "fidelity_level": self.fidelity_level,
+            "expected_runtime_s": self.expected_runtime_s,
+            "requires_torch": self.requires_torch,
+            "requires_gpu": self.requires_gpu,
+            "paper_gap_notes": self.paper_gap_notes,
+        }
+
     def claim_boundaries(self) -> dict[str, object]:
         return {
             "mock": evidence_metadata_for_run(use_mock=True, fidelity_level=self.fidelity_level),
@@ -375,10 +390,8 @@ def _text_digest(text: str) -> str:
 
 
 def _problem_bundle_digest(problem_bundle: ProblemBundle) -> str:
-    spec_payload = problem_bundle.benchmark_spec.to_dict()
-    spec_payload.pop("path", None)
     payload = {
-        "benchmark_spec": spec_payload,
+        "benchmark_spec": problem_bundle.benchmark_spec.contract_digest_metadata(),
         "Problem.md": _text_digest(problem_bundle.problem_md),
         "Requirements.md": _text_digest(problem_bundle.requirements_md),
         "Evaluation.md": _text_digest(problem_bundle.evaluation_md),
