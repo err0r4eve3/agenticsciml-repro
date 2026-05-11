@@ -85,8 +85,15 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
     contract = _read_json_file(contract_path, issues)
     run_metadata = _read_json_file(metadata_path, issues)
     workflow_metadata = _workflow_start_metadata(events)
-    tree = _read_optional_json_file(run_dir / "tree.json", issues)
-    checkpoint = _read_optional_json_file(run_dir / "checkpoint.json", issues)
+    tree_path = run_dir / "tree.json"
+    checkpoint_path = run_dir / "checkpoint.json"
+    if _requires_solution_artifacts(run_metadata):
+        if not tree_path.exists():
+            issues.append("tree.json is required when run_metadata.json records solution_count")
+        if not checkpoint_path.exists():
+            issues.append("checkpoint.json is required when run_metadata.json records solution_count")
+    tree = _read_optional_json_file(tree_path, issues)
+    checkpoint = _read_optional_json_file(checkpoint_path, issues)
 
     if contract is not None and run_metadata is not None:
         fidelity = contract.get("benchmark_fidelity")
@@ -139,6 +146,10 @@ def _read_optional_json_file(path: Path, issues: list[str]) -> dict[str, Any] | 
     if not path.exists():
         return None
     return _read_json_file(path, issues)
+
+
+def _requires_solution_artifacts(run_metadata: dict[str, Any] | None) -> bool:
+    return run_metadata is not None and "solution_count" in run_metadata
 
 
 def _check_solution_artifact_consistency(

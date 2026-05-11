@@ -208,6 +208,28 @@ def test_trace_summary_fails_on_checkpoint_tree_node_set_mismatch(tmp_path: Path
     assert any("checkpoint.json nodes" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
+def test_trace_summary_fails_when_completed_run_is_missing_tree(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    (run_dir / "tree.json").unlink()
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("tree.json is required" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
+def test_trace_summary_fails_when_completed_run_is_missing_checkpoint(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    (run_dir / "checkpoint.json").unlink()
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("checkpoint.json is required" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
 def _write_consistent_run_artifacts(run_dir: Path) -> Path:
     run_dir.mkdir()
     contract_hash = "a" * 64
