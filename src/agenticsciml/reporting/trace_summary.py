@@ -346,6 +346,10 @@ def _check_solution_artifact_consistency(
             )
 
     for artifact_name, nodes in (("tree.json", tree_nodes), ("checkpoint.json", checkpoint_nodes)):
+        if nodes is not None:
+            _check_solution_tree_graph_invariants(artifact_name, nodes, issues)
+
+    for artifact_name, nodes in (("tree.json", tree_nodes), ("checkpoint.json", checkpoint_nodes)):
         if nodes is None:
             continue
         for node_id, node in nodes.items():
@@ -457,6 +461,68 @@ def _nodes_by_id(
             continue
         by_id[node_id] = node
     return by_id
+
+
+def _check_solution_tree_graph_invariants(
+    artifact_name: str,
+    nodes: dict[str, dict[str, Any]],
+    issues: list[str],
+) -> None:
+    root_ids = [node_id for node_id, node in nodes.items() if node.get("parent_id") is None]
+    if len(root_ids) != 1:
+        issues.append(f"{artifact_name} must have exactly one root node: roots={sorted(root_ids)!r}")
+
+    for node_id, node in sorted(nodes.items()):
+        parent_id = node.get("parent_id")
+        if parent_id is not None:
+            if not isinstance(parent_id, str) or not parent_id:
+                issues.append(f"{artifact_name} node {node_id} has invalid parent_id: {parent_id!r}")
+            elif parent_id not in nodes:
+                issues.append(
+                    f"{artifact_name} node {node_id} parent_id references missing node: {parent_id}"
+                )
+
+        children = node.get("children", [])
+        if not isinstance(children, list):
+            issues.append(f"{artifact_name} node {node_id} children must be a list")
+            continue
+        for child_id in children:
+            if not isinstance(child_id, str) or not child_id:
+                issues.append(f"{artifact_name} node {node_id} children has invalid node id: {child_id!r}")
+                continue
+            child_node = nodes.get(child_id)
+            if child_node is None:
+                issues.append(
+                    f"{artifact_name} node {node_id} children references missing node: {child_id}"
+                )
+                continue
+            if child_node.get("parent_id") != node_id:
+                issues.append(
+                    f"{artifact_name} node {node_id} children includes {child_id}, "
+                    f"but child parent_id is {child_node.get('parent_id')!r}"
+                )
+
+    cycle_nodes = _solution_tree_cycle_nodes(nodes)
+    if cycle_nodes:
+        issues.append(f"{artifact_name} parent links contain a cycle: {cycle_nodes!r}")
+
+
+def _solution_tree_cycle_nodes(nodes: dict[str, dict[str, Any]]) -> list[str]:
+    cycle_nodes: set[str] = set()
+    for node_id in nodes:
+        seen: set[str] = set()
+        current_id: str | None = node_id
+        while current_id is not None:
+            if current_id in seen:
+                cycle_nodes.update(seen)
+                break
+            seen.add(current_id)
+            current_node = nodes.get(current_id)
+            if current_node is None:
+                break
+            parent_id = current_node.get("parent_id")
+            current_id = parent_id if isinstance(parent_id, str) and parent_id else None
+    return sorted(cycle_nodes)
 
 
 def _check_trace_node_references(

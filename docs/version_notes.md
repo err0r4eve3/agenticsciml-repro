@@ -58,6 +58,7 @@
 - trace node coverage gate：`trace_summary.json` 输出最终 node set 的 referenced/unreferenced 覆盖情况和每个 node 的 `referenced_by_event_names`、`reference_keys`、`self_reference_count`、`relation_reference_count`；exported/completed/finalized run 中任何 final node 没有 allowlisted trace reference，或只作为 relation endpoint 出现而没有 self trace reference，都会使 quality gate fail closed。
 - trace lifecycle stage coverage：`trace_summary.json` 输出每个 node 的 lifecycle stages 和对应 event names；exported/completed/finalized run 使用 status-aware required stage matrix，`status=evaluated` 的 root node 需要 `materialized` 和 `evaluated`，child node 还需要 `created` 和 `completed`。
 - trace lifecycle order gate：`trace_summary.json` 输出每个 lifecycle stage 的 `event_seq`，并校验完成态 root `materialized < evaluated`、child `created < materialized < evaluated < completed`。
+- solution tree graph invariants：`trace_summary.json` 校验 `tree.json` 和 `checkpoint.json` 都有唯一 root、非 root parent 存在、parent links 无环、`children` 只指向存在节点且与 child `parent_id` 一致。
 - benchmark catalog：6 类论文任务家族都有本地 deterministic engineering proxy，包括 `function_approx`、`poisson_lshape`、`burgers_pinn`、`antiderivative_operator`、`reaction_diffusion_operator`、`cylinder_wake_reconstruction`；每个 catalog entry 记录 `fidelity_level`、expected runtime、dependency flags 和 paper-gap notes。
 - benchmark metadata validation：`BenchmarkSpec` 构造时校验 `fidelity_level`、expected runtime、dependency flags、paper task name 和 proxy paper-gap notes。
 - fidelity levels document：`docs/fidelity_levels.md` 定义 `proxy`、`faithful-small`、`paper-like` 的准入标准和 claim rules。
@@ -84,6 +85,7 @@ uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trac
 uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trace_summary_fails_when_evaluated_node_has_no_evaluated_stage -q
 uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trace_summary_fails_when_evaluated_root_has_no_materialized_stage -q
 uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trace_summary_fails_when_lifecycle_stage_order_is_invalid -q
+uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trace_summary_fails_on_missing_solution_tree_parent tests/test_trace_reporting.py::test_trace_summary_fails_on_invalid_solution_tree_child_link tests/test_trace_reporting.py::test_trace_summary_fails_on_solution_tree_parent_cycle -q
 uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trace_summary_allows_partial_run_with_zero_solution_reference_events -q
 uv run --python 3.11 --extra dev agenticsciml benchmarks
 uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --mock --max-iterations 1

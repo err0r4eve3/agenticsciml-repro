@@ -210,6 +210,70 @@ def test_trace_summary_fails_on_checkpoint_tree_node_set_mismatch(tmp_path: Path
     assert any("checkpoint.json nodes" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
+def test_trace_summary_fails_on_missing_solution_tree_parent(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    for artifact_name in ("tree.json", "checkpoint.json"):
+        artifact = json.loads((run_dir / artifact_name).read_text(encoding="utf-8"))
+        artifact["nodes"][0]["parent_id"] = "solution_999"
+        (run_dir / artifact_name).write_text(json.dumps(artifact), encoding="utf-8")
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("parent_id references missing node" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
+def test_trace_summary_fails_on_invalid_solution_tree_child_link(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    for artifact_name in ("tree.json", "checkpoint.json"):
+        artifact = json.loads((run_dir / artifact_name).read_text(encoding="utf-8"))
+        artifact["nodes"][0]["children"] = ["solution_999"]
+        (run_dir / artifact_name).write_text(json.dumps(artifact), encoding="utf-8")
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("children references missing node" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
+def test_trace_summary_fails_on_solution_tree_parent_cycle(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    child_node = {
+        "node_id": "solution_001",
+        "parent_id": "solution_000",
+        "workspace": str(run_dir / "solutions" / "solution_001"),
+        "score": None,
+        "children": ["solution_000"],
+        "status": "evaluated",
+        "proposal_path": None,
+        "analysis_path": None,
+        "error": None,
+        "benchmark_name": "function_approx",
+        "contract_hash": "a" * 64,
+        "method_tags": [],
+        "failure_kind": None,
+        "score_delta_from_parent": None,
+        "num_debug_attempts": 0,
+    }
+    for artifact_name in ("tree.json", "checkpoint.json"):
+        artifact = json.loads((run_dir / artifact_name).read_text(encoding="utf-8"))
+        artifact["nodes"][0]["parent_id"] = "solution_001"
+        artifact["nodes"][0]["children"] = ["solution_001"]
+        artifact["nodes"].append(child_node)
+        (run_dir / artifact_name).write_text(json.dumps(artifact), encoding="utf-8")
+    metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    metadata["solution_count"] = 2
+    (run_dir / "run_metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("parent links contain a cycle" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
 def test_trace_summary_fails_when_completed_run_is_missing_tree(tmp_path: Path) -> None:
     run_dir = _write_consistent_run_artifacts(tmp_path / "run")
     (run_dir / "tree.json").unlink()

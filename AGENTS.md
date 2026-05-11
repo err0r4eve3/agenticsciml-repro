@@ -201,6 +201,10 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   require `created` and `completed`. Completed artifacts must validate
   lifecycle order using `event_seq`: root `materialized < evaluated`, child
   `created < materialized < evaluated < completed`.
+- Final `tree.json` and `checkpoint.json` must preserve solution-tree graph
+  invariants: exactly one root, every non-root `parent_id` references an
+  existing node, parent links are acyclic, `children` contains only existing
+  nodes, and each child entry agrees with the child node's `parent_id`.
 - Preserve resume semantics. When changing orchestration, keep `checkpoint.json`
   current after root creation, child creation, and final report export.
 - Keep evaluator and benchmark contracts deterministic. LLM judges may summarize
