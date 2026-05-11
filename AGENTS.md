@@ -188,7 +188,12 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   exported/completed/finalized run artifacts, not partial or in-progress resume
   checkpoints. Exported/completed/finalized runs must also report node coverage
   and fail when any final `tree.json` / `checkpoint.json` node has no
-  allowlisted trace reference.
+  allowlisted trace reference. Coverage details must distinguish self
+  references (`node_id`, `solution_id`, `child_id`, child ID lists, or
+  `parent_to_child.child`) from relation-only references (`parent_id`,
+  parent ID lists, or `parent_to_child.parent`); completed artifacts must fail
+  when a final node only appears as a relation endpoint and never has a self
+  trace reference.
 - Preserve resume semantics. When changing orchestration, keep `checkpoint.json`
   current after root creation, child creation, and final report export.
 - Keep evaluator and benchmark contracts deterministic. LLM judges may summarize

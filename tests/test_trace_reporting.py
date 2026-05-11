@@ -490,6 +490,14 @@ def test_trace_summary_reports_trace_node_reference_check_counts(tmp_path: Path)
         "total_nodes": 1,
         "referenced": ["solution_000"],
         "unreferenced": [],
+        "nodes": {
+            "solution_000": {
+                "referenced_by_event_names": ["train_and_evaluate"],
+                "reference_keys": ["solution_id"],
+                "self_reference_count": 1,
+                "relation_reference_count": 0,
+            }
+        },
     }
     assert summary["artifact_consistency"]["trace_node_reference_events_checked_by_name"] == {
         "train_and_evaluate": 1
@@ -557,6 +565,58 @@ def test_trace_summary_fails_when_exported_node_is_not_referenced_by_trace(tmp_p
         "solution_001"
     ]
     assert any("solution nodes have no allowlisted trace references" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
+def test_trace_summary_fails_when_exported_node_only_has_relation_reference(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    child_node = {
+        "node_id": "solution_001",
+        "parent_id": "solution_000",
+        "workspace": str(run_dir / "solutions" / "solution_001"),
+        "score": None,
+        "children": [],
+        "status": "evaluated",
+        "proposal_path": None,
+        "analysis_path": None,
+        "error": None,
+        "benchmark_name": "function_approx",
+        "contract_hash": "a" * 64,
+        "method_tags": [],
+        "failure_kind": None,
+        "score_delta_from_parent": None,
+        "num_debug_attempts": 0,
+    }
+    tree = json.loads((run_dir / "tree.json").read_text(encoding="utf-8"))
+    tree["nodes"].append(child_node)
+    (run_dir / "tree.json").write_text(json.dumps(tree), encoding="utf-8")
+    checkpoint = json.loads((run_dir / "checkpoint.json").read_text(encoding="utf-8"))
+    checkpoint["nodes"].append(child_node)
+    (run_dir / "checkpoint.json").write_text(json.dumps(checkpoint), encoding="utf-8")
+    metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    metadata["solution_count"] = 2
+    (run_dir / "run_metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    events.append(
+        {
+            "event_type": "workflow_span",
+            "name": "agenticsciml.child_mutation.end",
+            "metadata": {"parent_id": "solution_001"},
+        }
+    )
+    _write_events(run_dir / "trace.jsonl", events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    child_detail = summary["artifact_consistency"]["trace_node_reference_node_coverage"]["nodes"]["solution_001"]
+    assert child_detail["relation_reference_count"] == 1
+    assert child_detail["self_reference_count"] == 0
+    assert any("solution nodes have no self trace references" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
 def test_trace_summary_fails_when_exported_run_checks_no_actual_solution_node_references(tmp_path: Path) -> None:

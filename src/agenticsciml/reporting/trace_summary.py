@@ -34,6 +34,15 @@ TRACE_NODE_REFERENCE_EVENT_NAMES = {
     "train_and_evaluate",
     "train_and_evaluate.retry",
 }
+SELF_TRACE_REFERENCE_KEYS = {
+    "node_id",
+    "solution_id",
+    "child_id",
+    "node_ids",
+    "solution_ids",
+    "child_ids",
+    "parent_to_child.child",
+}
 
 
 def load_trace_events(run_dir: Path) -> list[dict[str, Any]]:
@@ -278,7 +287,7 @@ def _check_solution_artifact_consistency(
         "references_checked": 0,
         "events_with_references": 0,
         "references_checked_by_name": {},
-        "node_coverage": {"total_nodes": 0, "referenced": [], "unreferenced": []},
+        "node_coverage": {"total_nodes": 0, "referenced": [], "unreferenced": [], "nodes": {}},
     }
     expected_contract_hash = contract.get("contract_hash") if contract else None
     expected_benchmark_name = contract.get("benchmark_name") if contract else None
@@ -361,6 +370,17 @@ def _check_solution_artifact_consistency(
                     "solution nodes have no allowlisted trace references: "
                     + ", ".join(trace_node_reference_counts["node_coverage"]["unreferenced"])
                 )
+            else:
+                nodes_without_self_references = [
+                    node_id
+                    for node_id, detail in trace_node_reference_counts["node_coverage"]["nodes"].items()
+                    if detail["self_reference_count"] == 0
+                ]
+                if nodes_without_self_references:
+                    issues.append(
+                        "solution nodes have no self trace references: "
+                        + ", ".join(nodes_without_self_references)
+                    )
     return trace_node_reference_counts
 
 
@@ -404,9 +424,23 @@ def _check_trace_node_references(
         "references_checked": 0,
         "events_with_references": 0,
         "references_checked_by_name": {},
-        "node_coverage": {"total_nodes": len(node_ids), "referenced": [], "unreferenced": sorted(node_ids)},
+        "node_coverage": {
+            "total_nodes": len(node_ids),
+            "referenced": [],
+            "unreferenced": sorted(node_ids),
+            "nodes": {},
+        },
     }
     referenced_node_ids: set[str] = set()
+    node_details: dict[str, dict[str, Any]] = {
+        node_id: {
+            "referenced_by_event_names": set(),
+            "reference_keys": set(),
+            "self_reference_count": 0,
+            "relation_reference_count": 0,
+        }
+        for node_id in node_ids
+    }
     for event in events:
         event_name = str(event.get("name", ""))
         if event_name not in TRACE_NODE_REFERENCE_EVENT_NAMES:
@@ -432,12 +466,33 @@ def _check_trace_node_references(
                 )
             else:
                 referenced_node_ids.add(node_id)
+                detail = node_details[node_id]
+                detail["referenced_by_event_names"].add(event_name)
+                detail["reference_keys"].add(key)
+                if _is_self_trace_reference_key(key):
+                    detail["self_reference_count"] += 1
+                else:
+                    detail["relation_reference_count"] += 1
+    node_coverage_details = {
+        node_id: {
+            "referenced_by_event_names": sorted(detail["referenced_by_event_names"]),
+            "reference_keys": sorted(detail["reference_keys"]),
+            "self_reference_count": detail["self_reference_count"],
+            "relation_reference_count": detail["relation_reference_count"],
+        }
+        for node_id, detail in sorted(node_details.items())
+    }
     counts["node_coverage"] = {
         "total_nodes": len(node_ids),
         "referenced": sorted(referenced_node_ids),
         "unreferenced": sorted(node_ids - referenced_node_ids),
+        "nodes": node_coverage_details,
     }
     return counts
+
+
+def _is_self_trace_reference_key(key: str) -> bool:
+    return key in SELF_TRACE_REFERENCE_KEYS
 
 
 def _trace_node_references(metadata: dict[str, Any]) -> list[tuple[str, str]]:
