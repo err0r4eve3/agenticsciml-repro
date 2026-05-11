@@ -37,6 +37,8 @@ def run_llm_smoke(
 ) -> LLMSmokeResult:
     selected_variants = variants or list(DEFAULT_SMOKE_VARIANTS)
     _validate_smoke_variants(selected_variants)
+    if not dry_run:
+        _require_paired_contrast(selected_variants)
     output_dir.mkdir(parents=True, exist_ok=True)
     plan = _build_plan(
         benchmark_dir,
@@ -80,11 +82,14 @@ def run_llm_smoke(
         rows.append(row)
         if not _truthy(row["smoke_gate_passed"]):
             gate_issues.append(f"{variant}: {row['smoke_gate_issues']}")
+    paired_gate = _paired_contrast_gate(rows)
+    if not paired_gate["passed"]:
+        gate_issues.append(f"paired_contrast: {'; '.join(paired_gate['issues'])}")
 
     runs_csv = output_dir / "real_llm_smoke_runs.csv"
     _write_csv(runs_csv, rows)
     report_path = output_dir / "real_llm_smoke_report.md"
-    report_path.write_text(_render_real_report(plan, rows), encoding="utf-8")
+    report_path.write_text(_render_real_report(plan, rows, paired_gate), encoding="utf-8")
     if gate_issues:
         raise RuntimeError(f"Real LLM smoke gate failed; see {report_path}: {'; '.join(gate_issues)}")
     return LLMSmokeResult(plan_json=plan_path, report_md=report_path, runs_csv=runs_csv)
@@ -244,7 +249,7 @@ def _render_dry_run_report(plan: dict[str, Any]) -> str:
     )
 
 
-def _render_real_report(plan: dict[str, Any], rows: list[dict[str, Any]]) -> str:
+def _render_real_report(plan: dict[str, Any], rows: list[dict[str, Any]], paired_gate: dict[str, Any]) -> str:
     row_lines = "\n".join(
         f"- `{row['variant']}`: branch_context={row['branch_context_enabled']}, "
         f"solutions={row['solution_count']}, intents={row['branch_intents'] or 'none'}, "
@@ -257,6 +262,9 @@ def _render_real_report(plan: dict[str, Any], rows: list[dict[str, Any]]) -> str
         f"- Scientific claim: `{plan['scientific_claim']}`\n\n"
         "## Runs\n\n"
         f"{row_lines}\n\n"
+        "## Paired Contrast Gate\n\n"
+        f"- paired_contrast_passed: `{paired_gate['passed']}`\n"
+        f"- issues: `{'; '.join(paired_gate['issues']) or 'none'}`\n\n"
         "## Boundary\n\n"
         f"{plan['claim_boundary']}\n"
     )
@@ -278,6 +286,17 @@ def _validate_smoke_variants(variants: list[str]) -> None:
     if unknown:
         valid = ", ".join(DEFAULT_SMOKE_VARIANTS)
         raise ValueError(f"Unknown LLM smoke variant(s): {', '.join(unknown)}. Valid variants: {valid}")
+
+
+def _require_paired_contrast(variants: list[str]) -> None:
+    required = set(DEFAULT_SMOKE_VARIANTS)
+    present = set(variants)
+    if not required.issubset(present):
+        missing = ", ".join(sorted(required - present))
+        raise ValueError(
+            "Real LLM smoke requires paired branch_context and no_branch_context variants. "
+            f"Missing: {missing}"
+        )
 
 
 def _smoke_gate(
@@ -303,12 +322,17 @@ def _smoke_gate(
         if event.get("name") == "agenticsciml.child_mutation.start"
     ]
     if expected_branch_context:
+        transcript_text = _child_transcript_text(run_dir, nodes)
         if not branch_tags:
             issues.append("branch_context variant produced no branch method tags")
         if not child_events:
             issues.append("branch_context variant produced no child mutation trace events")
         if not any(event.get("metadata", {}).get("branch_context", {}).get("branch_intent") for event in child_events):
             issues.append("branch_context trace has no branch_intent evidence")
+        required_tokens = ("branch_intent", "sibling_branch_ids", "diversity_instruction")
+        missing_tokens = [token for token in required_tokens if token not in transcript_text]
+        if missing_tokens:
+            issues.append(f"branch_context transcripts missing tokens: {', '.join(missing_tokens)}")
     else:
         if branch_tags:
             issues.append("no_branch_context variant produced branch method tags")
@@ -319,6 +343,34 @@ def _smoke_gate(
         leaked = [token for token in forbidden if token in transcript_text]
         if leaked:
             issues.append(f"no_branch_context transcripts leaked tokens: {', '.join(leaked)}")
+    return {"passed": not issues, "issues": issues}
+
+
+def _paired_contrast_gate(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    issues: list[str] = []
+    by_variant = {str(row["variant"]): row for row in rows}
+    for required in DEFAULT_SMOKE_VARIANTS:
+        if required not in by_variant:
+            issues.append(f"missing required variant {required}")
+    if issues:
+        return {"passed": False, "issues": issues}
+
+    branch = by_variant["branch_context"]
+    no_branch = by_variant["no_branch_context"]
+    if not _truthy(branch.get("smoke_gate_passed")):
+        issues.append("branch_context row gate failed")
+    if not _truthy(no_branch.get("smoke_gate_passed")):
+        issues.append("no_branch_context row gate failed")
+    if not _truthy(branch.get("branch_context_enabled")):
+        issues.append("branch_context row did not enable branch context")
+    if _truthy(no_branch.get("branch_context_enabled")):
+        issues.append("no_branch_context row enabled branch context")
+    if int(branch.get("llm_calls", 0) or 0) <= 0 or int(no_branch.get("llm_calls", 0) or 0) <= 0:
+        issues.append("both paired variants must record positive LLM call counts")
+    if not str(branch.get("branch_intents", "")):
+        issues.append("branch_context row has no branch intents")
+    if str(no_branch.get("branch_intents", "")):
+        issues.append("no_branch_context row has branch intents")
     return {"passed": not issues, "issues": issues}
 
 

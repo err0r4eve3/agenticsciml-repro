@@ -99,24 +99,27 @@ uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx 
 ```
 
 The benchmark catalog now includes all six paper task families as lightweight
-offline examples. Each catalog entry records `fidelity_level`, expected runtime,
-dependency flags, and paper-gap notes so proxy tasks are not mistaken for full
-paper experiments:
+offline examples, plus a first `faithful-small` L-shaped Poisson upgrade. Each
+catalog entry records `fidelity_level`, expected runtime, dependency flags, and
+paper-gap notes so proxy tasks are not mistaken for full paper experiments:
 
 - `examples/function_approx`
 - `examples/poisson_lshape`
+- `examples/poisson_lshape_faithful_small`
 - `examples/burgers_pinn`
 - `examples/antiderivative_operator`
 - `examples/reaction_diffusion_operator`
 - `examples/cylinder_wake_reconstruction`
 
 These examples keep PyTorch as an optional `sciml` extra for real generated
-SciML solutions; the checked-in benchmark fixtures use NumPy to keep local
-verification light.
+SciML solutions. Most checked-in benchmark fixtures use NumPy to keep local
+verification light; `poisson_lshape_faithful_small` adds boundary and PDE
+residual collocation arrays without claiming paper-like score parity.
 
 ## Scope
 
 This is not a claim that the paper's reported improvement factors are reproduced.
 The MVP validates orchestration, persistence, evaluation contracts, and
-deterministic mock behavior first. The added benchmarks are engineering proxies
-for the paper tasks, not full paper-score reproductions.
+deterministic mock behavior first. The benchmark catalog now mixes engineering
+proxies with one faithful-small task; none of these are full paper-score
+reproductions.

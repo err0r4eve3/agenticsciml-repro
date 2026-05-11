@@ -61,10 +61,12 @@ uv run --python 3.11 --extra real-llm agenticsciml smoke-llm examples/function_a
   --output-dir runs/real-llm-smoke
 ```
 
-The real smoke gate reads `trace_summary.json`, requires positive LLM call
-counts, and checks that `branch_context` / `no_branch_context` artifacts match
-their variant. If the gate fails, the CLI returns non-zero and points at the
-report.
+The real smoke gate is a paired contrast: non-dry-run smoke must include both
+`branch_context` and `no_branch_context`. It reads `trace_summary.json`,
+requires positive LLM call counts on both sides, checks prompt-delivery evidence
+for branch context, and verifies that `no_branch_context` traces/transcripts do
+not leak branch fields. If the gate fails, the CLI returns non-zero and points
+at the report.
 
 After a real or mock run completes, inspect the trace quality gate:
 

@@ -1,0 +1,8 @@
+[
+  {
+    "id": "singularity_residual_balance",
+    "title": "Singularity and Residual Balance",
+    "file": "singularity_residual_balance.md",
+    "description": "Balance supervised anchors, boundary samples, and PDE residual collocation while using corner-aware features near the re-entrant singularity."
+  }
+]

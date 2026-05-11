@@ -371,6 +371,10 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   `trace_summary.json`, require positive real LLM call counts, verify
   branch-context / no-branch-context evidence, and return non-zero when the
   smoke gate fails instead of writing a normal-looking report.
+- Real LLM smoke is a paired contrast by default. Non-dry-run smoke must include
+  both `branch_context` and `no_branch_context`, and the paired contrast gate
+  must fail if either side is missing, has zero LLM calls, or contradicts its
+  branch-context setting.
 - Every benchmark entry must include fidelity metadata: `fidelity_level`,
   expected runtime, dependency flags, paper task name, and paper-gap notes. A
   `proxy` benchmark is allowed for workflow validation but must not be described

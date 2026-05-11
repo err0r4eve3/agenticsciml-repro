@@ -46,6 +46,7 @@
 | --- | --- | --- | --- | --- | --- |
 | `function_approx` | `S1.1` | `proxy` | `examples/function_approx` | `validation_mse` | 不连续振荡函数拟合 |
 | `poisson_lshape` | `S1.2` | `proxy` | `examples/poisson_lshape` | `relative_l2` | L-shaped Poisson / corner singularity proxy |
+| `poisson_lshape_faithful_small` | `S1.2` | `faithful-small` | `examples/poisson_lshape_faithful_small` | `relative_l2` | L-shaped Poisson with boundary/residual collocation data |
 | `burgers_pinn` | `S1.3` | `proxy` | `examples/burgers_pinn` | `relative_l2` | Burgers-style time-dependent PINN proxy |
 | `antiderivative_operator` | `S1.4` | `proxy` | `examples/antiderivative_operator` | `relative_l2` | 函数到反导数的 operator learning |
 | `reaction_diffusion_operator` | `S1.5` | `proxy` | `examples/reaction_diffusion_operator` | `relative_l2` | 多输入 reaction-diffusion operator proxy |
@@ -101,7 +102,7 @@ traversal、`.evaluator` / `private_eval` 字符串引用仍会被 static guardr
 
 1. 每个 benchmark 先跑 `--max-iterations 0`，只验证 root baseline。
 2. 每个 benchmark 跑 `--max-iterations 1 --parallel-mutations 1`，验证 proposal/critic/engineer/debugger 链路。
-3. 对 `function_approx`、`poisson_lshape`、`burgers_pinn` 跑
+3. 对 `function_approx`、`poisson_lshape`、`poisson_lshape_faithful_small`、`burgers_pinn` 跑
    `root_only` / `no_kb` / `kb` / `random_kb` / `no_critic` / `no_debugger`
    ablation。
 4. 对 KB ablation 同时比较 `use_kb=False`、lexical KB 和 deterministic
@@ -114,6 +115,7 @@ traversal、`.evaluator` / `private_eval` 字符串引用仍会被 static guardr
 ```bash
 uv run --python 3.11 --extra real-llm agenticsciml run examples/poisson_lshape --max-iterations 0 --experiment-id poisson-root
 uv run --python 3.11 --extra real-llm agenticsciml run examples/poisson_lshape --max-iterations 1 --parallel-mutations 1 --experiment-id poisson-one-iter
+uv run --python 3.11 --extra real-llm agenticsciml run examples/poisson_lshape_faithful_small --max-iterations 1 --parallel-mutations 1 --experiment-id poisson-faithful-small
 ```
 
 ## 边界

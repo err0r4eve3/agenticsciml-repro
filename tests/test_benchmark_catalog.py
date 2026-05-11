@@ -17,6 +17,7 @@ from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 EXPECTED_BENCHMARKS = {
     "function_approx",
     "poisson_lshape",
+    "poisson_lshape_faithful_small",
     "burgers_pinn",
     "antiderivative_operator",
     "reaction_diffusion_operator",
@@ -100,12 +101,12 @@ def test_benchmark_catalog_lists_all_paper_benchmarks() -> None:
         assert spec.metric
         assert spec.paper_section.startswith("S1.")
         assert spec.fidelity_level in {"proxy", "faithful-small", "paper-like"}
-        assert spec.fidelity_level == "proxy"
         assert spec.expected_runtime_s > 0
         assert isinstance(spec.requires_torch, bool)
         assert isinstance(spec.requires_gpu, bool)
         assert spec.paper_task_name
         assert spec.paper_gap_notes
+    assert any(spec.fidelity_level == "faithful-small" for spec in BENCHMARKS.values())
 
 
 def test_benchmark_spec_rejects_invalid_fidelity_metadata() -> None:
@@ -184,7 +185,7 @@ def test_problem_bundle_and_contract_are_benchmark_aware() -> None:
         assert contract.data_config_digest
         assert contract.problem_bundle_digest
         assert contract.benchmark_source_manifest_digest
-        assert contract.benchmark_fidelity["fidelity_level"] == "proxy"
+        assert contract.benchmark_fidelity["fidelity_level"] == spec.fidelity_level
         assert contract.benchmark_fidelity["paper_task_name"] == spec.paper_task_name
         manifest = contract.benchmark_source_manifest
         assert manifest["schema_version"] == 1

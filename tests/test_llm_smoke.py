@@ -8,7 +8,7 @@ import pytest
 
 from agenticsciml.evidence import EVIDENCE_MODE_REAL_LLM_SMOKE
 from agenticsciml.llm.mock import MockLLMClient
-from agenticsciml.llm_smoke import run_llm_smoke
+from agenticsciml.llm_smoke import _paired_contrast_gate, _smoke_gate, run_llm_smoke
 
 
 def test_llm_smoke_dry_run_writes_plan_without_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -51,8 +51,19 @@ def test_llm_smoke_real_mode_requires_api_key(tmp_path: Path, monkeypatch: pytes
         run_llm_smoke(
             benchmark_dir=Path("examples/function_approx").resolve(),
             output_dir=tmp_path,
+            variants=["branch_context", "no_branch_context"],
+            dry_run=False,
+        )
+
+
+def test_llm_smoke_real_mode_requires_paired_variants(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="paired branch_context and no_branch_context"):
+        run_llm_smoke(
+            benchmark_dir=Path("examples/function_approx").resolve(),
+            output_dir=tmp_path,
             variants=["branch_context"],
             dry_run=False,
+            llm_client=MockLLMClient(),
         )
 
 
@@ -73,6 +84,54 @@ def test_llm_smoke_real_gate_with_scripted_llm(tmp_path: Path) -> None:
     no_branch = next(row for row in rows if row["variant"] == "no_branch_context")
     assert no_branch["branch_context_enabled"] == "False"
     assert no_branch["branch_intents"] == ""
+
+
+def test_smoke_gate_requires_branch_context_prompt_delivery(tmp_path: Path) -> None:
+    run_dir = tmp_path
+    child = run_dir / "solutions" / "solution_001" / "transcripts"
+    child.mkdir(parents=True)
+    (child / "proposal_debate.json").write_text("[]", encoding="utf-8")
+    (child / "engineer.json").write_text("[]", encoding="utf-8")
+    (run_dir / "trace.jsonl").write_text(
+        json.dumps(
+            {
+                "name": "agenticsciml.child_mutation.start",
+                "metadata": {"branch_context": {"branch_intent": "features_or_architecture"}},
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    gate = _smoke_gate(
+        run_dir,
+        "branch_context",
+        {"branch_context_enabled": True, "llm_calls": {"total": 1}},
+        {"quality_gate": {"passed": True}},
+        [{"node_id": "solution_001", "parent_id": "solution_000"}],
+        {"branch:features_or_architecture"},
+    )
+
+    assert gate["passed"] is False
+    assert any("transcripts missing" in issue for issue in gate["issues"])
+
+
+def test_paired_contrast_gate_rejects_single_variant() -> None:
+    gate = _paired_contrast_gate(
+        [
+            {
+                "variant": "branch_context",
+                "smoke_gate_passed": True,
+                "branch_context_enabled": True,
+                "llm_calls": 1,
+                "branch_intents": "features_or_architecture",
+            }
+        ]
+    )
+
+    assert gate["passed"] is False
+    assert "missing required variant no_branch_context" in gate["issues"]
 
 
 def test_cli_smoke_llm_dry_run(tmp_path: Path, cli_env: dict[str, str]) -> None:

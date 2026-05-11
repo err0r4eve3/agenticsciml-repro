@@ -59,17 +59,21 @@ computes the metric without importing `solution.py`.
 ## Benchmark Coverage
 
 The local benchmark catalog mirrors the six paper task families with lightweight
-offline proxies:
+offline proxies and one faithful-small L-shaped Poisson upgrade:
 
 - `S1.1` `function_approx`: discontinuous oscillatory function approximation.
 - `S1.2` `poisson_lshape`: L-shaped Poisson / re-entrant corner proxy.
+- `S1.2` `poisson_lshape_faithful_small`: L-shaped Poisson with boundary and
+  PDE residual collocation data, still low-budget and not paper-like.
 - `S1.3` `burgers_pinn`: time-dependent Burgers-style PINN proxy.
 - `S1.4` `antiderivative_operator`: input functions to antiderivatives.
 - `S1.5` `reaction_diffusion_operator`: multiple-input reaction-diffusion operator proxy.
 - `S1.6` `cylinder_wake_reconstruction`: sparse sensor to vorticity-field reconstruction proxy.
 
 These examples preserve workflow pressure points from the paper but use small
-deterministic NumPy datasets for local validation.
+deterministic local datasets for validation. The faithful-small entry narrows
+the task-structure gap, but it still does not reproduce the paper's training
+budget, prompt set, model mix, or reported scores.
 
 ## Knowledge Base And Analysis Base
 

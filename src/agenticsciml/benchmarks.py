@@ -233,6 +233,11 @@ _PROXY_GAP = (
     "SciML training setup or reported-score reproduction."
 )
 
+_FAITHFUL_SMALL_GAP = (
+    "Low-budget faithful-small benchmark with paper-like task structure and "
+    "fixed local runtime; still not the full paper training budget or reported-score reproduction."
+)
+
 
 BENCHMARKS: dict[str, BenchmarkSpec] = {
     "function_approx": BenchmarkSpec(
@@ -262,6 +267,20 @@ BENCHMARKS: dict[str, BenchmarkSpec] = {
         requires_torch=False,
         requires_gpu=False,
         paper_gap_notes=_PROXY_GAP,
+    ),
+    "poisson_lshape_faithful_small": BenchmarkSpec(
+        name="poisson_lshape_faithful_small",
+        path=EXAMPLES_DIR / "poisson_lshape_faithful_small",
+        paper_section="S1.2",
+        paper_task_name="L-shaped Poisson PINN",
+        family="PINN",
+        metric="relative_l2",
+        description="Faithful-small L-shaped Poisson task with boundary and PDE residual collocation data.",
+        fidelity_level="faithful-small",
+        expected_runtime_s=45,
+        requires_torch=False,
+        requires_gpu=False,
+        paper_gap_notes=_FAITHFUL_SMALL_GAP,
     ),
     "burgers_pinn": BenchmarkSpec(
         name="burgers_pinn",

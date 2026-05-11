@@ -1,0 +1,6 @@
+experiment_id: poisson-lshape-faithful-small-real
+benchmark_dir: examples/poisson_lshape_faithful_small
+max_iterations: 1
+parallel_mutations: 1
+model: ${OPENAI_MODEL}
+temperature: 0.2
