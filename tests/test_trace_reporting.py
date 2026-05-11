@@ -470,6 +470,17 @@ def test_trace_summary_ignores_non_solution_parent_id_metadata(tmp_path: Path) -
 
     assert summary["artifact_consistency"]["passed"] is True
     assert summary["quality_gate"]["passed"] is True
+    assert summary["artifact_consistency"]["trace_node_reference_events_checked"] == 1
+    assert summary["artifact_consistency"]["trace_node_reference_events_skipped"] == 6
+
+
+def test_trace_summary_reports_trace_node_reference_check_counts(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["trace_node_reference_events_checked"] == 1
+    assert summary["artifact_consistency"]["trace_node_reference_events_skipped"] == 5
 
 
 def _write_consistent_run_artifacts(run_dir: Path) -> Path:

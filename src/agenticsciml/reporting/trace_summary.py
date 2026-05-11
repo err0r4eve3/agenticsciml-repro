@@ -141,9 +141,22 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
         _check_trace_event_sequence(issues, events)
     _check_workflow_lifecycle_sequence(issues, events)
     _check_run_state_consistency(issues, run_metadata, workflow_metadata, workflow_end_metadata)
-    _check_solution_artifact_consistency(issues, contract, run_metadata, tree, checkpoint, events)
+    trace_node_reference_counts = _check_solution_artifact_consistency(
+        issues,
+        contract,
+        run_metadata,
+        tree,
+        checkpoint,
+        events,
+    )
 
-    return {"checked": True, "passed": not issues, "issues": issues}
+    return {
+        "checked": True,
+        "passed": not issues,
+        "issues": issues,
+        "trace_node_reference_events_checked": trace_node_reference_counts["checked"],
+        "trace_node_reference_events_skipped": trace_node_reference_counts["skipped"],
+    }
 
 
 def _read_json_file(path: Path, issues: list[str]) -> dict[str, Any] | None:
@@ -248,7 +261,8 @@ def _check_solution_artifact_consistency(
     tree: dict[str, Any] | None,
     checkpoint: dict[str, Any] | None,
     events: list[dict[str, Any]],
-) -> None:
+) -> dict[str, int]:
+    trace_node_reference_counts = {"checked": 0, "skipped": 0}
     expected_contract_hash = contract.get("contract_hash") if contract else None
     expected_benchmark_name = contract.get("benchmark_name") if contract else None
 
@@ -319,7 +333,8 @@ def _check_solution_artifact_consistency(
 
     node_ids = set((tree_nodes or checkpoint_nodes or {}).keys())
     if node_ids:
-        _check_trace_node_references(issues, events, node_ids)
+        trace_node_reference_counts = _check_trace_node_references(issues, events, node_ids)
+    return trace_node_reference_counts
 
 
 def _nodes_by_id(
@@ -353,11 +368,14 @@ def _check_trace_node_references(
     issues: list[str],
     events: list[dict[str, Any]],
     node_ids: set[str],
-) -> None:
+) -> dict[str, int]:
+    counts = {"checked": 0, "skipped": 0}
     for event in events:
         event_name = str(event.get("name", ""))
         if event_name not in TRACE_NODE_REFERENCE_EVENT_NAMES:
+            counts["skipped"] += 1
             continue
+        counts["checked"] += 1
         metadata = event.get("metadata", {})
         if not isinstance(metadata, dict):
             continue
@@ -366,6 +384,7 @@ def _check_trace_node_references(
                 issues.append(
                     f"trace event {event_name} references unknown solution node via {key}: {node_id}"
                 )
+    return counts
 
 
 def _trace_node_references(metadata: dict[str, Any]) -> list[tuple[str, str]]:

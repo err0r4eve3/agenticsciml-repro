@@ -176,7 +176,9 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   to nodes present in the final tree/checkpoint artifact set when they appear
   on allowlisted solution lifecycle trace events. Do not treat arbitrary
   `parent_id` / `child_id` metadata on unrelated events as solution-tree
-  references without extending the allowlist and tests.
+  references without extending the allowlist and tests. `trace_summary.json`
+  must expose counts for checked and skipped trace node-reference events so the
+  allowlist behavior is auditable.
 - Preserve resume semantics. When changing orchestration, keep `checkpoint.json`
   current after root creation, child creation, and final report export.
 - Keep evaluator and benchmark contracts deterministic. LLM judges may summarize

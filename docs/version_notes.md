@@ -54,6 +54,7 @@
 - lifecycle trace ordering：trace summary 会拒绝 workflow-end 早于 workflow-start 的 trace，也会拒绝同一 run 中互相冲突的 workflow-end `run_state`。
 - trace event sequence：`ExperimentStorage.record_trace()` 为新 trace event 写入连续递增的 `event_seq`；trace summary 对 exported run artifact 校验 `event_seq` 必须完整且单调。
 - trace node reference integrity：trace summary 会在 allowlisted solution lifecycle events 上检查 trace metadata 中的 `solution_id`、`parent_id`、`child_id`、ID 列表和 `parent_to_child` 映射是否都能在最终 `tree.json` / `checkpoint.json` node set 中找到，避免误伤非 solution 语义 metadata。
+- trace node reference audit counters：`trace_summary.json` 输出 allowlist 中被检查的 solution-reference event 数，以及被跳过的非 solution event 数。
 - benchmark catalog：6 类论文任务家族都有本地 deterministic engineering proxy，包括 `function_approx`、`poisson_lshape`、`burgers_pinn`、`antiderivative_operator`、`reaction_diffusion_operator`、`cylinder_wake_reconstruction`；每个 catalog entry 记录 `fidelity_level`、expected runtime、dependency flags 和 paper-gap notes。
 - benchmark metadata validation：`BenchmarkSpec` 构造时校验 `fidelity_level`、expected runtime、dependency flags、paper task name 和 proxy paper-gap notes。
 - fidelity levels document：`docs/fidelity_levels.md` 定义 `proxy`、`faithful-small`、`paper-like` 的准入标准和 claim rules。
