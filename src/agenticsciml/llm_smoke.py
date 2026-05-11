@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,99 @@ class LLMSmokeResult:
 class LLMSmokeVerification:
     verification_json: Path
     passed: bool
+
+
+class _RecordingLLMClient(LLMClient):
+    def __init__(self, inner: LLMClient, ledger_path: Path):
+        self.inner = inner
+        self.ledger_path = ledger_path
+        self.provider = type(inner).__name__
+        self.model = getattr(inner, "model", None) or os.environ.get("OPENAI_MODEL", "gpt-5-mini")
+        self._call_count = 0
+
+    def complete_text(
+        self,
+        prompt: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+    ) -> str:
+        return self._record_call(
+            method="complete_text",
+            schema_name=None,
+            prompt=prompt,
+            system=system,
+            temperature=temperature,
+            call=lambda: self.inner.complete_text(prompt, system=system, temperature=temperature),
+        )
+
+    def complete_json(
+        self,
+        prompt: str,
+        schema_name: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+    ) -> dict[str, Any]:
+        return self._record_call(
+            method="complete_json",
+            schema_name=schema_name,
+            prompt=prompt,
+            system=system,
+            temperature=temperature,
+            call=lambda: self.inner.complete_json(prompt, schema_name, system=system, temperature=temperature),
+        )
+
+    def _record_call(
+        self,
+        *,
+        method: str,
+        schema_name: str | None,
+        prompt: str,
+        system: str | None,
+        temperature: float,
+        call: Any,
+    ) -> Any:
+        self._call_count += 1
+        call_id = f"llm_call_{self._call_count:06d}"
+        started_wall = time.time()
+        started = time.monotonic()
+        record: dict[str, Any] = {
+            "schema_version": 1,
+            "call_id": call_id,
+            "provider": self.provider,
+            "model": self.model,
+            "method": method,
+            "schema_name": schema_name,
+            "prompt_hash": _hash_text(prompt),
+            "system_hash": _hash_text(system or ""),
+            "temperature": temperature,
+            "started_at_unix": started_wall,
+        }
+        try:
+            response = call()
+        except Exception as exc:
+            record.update(
+                {
+                    "success": False,
+                    "error_type": type(exc).__name__,
+                    "duration_s": time.monotonic() - started,
+                }
+            )
+            self._append_ledger(record)
+            raise
+        record.update(
+            {
+                "success": True,
+                "response_hash": _hash_payload(response) if isinstance(response, dict) else _hash_text(str(response)),
+                "duration_s": time.monotonic() - started,
+            }
+        )
+        self._append_ledger(record)
+        return response
+
+    def _append_ledger(self, record: dict[str, Any]) -> None:
+        self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.ledger_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
 
 
 def run_llm_smoke(
@@ -84,6 +178,10 @@ def run_llm_smoke(
     gate_issues: list[str] = []
     for entry in plan["runs"]:
         variant = str(entry["variant"])
+        expected_run_dir = output_dir / "runs" / str(entry["experiment_id"])
+        ledger_path = expected_run_dir / "llm_call_ledger.jsonl"
+        if ledger_path.exists():
+            ledger_path.unlink()
         config = ExperimentConfig(
             experiment_id=str(entry["experiment_id"]),
             benchmark_dir=benchmark_dir,
@@ -98,7 +196,8 @@ def run_llm_smoke(
             use_mock=False,
         )
         try:
-            run_dir = AgenticSciMLOrchestrator(config, llm).run()
+            recording_llm = _RecordingLLMClient(llm, ledger_path)
+            run_dir = AgenticSciMLOrchestrator(config, recording_llm).run()
         except Exception as exc:
             report_path = output_dir / "real_llm_smoke_report.md"
             report_path.write_text(_render_failure_report(plan, "orchestrator_error", exc), encoding="utf-8")
@@ -231,7 +330,20 @@ def _smoke_row(run_dir: Path, variant: str, seed: int) -> dict[str, Any]:
     )
     proposal_titles = _proposal_titles(run_dir, nodes)
     llm_calls_total = _llm_call_count(metadata, variant, [])
-    gate = _smoke_gate(run_dir, variant, metadata, trace_summary, nodes, branch_tags)
+    ledger_entries, ledger_issues = _read_llm_call_ledger(run_dir, variant)
+    ledger_call_count = len(ledger_entries)
+    generation_span_count = _generation_span_count(run_dir)
+    gate = _smoke_gate(
+        run_dir,
+        variant,
+        metadata,
+        trace_summary,
+        nodes,
+        branch_tags,
+        ledger_issues=ledger_issues,
+        ledger_call_count=ledger_call_count,
+        generation_span_count=generation_span_count,
+    )
     return {
         "variant": variant,
         "seed": seed,
@@ -243,6 +355,10 @@ def _smoke_row(run_dir: Path, variant: str, seed: int) -> dict[str, Any]:
         "branch_intents": ",".join(tag.replace("branch:", "", 1) for tag in branch_tags),
         "proposal_titles": " | ".join(proposal_titles),
         "llm_calls": llm_calls_total if llm_calls_total is not None else 0,
+        "llm_ledger_calls": ledger_call_count,
+        "llm_ledger_providers": ",".join(sorted({str(entry.get("provider", "")) for entry in ledger_entries})),
+        "llm_ledger_models": ",".join(sorted({str(entry.get("model", "")) for entry in ledger_entries})),
+        "generation_span_count": generation_span_count,
         "trace_quality_gate_passed": bool(trace_summary.get("quality_gate", {}).get("passed", False)),
         "smoke_gate_passed": gate["passed"],
         "smoke_gate_issues": "; ".join(gate["issues"]),
@@ -418,6 +534,7 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
             row_call_count = _parse_strict_int(row.get("llm_calls"), f"{row_variant}: recomputed llm_calls", issues)
             if row_call_count is not None:
                 call_count += row_call_count
+            _verify_row_ledger(row, manifest, issues)
         if call_count <= 0:
             issues.append("recomputed LLM call count must be positive")
         if manifest_call_range is not None:
@@ -463,6 +580,56 @@ def _read_rows(path: Path, issues: list[str]) -> list[dict[str, str]]:
     except Exception as exc:
         issues.append(f"could not read {path.name}: {type(exc).__name__}: {exc}")
         return []
+
+
+def _read_llm_call_ledger(run_dir: Path, variant: str) -> tuple[list[dict[str, Any]], list[str]]:
+    issues: list[str] = []
+    path = run_dir / "llm_call_ledger.jsonl"
+    if not path.exists():
+        return [], [f"{variant}: missing llm_call_ledger.jsonl"]
+    entries: list[dict[str, Any]] = []
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError as exc:
+            issues.append(f"{variant}: invalid ledger JSON on line {line_number}: {exc.msg}")
+            continue
+        if not isinstance(entry, dict):
+            issues.append(f"{variant}: ledger line {line_number} must be a JSON object")
+            continue
+        entries.append(entry)
+    if not entries:
+        issues.append(f"{variant}: llm_call_ledger.jsonl must contain at least one call")
+    return entries, issues
+
+
+def _generation_span_count(run_dir: Path) -> int:
+    return sum(1 for event in _read_trace_events(run_dir) if event.get("event_type") == "generation_span")
+
+
+def _verify_row_ledger(row: dict[str, Any], manifest: dict[str, Any], issues: list[str]) -> None:
+    variant = str(row.get("variant", "unknown"))
+    ledger_calls = _parse_strict_int(row.get("llm_ledger_calls"), f"{variant}: llm_ledger_calls", issues)
+    llm_calls = _parse_strict_int(row.get("llm_calls"), f"{variant}: row llm_calls", issues)
+    generation_spans = _parse_strict_int(row.get("generation_span_count"), f"{variant}: generation_span_count", issues)
+    if ledger_calls is not None and llm_calls is not None and ledger_calls != llm_calls:
+        issues.append(f"{variant}: ledger call count {ledger_calls} does not match row llm_calls {llm_calls}")
+    if ledger_calls is not None and generation_spans is not None and ledger_calls != generation_spans:
+        issues.append(
+            f"{variant}: ledger call count {ledger_calls} does not match generation span count {generation_spans}"
+        )
+    expected_provider = manifest.get("provider")
+    expected_model = manifest.get("model")
+    providers = {item for item in str(row.get("llm_ledger_providers", "")).split(",") if item}
+    models = {item for item in str(row.get("llm_ledger_models", "")).split(",") if item}
+    if expected_provider and providers != {expected_provider}:
+        issues.append(
+            f"{variant}: ledger providers {sorted(providers)} do not match manifest provider {expected_provider}"
+        )
+    if expected_model and models != {expected_model}:
+        issues.append(f"{variant}: ledger models {sorted(models)} do not match manifest model {expected_model}")
 
 
 def _manifest_schema_issues(manifest: dict[str, Any], output_dir: Path) -> tuple[list[str], tuple[int, int] | None]:
@@ -612,14 +779,27 @@ def _smoke_gate(
     trace_summary: dict[str, Any],
     nodes: list[dict[str, Any]],
     branch_tags: set[str],
+    *,
+    ledger_issues: list[str] | None = None,
+    ledger_call_count: int | None = None,
+    generation_span_count: int | None = None,
 ) -> dict[str, Any]:
     issues: list[str] = []
+    issues.extend(ledger_issues or [])
     expected_branch_context = variant != "no_branch_context"
     if bool(metadata.get("branch_context_enabled", False)) is not expected_branch_context:
         issues.append("branch_context_enabled does not match variant")
     if not trace_summary.get("quality_gate", {}).get("passed", False):
         issues.append("trace_summary quality gate failed")
-    _llm_call_count(metadata, variant, issues)
+    llm_calls_total = _llm_call_count(metadata, variant, issues)
+    if ledger_call_count is not None and llm_calls_total is not None and llm_calls_total != ledger_call_count:
+        issues.append(
+            f"{variant}: llm_calls.total {llm_calls_total} does not match ledger count {ledger_call_count}"
+        )
+    if generation_span_count is not None and ledger_call_count is not None and generation_span_count != ledger_call_count:
+        issues.append(
+            f"{variant}: generation span count {generation_span_count} does not match ledger count {ledger_call_count}"
+        )
 
     child_events = [
         event
@@ -793,6 +973,10 @@ def _build_manifest(plan: dict[str, Any], *, llm_client: LLMClient | None) -> di
 def _hash_payload(payload: dict[str, Any]) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _hash_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _package_versions() -> dict[str, str]:

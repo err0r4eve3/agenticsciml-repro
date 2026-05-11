@@ -33,6 +33,24 @@ def _rewrite_run_metadata_llm_calls_total(run_dir: Path, value: object) -> None:
     metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
 
 
+def _rewrite_first_ledger_field(run_dir: Path, field: str, value: object) -> None:
+    ledger_path = run_dir / "llm_call_ledger.jsonl"
+    entries = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert entries, "expected at least one ledger entry"
+    entries[0][field] = value
+    ledger_path.write_text(
+        "\n".join(json.dumps(entry, sort_keys=True) for entry in entries) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _delete_first_ledger_entry(run_dir: Path) -> None:
+    ledger_path = run_dir / "llm_call_ledger.jsonl"
+    lines = [line for line in ledger_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert lines, "expected at least one ledger entry"
+    ledger_path.write_text("\n".join(lines[1:]) + ("\n" if len(lines) > 1 else ""), encoding="utf-8")
+
+
 def test_llm_smoke_dry_run_writes_plan_without_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
@@ -128,6 +146,10 @@ def test_llm_smoke_real_gate_with_scripted_llm(tmp_path: Path) -> None:
     assert verification.passed is True
     assert verification_payload["passed"] is True
     assert len(verification_payload["recomputed_rows"]) == 2
+    for row in verification_payload["recomputed_rows"]:
+        assert int(row["llm_ledger_calls"]) == int(row["llm_calls"])
+        assert int(row["generation_span_count"]) == int(row["llm_calls"])
+        assert row["llm_ledger_providers"] == "MockLLMClient"
 
 
 def test_verify_llm_smoke_output_rejects_dry_run_only(tmp_path: Path) -> None:
@@ -453,6 +475,60 @@ def test_verify_llm_smoke_output_rejects_malformed_llm_calls_total(
 
     assert verification.passed is False
     assert any(expected_issue in issue for issue in payload["issues"])
+
+
+def test_verify_llm_smoke_output_rejects_deleted_ledger_call(tmp_path: Path) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    _delete_first_ledger_entry(tmp_path / "runs" / "smoke-branch_context-seed-0")
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("ledger call count" in issue and "does not match" in issue for issue in payload["issues"])
+
+
+def test_verify_llm_smoke_output_rejects_ledger_provider_mismatch(tmp_path: Path) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    _rewrite_first_ledger_field(tmp_path / "runs" / "smoke-branch_context-seed-0", "provider", "OtherProvider")
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("ledger providers" in issue and "manifest provider" in issue for issue in payload["issues"])
+
+
+def test_verify_llm_smoke_output_rejects_manifest_model_mismatch(tmp_path: Path) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    manifest_path = tmp_path / "real_llm_smoke_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["model"] = "other-model"
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("ledger models" in issue and "manifest model" in issue for issue in payload["issues"])
 
 
 def test_cli_verify_smoke_llm_command(tmp_path: Path, cli_env: dict[str, str]) -> None:
