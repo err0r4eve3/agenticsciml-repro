@@ -208,6 +208,11 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   relation is bidirectionally consistent: child entries agree with child
   `parent_id`, and every non-root node appears exactly once in its parent's
   `children`.
+- Final solution nodes must satisfy a schema before graph checks are trusted:
+  required fields from `SolutionNode.to_dict()`, `status` in the supported enum,
+  valid nullable string fields, `method_tags` as strings, non-negative
+  `num_debug_attempts`, numeric/null `score_delta_from_parent`, and a valid
+  optional score object.
 - Preserve resume semantics. When changing orchestration, keep `checkpoint.json`
   current after root creation, child creation, and final report export.
 - Keep evaluator and benchmark contracts deterministic. LLM judges may summarize
