@@ -352,7 +352,11 @@ class AgenticSciMLOrchestrator:
             },
         )
 
-        branch_contexts = self._branch_contexts(fanout_trace)
+        branch_contexts = (
+            self._branch_contexts(fanout_trace)
+            if self.config.evolution.use_branch_context
+            else {solution_id: {} for _, solution_id in jobs}
+        )
 
         if max_workers == 1:
             children = [

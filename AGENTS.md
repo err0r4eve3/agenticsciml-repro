@@ -342,10 +342,12 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   ablation, not lexical retrieval disguised as random.
 - Ablation variants must map to real workflow switches. `no_critic` must skip
   `CriticAgent` calls; `no_debugger` must skip the debugger loop instead of only
-  changing report labels.
+  changing report labels; `no_branch_context` must disable branch context
+  injection instead of only changing report labels.
 - Ablation outputs must include per-run rows and aggregate rows with champion
   score, root score, champion/root improvement, valid solution rate, timeout
-  count, debug success count, LLM call count, wall time, and example run dirs.
+  count, debug success count, branch context count, branch intents, LLM call
+  count, wall time, and example run dirs.
 - Ablation best/worst score aggregation must respect `higher_is_better`; do not
   assume every future benchmark is an error metric.
 - Ablation outputs must explicitly label mock evidence boundaries with fields

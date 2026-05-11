@@ -17,7 +17,16 @@ from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 
 
-DEFAULT_VARIANTS = ("root_only", "no_kb", "kb", "random_kb", "no_critic", "no_debugger")
+DEFAULT_VARIANTS = (
+    "root_only",
+    "no_kb",
+    "kb",
+    "random_kb",
+    "no_critic",
+    "no_debugger",
+    "branch_context",
+    "no_branch_context",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +89,24 @@ def _run_variant(benchmark_dir: Path, output_dir: Path, variant: str, seed: int)
         for node in nodes
         if int(node.get("num_debug_attempts", 0)) > 0 and node.get("status") == "evaluated"
     )
+    branch_tags = sorted(
+        {
+            tag
+            for node in nodes
+            for tag in node.get("method_tags", [])
+            if isinstance(tag, str) and tag.startswith("branch:")
+        }
+    )
+    branch_context_count = sum(
+        1
+        for node in nodes
+        if (run_dir / "solutions" / str(node["node_id"]) / "branch_context.json").exists()
+        and json.loads(
+            (run_dir / "solutions" / str(node["node_id"]) / "branch_context.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    )
     return {
         "variant": variant,
         "seed": seed,
@@ -96,6 +123,8 @@ def _run_variant(benchmark_dir: Path, output_dir: Path, variant: str, seed: int)
         "valid_solution_rate": evaluated_count / len(nodes) if nodes else 0.0,
         "timeout_count": timeout_count,
         "debug_success_count": debug_success_count,
+        "branch_context_count": branch_context_count,
+        "branch_intents": ",".join(tag.replace("branch:", "", 1) for tag in branch_tags),
         "llm_calls": metadata.get("llm_calls", {}).get("total", 0),
         "wall_time_s": metadata.get("wall_time_s", 0.0),
     }
@@ -124,6 +153,18 @@ def _variant_config(variant: str, seed: int) -> EvolutionConfig:
             use_debugger=False,
             max_debug_retries=0,
             parallel_mutations=1,
+            random_seed=seed,
+        )
+    if variant == "branch_context":
+        branch_common = {**common, "parallel_mutations": 2}
+        return EvolutionConfig(max_iterations=1, use_kb=True, **branch_common)
+    if variant == "no_branch_context":
+        return EvolutionConfig(
+            max_iterations=1,
+            use_kb=True,
+            use_branch_context=False,
+            parallel_mutations=2,
+            max_debug_retries=1,
             random_seed=seed,
         )
     raise ValueError(f"Unknown ablation variant: {variant}")
@@ -188,6 +229,8 @@ def _aggregate(run_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "valid_solution_rate_mean": _mean(valid_rates),
                 "timeout_count_total": sum(int(row["timeout_count"]) for row in rows),
                 "debug_success_count_total": sum(int(row["debug_success_count"]) for row in rows),
+                "branch_context_count_total": sum(int(row.get("branch_context_count", 0)) for row in rows),
+                "branch_intents": _joined_unique(row.get("branch_intents", "") for row in rows),
                 "llm_calls_total": sum(int(row["llm_calls"]) for row in rows),
                 "wall_time_s_total": sum(float(row["wall_time_s"]) for row in rows),
                 "example_run_dir": str(rows[0]["run_dir"]),
@@ -204,6 +247,18 @@ def _numbers(rows: list[dict[str, Any]], key: str) -> list[float]:
             continue
         values.append(float(value))
     return values
+
+
+def _joined_unique(values: Any) -> str:
+    items: set[str] = set()
+    for value in values:
+        if not value:
+            continue
+        for item in str(value).split(","):
+            item = item.strip()
+            if item:
+                items.add(item)
+    return ",".join(sorted(items))
 
 
 def _higher_is_better(node: dict[str, Any]) -> bool:

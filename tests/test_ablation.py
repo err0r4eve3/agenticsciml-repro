@@ -15,14 +15,32 @@ def test_ablation_runner_writes_summary_and_report(tmp_path: Path) -> None:
         benchmark_dir=Path("examples/function_approx").resolve(),
         output_dir=tmp_path,
         seeds=[0],
-        variants=["root_only", "no_kb", "kb", "random_kb", "no_critic", "no_debugger"],
+        variants=[
+            "root_only",
+            "no_kb",
+            "kb",
+            "random_kb",
+            "no_critic",
+            "no_debugger",
+            "branch_context",
+            "no_branch_context",
+        ],
     )
 
     rows = list(csv.DictReader(result.summary_csv.open(encoding="utf-8")))
     variants = {row["variant"] for row in rows}
     report = result.report_md.read_text(encoding="utf-8")
 
-    assert variants == {"root_only", "no_kb", "kb", "random_kb", "no_critic", "no_debugger"}
+    assert variants == {
+        "root_only",
+        "no_kb",
+        "kb",
+        "random_kb",
+        "no_critic",
+        "no_debugger",
+        "branch_context",
+        "no_branch_context",
+    }
     assert result.summary_csv.exists()
     assert result.report_md.exists()
     assert "champion/root improvement" in rows[0]
@@ -50,6 +68,18 @@ def test_ablation_runner_writes_summary_and_report(tmp_path: Path) -> None:
     no_debugger_run = Path(next(row["example_run_dir"] for row in rows if row["variant"] == "no_debugger"))
     no_debugger_config = json.loads((no_debugger_run / "config.json").read_text(encoding="utf-8"))
     assert no_debugger_config["evolution"]["use_debugger"] is False
+
+    branch_context_row = next(row for row in rows if row["variant"] == "branch_context")
+    no_branch_context_row = next(row for row in rows if row["variant"] == "no_branch_context")
+    assert int(branch_context_row["branch_context_count_total"]) > 0
+    assert branch_context_row["branch_intents"]
+    assert int(no_branch_context_row["branch_context_count_total"]) == 0
+
+    no_branch_context_run = Path(no_branch_context_row["example_run_dir"])
+    no_branch_context_config = json.loads(
+        (no_branch_context_run / "config.json").read_text(encoding="utf-8")
+    )
+    assert no_branch_context_config["evolution"]["use_branch_context"] is False
 
 
 def test_cli_ablate_command_runs_mock_pipeline(tmp_path: Path, cli_env: dict[str, str]) -> None:

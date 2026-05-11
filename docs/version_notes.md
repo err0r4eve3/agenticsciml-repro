@@ -42,6 +42,7 @@
 - shared fanout trace contract：`FanoutTraceMetadata` 是 fanout trace 的共享 typed contract，orchestrator 写 trace 前和 trace summary 读 trace 时复用同一套 schema 约束。
 - resume-safe solution ID allocation：新 child ID 从已加载 node 和现有 `solutions/solution_*` workspace 的最大 numeric suffix 后继续分配，不再依赖 `len(nodes)`；遇到 malformed existing node ID 会 fail closed。
 - branch context for fanout：同一 parent 的多个 fanout child 会写入 `branch_context.json`、child mutation trace metadata 和 proposer/engineer prompt，并在 `method_tags` 里记录 `branch:<intent>`，用于审计 sibling branch diversity；这仍是 diversity intent/evidence，不等同于真实论文级 emergent discovery。
+- branch-context ablation switch：`EvolutionConfig.use_branch_context`、CLI `--no-branch-context` 和 ablation variants `branch_context` / `no_branch_context` 支持后续真实 LLM smoke 对比；mock ablation 只验证开关与 artifact。
 - benchmark-aware retrieval query：`RetrievalQueryBuilder` 使用 benchmark family/metric/description、parent analysis、failure kind、method tags 和 leaderboard top-k 生成检索 query。
 - KB ablation switches：`use_kb=False` 不注入 KB，`random_kb=True` 使用 seed-controlled random KB retrieval。
 - ablation runner：`agenticsciml ablate` 和 `scripts/run_ablation.py` 生成 `ablation_runs.csv`、`ablation_summary.csv`、`ablation_report.md`，支持 `root_only`、`no_kb`、`kb`、`random_kb`、`no_critic`、`no_debugger`。

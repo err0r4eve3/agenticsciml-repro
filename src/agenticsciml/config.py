@@ -172,6 +172,7 @@ class EvolutionConfig:
     random_seed: int = 0
     use_critic: bool = True
     use_debugger: bool = True
+    use_branch_context: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -185,6 +186,7 @@ class EvolutionConfig:
             "random_seed": self.random_seed,
             "use_critic": self.use_critic,
             "use_debugger": self.use_debugger,
+            "use_branch_context": self.use_branch_context,
         }
 
     @classmethod
@@ -200,6 +202,7 @@ class EvolutionConfig:
             random_seed=int(data.get("random_seed", 0)),
             use_critic=bool(data.get("use_critic", True)),
             use_debugger=bool(data.get("use_debugger", True)),
+            use_branch_context=bool(data.get("use_branch_context", True)),
         )
 
 

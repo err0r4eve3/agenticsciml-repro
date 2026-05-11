@@ -14,8 +14,11 @@
 4. `random_kb`：运行 seed-controlled random KB retrieval。
 5. `no_critic`：跳过 `CriticAgent` 调用，保留 proposer final proposal。
 6. `no_debugger`：跳过 debugger loop。
+7. `branch_context`：`parallel_mutations=2`，开启 same-parent fanout branch context。
+8. `no_branch_context`：`parallel_mutations=2`，关闭 branch context，用于后续真实 LLM smoke 对比。
 
-`no_critic` 和 `no_debugger` 必须映射到真实 workflow 开关，不能只在报表里改标签。
+`no_critic`、`no_debugger` 和 `no_branch_context` 必须映射到真实 workflow
+开关，不能只在报表里改标签。
 
 ## Commands
 
@@ -24,7 +27,7 @@ CLI：
 ```bash
 uv run --python 3.11 --extra dev agenticsciml ablate examples/function_approx \
   --seeds 0 1 2 \
-  --variants root_only,no_kb,kb,random_kb,no_critic,no_debugger \
+  --variants root_only,no_kb,kb,random_kb,no_critic,no_debugger,branch_context,no_branch_context \
   --output-dir runs/ablation
 ```
 
@@ -34,7 +37,7 @@ uv run --python 3.11 --extra dev agenticsciml ablate examples/function_approx \
 uv run --python 3.11 --extra dev python scripts/run_ablation.py \
   --benchmark-dir examples/function_approx \
   --seeds 0 1 2 \
-  --variants root_only,no_kb,kb,random_kb,no_critic,no_debugger \
+  --variants root_only,no_kb,kb,random_kb,no_critic,no_debugger,branch_context,no_branch_context \
   --output-dir runs/ablation
 ```
 
@@ -55,6 +58,8 @@ run-level 指标至少包含：
 - valid solution rate
 - timeout count
 - debug success count
+- branch context count
+- branch intents
 - LLM call count
 - wall time
 
