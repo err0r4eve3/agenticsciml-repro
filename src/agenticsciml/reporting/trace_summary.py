@@ -5,6 +5,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from agenticsciml.state import validate_solution_node_payload
+
 
 REQUIRED_EVENT_TYPES = (
     "workflow_span",
@@ -52,26 +54,6 @@ TRACE_NODE_LIFECYCLE_STAGE_RULES = {
     ("tool_span", "train_and_evaluate"): "evaluated",
     ("tool_span", "train_and_evaluate.retry"): "evaluated",
 }
-SOLUTION_NODE_REQUIRED_FIELDS = {
-    "analysis_path",
-    "benchmark_name",
-    "children",
-    "contract_hash",
-    "error",
-    "failure_kind",
-    "method_tags",
-    "node_id",
-    "num_debug_attempts",
-    "parent_id",
-    "proposal_path",
-    "score",
-    "score_delta_from_parent",
-    "status",
-    "workspace",
-}
-SOLUTION_NODE_STATUSES = {"created", "evaluated", "failed"}
-
-
 def load_trace_events(run_dir: Path) -> list[dict[str, Any]]:
     path = run_dir / "trace.jsonl"
     if not path.exists():
@@ -557,88 +539,7 @@ def _check_solution_node_schema(
     issues: list[str],
 ) -> None:
     for node_id, node in sorted(nodes.items()):
-        missing_fields = sorted(SOLUTION_NODE_REQUIRED_FIELDS - set(node))
-        for field_name in missing_fields:
-            issues.append(f"{artifact_name} node {node_id} missing required field {field_name}")
-
-        _check_nullable_str_field(artifact_name, node_id, node, "parent_id", issues)
-        _check_required_str_field(artifact_name, node_id, node, "workspace", issues)
-        _check_nullable_str_field(artifact_name, node_id, node, "proposal_path", issues)
-        _check_nullable_str_field(artifact_name, node_id, node, "analysis_path", issues)
-        _check_nullable_str_field(artifact_name, node_id, node, "error", issues)
-        _check_nullable_str_field(artifact_name, node_id, node, "benchmark_name", issues)
-        _check_nullable_str_field(artifact_name, node_id, node, "contract_hash", issues)
-        _check_nullable_str_field(artifact_name, node_id, node, "failure_kind", issues)
-
-        status = node.get("status")
-        if not isinstance(status, str) or status not in SOLUTION_NODE_STATUSES:
-            issues.append(f"{artifact_name} node {node_id} has invalid status: {status!r}")
-
-        method_tags = node.get("method_tags")
-        if not isinstance(method_tags, list) or any(not isinstance(item, str) for item in method_tags):
-            issues.append(f"{artifact_name} node {node_id} method_tags must be a list of strings")
-
-        num_debug_attempts = node.get("num_debug_attempts")
-        if (
-            not isinstance(num_debug_attempts, int)
-            or isinstance(num_debug_attempts, bool)
-            or num_debug_attempts < 0
-        ):
-            issues.append(f"{artifact_name} node {node_id} num_debug_attempts must be a non-negative integer")
-
-        score_delta = node.get("score_delta_from_parent")
-        if score_delta is not None and (
-            not isinstance(score_delta, int | float) or isinstance(score_delta, bool)
-        ):
-            issues.append(f"{artifact_name} node {node_id} score_delta_from_parent must be a number or null")
-
-        _check_solution_score_schema(artifact_name, node_id, node.get("score"), issues)
-
-
-def _check_required_str_field(
-    artifact_name: str,
-    node_id: str,
-    node: dict[str, Any],
-    field_name: str,
-    issues: list[str],
-) -> None:
-    value = node.get(field_name)
-    if not isinstance(value, str) or not value:
-        issues.append(f"{artifact_name} node {node_id} {field_name} must be a non-empty string")
-
-
-def _check_nullable_str_field(
-    artifact_name: str,
-    node_id: str,
-    node: dict[str, Any],
-    field_name: str,
-    issues: list[str],
-) -> None:
-    value = node.get(field_name)
-    if value is not None and not isinstance(value, str):
-        issues.append(f"{artifact_name} node {node_id} {field_name} must be a string or null")
-
-
-def _check_solution_score_schema(
-    artifact_name: str,
-    node_id: str,
-    score: Any,
-    issues: list[str],
-) -> None:
-    if score is None:
-        return
-    if not isinstance(score, dict):
-        issues.append(f"{artifact_name} node {node_id} score must be an object or null")
-        return
-    metric = score.get("metric")
-    if not isinstance(metric, str) or not metric:
-        issues.append(f"{artifact_name} node {node_id} score.metric must be a non-empty string")
-    value = score.get("value")
-    if not isinstance(value, int | float) or isinstance(value, bool):
-        issues.append(f"{artifact_name} node {node_id} score.value must be a number")
-    higher_is_better = score.get("higher_is_better")
-    if not isinstance(higher_is_better, bool):
-        issues.append(f"{artifact_name} node {node_id} score.higher_is_better must be a boolean")
+        issues.extend(validate_solution_node_payload(node, context=f"{artifact_name} node {node_id}"))
 
 
 def _solution_tree_cycle_nodes(nodes: dict[str, dict[str, Any]]) -> list[str]:

@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from agenticsciml.config import EvaluationContract, ExperimentConfig
 from agenticsciml.state import AgentMessage, Proposal, SolutionNode, SolutionScore
 from agenticsciml.storage import ExperimentStorage
@@ -21,6 +23,48 @@ def test_solution_node_round_trips_through_json() -> None:
     assert restored == node
     assert restored.score is not None
     assert restored.score.value == 0.125
+
+
+def test_solution_node_from_dict_rejects_missing_required_field() -> None:
+    node = SolutionNode(
+        node_id="solution_000",
+        parent_id=None,
+        workspace="runs/demo/solutions/solution_000",
+        status="created",
+    )
+    payload = node.to_dict()
+    del payload["status"]
+
+    with pytest.raises(ValueError, match="missing required field status"):
+        SolutionNode.from_dict(payload)
+
+
+def test_solution_node_from_dict_rejects_invalid_status() -> None:
+    node = SolutionNode(
+        node_id="solution_000",
+        parent_id=None,
+        workspace="runs/demo/solutions/solution_000",
+        status="created",
+    )
+    payload = node.to_dict()
+    payload["status"] = "done"
+
+    with pytest.raises(ValueError, match="invalid status"):
+        SolutionNode.from_dict(payload)
+
+
+def test_solution_node_from_dict_rejects_invalid_score_shape() -> None:
+    node = SolutionNode(
+        node_id="solution_000",
+        parent_id=None,
+        workspace="runs/demo/solutions/solution_000",
+        status="created",
+    )
+    payload = node.to_dict()
+    payload["score"] = {"metric": "", "value": "bad", "higher_is_better": "no"}
+
+    with pytest.raises(ValueError, match="score.value must be a number"):
+        SolutionNode.from_dict(payload)
 
 
 def test_storage_creates_solution_workspace_and_transcript(tmp_path: Path) -> None:
