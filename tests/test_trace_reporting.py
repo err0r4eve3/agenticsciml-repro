@@ -507,6 +507,10 @@ def test_trace_summary_reports_trace_node_reference_check_counts(tmp_path: Path)
                     "evaluated": ["train_and_evaluate"],
                     "materialized": ["root_engineer"],
                 },
+                "stage_event_seqs": {
+                    "evaluated": [6],
+                    "materialized": [5],
+                },
             }
         }
     }
@@ -681,6 +685,28 @@ def test_trace_summary_fails_when_evaluated_root_has_no_materialized_stage(tmp_p
         "stages"
     ] == ["evaluated"]
     assert any("solution nodes missing required lifecycle stages" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
+def test_trace_summary_fails_when_lifecycle_stage_order_is_invalid(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    root_engineer_event = next(event for event in events if event.get("name") == "root_engineer")
+    events = [event for event in events if event.get("name") != "root_engineer"]
+    for event in events:
+        event.pop("event_seq", None)
+    root_engineer_event.pop("event_seq", None)
+    events.append(root_engineer_event)
+    _write_events(run_dir / "trace.jsonl", events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("solution nodes have invalid lifecycle stage order" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
 def test_trace_summary_fails_when_exported_run_checks_no_actual_solution_node_references(tmp_path: Path) -> None:

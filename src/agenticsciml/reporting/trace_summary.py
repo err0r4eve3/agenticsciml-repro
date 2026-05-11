@@ -417,6 +417,18 @@ def _check_solution_artifact_consistency(
                         "evaluated solution nodes have no evaluated trace stage: "
                         + ", ".join(evaluated_nodes_without_evaluated_stage)
                     )
+                nodes_with_invalid_stage_order = _nodes_with_invalid_lifecycle_stage_order(
+                    tree_nodes or checkpoint_nodes or {},
+                    trace_node_reference_counts["lifecycle_stage_coverage"],
+                )
+                if nodes_with_invalid_stage_order:
+                    issues.append(
+                        "solution nodes have invalid lifecycle stage order: "
+                        + "; ".join(
+                            f"{node_id}={'>'.join(expected_order)}"
+                            for node_id, expected_order in nodes_with_invalid_stage_order.items()
+                        )
+                    )
     return trace_node_reference_counts
 
 
@@ -537,7 +549,7 @@ def _check_trace_node_lifecycle_stages(
     events: list[dict[str, Any]],
     node_ids: set[str],
 ) -> dict[str, Any]:
-    stage_events: dict[str, dict[str, set[str]]] = {node_id: {} for node_id in node_ids}
+    stage_events: dict[str, dict[str, dict[str, Any]]] = {node_id: {} for node_id in node_ids}
     for event in events:
         event_type = str(event.get("event_type", ""))
         event_name = str(event.get("name", ""))
@@ -555,13 +567,23 @@ def _check_trace_node_lifecycle_stages(
                     f"trace lifecycle event {event_name} references unknown solution node via {key}: {node_id}"
                 )
                 continue
-            stage_events[node_id].setdefault(stage, set()).add(event_name)
+            stage_payload = stage_events[node_id].setdefault(
+                stage,
+                {"event_names": set(), "event_seqs": []},
+            )
+            stage_payload["event_names"].add(event_name)
+            event_seq = event.get("event_seq")
+            if isinstance(event_seq, int) and not isinstance(event_seq, bool):
+                stage_payload["event_seqs"].append(event_seq)
     nodes_payload: dict[str, dict[str, Any]] = {}
     for node_id, stage_events_for_node in sorted(stage_events.items()):
         nodes_payload[node_id] = {
             "stages": sorted(stage_events_for_node),
             "stage_events": {
-                stage: sorted(event_names) for stage, event_names in sorted(stage_events_for_node.items())
+                stage: sorted(payload["event_names"]) for stage, payload in sorted(stage_events_for_node.items())
+            },
+            "stage_event_seqs": {
+                stage: sorted(payload["event_seqs"]) for stage, payload in sorted(stage_events_for_node.items())
             },
         }
     return {
@@ -615,6 +637,53 @@ def _required_lifecycle_stages(node: dict[str, Any]) -> set[str]:
     if node.get("parent_id"):
         required.update({"created", "completed"})
     return required
+
+
+def _nodes_with_invalid_lifecycle_stage_order(
+    nodes: dict[str, dict[str, Any]],
+    lifecycle_stage_coverage: dict[str, Any],
+) -> dict[str, list[str]]:
+    coverage_nodes = lifecycle_stage_coverage.get("nodes", {})
+    if not isinstance(coverage_nodes, dict):
+        return {}
+    invalid: dict[str, list[str]] = {}
+    for node_id, node in sorted(nodes.items()):
+        expected_order = _expected_lifecycle_stage_order(node)
+        if not expected_order:
+            continue
+        coverage = coverage_nodes.get(node_id, {})
+        if not isinstance(coverage, dict):
+            continue
+        stage_event_seqs = coverage.get("stage_event_seqs", {})
+        if not isinstance(stage_event_seqs, dict):
+            continue
+        if not _lifecycle_stage_order_is_valid(stage_event_seqs, expected_order):
+            invalid[node_id] = expected_order
+    return invalid
+
+
+def _expected_lifecycle_stage_order(node: dict[str, Any]) -> list[str]:
+    if node.get("status") != "evaluated":
+        return []
+    if node.get("parent_id"):
+        return ["created", "materialized", "evaluated", "completed"]
+    return ["materialized", "evaluated"]
+
+
+def _lifecycle_stage_order_is_valid(stage_event_seqs: dict[str, Any], expected_order: list[str]) -> bool:
+    previous_seq: int | None = None
+    for stage in expected_order:
+        seqs = stage_event_seqs.get(stage)
+        if not isinstance(seqs, list) or not seqs:
+            return True
+        int_seqs = [seq for seq in seqs if isinstance(seq, int) and not isinstance(seq, bool)]
+        if not int_seqs:
+            return True
+        current_seq = min(int_seqs)
+        if previous_seq is not None and current_seq <= previous_seq:
+            return False
+        previous_seq = current_seq
+    return True
 
 
 def _trace_node_references(metadata: dict[str, Any]) -> list[tuple[str, str]]:

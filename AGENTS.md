@@ -198,7 +198,9 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   nodes must have an `evaluated` stage from a self-referenced evaluation event.
   Lifecycle stage checks must use a status-aware matrix: evaluated root nodes
   require `materialized` and `evaluated`; evaluated child nodes additionally
-  require `created` and `completed`.
+  require `created` and `completed`. Completed artifacts must validate
+  lifecycle order using `event_seq`: root `materialized < evaluated`, child
+  `created < materialized < evaluated < completed`.
 - Preserve resume semantics. When changing orchestration, keep `checkpoint.json`
   current after root creation, child creation, and final report export.
 - Keep evaluator and benchmark contracts deterministic. LLM judges may summarize
