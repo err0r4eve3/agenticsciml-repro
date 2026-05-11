@@ -322,7 +322,9 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   `parent_to_children`. `parallel_children.start/end` trace events must include
   the full canonical fanout schema (`parent_ids`, `unique_parent_ids`,
   `child_ids`, `parent_child_edges`, and `parent_to_children`) or trace summary
-  must fail closed.
+  must fail closed. The fanout trace schema must live in a shared typed
+  contract used by both the orchestrator writer and trace-summary reader; do
+  not duplicate writer-only and reader-only schema logic.
 - Retrieval queries must be benchmark-aware. Build them from `ProblemBundle`,
   parent analysis, failure kind, method tags, score trend, and top leaderboard
   context rather than fixed benchmark-specific keywords.
