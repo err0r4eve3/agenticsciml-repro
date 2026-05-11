@@ -80,6 +80,7 @@ def test_trace_summary_checks_run_artifact_evidence_consistency(tmp_path: Path) 
         "scientific_claim": "not_supported",
     }
     (run_dir / "run_metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+    (run_dir / "solutions" / "solution_000").mkdir(parents=True)
     (run_dir / "evaluation_contract.json").write_text(
         json.dumps(
             {
@@ -324,6 +325,23 @@ def test_trace_summary_fails_on_unsupported_solution_tree_schema_version(tmp_pat
     assert summary["artifact_consistency"]["passed"] is False
     assert summary["quality_gate"]["passed"] is False
     assert any("unsupported schema_version" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
+def test_trace_summary_fails_when_solution_node_artifact_path_escapes_run(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    for artifact_name in ("tree.json", "checkpoint.json"):
+        artifact = json.loads((run_dir / artifact_name).read_text(encoding="utf-8"))
+        artifact["nodes"][0]["analysis_path"] = "/etc/passwd"
+        (run_dir / artifact_name).write_text(json.dumps(artifact), encoding="utf-8")
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any(
+        "analysis_path must be inside node workspace" in issue
+        for issue in summary["artifact_consistency"]["issues"]
+    )
 
 
 def test_trace_summary_fails_on_invalid_solution_tree_child_link(tmp_path: Path) -> None:
@@ -1023,6 +1041,7 @@ def _write_consistent_run_artifacts(run_dir: Path) -> Path:
         "solution_count": 1,
     }
     (run_dir / "run_metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+    (run_dir / "solutions" / "solution_000").mkdir(parents=True)
     (run_dir / "evaluation_contract.json").write_text(
         json.dumps(
             {

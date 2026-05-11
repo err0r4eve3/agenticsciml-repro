@@ -230,11 +230,11 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
 - `tree.json` and `checkpoint.json` must carry the current solution-tree schema
   version. Resume/load and trace summary must reject missing or unsupported
   schema versions instead of attempting silent migration.
-- Resume/load must validate solution artifact path semantics. `workspace` must
-  resolve under the run's `solutions/` directory and match `node_id`; non-null
-  `proposal_path` and `analysis_path` must resolve inside that node workspace
-  and must exist. Reject absolute external paths, `..` escapes, and symlink
-  escapes that resolve outside the run workspace.
+- Resume/load and trace summary must validate solution artifact path semantics.
+  `workspace` must resolve under the run's `solutions/` directory and match
+  `node_id`; non-null `proposal_path` and `analysis_path` must resolve inside
+  that node workspace and must exist. Reject absolute external paths, `..`
+  escapes, and symlink escapes that resolve outside the run workspace.
 - JSON artifact writes must reject `NaN`, `Infinity`, and `-Infinity`; do not
   let non-standard JSON numeric constants enter run metadata, trace events,
   transcripts, checkpoint files, tree exports, or leaderboard inputs.

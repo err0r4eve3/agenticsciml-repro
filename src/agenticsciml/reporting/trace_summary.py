@@ -7,6 +7,7 @@ from typing import Any
 
 from agenticsciml.state import (
     SOLUTION_TREE_SCHEMA_VERSION,
+    validate_solution_node_artifact_paths,
     validate_solution_node_payload,
     validate_solution_tree_graph_payload,
 )
@@ -165,6 +166,7 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
     _check_run_state_consistency(issues, run_metadata, workflow_metadata, workflow_end_metadata)
     trace_node_reference_counts = _check_solution_artifact_consistency(
         issues,
+        run_dir,
         contract,
         run_metadata,
         tree,
@@ -287,6 +289,7 @@ def _check_trace_event_sequence(issues: list[str], events: list[dict[str, Any]])
 
 def _check_solution_artifact_consistency(
     issues: list[str],
+    run_dir: Path,
     contract: dict[str, Any] | None,
     run_metadata: dict[str, Any] | None,
     tree: dict[str, Any] | None,
@@ -353,6 +356,8 @@ def _check_solution_artifact_consistency(
         if nodes is not None:
             _check_solution_node_schema(artifact_name, nodes, issues)
             _check_solution_tree_graph_invariants(artifact_name, nodes, issues)
+            if _requires_solution_artifacts(run_metadata):
+                _check_solution_node_artifact_paths(artifact_name, run_dir, nodes, issues)
 
     for artifact_name, nodes in (("tree.json", tree_nodes), ("checkpoint.json", checkpoint_nodes)):
         if nodes is None:
@@ -489,6 +494,22 @@ def _check_solution_node_schema(
 ) -> None:
     for node_id, node in sorted(nodes.items()):
         issues.extend(validate_solution_node_payload(node, context=f"{artifact_name} node {node_id}"))
+
+
+def _check_solution_node_artifact_paths(
+    artifact_name: str,
+    run_dir: Path,
+    nodes: dict[str, dict[str, Any]],
+    issues: list[str],
+) -> None:
+    for node_id, node in sorted(nodes.items()):
+        issues.extend(
+            validate_solution_node_artifact_paths(
+                node,
+                run_dir=run_dir,
+                context=f"{artifact_name} node {node_id}",
+            )
+        )
 
 
 def _check_trace_node_references(
