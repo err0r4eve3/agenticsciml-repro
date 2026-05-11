@@ -88,6 +88,8 @@ def _run_variant(benchmark_dir: Path, output_dir: Path, variant: str, seed: int)
         "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
         "run_dir": str(run_dir),
         "champion_node_id": champion["node_id"],
+        "metric_name": champion.get("score", {}).get("metric", ""),
+        "higher_is_better": _higher_is_better(champion),
         "champion_score": champion_score,
         "root_score": root_score,
         "champion/root improvement": improvement,
@@ -161,18 +163,20 @@ def _aggregate(run_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         champion_scores = _numbers(rows, "champion_score")
         improvements = _numbers(rows, "champion/root improvement")
         valid_rates = _numbers(rows, "valid_solution_rate")
+        higher_is_better = _variant_higher_is_better(rows)
         summary.append(
             {
                 "variant": variant,
                 "evidence_mode": EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE,
                 "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
+                "higher_is_better": higher_is_better,
                 "runs": len(rows),
                 "valid_runs": sum(1 for row in rows if float(row["valid_solution_rate"]) > 0),
                 "champion_score_median": _median(champion_scores),
                 "champion_score_mean": _mean(champion_scores),
                 "champion_score_std": _std(champion_scores),
-                "champion_score_best": min(champion_scores) if champion_scores else "",
-                "champion_score_worst": max(champion_scores) if champion_scores else "",
+                "champion_score_best": _best_score(champion_scores, higher_is_better),
+                "champion_score_worst": _worst_score(champion_scores, higher_is_better),
                 "champion_score_iqr": _iqr(champion_scores),
                 "champion/root improvement": _median(improvements),
                 "champion/root improvement_median": _median(improvements),
@@ -200,6 +204,35 @@ def _numbers(rows: list[dict[str, Any]], key: str) -> list[float]:
             continue
         values.append(float(value))
     return values
+
+
+def _higher_is_better(node: dict[str, Any]) -> bool:
+    score = node.get("score")
+    if not score:
+        return False
+    return bool(score.get("higher_is_better", False))
+
+
+def _variant_higher_is_better(rows: list[dict[str, Any]]) -> bool:
+    for row in rows:
+        value = row.get("higher_is_better")
+        if value in (True, "True", "true", "1", 1):
+            return True
+        if value in (False, "False", "false", "0", 0):
+            return False
+    return False
+
+
+def _best_score(values: list[float], higher_is_better: bool) -> float | str:
+    if not values:
+        return ""
+    return max(values) if higher_is_better else min(values)
+
+
+def _worst_score(values: list[float], higher_is_better: bool) -> float | str:
+    if not values:
+        return ""
+    return min(values) if higher_is_better else max(values)
 
 
 def _median(values: list[float]) -> float | str:

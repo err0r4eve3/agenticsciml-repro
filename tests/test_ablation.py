@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from agenticsciml.ablation import run_ablation
+from agenticsciml.ablation import _aggregate, run_ablation
 from agenticsciml.evidence import EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE, SCIENTIFIC_CLAIM_NOT_SUPPORTED
 
 
@@ -79,3 +79,28 @@ def test_cli_ablate_command_runs_mock_pipeline(tmp_path: Path, cli_env: dict[str
     assert summary_path.name == "ablation_summary.csv"
     assert {row["variant"] for row in rows} == {"root_only", "kb"}
     assert (summary_path.parent / "ablation_report.md").exists()
+
+
+def test_ablation_aggregate_respects_score_direction() -> None:
+    base_row = {
+        "variant": "accuracy_metric",
+        "evidence_mode": EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE,
+        "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
+        "valid_solution_rate": 1.0,
+        "timeout_count": 0,
+        "debug_success_count": 0,
+        "llm_calls": 0,
+        "wall_time_s": 0.0,
+        "run_dir": "runs/demo",
+        "champion/root improvement": 0.0,
+    }
+    rows = [
+        {**base_row, "seed": 0, "higher_is_better": True, "champion_score": 0.8},
+        {**base_row, "seed": 1, "higher_is_better": True, "champion_score": 0.9},
+    ]
+
+    summary = _aggregate(rows)[0]
+
+    assert summary["higher_is_better"] is True
+    assert summary["champion_score_best"] == 0.9
+    assert summary["champion_score_worst"] == 0.8

@@ -41,6 +41,7 @@
 - KB ablation switches：`use_kb=False` 不注入 KB，`random_kb=True` 使用 seed-controlled random KB retrieval。
 - ablation runner：`agenticsciml ablate` 和 `scripts/run_ablation.py` 生成 `ablation_runs.csv`、`ablation_summary.csv`、`ablation_report.md`，支持 `root_only`、`no_kb`、`kb`、`random_kb`、`no_critic`、`no_debugger`。
 - ablation metrics：每个 variant 汇总 champion score、root score、champion/root improvement、valid solution rate、timeout count、debug success count、LLM call count 和 wall time。
+- direction-aware ablation summary：ablation run rows 记录 `higher_is_better`，summary 中的 champion best/worst 会按 metric direction 聚合，避免未来 accuracy/R2 类 benchmark 仍按 lower-is-better 解释。
 - mock evidence boundary：ablation run 和 summary 输出显式记录 `evidence_mode=mock_workflow_shape`、`scientific_claim=not_supported`，避免把 mock 分数误解为 emergent discovery。
 - run evidence boundary：`run_metadata.json` 和 workflow-start trace 记录 `llm_mode`、`benchmark_fidelity_level`、`evidence_mode` 和 `scientific_claim`，避免单个 run artifact 被过度解读。
 - centralized evidence constants：`agenticsciml.evidence` 集中定义 `llm_mode`、`evidence_mode` 和 `scientific_claim`，减少字符串漂移。
@@ -86,6 +87,7 @@ uv run --python 3.11 --extra dev pytest -q
 uv run --python 3.11 --extra dev pytest tests/test_benchmark_catalog.py -q
 uv run --python 3.11 --extra dev pytest tests/test_patch_mutation.py tests/test_orchestrator_cli.py -q
 uv run --python 3.11 --extra dev pytest tests/test_ablation.py -q
+uv run --python 3.11 --extra dev pytest tests/test_ablation.py::test_ablation_aggregate_respects_score_direction -q
 uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trace_summary_reports_trace_node_reference_check_counts tests/test_trace_reporting.py::test_trace_summary_fails_when_exported_run_checks_zero_solution_reference_events -q
 uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trace_summary_fails_when_exported_run_checks_no_actual_solution_node_references -q
 uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trace_summary_fails_when_exported_node_is_not_referenced_by_trace -q
