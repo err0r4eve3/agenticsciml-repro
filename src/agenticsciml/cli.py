@@ -12,6 +12,7 @@ from agenticsciml.benchmarks import list_benchmarks
 from agenticsciml.config import EvolutionConfig, ExperimentConfig
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
+from agenticsciml.llm_smoke import DEFAULT_SMOKE_VARIANTS, run_llm_smoke
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 from agenticsciml.reporting import write_trace_summary
 
@@ -117,6 +118,20 @@ def cmd_ablate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_smoke_llm(args: argparse.Namespace) -> int:
+    variants = [item.strip() for item in args.variants.split(",") if item.strip()]
+    result = run_llm_smoke(
+        benchmark_dir=Path(args.benchmark_dir).resolve(),
+        output_dir=Path(args.output_dir).resolve(),
+        variants=variants,
+        seed=args.seed,
+        dry_run=args.dry_run,
+        timeout_s=args.timeout_s,
+    )
+    print(result.report_md.resolve())
+    return 0
+
+
 def cmd_benchmarks(args: argparse.Namespace) -> int:
     specs = list_benchmarks()
     if args.json:
@@ -170,6 +185,15 @@ def build_parser() -> argparse.ArgumentParser:
     ablate.add_argument("--variants", default=",".join(DEFAULT_VARIANTS))
     ablate.add_argument("--output-dir", default="runs/ablation")
     ablate.set_defaults(func=cmd_ablate)
+
+    smoke_llm = sub.add_parser("smoke-llm")
+    smoke_llm.add_argument("benchmark_dir")
+    smoke_llm.add_argument("--variants", default=",".join(DEFAULT_SMOKE_VARIANTS))
+    smoke_llm.add_argument("--seed", type=int, default=0)
+    smoke_llm.add_argument("--timeout-s", type=int, default=60)
+    smoke_llm.add_argument("--output-dir", default="runs/real-llm-smoke")
+    smoke_llm.add_argument("--dry-run", action="store_true")
+    smoke_llm.set_defaults(func=cmd_smoke_llm)
 
     benchmarks = sub.add_parser("benchmarks")
     benchmarks.add_argument("--json", action="store_true")

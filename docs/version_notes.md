@@ -44,6 +44,7 @@
 - branch context for fanout：同一 parent 的多个 fanout child 会写入 `branch_context.json`、child mutation trace metadata 和 proposer/engineer prompt，并在 `method_tags` 里记录 `branch:<intent>`，用于审计 sibling branch diversity；这仍是 diversity intent/evidence，不等同于真实论文级 emergent discovery。
 - branch-context ablation switch：`EvolutionConfig.use_branch_context`、CLI `--no-branch-context` 和 ablation variants `branch_context` / `no_branch_context` 支持后续真实 LLM smoke 对比；mock ablation 只验证开关与 artifact。
 - branch-context evidence flag：`run_metadata.json`、workflow-start trace 和 child mutation trace 显式记录 `branch_context_enabled`，避免把存在但为空的 `branch_context` 字段误读为启用了分支上下文。
+- real LLM smoke scaffold：`agenticsciml smoke-llm` 支持 `--dry-run` 无 key 生成 `real_llm_smoke_plan.json` / `real_llm_smoke_report.md`，真实模式才要求 `OPENAI_API_KEY` 并运行 branch_context/no_branch_context 最小对比。
 - benchmark-aware retrieval query：`RetrievalQueryBuilder` 使用 benchmark family/metric/description、parent analysis、failure kind、method tags 和 leaderboard top-k 生成检索 query。
 - KB ablation switches：`use_kb=False` 不注入 KB，`random_kb=True` 使用 seed-controlled random KB retrieval。
 - ablation runner：`agenticsciml ablate` 和 `scripts/run_ablation.py` 生成 `ablation_runs.csv`、`ablation_summary.csv`、`ablation_report.md`，支持 `root_only`、`no_kb`、`kb`、`random_kb`、`no_critic`、`no_debugger`。

@@ -31,6 +31,31 @@ uv run --python 3.11 --extra real-llm agenticsciml run examples/burgers_pinn --m
 
 Use `--dry-run` to print the planned role calls without making API requests.
 
+Branch-context smoke can be prepared before credentials are available:
+
+```bash
+uv run --python 3.11 --extra dev agenticsciml smoke-llm examples/function_approx \
+  --variants branch_context,no_branch_context \
+  --dry-run \
+  --output-dir runs/real-llm-smoke
+```
+
+The dry run writes `real_llm_smoke_plan.json` and
+`real_llm_smoke_report.md`; it does not call an API and does not require
+`OPENAI_API_KEY`.
+
+With credentials, the same command without `--dry-run` runs a minimal real LLM
+smoke. Treat the output as prompt-delivery / behavioral-difference evidence
+only, not as paper-scale SciML reproduction:
+
+```bash
+export OPENAI_API_KEY=...
+export OPENAI_MODEL=gpt-5-mini
+uv run --python 3.11 --extra real-llm agenticsciml smoke-llm examples/function_approx \
+  --variants branch_context,no_branch_context \
+  --output-dir runs/real-llm-smoke
+```
+
 After a real or mock run completes, inspect the trace quality gate:
 
 ```bash

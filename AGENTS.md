@@ -362,6 +362,10 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   literals through orchestration, reporting, or tests.
 - Ablation tests use mock mode only. Do not claim scientific improvement or
   emergent discovery from mock ablation results.
+- Real LLM smoke tooling must be no-key-safe in dry-run mode. `agenticsciml
+  smoke-llm --dry-run` should write the planned run manifest and report without
+  making API calls or requiring `OPENAI_API_KEY`; non-dry-run real mode must
+  fail clearly when credentials are absent.
 - Every benchmark entry must include fidelity metadata: `fidelity_level`,
   expected runtime, dependency flags, paper task name, and paper-gap notes. A
   `proxy` benchmark is allowed for workflow validation but must not be described
