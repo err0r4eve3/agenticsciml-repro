@@ -154,7 +154,10 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   failure is present. Trace summary must also check artifact consistency when
   `evaluation_contract.json` or `run_metadata.json` exists: contract
   `benchmark_fidelity.fidelity_level`, run metadata, and workflow-start trace
-  evidence fields must agree, or the quality gate fails closed.
+  evidence fields must agree. When `tree.json` or `checkpoint.json` exists,
+  node IDs, node `contract_hash`, node `benchmark_name`, checkpoint contract
+  metadata, and run `solution_count` must also be consistent with the frozen
+  evaluation contract, or the quality gate fails closed.
 - Preserve resume semantics. When changing orchestration, keep `checkpoint.json`
   current after root creation, child creation, and final report export.
 - Keep evaluator and benchmark contracts deterministic. LLM judges may summarize
