@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from agenticsciml.config import EvaluationContract, ExperimentConfig
@@ -45,6 +46,19 @@ def test_storage_atomic_writes_do_not_leave_temp_files(tmp_path: Path) -> None:
 
     assert storage.load_json("config.json") == {"value": 2}
     assert not list(storage.run_dir.rglob("*.tmp"))
+
+
+def test_storage_trace_events_get_monotonic_event_sequence(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo-run")
+
+    storage.record_trace("workflow_span", "start", {})
+    storage.record_trace("workflow_span", "end", {})
+
+    events = [
+        json.loads(line)
+        for line in (storage.run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["event_seq"] for event in events] == [1, 2]
 
 
 def test_contract_serialization_preserves_commands() -> None:

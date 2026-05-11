@@ -93,9 +93,9 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
     checkpoint_path = run_dir / "checkpoint.json"
     if _requires_solution_artifacts(run_metadata):
         if not tree_path.exists():
-            issues.append("tree.json is required when run_metadata.json records solution_count")
+            issues.append("tree.json is required for exported run artifacts")
         if not checkpoint_path.exists():
-            issues.append("checkpoint.json is required when run_metadata.json records solution_count")
+            issues.append("checkpoint.json is required for exported run artifacts")
     tree = _read_optional_json_file(tree_path, issues)
     checkpoint = _read_optional_json_file(checkpoint_path, issues)
 
@@ -126,6 +126,8 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
     elif run_metadata is not None and events:
         issues.append("trace workflow start metadata is missing")
 
+    if run_metadata is not None or contract is not None:
+        _check_trace_event_sequence(issues, events)
     _check_workflow_lifecycle_sequence(issues, events)
     _check_run_state_consistency(issues, run_metadata, workflow_metadata, workflow_end_metadata)
     _check_solution_artifact_consistency(issues, contract, run_metadata, tree, checkpoint)
@@ -213,6 +215,19 @@ def _check_workflow_lifecycle_sequence(issues: list[str], events: list[dict[str,
         issues.append("workflow end precedes workflow start in trace order")
     if len(end_states) > 1:
         issues.append("conflicting workflow end run_state values: " + ", ".join(sorted(end_states)))
+
+
+def _check_trace_event_sequence(issues: list[str], events: list[dict[str, Any]]) -> None:
+    observed: list[int] = []
+    for index, event in enumerate(events, start=1):
+        seq = event.get("event_seq")
+        if not isinstance(seq, int) or isinstance(seq, bool):
+            issues.append(f"trace event_seq missing or invalid at trace line {index}")
+            return
+        observed.append(seq)
+    expected = list(range(1, len(events) + 1))
+    if observed != expected:
+        issues.append(f"trace event_seq must be contiguous and monotonic: observed={observed!r}")
 
 
 def _check_solution_artifact_consistency(

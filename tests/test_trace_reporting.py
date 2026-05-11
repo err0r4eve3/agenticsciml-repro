@@ -6,6 +6,8 @@ from agenticsciml.reporting.trace_summary import summarize_trace, write_trace_su
 
 
 def _write_events(path: Path, events: list[dict]) -> None:
+    for index, event in enumerate(events, start=1):
+        event.setdefault("event_seq", index)
     path.write_text("\n".join(json.dumps(event) for event in events) + "\n", encoding="utf-8")
 
 
@@ -360,6 +362,46 @@ def test_trace_summary_fails_on_conflicting_workflow_end_states(tmp_path: Path) 
     assert summary["artifact_consistency"]["passed"] is False
     assert summary["quality_gate"]["passed"] is False
     assert any("conflicting workflow end run_state" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
+def test_trace_summary_fails_when_exported_run_trace_is_missing_event_seq(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    del events[0]["event_seq"]
+    (run_dir / "trace.jsonl").write_text(
+        "\n".join(json.dumps(event) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("event_seq" in issue and "missing" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
+def test_trace_summary_fails_on_non_monotonic_event_seq(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    events[1]["event_seq"] = events[0]["event_seq"]
+    (run_dir / "trace.jsonl").write_text(
+        "\n".join(json.dumps(event) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("event_seq" in issue and "monotonic" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
 def _write_consistent_run_artifacts(run_dir: Path) -> Path:

@@ -168,7 +168,9 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   orchestrator run-start traces should use `run_state=partial` and run-end
   traces should use the final exported state. Workflow-end events must not
   appear before workflow-start in trace order, and multiple workflow-end events
-  with conflicting `run_state` values must fail the quality gate.
+  with conflicting `run_state` values must fail the quality gate. New trace
+  events must include a contiguous, monotonic `event_seq`; exported run
+  artifacts missing valid `event_seq` values fail the quality gate.
 - Preserve resume semantics. When changing orchestration, keep `checkpoint.json`
   current after root creation, child creation, and final report export.
 - Keep evaluator and benchmark contracts deterministic. LLM judges may summarize

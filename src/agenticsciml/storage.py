@@ -16,6 +16,7 @@ class ExperimentStorage:
         self.run_dir = run_dir
         self.solutions_dir = run_dir / "solutions"
         self._lock = threading.RLock()
+        self._trace_seq = self._load_trace_sequence()
 
     @classmethod
     def create(cls, output_dir: Path, experiment_id: str) -> "ExperimentStorage":
@@ -50,18 +51,37 @@ class ExperimentStorage:
 
     def record_trace(self, event_type: str, name: str, metadata: dict[str, Any] | None = None) -> Path:
         path = self.run_dir / "trace.jsonl"
-        event = {
-            "event_type": event_type,
-            "name": name,
-            "timestamp": time.time(),
-            "metadata": metadata or {},
-        }
         with self._lock:
+            self._trace_seq += 1
+            event = {
+                "event_seq": self._trace_seq,
+                "event_type": event_type,
+                "name": name,
+                "timestamp": time.time(),
+                "metadata": metadata or {},
+            }
             with path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(event, sort_keys=True, default=str) + "\n")
                 f.flush()
                 os.fsync(f.fileno())
         return path
+
+    def _load_trace_sequence(self) -> int:
+        path = self.run_dir / "trace.jsonl"
+        if not path.exists():
+            return 0
+        max_seq = 0
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            seq = event.get("event_seq")
+            if isinstance(seq, int) and not isinstance(seq, bool):
+                max_seq = max(max_seq, seq)
+        return max_seq
 
     def save_text(self, relative_path: str | Path, text: str) -> Path:
         with self._lock:
