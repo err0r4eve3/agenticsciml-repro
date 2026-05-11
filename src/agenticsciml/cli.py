@@ -146,7 +146,12 @@ def cmd_benchmarks(args: argparse.Namespace) -> int:
         print(json.dumps({"benchmarks": [spec.to_dict() for spec in specs]}, indent=2, sort_keys=True))
         return 0
     for spec in specs:
-        print(f"{spec.name}\t{spec.paper_section}\t{spec.family}\t{spec.metric}\t{spec.path}")
+        claim = spec.claim_boundaries()["real_llm"]
+        scientific_claim = claim["scientific_claim"] if isinstance(claim, dict) else "unknown"
+        print(
+            f"{spec.name}\t{spec.paper_section}\t{spec.fidelity_level}\t"
+            f"{spec.family}\t{spec.metric}\t{scientific_claim}\t{spec.path}"
+        )
     return 0
 
 

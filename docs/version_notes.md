@@ -58,6 +58,7 @@
 - smoke trace keyed bijection：ledger/trace 对账按 `llm_call_id` canonical fingerprint 比较，不依赖并发完成顺序；缺失、重复或字段不一致的 trace metadata 会 fail-closed。
 - CLI editable-install note：`pyproject.toml` 明确 `src` package-dir；README/AGENTS 记录路径含空格时可用 `PYTHONPATH=src python -m agenticsciml.cli` 作为本地 CLI fallback。
 - CLI smoke invocation boundary：`python -m agenticsciml.cli smoke-llm` / `verify-smoke-llm` 覆盖 checkout 路径和 output-dir 同时含空格的 dry-run bundle，并验证 dry-run artifact 会被 verifier 明确拒绝为真实 LLM evidence。
+- benchmark claim boundaries：`agenticsciml benchmarks --json` 输出每个 benchmark 的 `claim_boundaries`，普通列表也显示 `fidelity_level` 和 real-LLM `scientific_claim`，避免把 proxy catalog 误读成论文全量 SciML 复现。
 - faithful-small benchmark seed：新增 `examples/poisson_lshape_faithful_small`，在 L-shaped Poisson 任务中加入 boundary/residual collocation 数据和 finite-difference residual composite score，用于缩小 proxy 与论文 PINN 任务结构的差距；仍不声明 paper-like 分数。
 - benchmark-aware retrieval query：`RetrievalQueryBuilder` 使用 benchmark family/metric/description、parent analysis、failure kind、method tags 和 leaderboard top-k 生成检索 query。
 - KB ablation switches：`use_kb=False` 不注入 KB，`random_kb=True` 使用 seed-controlled random KB retrieval。

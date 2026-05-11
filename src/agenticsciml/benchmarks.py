@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from agenticsciml.config import DataConfig, EvaluationContract
+from agenticsciml.evidence import evidence_metadata_for_run
 from agenticsciml.execution.runner import run_command
 
 
@@ -67,6 +68,7 @@ class BenchmarkSpec:
             "requires_torch": self.requires_torch,
             "requires_gpu": self.requires_gpu,
             "paper_gap_notes": self.paper_gap_notes,
+            "claim_boundaries": self.claim_boundaries(),
         }
 
     def fidelity_metadata(self) -> dict[str, object]:
@@ -79,6 +81,14 @@ class BenchmarkSpec:
             "requires_torch": self.requires_torch,
             "requires_gpu": self.requires_gpu,
             "paper_gap_notes": self.paper_gap_notes,
+        }
+
+    def claim_boundaries(self) -> dict[str, object]:
+        return {
+            "mock": evidence_metadata_for_run(use_mock=True, fidelity_level=self.fidelity_level),
+            "real_llm": evidence_metadata_for_run(use_mock=False, fidelity_level=self.fidelity_level),
+            "paper_score_reproduction": "not_supported",
+            "notes": self.paper_gap_notes,
         }
 
 

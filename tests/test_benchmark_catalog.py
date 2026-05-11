@@ -610,6 +610,29 @@ def test_cli_lists_benchmarks(cli_env: dict[str, str]) -> None:
     )
     payload = json.loads(result.stdout)
     assert {item["name"] for item in payload["benchmarks"]} == EXPECTED_BENCHMARKS
+    for item in payload["benchmarks"]:
+        boundaries = item["claim_boundaries"]
+        assert boundaries["paper_score_reproduction"] == "not_supported"
+        assert boundaries["mock"]["scientific_claim"] == "not_supported"
+        if item["fidelity_level"] == "proxy":
+            assert boundaries["real_llm"]["scientific_claim"] == "proxy_workflow_only"
+        else:
+            assert boundaries["real_llm"]["scientific_claim"] == "not_validated"
+
+
+def test_cli_lists_benchmark_fidelity_and_claim(cli_env: dict[str, str]) -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "agenticsciml.cli", "benchmarks"],
+        check=True,
+        text=True,
+        capture_output=True,
+        env=cli_env,
+    )
+
+    assert "\tproxy\t" in result.stdout
+    assert "\tfaithful-small\t" in result.stdout
+    assert "proxy_workflow_only" in result.stdout
+    assert "not_validated" in result.stdout
 
 
 def test_mock_orchestrator_root_only_runs_all_benchmarks(tmp_path: Path) -> None:

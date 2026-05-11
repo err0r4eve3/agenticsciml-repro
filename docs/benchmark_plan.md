@@ -39,6 +39,9 @@
   kind, method tags, score trend, and leaderboard top-k context
 - catalog metadata records `fidelity_level`, `expected_runtime_s`,
   `requires_torch`, `requires_gpu`, and `paper_gap_notes`
+- `agenticsciml benchmarks --json` exposes per-benchmark `claim_boundaries`,
+  including mock claim, real-LLM claim, and explicit
+  `paper_score_reproduction=not_supported`
 
 ## Benchmark Catalog
 
@@ -71,6 +74,10 @@ a private composite score without importing `solution.py`.
 uv run --python 3.11 --extra dev agenticsciml benchmarks
 uv run --python 3.11 --extra dev agenticsciml benchmarks --json
 ```
+
+The plain table includes `fidelity_level` and the maximum real-LLM
+`scientific_claim`; the JSON output includes explicit mock/real claim
+boundaries so proxy tasks cannot be mistaken for paper-score reproduction.
 
 ## 离线验证矩阵
 
