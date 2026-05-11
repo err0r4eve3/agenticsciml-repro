@@ -382,6 +382,8 @@ def _smoke_row(run_dir: Path, variant: str, seed: int) -> dict[str, Any]:
         "llm_trace_models": ",".join(sorted({str(event.get("model", "")) for event in generation_spans})),
         "llm_trace_methods": _join_sequence(event.get("method") for event in generation_spans),
         "llm_trace_schema_names": _join_sequence(event.get("schema_name") for event in generation_spans),
+        "llm_ledger_call_fingerprints": _join_sequence(sorted(_call_fingerprints(ledger_entries, id_key="call_id"))),
+        "llm_trace_call_fingerprints": _join_sequence(sorted(_call_fingerprints(generation_spans, id_key="llm_call_id"))),
         "generation_span_count": generation_span_count,
         "trace_quality_gate_passed": bool(trace_summary.get("quality_gate", {}).get("passed", False)),
         "smoke_gate_passed": gate["passed"],
@@ -778,6 +780,25 @@ def _split_sequence(value: Any) -> list[str]:
     return [item for item in str(value).split(",")]
 
 
+def _call_fingerprints(entries: list[dict[str, Any]], *, id_key: str) -> list[str]:
+    fingerprints: list[str] = []
+    for entry in entries:
+        call_id = entry.get(id_key)
+        fingerprints.append(
+            "|".join(
+                "__none__" if value is None else str(value)
+                for value in (
+                    call_id,
+                    entry.get("provider"),
+                    entry.get("model"),
+                    entry.get("method"),
+                    entry.get("schema_name"),
+                )
+            )
+        )
+    return fingerprints
+
+
 def _verify_row_ledger(row: dict[str, Any], manifest: dict[str, Any], issues: list[str]) -> None:
     variant = str(row.get("variant", "unknown"))
     ledger_calls = _parse_strict_int(row.get("llm_ledger_calls"), f"{variant}: llm_ledger_calls", issues)
@@ -791,12 +812,16 @@ def _verify_row_ledger(row: dict[str, Any], manifest: dict[str, Any], issues: li
         )
     ledger_call_ids = _split_sequence(row.get("llm_ledger_call_ids"))
     trace_call_ids = _split_sequence(row.get("llm_trace_call_ids"))
-    if ledger_call_ids != trace_call_ids:
-        issues.append(f"{variant}: ledger call_ids do not exactly match trace llm_call_id sequence")
-    if _split_sequence(row.get("llm_ledger_methods")) != _split_sequence(row.get("llm_trace_methods")):
-        issues.append(f"{variant}: ledger methods do not match trace methods")
-    if _split_sequence(row.get("llm_ledger_schema_names")) != _split_sequence(row.get("llm_trace_schema_names")):
-        issues.append(f"{variant}: ledger schema_names do not match trace schema_names")
+    if len(trace_call_ids) != len(set(trace_call_ids)):
+        issues.append(f"{variant}: trace llm_call_id values must be unique")
+    if "__none__" in trace_call_ids:
+        issues.append(f"{variant}: every trace generation span must include llm_call_id")
+    if sorted(ledger_call_ids) != sorted(trace_call_ids):
+        issues.append(f"{variant}: ledger call_id set does not match trace llm_call_id set")
+    ledger_fingerprints = _split_sequence(row.get("llm_ledger_call_fingerprints"))
+    trace_fingerprints = _split_sequence(row.get("llm_trace_call_fingerprints"))
+    if ledger_fingerprints != trace_fingerprints:
+        issues.append(f"{variant}: ledger call fingerprints do not match trace call fingerprints")
     expected_provider = manifest.get("provider")
     expected_model = manifest.get("model")
     providers = {item for item in str(row.get("llm_ledger_providers", "")).split(",") if item}
