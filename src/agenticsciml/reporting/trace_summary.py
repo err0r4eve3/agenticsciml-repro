@@ -482,14 +482,25 @@ def _check_solution_tree_graph_invariants(
                     f"{artifact_name} node {node_id} parent_id references missing node: {parent_id}"
                 )
 
-        children = node.get("children", [])
+        if "children" not in node:
+            issues.append(f"{artifact_name} node {node_id} children is missing")
+            children = []
+        else:
+            children = node.get("children")
         if not isinstance(children, list):
             issues.append(f"{artifact_name} node {node_id} children must be a list")
             continue
+        seen_children: set[str] = set()
         for child_id in children:
             if not isinstance(child_id, str) or not child_id:
                 issues.append(f"{artifact_name} node {node_id} children has invalid node id: {child_id!r}")
                 continue
+            if child_id in seen_children:
+                issues.append(
+                    f"{artifact_name} node {node_id} children contains duplicate node id: {child_id}"
+                )
+                continue
+            seen_children.add(child_id)
             child_node = nodes.get(child_id)
             if child_node is None:
                 issues.append(
@@ -501,6 +512,20 @@ def _check_solution_tree_graph_invariants(
                     f"{artifact_name} node {node_id} children includes {child_id}, "
                     f"but child parent_id is {child_node.get('parent_id')!r}"
                 )
+
+    for node_id, node in sorted(nodes.items()):
+        parent_id = node.get("parent_id")
+        if not isinstance(parent_id, str) or parent_id not in nodes:
+            continue
+        parent_children = nodes[parent_id].get("children")
+        if not isinstance(parent_children, list):
+            continue
+        child_count = sum(1 for child_id in parent_children if child_id == node_id)
+        if child_count != 1:
+            issues.append(
+                f"{artifact_name} node {node_id} parent children does not include node exactly once: "
+                f"parent_id={parent_id}, count={child_count}"
+            )
 
     cycle_nodes = _solution_tree_cycle_nodes(nodes)
     if cycle_nodes:

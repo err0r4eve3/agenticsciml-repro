@@ -204,7 +204,10 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
 - Final `tree.json` and `checkpoint.json` must preserve solution-tree graph
   invariants: exactly one root, every non-root `parent_id` references an
   existing node, parent links are acyclic, `children` contains only existing
-  nodes, and each child entry agrees with the child node's `parent_id`.
+  nodes, `children` is schema-required and duplicate-free, and each parent-child
+  relation is bidirectionally consistent: child entries agree with child
+  `parent_id`, and every non-root node appears exactly once in its parent's
+  `children`.
 - Preserve resume semantics. When changing orchestration, keep `checkpoint.json`
   current after root creation, child creation, and final report export.
 - Keep evaluator and benchmark contracts deterministic. LLM judges may summarize
