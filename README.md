@@ -45,6 +45,9 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli smoke
 PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli verify-smoke-llm "runs/real llm smoke"
 ```
 
+The dry-run `verify-smoke-llm` command is an expected negative check and should
+exit non-zero. Use `smoke-llm --real` before expecting verification to pass.
+
 Inspect the trace quality gate for a completed run:
 
 ```bash

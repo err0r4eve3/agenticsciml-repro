@@ -101,6 +101,10 @@ The same verifier can be invoked through the module form:
 PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli verify-smoke-llm "runs/real llm smoke"
 ```
 
+When pointed at a dry-run bundle, `verify-smoke-llm` is expected to exit
+non-zero. That negative result confirms the bundle is not being accepted as
+real LLM evidence.
+
 The verifier rejects dry-run-only artifacts, recomputes the paired
 branch/no-branch gates from the run directories, checks manifest/plan
 consistency, and requires parallel-child trace evidence when
