@@ -10,6 +10,10 @@ import pytest
 
 from agenticsciml.benchmarks import BenchmarkContractFactory
 from agenticsciml.config import ExperimentConfig, EvolutionConfig
+from agenticsciml.evidence import (
+    EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE,
+    SCIENTIFIC_CLAIM_NOT_SUPPORTED,
+)
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 from agenticsciml.state import SolutionNode, SolutionScore
@@ -125,8 +129,8 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert (run_dir / "tree.mmd").exists()
     assert (run_dir / "trace_summary.json").exists()
     run_metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
-    assert run_metadata["evidence_mode"] == "mock_workflow_shape"
-    assert run_metadata["scientific_claim"] == "not_supported"
+    assert run_metadata["evidence_mode"] == EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE
+    assert run_metadata["scientific_claim"] == SCIENTIFIC_CLAIM_NOT_SUPPORTED
     assert run_metadata["benchmark_fidelity_level"] == "proxy"
     assert run_metadata["llm_calls"]["total"] >= 1
     assert run_metadata["llm_calls"]["by_role"]["proposer"] >= 1
@@ -251,6 +255,75 @@ def test_failed_child_exception_writes_minimum_artifacts(tmp_path: Path) -> None
     assert Path(child.proposal_path).exists()
     assert Path(child.analysis_path).exists()
     assert (Path(child.workspace) / "orchestration_error.md").exists()
+
+
+def test_parallel_child_jobs_keep_mixed_success_failure_artifacts_stable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = ExperimentConfig(
+        experiment_id="parallel-mixed-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=2, max_debug_retries=0),
+        use_mock=True,
+    )
+    orchestrator = AgenticSciMLOrchestrator(config, MockLLMClient())
+    contract = BenchmarkContractFactory.create_contract(orchestrator.problem_bundle)
+    orchestrator.contract = contract
+    orchestrator.nodes = [
+        SolutionNode(
+            node_id=f"solution_{index:03d}",
+            parent_id=None,
+            workspace=str(tmp_path / f"solution_{index:03d}"),
+            score=SolutionScore("validation_mse", float(index + 1), higher_is_better=False),
+            status="evaluated",
+            benchmark_name=contract.benchmark_name,
+            contract_hash=contract.contract_hash,
+        )
+        for index in range(2)
+    ]
+
+    def fake_create_child(
+        parent: SolutionNode,
+        contract_arg,
+        solution_id: str | None = None,
+    ) -> SolutionNode:
+        assert solution_id is not None
+        if parent.node_id == "solution_000":
+            raise RuntimeError("synthetic child failure")
+        return SolutionNode(
+            node_id=solution_id,
+            parent_id=parent.node_id,
+            workspace=str(tmp_path / solution_id),
+            score=None,
+            status="evaluated",
+            benchmark_name=contract_arg.benchmark_name,
+            contract_hash=contract_arg.contract_hash,
+        )
+
+    monkeypatch.setattr(orchestrator, "_create_child", fake_create_child)
+
+    children = orchestrator._create_children_for_parents(orchestrator.nodes, contract)
+    trace_events = [
+        json.loads(line)
+        for line in (orchestrator.storage.run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    end_events = [
+        event
+        for event in trace_events
+        if event["name"] == "agenticsciml.child_mutation.end"
+    ]
+    by_child = {child.node_id: child for _, child in children}
+
+    assert [child.node_id for _, child in children] == ["solution_002", "solution_003"]
+    assert by_child["solution_002"].status == "failed"
+    assert by_child["solution_003"].status == "evaluated"
+    assert Path(by_child["solution_002"].proposal_path).exists()
+    assert (Path(by_child["solution_002"].workspace) / "orchestration_error.md").exists()
+    assert {event["metadata"]["solution_id"] for event in end_events} == {"solution_002", "solution_003"}
+    assert any(event["metadata"]["status"] == "failed" for event in end_events)
+    assert any(event["metadata"]["status"] == "evaluated" for event in end_events)
 
 
 def test_resume_continues_existing_solution_tree_without_rebuilding_root(tmp_path: Path) -> None:

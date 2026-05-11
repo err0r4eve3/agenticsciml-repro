@@ -36,6 +36,8 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
 - `docs/version_notes.md` records current MVP capabilities and release notes.
 - `docs/benchmark_plan.md` records benchmark catalog, validation matrix, and
   real LLM experiment order.
+- `docs/fidelity_levels.md` records benchmark fidelity levels and claim
+  boundaries.
 - `examples/` contains the runnable benchmark catalog.
 
 ## Documentation Goals
@@ -174,7 +176,8 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   these in `BenchmarkSourceManifest` and include its digest in the contract
   hash. Benchmark fidelity metadata (`fidelity_level`, paper task name,
   expected runtime, dependency flags, and paper-gap notes) must also be stored
-  in `EvaluationContract` and included in `contract_hash`.
+  in `EvaluationContract` and included in `contract_hash`. New contracts must
+  fail closed when `benchmark_fidelity` is missing.
   `EvaluationContract.from_dict()` must recompute the manifest digest and
   reject mismatched human-readable manifest contents. Manifest data generation
   must use the same sanitized subprocess environment policy as generated
@@ -241,12 +244,17 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   `benchmark_fidelity_level`, `evidence_mode`, and `scientific_claim`, so a
   standalone run artifact cannot be mistaken for a scientific reproduction
   claim.
+- Evidence metadata strings must be centralized in `agenticsciml.evidence`.
+  Do not scatter new `scientific_claim`, `evidence_mode`, or `llm_mode` string
+  literals through orchestration, reporting, or tests.
 - Ablation tests use mock mode only. Do not claim scientific improvement or
   emergent discovery from mock ablation results.
 - Every benchmark entry must include fidelity metadata: `fidelity_level`,
   expected runtime, dependency flags, paper task name, and paper-gap notes. A
   `proxy` benchmark is allowed for workflow validation but must not be described
-  as a paper-like SciML reproduction.
+  as a paper-like SciML reproduction. New or upgraded benchmark fidelity levels
+  must follow `docs/fidelity_levels.md` and keep
+  `EvaluationContract.benchmark_fidelity` hash-bound.
 - `SolutionNode` metadata used by selector/retriever/ablation must stay
   persisted in `tree.json` and `checkpoint.json`: `benchmark_name`,
   `contract_hash`, `method_tags`, `failure_kind`, `score_delta_from_parent`,

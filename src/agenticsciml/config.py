@@ -108,6 +108,7 @@ def _validate_benchmark_source_manifest(
 
 def _validate_benchmark_fidelity(metadata: dict[str, Any]) -> None:
     required = {
+        "schema_version",
         "paper_task_name",
         "paper_section",
         "fidelity_level",
@@ -119,6 +120,13 @@ def _validate_benchmark_fidelity(metadata: dict[str, Any]) -> None:
     missing = sorted(required - set(metadata))
     if missing:
         raise ValueError("Benchmark fidelity metadata missing required field(s): " + ", ".join(missing))
+    if metadata.get("schema_version") != 1:
+        raise ValueError("Benchmark fidelity metadata schema_version must be 1")
+    for key in ("paper_task_name", "paper_section", "paper_gap_notes"):
+        if not isinstance(metadata.get(key), str):
+            raise ValueError(f"Benchmark fidelity metadata {key} must be a string")
+        if not metadata[key].strip():
+            raise ValueError(f"Benchmark fidelity metadata {key} is required")
     if metadata.get("fidelity_level") not in {"proxy", "faithful-small", "paper-like"}:
         raise ValueError("Benchmark fidelity metadata fidelity_level is invalid")
     expected_runtime_s = metadata.get("expected_runtime_s")
@@ -127,10 +135,8 @@ def _validate_benchmark_fidelity(metadata: dict[str, Any]) -> None:
     for key in ("requires_torch", "requires_gpu"):
         if not isinstance(metadata.get(key), bool):
             raise ValueError(f"Benchmark fidelity metadata {key} must be a boolean")
-    if metadata.get("fidelity_level") == "proxy" and not str(metadata.get("paper_gap_notes", "")).strip():
+    if metadata.get("fidelity_level") == "proxy" and not metadata["paper_gap_notes"].strip():
         raise ValueError("Benchmark fidelity metadata paper_gap_notes is required for proxy benchmarks")
-    if not str(metadata.get("paper_task_name", "")).strip():
-        raise ValueError("Benchmark fidelity metadata paper_task_name is required")
 
 
 @dataclass(slots=True)
@@ -236,6 +242,7 @@ class EvaluationContract:
             checkpoint_path="model.pkl",
             benchmark_name="function_approx",
             benchmark_fidelity={
+                "schema_version": 1,
                 "paper_task_name": "Discontinuous function fitting",
                 "paper_section": "S1.1",
                 "fidelity_level": "proxy",
@@ -332,8 +339,9 @@ class EvaluationContract:
             benchmark_source_manifest_digest=str(data.get("benchmark_source_manifest_digest", "")),
             contract_hash=str(data.get("contract_hash", "")),
         )
-        if contract.benchmark_fidelity:
-            _validate_benchmark_fidelity(contract.benchmark_fidelity)
+        if not contract.benchmark_fidelity:
+            raise ValueError("EvaluationContract benchmark_fidelity missing")
+        _validate_benchmark_fidelity(contract.benchmark_fidelity)
         if contract.benchmark_source_manifest_digest:
             if not contract.benchmark_source_manifest:
                 raise ValueError("EvaluationContract benchmark source manifest missing")

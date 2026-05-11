@@ -13,6 +13,7 @@
 - [论文机制笔记](paper_notes.md)：AgenticSciML 论文中的阶段、角色、solution tree 和 evaluation contract。
 - [多 Agent 设计方法](multi_agent_design.md)：什么时候使用多 Agent、状态机优先原则、通信方式、可靠性和新增 Agent 检查清单。
 - [Benchmark 与实验设计](benchmark_plan.md)：6 类 benchmark 的本地代理、验证矩阵和真实 LLM 实验顺序。
+- [Benchmark Fidelity Levels](fidelity_levels.md)：`proxy`、`faithful-small`、`paper-like` 的准入标准和 claim 边界。
 
 ## 实施与运行
 
@@ -25,4 +26,4 @@
 1. 先读 [项目概览](../README.md)，确认本项目只复刻 workflow，不承诺复现论文分数。
 2. 再读 [论文机制笔记](paper_notes.md) 和 [多 Agent 设计方法](multi_agent_design.md)，理解为什么采用代码控制的多 Agent 进化搜索。
 3. 开发前读 [项目 Agent 规则](../AGENTS.md) 和 [Codex 实施任务](codex_tasks.md)。
-4. 做实验时读 [Benchmark 与实验设计](benchmark_plan.md)、[Real LLM 运行](real_run.md)、[Ablation 说明](ablation.md) 和 [版本说明](version_notes.md)。
+4. 做实验时读 [Benchmark 与实验设计](benchmark_plan.md)、[Benchmark Fidelity Levels](fidelity_levels.md)、[Real LLM 运行](real_run.md)、[Ablation 说明](ablation.md) 和 [版本说明](version_notes.md)。

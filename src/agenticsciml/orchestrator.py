@@ -21,6 +21,7 @@ from agenticsciml.agents import (
 from agenticsciml.agents.base import StructuredOutputError
 from agenticsciml.benchmarks import BenchmarkContractFactory, ProblemBundle
 from agenticsciml.config import EvaluationContract, ExperimentConfig
+from agenticsciml.evidence import evidence_metadata_for_run
 from agenticsciml.execution.sandbox import prepare_solution_workspace, train_and_evaluate
 from agenticsciml.llm.base import LLMClient
 from agenticsciml.patching import PatchApplicationError
@@ -756,21 +757,10 @@ class AgenticSciMLOrchestrator:
         }
 
     def _evidence_metadata(self) -> dict[str, object]:
-        fidelity_level = self.problem_bundle.benchmark_spec.fidelity_level
-        if self.config.use_mock:
-            evidence_mode = "mock_workflow_shape"
-            llm_mode = "mock"
-            scientific_claim = "not_supported"
-        else:
-            evidence_mode = f"real_llm_{fidelity_level}_benchmark"
-            llm_mode = "real"
-            scientific_claim = "proxy_workflow_only" if fidelity_level == "proxy" else "not_validated"
-        return {
-            "llm_mode": llm_mode,
-            "benchmark_fidelity_level": fidelity_level,
-            "evidence_mode": evidence_mode,
-            "scientific_claim": scientific_claim,
-        }
+        return evidence_metadata_for_run(
+            use_mock=self.config.use_mock,
+            fidelity_level=self.problem_bundle.benchmark_spec.fidelity_level,
+        )
 
 
 def _failure_phase(command: list[str]) -> str:

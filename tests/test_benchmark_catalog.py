@@ -130,6 +130,28 @@ def test_benchmark_spec_rejects_invalid_fidelity_metadata() -> None:
         raise AssertionError("Expected invalid fidelity metadata to fail.")
 
 
+def test_benchmark_spec_rejects_empty_paper_section() -> None:
+    try:
+        BenchmarkSpec(
+            name="bad",
+            path=Path("examples/function_approx"),
+            paper_section="",
+            paper_task_name="Bad task",
+            family="bad",
+            metric="bad_metric",
+            description="bad",
+            fidelity_level="proxy",
+            expected_runtime_s=1,
+            requires_torch=False,
+            requires_gpu=False,
+            paper_gap_notes="proxy gap",
+        )
+    except ValueError as exc:
+        assert "paper_section" in str(exc)
+    else:
+        raise AssertionError("Expected empty paper_section to fail.")
+
+
 def test_all_benchmarks_have_required_artifacts() -> None:
     for name, spec in BENCHMARKS.items():
         required = [
@@ -200,6 +222,33 @@ def test_contract_hash_binds_benchmark_fidelity_metadata() -> None:
         assert "hash mismatch" in str(exc)
     else:
         raise AssertionError("Expected tampered fidelity metadata to fail contract hash.")
+
+
+def test_contract_from_dict_requires_benchmark_fidelity_metadata() -> None:
+    bundle = ProblemBundle.load(BENCHMARKS["function_approx"].path)
+    payload = BenchmarkContractFactory.create_contract(bundle).to_dict()
+    del payload["benchmark_fidelity"]
+    payload["contract_hash"] = ""
+
+    try:
+        EvaluationContract.from_dict(payload)
+    except ValueError as exc:
+        assert "benchmark_fidelity" in str(exc)
+    else:
+        raise AssertionError("Expected missing benchmark_fidelity to fail.")
+
+
+def test_contract_from_dict_rejects_invalid_benchmark_fidelity_strings() -> None:
+    bundle = ProblemBundle.load(BENCHMARKS["function_approx"].path)
+    payload = BenchmarkContractFactory.create_contract(bundle).to_dict()
+    payload["benchmark_fidelity"]["paper_section"] = ""
+
+    try:
+        EvaluationContract.from_dict(payload)
+    except ValueError as exc:
+        assert "paper_section" in str(exc)
+    else:
+        raise AssertionError("Expected invalid benchmark_fidelity paper_section to fail.")
 
 
 def test_contract_from_dict_rejects_hash_mismatch() -> None:

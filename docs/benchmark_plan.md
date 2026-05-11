@@ -1,6 +1,6 @@
 # Benchmark 与实验设计
 
-[返回文档树](index.md) · 相关文档：[论文机制笔记](paper_notes.md)、[Real LLM 运行](real_run.md)、[Ablation 说明](ablation.md)
+[返回文档树](index.md) · 相关文档：[论文机制笔记](paper_notes.md)、[Benchmark Fidelity Levels](fidelity_levels.md)、[Real LLM 运行](real_run.md)、[Ablation 说明](ablation.md)
 
 ## 目标
 
@@ -56,6 +56,8 @@
 - `proxy`：本地 NumPy 小规模代理任务，只验证 workflow / evaluator / artifact shape。
 - `faithful-small`：后续目标，使用更接近论文的 SciML/PyTorch 训练目标，但缩小预算。
 - `paper-like`：后续目标，尽量贴近论文数据、训练预算和指标，不默认承诺复现论文分数。
+
+详细准入标准见 [Benchmark Fidelity Levels](fidelity_levels.md)。
 
 用 CLI 查看当前 catalog：
 

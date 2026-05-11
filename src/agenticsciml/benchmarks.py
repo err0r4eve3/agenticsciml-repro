@@ -34,6 +34,8 @@ class BenchmarkSpec:
     def __post_init__(self) -> None:
         if self.fidelity_level not in {"proxy", "faithful-small", "paper-like"}:
             raise ValueError(f"Invalid fidelity_level for {self.name}: {self.fidelity_level}")
+        if not isinstance(self.paper_section, str) or not self.paper_section.strip():
+            raise ValueError(f"paper_section is required for {self.name}")
         if (
             not isinstance(self.expected_runtime_s, int)
             or isinstance(self.expected_runtime_s, bool)
@@ -44,9 +46,11 @@ class BenchmarkSpec:
             raise ValueError(f"requires_torch must be a bool for {self.name}")
         if not isinstance(self.requires_gpu, bool):
             raise ValueError(f"requires_gpu must be a bool for {self.name}")
-        if not self.paper_task_name.strip():
+        if not isinstance(self.paper_task_name, str) or not self.paper_task_name.strip():
             raise ValueError(f"paper_task_name is required for {self.name}")
-        if self.fidelity_level == "proxy" and not self.paper_gap_notes.strip():
+        if self.fidelity_level == "proxy" and (
+            not isinstance(self.paper_gap_notes, str) or not self.paper_gap_notes.strip()
+        ):
             raise ValueError(f"paper_gap_notes is required for proxy benchmark {self.name}")
 
     def to_dict(self) -> dict[str, object]:
@@ -67,6 +71,7 @@ class BenchmarkSpec:
 
     def fidelity_metadata(self) -> dict[str, object]:
         return {
+            "schema_version": 1,
             "paper_task_name": self.paper_task_name,
             "paper_section": self.paper_section,
             "fidelity_level": self.fidelity_level,

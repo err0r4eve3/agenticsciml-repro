@@ -48,6 +48,14 @@ def test_storage_atomic_writes_do_not_leave_temp_files(tmp_path: Path) -> None:
 
 
 def test_contract_serialization_preserves_commands() -> None:
+    contract = EvaluationContract.default_function_approx()
+    contract.evaluate_command = ["python", "evaluate.py"]
+    contract.with_computed_hash()
+
+    assert EvaluationContract.from_dict(contract.to_dict()).evaluate_command == ["python", "evaluate.py"]
+
+
+def test_contract_serialization_rejects_missing_fidelity_metadata() -> None:
     contract = EvaluationContract(
         metric_name="validation_mse",
         higher_is_better=False,
@@ -57,7 +65,12 @@ def test_contract_serialization_preserves_commands() -> None:
         evaluate_command=["python", "evaluate.py"],
     )
 
-    assert EvaluationContract.from_dict(contract.to_dict()).evaluate_command == ["python", "evaluate.py"]
+    try:
+        EvaluationContract.from_dict(contract.to_dict())
+    except ValueError as exc:
+        assert "benchmark_fidelity" in str(exc)
+    else:
+        raise AssertionError("Expected missing benchmark_fidelity to fail.")
 
 
 def test_proposal_serialization() -> None:
