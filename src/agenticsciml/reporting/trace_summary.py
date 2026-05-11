@@ -23,6 +23,17 @@ EVIDENCE_METADATA_KEYS = (
 
 RUN_STATES = {"partial", "completed", "exported", "finalized"}
 EXPORTED_RUN_STATES = {"completed", "exported", "finalized"}
+TRACE_NODE_REFERENCE_EVENT_NAMES = {
+    "agenticsciml.parallel_children.start",
+    "agenticsciml.parallel_children.end",
+    "agenticsciml.child_mutation.start",
+    "agenticsciml.child_mutation.end",
+    "child_creation:exception",
+    "engineer:patch_application",
+    "debugger:patch_application",
+    "train_and_evaluate",
+    "train_and_evaluate.retry",
+}
 
 
 def load_trace_events(run_dir: Path) -> list[dict[str, Any]]:
@@ -344,12 +355,14 @@ def _check_trace_node_references(
     node_ids: set[str],
 ) -> None:
     for event in events:
+        event_name = str(event.get("name", ""))
+        if event_name not in TRACE_NODE_REFERENCE_EVENT_NAMES:
+            continue
         metadata = event.get("metadata", {})
         if not isinstance(metadata, dict):
             continue
         for key, node_id in _trace_node_references(metadata):
             if node_id not in node_ids:
-                event_name = event.get("name", "<unknown>")
                 issues.append(
                     f"trace event {event_name} references unknown solution node via {key}: {node_id}"
                 )
