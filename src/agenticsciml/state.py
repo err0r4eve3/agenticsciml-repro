@@ -23,7 +23,9 @@ SOLUTION_NODE_REQUIRED_FIELDS = {
     "status",
     "workspace",
 }
+SOLUTION_NODE_ALLOWED_FIELDS = SOLUTION_NODE_REQUIRED_FIELDS
 SOLUTION_NODE_STATUSES = {"created", "evaluated", "failed"}
+SOLUTION_SCORE_ALLOWED_FIELDS = {"metric", "value", "higher_is_better"}
 
 
 def validate_solution_score_payload(score: Any, *, context: str) -> list[str]:
@@ -32,6 +34,9 @@ def validate_solution_score_payload(score: Any, *, context: str) -> list[str]:
         return issues
     if not isinstance(score, dict):
         return [f"{context} score must be an object or null"]
+    unknown_fields = sorted(set(score) - SOLUTION_SCORE_ALLOWED_FIELDS)
+    if unknown_fields:
+        issues.append(f"{context} score has unknown fields: {', '.join(unknown_fields)}")
     metric = score.get("metric")
     if not isinstance(metric, str) or not metric:
         issues.append(f"{context} score.metric must be a non-empty string")
@@ -49,6 +54,9 @@ def validate_solution_node_payload(data: Any, *, context: str = "SolutionNode") 
         return [f"{context} must be an object"]
 
     issues: list[str] = []
+    unknown_fields = sorted(set(data) - SOLUTION_NODE_ALLOWED_FIELDS)
+    if unknown_fields:
+        issues.append(f"{context} has unknown fields: {', '.join(unknown_fields)}")
     missing_fields = sorted(SOLUTION_NODE_REQUIRED_FIELDS - set(data))
     for field_name in missing_fields:
         issues.append(f"{context} missing required field {field_name}")

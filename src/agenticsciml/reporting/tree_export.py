@@ -9,7 +9,7 @@ from agenticsciml.state import SolutionNode
 def write_tree_json(run_dir: Path, nodes: list[SolutionNode]) -> Path:
     path = run_dir / "tree.json"
     payload = {"nodes": [node.to_dict() for node in nodes]}
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True, allow_nan=False), encoding="utf-8")
     return path
 
 

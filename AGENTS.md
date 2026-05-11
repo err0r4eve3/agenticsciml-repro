@@ -223,6 +223,10 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   a valid score and no `error` / `failure_kind`; `failed` nodes must not carry a
   score and must have either `error` or `failure_kind`; `created` nodes must not
   carry score, error, or failure kind.
+- Solution node and score schemas are closed by default. Unknown node fields or
+  unknown score fields must fail closed at `from_dict()`, resume/load, and trace
+  summary boundaries unless a future migration explicitly versions and accepts
+  them.
 - Resume/load must validate solution artifact path semantics. `workspace` must
   resolve under the run's `solutions/` directory and match `node_id`; non-null
   `proposal_path` and `analysis_path` must resolve inside that node workspace

@@ -761,7 +761,7 @@ def _compare_metadata_value(
 def write_trace_summary(run_dir: Path) -> Path:
     path = run_dir / "trace_summary.json"
     path.write_text(
-        json.dumps(summarize_trace(run_dir), indent=2, sort_keys=True),
+        json.dumps(summarize_trace(run_dir), indent=2, sort_keys=True, allow_nan=False),
         encoding="utf-8",
     )
     return path

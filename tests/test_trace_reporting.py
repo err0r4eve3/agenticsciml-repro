@@ -298,6 +298,20 @@ def test_trace_summary_fails_when_solution_node_status_semantics_are_invalid(tmp
     assert any("evaluated node must have a score" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
+def test_trace_summary_fails_when_solution_node_has_unknown_fields(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    for artifact_name in ("tree.json", "checkpoint.json"):
+        artifact = json.loads((run_dir / artifact_name).read_text(encoding="utf-8"))
+        artifact["nodes"][0]["extra"] = "drift"
+        (run_dir / artifact_name).write_text(json.dumps(artifact), encoding="utf-8")
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("unknown fields: extra" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
 def test_trace_summary_fails_on_invalid_solution_tree_child_link(tmp_path: Path) -> None:
     run_dir = _write_consistent_run_artifacts(tmp_path / "run")
     for artifact_name in ("tree.json", "checkpoint.json"):

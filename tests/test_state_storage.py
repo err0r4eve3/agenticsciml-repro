@@ -128,6 +128,27 @@ def test_solution_node_from_dict_rejects_invalid_status_semantics() -> None:
         SolutionNode.from_dict(created)
 
 
+def test_solution_node_from_dict_rejects_unknown_fields() -> None:
+    node = SolutionNode(
+        node_id="solution_000",
+        parent_id=None,
+        workspace="runs/demo/solutions/solution_000",
+        score=SolutionScore(metric="validation_mse", value=1.0, higher_is_better=False),
+        status="evaluated",
+    )
+    payload = node.to_dict()
+    payload["surprise"] = True
+
+    with pytest.raises(ValueError, match="unknown fields: surprise"):
+        SolutionNode.from_dict(payload)
+
+    payload = node.to_dict()
+    payload["score"]["surprise"] = True
+
+    with pytest.raises(ValueError, match="score has unknown fields: surprise"):
+        SolutionNode.from_dict(payload)
+
+
 def test_solution_tree_payload_rejects_empty_node_list() -> None:
     issues = validate_solution_tree_payload([], context="checkpoint.json")
 
