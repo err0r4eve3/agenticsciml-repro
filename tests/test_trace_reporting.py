@@ -471,7 +471,7 @@ def test_trace_summary_ignores_non_solution_parent_id_metadata(tmp_path: Path) -
     assert summary["artifact_consistency"]["passed"] is True
     assert summary["quality_gate"]["passed"] is True
     assert summary["artifact_consistency"]["trace_node_reference_events_checked"] == 1
-    assert summary["artifact_consistency"]["trace_node_reference_events_skipped"] == 6
+    assert summary["artifact_consistency"]["trace_node_reference_events_skipped"] == 7
 
 
 def test_trace_summary_reports_trace_node_reference_check_counts(tmp_path: Path) -> None:
@@ -480,7 +480,7 @@ def test_trace_summary_reports_trace_node_reference_check_counts(tmp_path: Path)
     summary = summarize_trace(run_dir)
 
     assert summary["artifact_consistency"]["trace_node_reference_events_checked"] == 1
-    assert summary["artifact_consistency"]["trace_node_reference_events_skipped"] == 5
+    assert summary["artifact_consistency"]["trace_node_reference_events_skipped"] == 6
     assert summary["artifact_consistency"]["trace_node_references_checked"] == 1
     assert summary["artifact_consistency"]["trace_node_reference_events_with_references"] == 1
     assert summary["artifact_consistency"]["trace_node_references_checked_by_name"] == {
@@ -502,8 +502,11 @@ def test_trace_summary_reports_trace_node_reference_check_counts(tmp_path: Path)
     assert summary["artifact_consistency"]["trace_node_lifecycle_stage_coverage"] == {
         "nodes": {
             "solution_000": {
-                "stages": ["evaluated"],
-                "stage_events": {"evaluated": ["train_and_evaluate"]},
+                "stages": ["evaluated", "materialized"],
+                "stage_events": {
+                    "evaluated": ["train_and_evaluate"],
+                    "materialized": ["root_engineer"],
+                },
             }
         }
     }
@@ -515,6 +518,7 @@ def test_trace_summary_reports_trace_node_reference_check_counts(tmp_path: Path)
         "agenticsciml.run.start": 1,
         "guard": 1,
         "proposer": 2,
+        "root_engineer": 1,
     }
 
 
@@ -653,8 +657,30 @@ def test_trace_summary_fails_when_evaluated_node_has_no_evaluated_stage(tmp_path
     assert summary["quality_gate"]["passed"] is False
     assert summary["artifact_consistency"]["trace_node_lifecycle_stage_coverage"]["nodes"]["solution_000"][
         "stages"
-    ] == ["created"]
+    ] == ["created", "materialized"]
     assert any("evaluated solution nodes have no evaluated trace stage" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
+def test_trace_summary_fails_when_evaluated_root_has_no_materialized_stage(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    events = [event for event in events if event.get("name") != "root_engineer"]
+    for event in events:
+        event.pop("event_seq", None)
+    _write_events(run_dir / "trace.jsonl", events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert summary["artifact_consistency"]["trace_node_lifecycle_stage_coverage"]["nodes"]["solution_000"][
+        "stages"
+    ] == ["evaluated"]
+    assert any("solution nodes missing required lifecycle stages" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
 def test_trace_summary_fails_when_exported_run_checks_no_actual_solution_node_references(tmp_path: Path) -> None:
@@ -783,6 +809,7 @@ def _write_consistent_run_artifacts(run_dir: Path) -> Path:
             {"event_type": "workflow_span", "name": "agenticsciml.run.end", "metadata": {"run_state": "exported"}},
             {"event_type": "agent_span", "name": "proposer", "metadata": {}},
             {"event_type": "generation_span", "name": "proposer", "metadata": {}},
+            {"event_type": "agent_span", "name": "root_engineer", "metadata": {"solution_id": "solution_000"}},
             {
                 "event_type": "tool_span",
                 "name": "train_and_evaluate",

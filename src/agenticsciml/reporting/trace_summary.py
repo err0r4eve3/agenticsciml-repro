@@ -395,6 +395,18 @@ def _check_solution_artifact_consistency(
                         "solution nodes have no self trace references: "
                         + ", ".join(nodes_without_self_references)
                     )
+                nodes_missing_required_stages = _nodes_missing_required_lifecycle_stages(
+                    tree_nodes or checkpoint_nodes or {},
+                    trace_node_reference_counts["lifecycle_stage_coverage"],
+                )
+                if nodes_missing_required_stages:
+                    issues.append(
+                        "solution nodes missing required lifecycle stages: "
+                        + "; ".join(
+                            f"{node_id}={','.join(missing_stages)}"
+                            for node_id, missing_stages in nodes_missing_required_stages.items()
+                        )
+                    )
                 evaluated_nodes_without_evaluated_stage = _evaluated_nodes_without_stage(
                     tree_nodes or checkpoint_nodes or {},
                     trace_node_reference_counts["lifecycle_stage_coverage"],
@@ -574,6 +586,35 @@ def _evaluated_nodes_without_stage(
         if stage not in stages:
             missing.append(node_id)
     return missing
+
+
+def _nodes_missing_required_lifecycle_stages(
+    nodes: dict[str, dict[str, Any]],
+    lifecycle_stage_coverage: dict[str, Any],
+) -> dict[str, list[str]]:
+    coverage_nodes = lifecycle_stage_coverage.get("nodes", {})
+    if not isinstance(coverage_nodes, dict):
+        return {}
+    missing: dict[str, list[str]] = {}
+    for node_id, node in sorted(nodes.items()):
+        required_stages = _required_lifecycle_stages(node)
+        if not required_stages:
+            continue
+        coverage = coverage_nodes.get(node_id, {})
+        stages = set(coverage.get("stages", [])) if isinstance(coverage, dict) else set()
+        missing_stages = sorted(required_stages - stages)
+        if missing_stages:
+            missing[node_id] = missing_stages
+    return missing
+
+
+def _required_lifecycle_stages(node: dict[str, Any]) -> set[str]:
+    if node.get("status") != "evaluated":
+        return set()
+    required = {"evaluated", "materialized"}
+    if node.get("parent_id"):
+        required.update({"created", "completed"})
+    return required
 
 
 def _trace_node_references(metadata: dict[str, Any]) -> list[tuple[str, str]]:
