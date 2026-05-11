@@ -91,6 +91,115 @@ def validate_solution_node_payload(data: Any, *, context: str = "SolutionNode") 
     return issues
 
 
+def validate_solution_tree_payload(nodes: Any, *, context: str = "Solution tree") -> list[str]:
+    if not isinstance(nodes, list):
+        return [f"{context} nodes must be a list"]
+
+    issues: list[str] = []
+    by_id: dict[str, dict[str, Any]] = {}
+    for index, node in enumerate(nodes):
+        if not isinstance(node, dict):
+            issues.append(f"{context} node at index {index} must be an object")
+            continue
+        node_id = node.get("node_id")
+        node_context = f"{context} node {node_id}" if isinstance(node_id, str) and node_id else f"{context} node at index {index}"
+        issues.extend(validate_solution_node_payload(node, context=node_context))
+        if not isinstance(node_id, str) or not node_id:
+            issues.append(f"{context} node at index {index} has invalid node_id")
+            continue
+        if node_id in by_id:
+            issues.append(f"{context} has duplicate node_id: {node_id}")
+            continue
+        by_id[node_id] = node
+
+    if by_id:
+        issues.extend(validate_solution_tree_graph_payload(by_id, context=context))
+    return issues
+
+
+def validate_solution_tree_graph_payload(
+    nodes: dict[str, dict[str, Any]],
+    *,
+    context: str = "Solution tree",
+) -> list[str]:
+    issues: list[str] = []
+    root_ids = [node_id for node_id, node in nodes.items() if node.get("parent_id") is None]
+    if len(root_ids) != 1:
+        issues.append(f"{context} must have exactly one root node: roots={sorted(root_ids)!r}")
+
+    for node_id, node in sorted(nodes.items()):
+        parent_id = node.get("parent_id")
+        if parent_id is not None:
+            if not isinstance(parent_id, str) or not parent_id:
+                issues.append(f"{context} node {node_id} has invalid parent_id: {parent_id!r}")
+            elif parent_id not in nodes:
+                issues.append(f"{context} node {node_id} parent_id references missing node: {parent_id}")
+
+        if "children" not in node:
+            issues.append(f"{context} node {node_id} children is missing")
+            children = []
+        else:
+            children = node.get("children")
+        if not isinstance(children, list):
+            issues.append(f"{context} node {node_id} children must be a list")
+            continue
+        seen_children: set[str] = set()
+        for child_id in children:
+            if not isinstance(child_id, str) or not child_id:
+                issues.append(f"{context} node {node_id} children has invalid node id: {child_id!r}")
+                continue
+            if child_id in seen_children:
+                issues.append(f"{context} node {node_id} children contains duplicate node id: {child_id}")
+                continue
+            seen_children.add(child_id)
+            child_node = nodes.get(child_id)
+            if child_node is None:
+                issues.append(f"{context} node {node_id} children references missing node: {child_id}")
+                continue
+            if child_node.get("parent_id") != node_id:
+                issues.append(
+                    f"{context} node {node_id} children includes {child_id}, "
+                    f"but child parent_id is {child_node.get('parent_id')!r}"
+                )
+
+    for node_id, node in sorted(nodes.items()):
+        parent_id = node.get("parent_id")
+        if not isinstance(parent_id, str) or parent_id not in nodes:
+            continue
+        parent_children = nodes[parent_id].get("children")
+        if not isinstance(parent_children, list):
+            continue
+        child_count = sum(1 for child_id in parent_children if child_id == node_id)
+        if child_count != 1:
+            issues.append(
+                f"{context} node {node_id} parent children does not include node exactly once: "
+                f"parent_id={parent_id}, count={child_count}"
+            )
+
+    cycle_nodes = _solution_tree_cycle_nodes(nodes)
+    if cycle_nodes:
+        issues.append(f"{context} parent links contain a cycle: {cycle_nodes!r}")
+    return issues
+
+
+def _solution_tree_cycle_nodes(nodes: dict[str, dict[str, Any]]) -> list[str]:
+    cycle_nodes: set[str] = set()
+    for node_id in nodes:
+        seen: set[str] = set()
+        current_id: str | None = node_id
+        while current_id is not None:
+            if current_id in seen:
+                cycle_nodes.update(seen)
+                break
+            seen.add(current_id)
+            current_node = nodes.get(current_id)
+            if current_node is None:
+                break
+            parent_id = current_node.get("parent_id")
+            current_id = parent_id if isinstance(parent_id, str) and parent_id else None
+    return sorted(cycle_nodes)
+
+
 def _check_required_str_field(
     data: dict[str, Any],
     field_name: str,

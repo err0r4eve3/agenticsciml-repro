@@ -34,7 +34,13 @@ from agenticsciml.reporting import (
     write_tree_mermaid,
 )
 from agenticsciml.search_policy import SearchPolicy
-from agenticsciml.state import AnalysisReport, Proposal, SolutionNode, SolutionScore
+from agenticsciml.state import (
+    AnalysisReport,
+    Proposal,
+    SolutionNode,
+    SolutionScore,
+    validate_solution_tree_payload,
+)
 from agenticsciml.storage import ExperimentStorage
 
 
@@ -134,7 +140,11 @@ class AgenticSciMLOrchestrator:
             raise FileNotFoundError(f"Cannot resume without checkpoint: {checkpoint_path}")
         payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
         self.loaded_checkpoint = payload
-        self.nodes = [SolutionNode.from_dict(node) for node in payload.get("nodes", [])]
+        node_payloads = payload.get("nodes", [])
+        node_issues = validate_solution_tree_payload(node_payloads, context="checkpoint.json")
+        if node_issues:
+            raise ValueError("Invalid checkpoint solution tree: " + "; ".join(node_issues))
+        self.nodes = [SolutionNode.from_dict(node) for node in node_payloads]
         self.analysis_by_node = self._load_analysis_reports(self.nodes)
         self.storage.record_trace(
             "workflow_span",

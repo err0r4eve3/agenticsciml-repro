@@ -207,7 +207,9 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   nodes, `children` is schema-required and duplicate-free, and each parent-child
   relation is bidirectionally consistent: child entries agree with child
   `parent_id`, and every non-root node appears exactly once in its parent's
-  `children`.
+  `children`. The graph invariant validator must run at both resume/load
+  boundaries and trace-summary/reporting boundaries so corrupted checkpoint
+  topology never enters the evolutionary search loop.
 - Final solution nodes must satisfy a schema before graph checks are trusted:
   required fields from `SolutionNode.to_dict()`, `status` in the supported enum,
   valid nullable string fields, `method_tags` as strings, non-negative

@@ -5,7 +5,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from agenticsciml.state import validate_solution_node_payload
+from agenticsciml.state import validate_solution_node_payload, validate_solution_tree_graph_payload
 
 
 REQUIRED_EVENT_TYPES = (
@@ -469,68 +469,7 @@ def _check_solution_tree_graph_invariants(
     nodes: dict[str, dict[str, Any]],
     issues: list[str],
 ) -> None:
-    root_ids = [node_id for node_id, node in nodes.items() if node.get("parent_id") is None]
-    if len(root_ids) != 1:
-        issues.append(f"{artifact_name} must have exactly one root node: roots={sorted(root_ids)!r}")
-
-    for node_id, node in sorted(nodes.items()):
-        parent_id = node.get("parent_id")
-        if parent_id is not None:
-            if not isinstance(parent_id, str) or not parent_id:
-                issues.append(f"{artifact_name} node {node_id} has invalid parent_id: {parent_id!r}")
-            elif parent_id not in nodes:
-                issues.append(
-                    f"{artifact_name} node {node_id} parent_id references missing node: {parent_id}"
-                )
-
-        if "children" not in node:
-            issues.append(f"{artifact_name} node {node_id} children is missing")
-            children = []
-        else:
-            children = node.get("children")
-        if not isinstance(children, list):
-            issues.append(f"{artifact_name} node {node_id} children must be a list")
-            continue
-        seen_children: set[str] = set()
-        for child_id in children:
-            if not isinstance(child_id, str) or not child_id:
-                issues.append(f"{artifact_name} node {node_id} children has invalid node id: {child_id!r}")
-                continue
-            if child_id in seen_children:
-                issues.append(
-                    f"{artifact_name} node {node_id} children contains duplicate node id: {child_id}"
-                )
-                continue
-            seen_children.add(child_id)
-            child_node = nodes.get(child_id)
-            if child_node is None:
-                issues.append(
-                    f"{artifact_name} node {node_id} children references missing node: {child_id}"
-                )
-                continue
-            if child_node.get("parent_id") != node_id:
-                issues.append(
-                    f"{artifact_name} node {node_id} children includes {child_id}, "
-                    f"but child parent_id is {child_node.get('parent_id')!r}"
-                )
-
-    for node_id, node in sorted(nodes.items()):
-        parent_id = node.get("parent_id")
-        if not isinstance(parent_id, str) or parent_id not in nodes:
-            continue
-        parent_children = nodes[parent_id].get("children")
-        if not isinstance(parent_children, list):
-            continue
-        child_count = sum(1 for child_id in parent_children if child_id == node_id)
-        if child_count != 1:
-            issues.append(
-                f"{artifact_name} node {node_id} parent children does not include node exactly once: "
-                f"parent_id={parent_id}, count={child_count}"
-            )
-
-    cycle_nodes = _solution_tree_cycle_nodes(nodes)
-    if cycle_nodes:
-        issues.append(f"{artifact_name} parent links contain a cycle: {cycle_nodes!r}")
+    issues.extend(validate_solution_tree_graph_payload(nodes, context=artifact_name))
 
 
 def _check_solution_node_schema(
@@ -540,24 +479,6 @@ def _check_solution_node_schema(
 ) -> None:
     for node_id, node in sorted(nodes.items()):
         issues.extend(validate_solution_node_payload(node, context=f"{artifact_name} node {node_id}"))
-
-
-def _solution_tree_cycle_nodes(nodes: dict[str, dict[str, Any]]) -> list[str]:
-    cycle_nodes: set[str] = set()
-    for node_id in nodes:
-        seen: set[str] = set()
-        current_id: str | None = node_id
-        while current_id is not None:
-            if current_id in seen:
-                cycle_nodes.update(seen)
-                break
-            seen.add(current_id)
-            current_node = nodes.get(current_id)
-            if current_node is None:
-                break
-            parent_id = current_node.get("parent_id")
-            current_id = parent_id if isinstance(parent_id, str) and parent_id else None
-    return sorted(cycle_nodes)
 
 
 def _check_trace_node_references(

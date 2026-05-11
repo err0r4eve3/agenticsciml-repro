@@ -61,6 +61,7 @@
 - solution tree graph invariants：`trace_summary.json` 校验 `tree.json` 和 `checkpoint.json` 都有唯一 root、非 root parent 存在、parent links 无环、`children` 必填且无重复、`children` 只指向存在节点，并要求 parent `children` 与 child `parent_id` 双向一致。
 - solution node schema gate：`trace_summary.json` 在 graph invariant 前校验 final node required fields、status enum、nullable string fields、score schema、method tags、debug count 和 score delta 类型。
 - shared solution node load schema：`trace_summary.json` 与 `SolutionNode.from_dict()` 复用同一套 schema validator；resume/load 遇到坏 `checkpoint.json` node payload 会在加载边界 fail closed，而不是只在事后 trace 报告中暴露。
+- shared solution tree load schema：resume/load 与 `trace_summary.json` 复用 solution-tree graph invariant validator；坏 `checkpoint.json` 拓扑（缺失 parent、环、重复 child、children/parent_id 不一致等）会在进入进化搜索前 fail closed。
 - benchmark catalog：6 类论文任务家族都有本地 deterministic engineering proxy，包括 `function_approx`、`poisson_lshape`、`burgers_pinn`、`antiderivative_operator`、`reaction_diffusion_operator`、`cylinder_wake_reconstruction`；每个 catalog entry 记录 `fidelity_level`、expected runtime、dependency flags 和 paper-gap notes。
 - benchmark metadata validation：`BenchmarkSpec` 构造时校验 `fidelity_level`、expected runtime、dependency flags、paper task name 和 proxy paper-gap notes。
 - fidelity levels document：`docs/fidelity_levels.md` 定义 `proxy`、`faithful-small`、`paper-like` 的准入标准和 claim rules。
@@ -91,6 +92,7 @@ uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trac
 uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trace_summary_fails_when_children_field_is_missing tests/test_trace_reporting.py::test_trace_summary_fails_on_duplicate_solution_tree_child_link tests/test_trace_reporting.py::test_trace_summary_fails_when_child_is_missing_from_parent_children -q
 uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trace_summary_fails_when_solution_node_required_field_is_missing tests/test_trace_reporting.py::test_trace_summary_fails_when_solution_node_status_is_invalid tests/test_trace_reporting.py::test_trace_summary_fails_when_solution_node_score_shape_is_invalid -q
 uv run --python 3.11 --extra dev pytest tests/test_state_storage.py::test_solution_node_from_dict_rejects_missing_required_field tests/test_state_storage.py::test_solution_node_from_dict_rejects_invalid_status tests/test_state_storage.py::test_solution_node_from_dict_rejects_invalid_score_shape tests/test_orchestrator_cli.py::test_resume_rejects_invalid_solution_node_schema -q
+uv run --python 3.11 --extra dev pytest tests/test_orchestrator_cli.py::test_resume_rejects_invalid_solution_tree_graph -q
 uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trace_summary_allows_partial_run_with_zero_solution_reference_events -q
 uv run --python 3.11 --extra dev agenticsciml benchmarks
 uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --mock --max-iterations 1
