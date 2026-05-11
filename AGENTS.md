@@ -365,7 +365,12 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
 - Real LLM smoke tooling must be no-key-safe in dry-run mode. `agenticsciml
   smoke-llm --dry-run` should write the planned run manifest and report without
   making API calls or requiring `OPENAI_API_KEY`; non-dry-run real mode must
-  fail clearly when credentials are absent.
+  require explicit `--real` and fail clearly when credentials or adapter
+  dependencies are absent.
+- Real LLM smoke outputs must be fail-closed. A real smoke run should read
+  `trace_summary.json`, require positive real LLM call counts, verify
+  branch-context / no-branch-context evidence, and return non-zero when the
+  smoke gate fails instead of writing a normal-looking report.
 - Every benchmark entry must include fidelity metadata: `fidelity_level`,
   expected runtime, dependency flags, paper task name, and paper-gap notes. A
   `proxy` benchmark is allowed for workflow validation but must not be described

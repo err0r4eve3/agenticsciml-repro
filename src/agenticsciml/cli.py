@@ -127,6 +127,8 @@ def cmd_smoke_llm(args: argparse.Namespace) -> int:
         seed=args.seed,
         dry_run=args.dry_run,
         timeout_s=args.timeout_s,
+        max_iterations=args.max_iterations,
+        parallel_mutations=args.parallel_mutations,
     )
     print(result.report_md.resolve())
     return 0
@@ -191,8 +193,12 @@ def build_parser() -> argparse.ArgumentParser:
     smoke_llm.add_argument("--variants", default=",".join(DEFAULT_SMOKE_VARIANTS))
     smoke_llm.add_argument("--seed", type=int, default=0)
     smoke_llm.add_argument("--timeout-s", type=int, default=60)
+    smoke_llm.add_argument("--max-iterations", type=int, default=1)
+    smoke_llm.add_argument("--parallel-mutations", type=int, default=2)
     smoke_llm.add_argument("--output-dir", default="runs/real-llm-smoke")
-    smoke_llm.add_argument("--dry-run", action="store_true")
+    smoke_mode = smoke_llm.add_mutually_exclusive_group()
+    smoke_mode.add_argument("--dry-run", dest="dry_run", action="store_true", default=True)
+    smoke_mode.add_argument("--real", dest="dry_run", action="store_false")
     smoke_llm.set_defaults(func=cmd_smoke_llm)
 
     benchmarks = sub.add_parser("benchmarks")

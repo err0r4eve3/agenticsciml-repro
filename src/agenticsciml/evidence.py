@@ -5,6 +5,7 @@ LLM_MODE_MOCK = "mock"
 LLM_MODE_REAL = "real"
 
 EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE = "mock_workflow_shape"
+EVIDENCE_MODE_REAL_LLM_SMOKE = "real_llm_smoke"
 SCIENTIFIC_CLAIM_NOT_SUPPORTED = "not_supported"
 SCIENTIFIC_CLAIM_PROXY_WORKFLOW_ONLY = "proxy_workflow_only"
 SCIENTIFIC_CLAIM_NOT_VALIDATED = "not_validated"
