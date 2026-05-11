@@ -312,6 +312,20 @@ def test_trace_summary_fails_when_solution_node_has_unknown_fields(tmp_path: Pat
     assert any("unknown fields: extra" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
+def test_trace_summary_fails_on_unsupported_solution_tree_schema_version(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    for artifact_name in ("tree.json", "checkpoint.json"):
+        artifact = json.loads((run_dir / artifact_name).read_text(encoding="utf-8"))
+        artifact["schema_version"] = "solution_tree.v999"
+        (run_dir / artifact_name).write_text(json.dumps(artifact), encoding="utf-8")
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("unsupported schema_version" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
 def test_trace_summary_fails_on_invalid_solution_tree_child_link(tmp_path: Path) -> None:
     run_dir = _write_consistent_run_artifacts(tmp_path / "run")
     for artifact_name in ("tree.json", "checkpoint.json"):
@@ -1045,11 +1059,15 @@ def _write_consistent_run_artifacts(run_dir: Path) -> Path:
         "score_delta_from_parent": None,
         "num_debug_attempts": 0,
     }
-    (run_dir / "tree.json").write_text(json.dumps({"nodes": [node]}), encoding="utf-8")
+    (run_dir / "tree.json").write_text(
+        json.dumps({"schema_version": "solution_tree.v1", "nodes": [node]}),
+        encoding="utf-8",
+    )
     (run_dir / "checkpoint.json").write_text(
         json.dumps(
             {
                 "phase": "completed",
+                "schema_version": "solution_tree.v1",
                 "experiment_id": "trace-run",
                 "benchmark_name": benchmark_name,
                 "contract_hash": contract_hash,

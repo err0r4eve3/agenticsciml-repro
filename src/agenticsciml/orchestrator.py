@@ -37,10 +37,11 @@ from agenticsciml.search_policy import SearchPolicy
 from agenticsciml.state import (
     AnalysisReport,
     Proposal,
+    SOLUTION_TREE_SCHEMA_VERSION,
     SolutionNode,
     SolutionScore,
     validate_solution_node_artifact_paths,
-    validate_solution_tree_payload,
+    validate_solution_tree_artifact_payload,
 )
 from agenticsciml.storage import ExperimentStorage
 
@@ -141,8 +142,8 @@ class AgenticSciMLOrchestrator:
             raise FileNotFoundError(f"Cannot resume without checkpoint: {checkpoint_path}")
         payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
         self.loaded_checkpoint = payload
+        node_issues = validate_solution_tree_artifact_payload(payload, context="checkpoint.json")
         node_payloads = payload.get("nodes", [])
-        node_issues = validate_solution_tree_payload(node_payloads, context="checkpoint.json")
         if isinstance(node_payloads, list):
             for node in node_payloads:
                 if isinstance(node, dict):
@@ -183,6 +184,7 @@ class AgenticSciMLOrchestrator:
             "checkpoint.json",
             {
                 "phase": phase,
+                "schema_version": SOLUTION_TREE_SCHEMA_VERSION,
                 "experiment_id": self.config.experiment_id,
                 "benchmark_name": self.problem_bundle.benchmark_name,
                 "contract_hash": self.contract.contract_hash if self.contract else "",

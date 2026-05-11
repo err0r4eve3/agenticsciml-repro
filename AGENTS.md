@@ -227,6 +227,9 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   unknown score fields must fail closed at `from_dict()`, resume/load, and trace
   summary boundaries unless a future migration explicitly versions and accepts
   them.
+- `tree.json` and `checkpoint.json` must carry the current solution-tree schema
+  version. Resume/load and trace summary must reject missing or unsupported
+  schema versions instead of attempting silent migration.
 - Resume/load must validate solution artifact path semantics. `workspace` must
   resolve under the run's `solutions/` directory and match `node_id`; non-null
   `proposal_path` and `analysis_path` must resolve inside that node workspace

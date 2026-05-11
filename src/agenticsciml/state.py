@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 
+SOLUTION_TREE_SCHEMA_VERSION = "solution_tree.v1"
 SOLUTION_NODE_REQUIRED_FIELDS = {
     "analysis_path",
     "benchmark_name",
@@ -153,6 +154,24 @@ def validate_solution_tree_payload(nodes: Any, *, context: str = "Solution tree"
         issues.append(f"{context} must contain at least one node")
     if by_id:
         issues.extend(validate_solution_tree_graph_payload(by_id, context=context))
+    return issues
+
+
+def validate_solution_tree_artifact_payload(
+    payload: Any,
+    *,
+    context: str = "Solution tree artifact",
+) -> list[str]:
+    if not isinstance(payload, dict):
+        return [f"{context} must be an object"]
+    issues: list[str] = []
+    schema_version = payload.get("schema_version")
+    if schema_version != SOLUTION_TREE_SCHEMA_VERSION:
+        issues.append(
+            f"{context} has unsupported schema_version: "
+            f"{schema_version!r}; expected {SOLUTION_TREE_SCHEMA_VERSION!r}"
+        )
+    issues.extend(validate_solution_tree_payload(payload.get("nodes"), context=context))
     return issues
 
 

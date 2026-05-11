@@ -7,8 +7,10 @@ from agenticsciml.config import EvaluationContract, ExperimentConfig
 from agenticsciml.state import (
     AgentMessage,
     Proposal,
+    SOLUTION_TREE_SCHEMA_VERSION,
     SolutionNode,
     SolutionScore,
+    validate_solution_tree_artifact_payload,
     validate_solution_tree_payload,
 )
 from agenticsciml.storage import ExperimentStorage
@@ -153,6 +155,18 @@ def test_solution_tree_payload_rejects_empty_node_list() -> None:
     issues = validate_solution_tree_payload([], context="checkpoint.json")
 
     assert "checkpoint.json must contain at least one node" in issues
+
+
+def test_solution_tree_artifact_payload_rejects_unsupported_schema_version() -> None:
+    issues = validate_solution_tree_artifact_payload(
+        {"schema_version": "solution_tree.v999", "nodes": []},
+        context="checkpoint.json",
+    )
+
+    assert (
+        "checkpoint.json has unsupported schema_version: "
+        f"'solution_tree.v999'; expected '{SOLUTION_TREE_SCHEMA_VERSION}'"
+    ) in issues
 
 
 def test_storage_creates_solution_workspace_and_transcript(tmp_path: Path) -> None:

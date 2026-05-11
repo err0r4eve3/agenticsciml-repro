@@ -5,7 +5,11 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from agenticsciml.state import validate_solution_node_payload, validate_solution_tree_graph_payload
+from agenticsciml.state import (
+    SOLUTION_TREE_SCHEMA_VERSION,
+    validate_solution_node_payload,
+    validate_solution_tree_graph_payload,
+)
 
 
 REQUIRED_EVENT_TYPES = (
@@ -444,6 +448,12 @@ def _nodes_by_id(
 ) -> dict[str, dict[str, Any]] | None:
     if payload is None:
         return None
+    schema_version = payload.get("schema_version")
+    if schema_version != SOLUTION_TREE_SCHEMA_VERSION:
+        issues.append(
+            f"{artifact_name} has unsupported schema_version: "
+            f"{schema_version!r}; expected {SOLUTION_TREE_SCHEMA_VERSION!r}"
+        )
     nodes = payload.get("nodes")
     if not isinstance(nodes, list):
         issues.append(f"{artifact_name} nodes must be a list")
