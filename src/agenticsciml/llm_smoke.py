@@ -28,6 +28,12 @@ class LLMSmokeResult:
     runs_csv: Path | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class LLMSmokeVerification:
+    verification_json: Path
+    passed: bool
+
+
 def run_llm_smoke(
     *,
     benchmark_dir: Path,
@@ -111,6 +117,14 @@ def run_llm_smoke(
     if gate_issues:
         raise RuntimeError(f"Real LLM smoke gate failed; see {report_path}: {'; '.join(gate_issues)}")
     return LLMSmokeResult(plan_json=plan_path, report_md=report_path, manifest_json=manifest_path, runs_csv=runs_csv)
+
+
+def verify_llm_smoke_output(output_dir: Path) -> LLMSmokeVerification:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    payload = _verify_llm_smoke_output(output_dir)
+    path = output_dir / "real_llm_smoke_verification.json"
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True, allow_nan=False), encoding="utf-8")
+    return LLMSmokeVerification(verification_json=path, passed=bool(payload["passed"]))
 
 
 def _build_plan(
@@ -315,6 +329,115 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         writer.writeheader()
         writer.writerows(rows)
+
+
+def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
+    issues: list[str] = []
+    plan = _read_json_or_issue(output_dir / "real_llm_smoke_plan.json", issues)
+    manifest = _read_json_or_issue(output_dir / "real_llm_smoke_manifest.json", issues)
+    runs_csv = output_dir / "real_llm_smoke_runs.csv"
+    report_path = output_dir / "real_llm_smoke_report.md"
+    if not report_path.exists():
+        issues.append("missing real_llm_smoke_report.md")
+    if not runs_csv.exists():
+        issues.append("missing real_llm_smoke_runs.csv; dry-run outputs are not real-smoke evidence")
+
+    rows = _read_rows(runs_csv, issues) if runs_csv.exists() else []
+    if plan:
+        expected_hash = _hash_payload(plan)
+        if manifest and manifest.get("plan_hash") != expected_hash:
+            issues.append("manifest plan_hash does not match plan payload")
+        if plan.get("execution_mode") != "real":
+            issues.append("plan execution_mode must be real for smoke verification")
+        variants = [str(entry.get("variant")) for entry in plan.get("runs", []) if isinstance(entry, dict)]
+        try:
+            _require_paired_contrast(variants)
+        except ValueError as exc:
+            issues.append(str(exc))
+
+    recomputed_rows: list[dict[str, Any]] = []
+    for row in rows:
+        variant = str(row.get("variant", ""))
+        run_dir = Path(str(row.get("run_dir", "")))
+        seed = int(row.get("seed", 0) or 0)
+        if not run_dir.exists():
+            issues.append(f"{variant}: run_dir does not exist: {run_dir}")
+            continue
+        try:
+            recomputed = _smoke_row(run_dir, variant, seed)
+        except Exception as exc:
+            issues.append(f"{variant}: could not recompute smoke row: {type(exc).__name__}: {exc}")
+            continue
+        recomputed_rows.append(recomputed)
+        if not _truthy(recomputed["smoke_gate_passed"]):
+            issues.append(f"{variant}: smoke gate failed: {recomputed['smoke_gate_issues']}")
+        issues.extend(_parallel_trace_issues(run_dir, variant, plan))
+
+    if recomputed_rows:
+        paired_gate = _paired_contrast_gate(recomputed_rows)
+        if not paired_gate["passed"]:
+            issues.append(f"paired contrast gate failed: {'; '.join(paired_gate['issues'])}")
+
+    return {
+        "schema_version": 1,
+        "passed": not issues,
+        "issues": issues,
+        "checked_artifacts": {
+            "plan": str(output_dir / "real_llm_smoke_plan.json"),
+            "manifest": str(output_dir / "real_llm_smoke_manifest.json"),
+            "report": str(report_path),
+            "runs_csv": str(runs_csv),
+        },
+        "recomputed_rows": recomputed_rows,
+    }
+
+
+def _read_json_or_issue(path: Path, issues: list[str]) -> dict[str, Any]:
+    if not path.exists():
+        issues.append(f"missing {path.name}")
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        issues.append(f"invalid {path.name}: {type(exc).__name__}: {exc}")
+        return {}
+    if not isinstance(data, dict):
+        issues.append(f"{path.name} must contain a JSON object")
+        return {}
+    return data
+
+
+def _read_rows(path: Path, issues: list[str]) -> list[dict[str, str]]:
+    try:
+        with path.open(encoding="utf-8", newline="") as f:
+            return list(csv.DictReader(f))
+    except Exception as exc:
+        issues.append(f"could not read {path.name}: {type(exc).__name__}: {exc}")
+        return []
+
+
+def _parallel_trace_issues(run_dir: Path, variant: str, plan: dict[str, Any]) -> list[str]:
+    parallel_mutations = 1
+    for entry in plan.get("runs", []):
+        if isinstance(entry, dict) and entry.get("variant") == variant:
+            parallel_mutations = int(entry.get("parallel_mutations", 1) or 1)
+            break
+    if parallel_mutations <= 1:
+        return []
+    starts = [
+        event
+        for event in _read_trace_events(run_dir)
+        if event.get("name") == "agenticsciml.parallel_children.start"
+    ]
+    if not starts:
+        return [f"{variant}: missing parallel_children.start trace"]
+    if not any(
+        event.get("metadata", {}).get("execution_mode") == "parallel"
+        and int(event.get("metadata", {}).get("max_workers", 0) or 0) >= 2
+        for event in starts
+    ):
+        return [f"{variant}: no parallel child trace with max_workers >= 2"]
+    return []
 
 
 def _validate_smoke_variants(variants: list[str]) -> None:

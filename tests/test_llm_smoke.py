@@ -8,7 +8,7 @@ import pytest
 
 from agenticsciml.evidence import EVIDENCE_MODE_REAL_LLM_SMOKE
 from agenticsciml.llm.mock import MockLLMClient
-from agenticsciml.llm_smoke import _paired_contrast_gate, _smoke_gate, run_llm_smoke
+from agenticsciml.llm_smoke import _paired_contrast_gate, _smoke_gate, run_llm_smoke, verify_llm_smoke_output
 
 
 def test_llm_smoke_dry_run_writes_plan_without_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -100,6 +100,53 @@ def test_llm_smoke_real_gate_with_scripted_llm(tmp_path: Path) -> None:
     no_branch = next(row for row in rows if row["variant"] == "no_branch_context")
     assert no_branch["branch_context_enabled"] == "False"
     assert no_branch["branch_intents"] == ""
+
+    verification = verify_llm_smoke_output(tmp_path)
+    verification_payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+    assert verification.passed is True
+    assert verification_payload["passed"] is True
+    assert len(verification_payload["recomputed_rows"]) == 2
+
+
+def test_verify_llm_smoke_output_rejects_dry_run_only(tmp_path: Path) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=True,
+    )
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("dry-run outputs are not real-smoke evidence" in issue for issue in payload["issues"])
+
+
+def test_cli_verify_smoke_llm_command(tmp_path: Path, cli_env: dict[str, str]) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenticsciml.cli",
+            "verify-smoke-llm",
+            str(tmp_path),
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+        env=cli_env,
+    )
+
+    assert Path(result.stdout.strip().splitlines()[-1]).name == "real_llm_smoke_verification.json"
 
 
 def test_smoke_gate_requires_branch_context_prompt_delivery(tmp_path: Path) -> None:

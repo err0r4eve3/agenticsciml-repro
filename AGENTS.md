@@ -380,6 +380,10 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   iteration/mutation budgets, timeout semantics, output dir, config hash, and
   token/cost budget placeholders so failed and completed real runs remain
   auditable.
+- Completed real LLM smoke outputs should be checked with `agenticsciml
+  verify-smoke-llm <output_dir>`. Verification must reject dry-run-only
+  artifacts, recompute branch/no-branch gates from run directories, and check
+  parallel-child trace evidence when `parallel_mutations > 1`.
 - Every benchmark entry must include fidelity metadata: `fidelity_level`,
   expected runtime, dependency flags, paper task name, and paper-gap notes. A
   `proxy` benchmark is allowed for workflow validation but must not be described

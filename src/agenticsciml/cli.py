@@ -12,7 +12,7 @@ from agenticsciml.benchmarks import list_benchmarks
 from agenticsciml.config import EvolutionConfig, ExperimentConfig
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
-from agenticsciml.llm_smoke import DEFAULT_SMOKE_VARIANTS, run_llm_smoke
+from agenticsciml.llm_smoke import DEFAULT_SMOKE_VARIANTS, run_llm_smoke, verify_llm_smoke_output
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 from agenticsciml.reporting import write_trace_summary
 
@@ -134,6 +134,12 @@ def cmd_smoke_llm(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_verify_smoke_llm(args: argparse.Namespace) -> int:
+    result = verify_llm_smoke_output(Path(args.output_dir).resolve())
+    print(result.verification_json.resolve())
+    return 0 if result.passed else 1
+
+
 def cmd_benchmarks(args: argparse.Namespace) -> int:
     specs = list_benchmarks()
     if args.json:
@@ -200,6 +206,10 @@ def build_parser() -> argparse.ArgumentParser:
     smoke_mode.add_argument("--dry-run", dest="dry_run", action="store_true", default=True)
     smoke_mode.add_argument("--real", dest="dry_run", action="store_false")
     smoke_llm.set_defaults(func=cmd_smoke_llm)
+
+    verify_smoke_llm = sub.add_parser("verify-smoke-llm")
+    verify_smoke_llm.add_argument("output_dir")
+    verify_smoke_llm.set_defaults(func=cmd_verify_smoke_llm)
 
     benchmarks = sub.add_parser("benchmarks")
     benchmarks.add_argument("--json", action="store_true")

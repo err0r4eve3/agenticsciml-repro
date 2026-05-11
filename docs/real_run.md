@@ -75,6 +75,18 @@ After a real or mock run completes, inspect the trace quality gate:
 uv run --python 3.11 --extra dev agenticsciml trace-summary runs/<experiment_id>
 ```
 
+After a real `smoke-llm --real` run completes, verify the whole smoke output
+directory:
+
+```bash
+uv run --python 3.11 --extra dev agenticsciml verify-smoke-llm runs/real-llm-smoke
+```
+
+The verifier rejects dry-run-only artifacts, recomputes the paired
+branch/no-branch gates from the run directories, checks manifest/plan
+consistency, and requires parallel-child trace evidence when
+`parallel_mutations > 1`.
+
 `run_metadata.json` also records aggregate LLM call counts by role plus prompt
 and response token estimates. These are accounting placeholders, not provider
 billing records.
