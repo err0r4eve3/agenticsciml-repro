@@ -40,6 +40,8 @@ from agenticsciml.state import (
     SOLUTION_TREE_SCHEMA_VERSION,
     SolutionNode,
     SolutionScore,
+    format_solution_id,
+    solution_id_index,
     validate_solution_node_artifact_paths,
     validate_solution_tree_artifact_payload,
 )
@@ -70,6 +72,7 @@ class AgenticSciMLOrchestrator:
         self.problem_bundle = ProblemBundle.load(config.benchmark_dir)
         self.contract: EvaluationContract | None = None
         self.loaded_checkpoint: dict[str, object] | None = None
+        self._next_solution_index: int | None = None
 
     def run(self) -> Path:
         started = time.monotonic()
@@ -160,6 +163,7 @@ class AgenticSciMLOrchestrator:
             raise ValueError("Invalid checkpoint solution tree: " + "; ".join(node_issues))
         self.nodes = [SolutionNode.from_dict(node) for node in node_payloads]
         self.analysis_by_node = self._load_analysis_reports(self.nodes)
+        self._next_solution_index = self._compute_next_solution_index()
         self.storage.record_trace(
             "workflow_span",
             "agenticsciml.resume.loaded",
@@ -227,7 +231,60 @@ class AgenticSciMLOrchestrator:
                 )
 
     def _next_solution_id(self) -> str:
-        return f"solution_{len(self.nodes):03d}"
+        return self._reserve_solution_ids(1)[0]
+
+    def _reserve_solution_ids(self, count: int) -> list[str]:
+        if count < 0:
+            raise ValueError(f"Solution id reservation count must be non-negative: {count}")
+        if count == 0:
+            return []
+        next_index = (
+            self._next_solution_index
+            if self._next_solution_index is not None
+            else self._compute_next_solution_index()
+        )
+        reserved: list[str] = []
+        occupied = self._occupied_solution_ids()
+        while len(reserved) < count:
+            solution_id = format_solution_id(next_index)
+            next_index += 1
+            if solution_id in occupied:
+                continue
+            reserved.append(solution_id)
+            occupied.add(solution_id)
+        self._next_solution_index = next_index
+        return reserved
+
+    def _compute_next_solution_index(self) -> int:
+        indexes: list[int] = []
+        for node in self.nodes:
+            index = solution_id_index(node.node_id)
+            if index is None:
+                raise ValueError(f"Cannot allocate solution ids with malformed node_id: {node.node_id}")
+            indexes.append(index)
+        if self.storage.solutions_dir.exists():
+            for workspace in self.storage.solutions_dir.iterdir():
+                if not workspace.is_dir():
+                    continue
+                index = solution_id_index(workspace.name)
+                if index is None:
+                    if workspace.name.startswith("solution_"):
+                        raise ValueError(
+                            f"Cannot allocate solution ids with malformed workspace name: {workspace.name}"
+                        )
+                    continue
+                indexes.append(index)
+        return max(indexes, default=-1) + 1
+
+    def _occupied_solution_ids(self) -> set[str]:
+        occupied = {node.node_id for node in self.nodes}
+        if self.storage.solutions_dir.exists():
+            occupied.update(
+                workspace.name
+                for workspace in self.storage.solutions_dir.iterdir()
+                if workspace.is_dir() and solution_id_index(workspace.name) is not None
+            )
+        return occupied
 
     def _guidelines_text(self) -> str:
         path = self.config.benchmark_dir / "guidelines.md"
@@ -269,10 +326,8 @@ class AgenticSciMLOrchestrator:
         mutation_budget = max(1, self.config.evolution.parallel_mutations)
         selected = self._mutation_parent_slots(available, mutation_budget)
         max_workers = min(len(selected), mutation_budget)
-        jobs = [
-            (parent, f"solution_{len(self.nodes) + index:03d}")
-            for index, parent in enumerate(selected)
-        ]
+        solution_ids = self._reserve_solution_ids(len(selected))
+        jobs = list(zip(selected, solution_ids))
         execution_mode = "parallel" if max_workers > 1 else "sequential"
         batch_started = time.monotonic()
         fanout_trace = FanoutTraceMetadata.from_pairs(

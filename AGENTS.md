@@ -240,6 +240,10 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
   transcripts, checkpoint files, tree exports, or leaderboard inputs.
 - Preserve resume semantics. When changing orchestration, keep `checkpoint.json`
   current after root creation, child creation, and final report export.
+- Solution ID allocation must be resume-safe. Allocate new `solution_NNN` IDs
+  from the maximum numeric suffix already present in loaded nodes or existing
+  `solutions/solution_*` workspaces, not from `len(nodes)`, and fail closed on
+  malformed existing solution node IDs.
 - Keep evaluator and benchmark contracts deterministic. LLM judges may summarize
   results, but scores must come from code.
 - New benchmarks must be added to `agenticsciml.benchmarks.BENCHMARKS`, linked

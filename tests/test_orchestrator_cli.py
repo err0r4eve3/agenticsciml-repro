@@ -241,6 +241,97 @@ def test_parallel_mutation_fanout_respects_max_children_per_node(tmp_path: Path)
     assert [slot.node_id for slot in slots] == ["solution_000"]
 
 
+def test_solution_id_allocator_uses_max_existing_suffix(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="id-allocator-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+    )
+    orchestrator = AgenticSciMLOrchestrator(config, MockLLMClient())
+    contract = BenchmarkContractFactory.create_contract(orchestrator.problem_bundle)
+    orchestrator.nodes = [
+        SolutionNode(
+            node_id="solution_000",
+            parent_id=None,
+            workspace=str(tmp_path / "solution_000"),
+            score=SolutionScore("validation_mse", 1.0, higher_is_better=False),
+            status="evaluated",
+            benchmark_name=contract.benchmark_name,
+            contract_hash=contract.contract_hash,
+        ),
+        SolutionNode(
+            node_id="solution_002",
+            parent_id="solution_000",
+            workspace=str(tmp_path / "solution_002"),
+            score=SolutionScore("validation_mse", 0.9, higher_is_better=False),
+            status="evaluated",
+            benchmark_name=contract.benchmark_name,
+            contract_hash=contract.contract_hash,
+        ),
+    ]
+    orchestrator.storage.create_solution_workspace("solution_004")
+
+    assert orchestrator._reserve_solution_ids(2) == ["solution_005", "solution_006"]
+
+
+def test_solution_id_allocator_rejects_malformed_existing_node_id(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="bad-id-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+    )
+    orchestrator = AgenticSciMLOrchestrator(config, MockLLMClient())
+    orchestrator.nodes = [
+        SolutionNode(
+            node_id="candidate_a",
+            parent_id=None,
+            workspace=str(tmp_path / "candidate_a"),
+            score=None,
+            status="created",
+            benchmark_name="function_approx",
+            contract_hash="hash",
+        )
+    ]
+
+    with pytest.raises(ValueError, match="malformed node_id"):
+        orchestrator._reserve_solution_ids(1)
+
+
+def test_resume_solution_id_allocation_skips_existing_workspace_suffix(tmp_path: Path) -> None:
+    first_config = ExperimentConfig(
+        experiment_id="resume-id-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=2, max_debug_retries=1),
+        use_mock=True,
+    )
+    first_run_dir = AgenticSciMLOrchestrator(first_config, MockLLMClient()).run()
+    (first_run_dir / "solutions" / "solution_002").mkdir(parents=True)
+
+    second_config = ExperimentConfig(
+        experiment_id="resume-id-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=1, parallel_mutations=2, max_debug_retries=1),
+        use_mock=True,
+        resume=True,
+    )
+    second_run_dir = AgenticSciMLOrchestrator(second_config, MockLLMClient()).run()
+    tree = json.loads((second_run_dir / "tree.json").read_text(encoding="utf-8"))
+    root = next(node for node in tree["nodes"] if node["node_id"] == "solution_000")
+
+    assert root["children"] == ["solution_003", "solution_004"]
+    assert {node["node_id"] for node in tree["nodes"]} == {
+        "solution_000",
+        "solution_003",
+        "solution_004",
+    }
+
+
 def test_parallel_child_jobs_respect_parallel_mutation_budget(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config = ExperimentConfig(
         experiment_id="parallel-budget-run",

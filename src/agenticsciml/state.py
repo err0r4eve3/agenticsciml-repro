@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 
 SOLUTION_TREE_SCHEMA_VERSION = "solution_tree.v1"
+SOLUTION_ID_PATTERN = re.compile(r"^solution_(\d{3,})$")
 SOLUTION_NODE_REQUIRED_FIELDS = {
     "analysis_path",
     "benchmark_name",
@@ -27,6 +29,19 @@ SOLUTION_NODE_REQUIRED_FIELDS = {
 SOLUTION_NODE_ALLOWED_FIELDS = SOLUTION_NODE_REQUIRED_FIELDS
 SOLUTION_NODE_STATUSES = {"created", "evaluated", "failed"}
 SOLUTION_SCORE_ALLOWED_FIELDS = {"metric", "value", "higher_is_better"}
+
+
+def format_solution_id(index: int) -> str:
+    if not isinstance(index, int) or isinstance(index, bool) or index < 0:
+        raise ValueError(f"Solution index must be a non-negative integer: {index!r}")
+    return f"solution_{index:03d}"
+
+
+def solution_id_index(solution_id: str) -> int | None:
+    match = SOLUTION_ID_PATTERN.fullmatch(solution_id)
+    if not match:
+        return None
+    return int(match.group(1))
 
 
 def validate_solution_score_payload(score: Any, *, context: str) -> list[str]:
