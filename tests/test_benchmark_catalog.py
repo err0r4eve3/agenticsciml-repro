@@ -3,6 +3,7 @@ import json
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -243,6 +244,37 @@ def test_claim_boundary_wording_does_not_change_contract_hash(monkeypatch) -> No
     after = BenchmarkContractFactory.create_contract(bundle)
     assert after.problem_bundle_digest == before.problem_bundle_digest
     assert after.contract_hash == before.contract_hash
+
+
+def test_public_catalog_only_fields_do_not_change_contract_hash(monkeypatch) -> None:
+    bundle = ProblemBundle.load(BENCHMARKS["function_approx"].path)
+    before = BenchmarkContractFactory.create_contract(bundle)
+    original_to_dict = BenchmarkSpec.to_dict
+
+    def to_dict_with_display_badge(self: BenchmarkSpec) -> dict[str, object]:
+        payload = original_to_dict(self)
+        payload["display_badge"] = "public catalog label only"
+        return payload
+
+    monkeypatch.setattr(BenchmarkSpec, "to_dict", to_dict_with_display_badge)
+    assert bundle.benchmark_spec.to_dict()["display_badge"] == "public catalog label only"
+
+    after = BenchmarkContractFactory.create_contract(bundle)
+    assert after.problem_bundle_digest == before.problem_bundle_digest
+    assert after.contract_hash == before.contract_hash
+
+
+def test_contract_bound_benchmark_fields_change_contract_hash() -> None:
+    bundle = ProblemBundle.load(BENCHMARKS["function_approx"].path)
+    before = BenchmarkContractFactory.create_contract(bundle)
+    changed_bundle = replace(
+        bundle,
+        benchmark_spec=replace(bundle.benchmark_spec, metric="changed_contract_metric"),
+    )
+
+    after = BenchmarkContractFactory.create_contract(changed_bundle)
+    assert after.problem_bundle_digest != before.problem_bundle_digest
+    assert after.contract_hash != before.contract_hash
 
 
 def test_contract_from_dict_requires_benchmark_fidelity_metadata() -> None:
