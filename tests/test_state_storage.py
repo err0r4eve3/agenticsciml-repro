@@ -4,7 +4,13 @@ from pathlib import Path
 import pytest
 
 from agenticsciml.config import EvaluationContract, ExperimentConfig
-from agenticsciml.state import AgentMessage, Proposal, SolutionNode, SolutionScore
+from agenticsciml.state import (
+    AgentMessage,
+    Proposal,
+    SolutionNode,
+    SolutionScore,
+    validate_solution_tree_payload,
+)
 from agenticsciml.storage import ExperimentStorage
 
 
@@ -63,8 +69,35 @@ def test_solution_node_from_dict_rejects_invalid_score_shape() -> None:
     payload = node.to_dict()
     payload["score"] = {"metric": "", "value": "bad", "higher_is_better": "no"}
 
-    with pytest.raises(ValueError, match="score.value must be a number"):
+    with pytest.raises(ValueError, match="score.value must be a finite number"):
         SolutionNode.from_dict(payload)
+
+
+def test_solution_node_from_dict_rejects_non_finite_score_values() -> None:
+    node = SolutionNode(
+        node_id="solution_000",
+        parent_id=None,
+        workspace="runs/demo/solutions/solution_000",
+        score=SolutionScore(metric="validation_mse", value=0.125, higher_is_better=False),
+        status="evaluated",
+    )
+    payload = node.to_dict()
+    payload["score"]["value"] = float("nan")
+
+    with pytest.raises(ValueError, match="score.value must be a finite number"):
+        SolutionNode.from_dict(payload)
+
+    payload = node.to_dict()
+    payload["score_delta_from_parent"] = float("inf")
+
+    with pytest.raises(ValueError, match="score_delta_from_parent must be a finite number or null"):
+        SolutionNode.from_dict(payload)
+
+
+def test_solution_tree_payload_rejects_empty_node_list() -> None:
+    issues = validate_solution_tree_payload([], context="checkpoint.json")
+
+    assert "checkpoint.json must contain at least one node" in issues
 
 
 def test_storage_creates_solution_workspace_and_transcript(tmp_path: Path) -> None:
@@ -90,6 +123,16 @@ def test_storage_atomic_writes_do_not_leave_temp_files(tmp_path: Path) -> None:
 
     assert storage.load_json("config.json") == {"value": 2}
     assert not list(storage.run_dir.rglob("*.tmp"))
+
+
+def test_storage_rejects_non_finite_json_artifacts(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo-run")
+
+    with pytest.raises(ValueError):
+        storage.save_json("bad.json", {"value": float("nan")})
+
+    with pytest.raises(ValueError):
+        storage.record_trace("workflow_span", "bad", {"value": float("inf")})
 
 
 def test_storage_trace_events_get_monotonic_event_sequence(tmp_path: Path) -> None:

@@ -213,11 +213,15 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --moc
 - Final solution nodes must satisfy a schema before graph checks are trusted:
   required fields from `SolutionNode.to_dict()`, `status` in the supported enum,
   valid nullable string fields, `method_tags` as strings, non-negative
-  `num_debug_attempts`, numeric/null `score_delta_from_parent`, and a valid
-  optional score object. The same shared validator must be used by
+  `num_debug_attempts`, finite numeric/null `score_delta_from_parent`, and a
+  valid optional score object with finite numeric `score.value`. Empty solution
+  trees are invalid. The same shared validator must be used by
   `trace_summary.json` artifact checks and `SolutionNode.from_dict()` load
   paths so corrupted `tree.json` / `checkpoint.json` payloads fail closed at
   resume time, not only during post-run reporting.
+- JSON artifact writes must reject `NaN`, `Infinity`, and `-Infinity`; do not
+  let non-standard JSON numeric constants enter run metadata, trace events,
+  transcripts, checkpoint files, tree exports, or leaderboard inputs.
 - Preserve resume semantics. When changing orchestration, keep `checkpoint.json`
   current after root creation, child creation, and final report export.
 - Keep evaluator and benchmark contracts deterministic. LLM judges may summarize

@@ -263,7 +263,25 @@ def test_trace_summary_fails_when_solution_node_score_shape_is_invalid(tmp_path:
 
     assert summary["artifact_consistency"]["passed"] is False
     assert summary["quality_gate"]["passed"] is False
-    assert any("score.value must be a number" in issue for issue in summary["artifact_consistency"]["issues"])
+    assert any("score.value must be a finite number" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
+def test_trace_summary_fails_when_solution_node_score_is_not_finite(tmp_path: Path) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    for artifact_name in ("tree.json", "checkpoint.json"):
+        artifact = json.loads((run_dir / artifact_name).read_text(encoding="utf-8"))
+        artifact["nodes"][0]["score"] = {
+            "metric": "validation_mse",
+            "value": float("inf"),
+            "higher_is_better": False,
+        }
+        (run_dir / artifact_name).write_text(json.dumps(artifact), encoding="utf-8")
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("score.value must be a finite number" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
 def test_trace_summary_fails_on_invalid_solution_tree_child_link(tmp_path: Path) -> None:

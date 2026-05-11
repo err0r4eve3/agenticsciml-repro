@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -34,8 +35,8 @@ def validate_solution_score_payload(score: Any, *, context: str) -> list[str]:
     if not isinstance(metric, str) or not metric:
         issues.append(f"{context} score.metric must be a non-empty string")
     value = score.get("value")
-    if not isinstance(value, int | float) or isinstance(value, bool):
-        issues.append(f"{context} score.value must be a number")
+    if not _is_finite_number(value):
+        issues.append(f"{context} score.value must be a finite number")
     higher_is_better = score.get("higher_is_better")
     if not isinstance(higher_is_better, bool):
         issues.append(f"{context} score.higher_is_better must be a boolean")
@@ -82,10 +83,8 @@ def validate_solution_node_payload(data: Any, *, context: str = "SolutionNode") 
         issues.append(f"{context} num_debug_attempts must be a non-negative integer")
 
     score_delta = data.get("score_delta_from_parent")
-    if score_delta is not None and (
-        not isinstance(score_delta, int | float) or isinstance(score_delta, bool)
-    ):
-        issues.append(f"{context} score_delta_from_parent must be a number or null")
+    if score_delta is not None and not _is_finite_number(score_delta):
+        issues.append(f"{context} score_delta_from_parent must be a finite number or null")
 
     issues.extend(validate_solution_score_payload(data.get("score"), context=context))
     return issues
@@ -112,6 +111,8 @@ def validate_solution_tree_payload(nodes: Any, *, context: str = "Solution tree"
             continue
         by_id[node_id] = node
 
+    if not by_id:
+        issues.append(f"{context} must contain at least one node")
     if by_id:
         issues.extend(validate_solution_tree_graph_payload(by_id, context=context))
     return issues
@@ -220,6 +221,10 @@ def _check_nullable_str_field(
     value = data.get(field_name)
     if value is not None and not isinstance(value, str):
         issues.append(f"{context} {field_name} must be a string or null")
+
+
+def _is_finite_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(float(value))
 
 
 @dataclass(slots=True)

@@ -42,7 +42,7 @@ class ExperimentStorage:
         with self._lock:
             path = self.run_dir / relative_path
             path.parent.mkdir(parents=True, exist_ok=True)
-            _atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True))
+            _atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True, allow_nan=False))
             return path
 
     def load_json(self, relative_path: str | Path) -> Any:
@@ -61,7 +61,7 @@ class ExperimentStorage:
                 "metadata": metadata or {},
             }
             with path.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(event, sort_keys=True, default=str) + "\n")
+                f.write(json.dumps(event, sort_keys=True, default=str, allow_nan=False) + "\n")
                 f.flush()
                 os.fsync(f.fileno())
         return path
@@ -109,7 +109,7 @@ class ExperimentStorage:
             else:
                 path = self.create_solution_workspace(solution_id) / "transcripts" / f"{agent_name}.json"
             payload = [message.to_dict() for message in messages]
-            _atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True))
+            _atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True, allow_nan=False))
             return path
 
 
