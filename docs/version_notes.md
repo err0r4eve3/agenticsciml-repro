@@ -53,6 +53,7 @@
 - smoke verifier LLM-call schema：`run_metadata.json` 的 `llm_calls.total` 使用 strict positive integer schema，manifest `provider` / `model` 必须是非空字符串。
 - smoke LLM-call ledger：`smoke-llm` 为每个 real/mock smoke run 写入 hash-only `llm_call_ledger.jsonl`，`verify-smoke-llm` 会对账 ledger、`run_metadata.llm_calls.total`、generation spans 与 manifest provider/model。
 - smoke ledger contract：`verify-smoke-llm` 校验每条 ledger entry 的连续 `call_id`、provider/model/method/schema、SHA-256 hashes、success/duration/timestamp，并拒绝 raw prompt/response 字段。
+- smoke ledger closed schema：ledger entry 采用 exact-key allowlist，记录 `span_kind="generation_span"`，并校验 `temperature` 为 finite number，防止未知 raw payload 字段混入公开 evidence bundle。
 - faithful-small benchmark seed：新增 `examples/poisson_lshape_faithful_small`，在 L-shaped Poisson 任务中加入 boundary/residual collocation 数据和 finite-difference residual composite score，用于缩小 proxy 与论文 PINN 任务结构的差距；仍不声明 paper-like 分数。
 - benchmark-aware retrieval query：`RetrievalQueryBuilder` 使用 benchmark family/metric/description、parent analysis、failure kind、method tags 和 leaderboard top-k 生成检索 query。
 - KB ablation switches：`use_kb=False` 不注入 KB，`random_kb=True` 使用 seed-controlled random KB retrieval。

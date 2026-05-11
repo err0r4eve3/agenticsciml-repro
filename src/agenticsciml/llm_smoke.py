@@ -97,6 +97,7 @@ class _RecordingLLMClient(LLMClient):
             "model": self.model,
             "method": method,
             "schema_name": schema_name,
+            "span_kind": "generation_span",
             "prompt_hash": _hash_text(prompt),
             "system_hash": _hash_text(system or ""),
             "temperature": temperature,
@@ -618,7 +619,37 @@ def _validate_llm_call_ledger_entry(
 ) -> list[str]:
     issues: list[str] = []
     prefix = f"{variant}: ledger line {line_number}"
-    forbidden = {"prompt", "system", "response", "raw_prompt", "raw_response", "messages"}
+    success = entry.get("success")
+    allowed_base = {
+        "schema_version",
+        "call_id",
+        "provider",
+        "model",
+        "method",
+        "schema_name",
+        "span_kind",
+        "prompt_hash",
+        "system_hash",
+        "temperature",
+        "started_at_unix",
+        "success",
+        "duration_s",
+    }
+    allowed_keys = allowed_base | ({"response_hash"} if success is True else {"error_type"} if success is False else {"response_hash", "error_type"})
+    extra_keys = sorted(set(entry) - allowed_keys)
+    if extra_keys:
+        issues.append(f"{prefix} contains unknown ledger field(s): {', '.join(extra_keys)}")
+    forbidden = {
+        "prompt",
+        "system",
+        "response",
+        "raw_prompt",
+        "raw_response",
+        "raw_messages",
+        "messages",
+        "request_payload",
+        "completion_text",
+    }
     leaked = sorted(forbidden & set(entry))
     if leaked:
         issues.append(f"{prefix} contains forbidden raw field(s): {', '.join(leaked)}")
@@ -636,6 +667,8 @@ def _validate_llm_call_ledger_entry(
     method = _required_non_empty_string(entry.get("method"), f"{prefix} method", issues)
     if method and method not in {"complete_text", "complete_json"}:
         issues.append(f"{prefix} method must be complete_text or complete_json")
+    if entry.get("span_kind") != "generation_span":
+        issues.append(f"{prefix} span_kind must be generation_span")
     schema_name = entry.get("schema_name")
     if method == "complete_text" and schema_name is not None:
         issues.append(f"{prefix} schema_name must be null for complete_text")
@@ -643,7 +676,6 @@ def _validate_llm_call_ledger_entry(
         _required_non_empty_string(schema_name, f"{prefix} schema_name", issues)
     for field in ("prompt_hash", "system_hash"):
         _validate_sha256_hex(entry.get(field), f"{prefix} {field}", issues)
-    success = entry.get("success")
     if not isinstance(success, bool):
         issues.append(f"{prefix} success must be boolean")
     elif success:
@@ -651,6 +683,7 @@ def _validate_llm_call_ledger_entry(
     else:
         issues.append(f"{prefix} success must be true for completed smoke evidence")
         _required_non_empty_string(entry.get("error_type"), f"{prefix} error_type", issues)
+    _validate_finite_number(entry.get("temperature"), f"{prefix} temperature", issues)
     _validate_non_negative_finite_number(entry.get("duration_s"), f"{prefix} duration_s", issues)
     _validate_positive_finite_number(entry.get("started_at_unix"), f"{prefix} started_at_unix", issues)
     return issues
@@ -665,6 +698,10 @@ def _validate_non_negative_finite_number(value: Any, label: str, issues: list[st
     number = _parse_finite_number(value, label, issues)
     if number is not None and number < 0:
         issues.append(f"{label} must be >= 0")
+
+
+def _validate_finite_number(value: Any, label: str, issues: list[str]) -> None:
+    _parse_finite_number(value, label, issues)
 
 
 def _validate_positive_finite_number(value: Any, label: str, issues: list[str]) -> None:

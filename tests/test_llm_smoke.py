@@ -560,7 +560,13 @@ def test_verify_llm_smoke_output_rejects_manifest_model_mismatch(tmp_path: Path)
         ("provider", "", "provider must be a non-empty string"),
         ("success", False, "success must be true for completed smoke evidence"),
         ("prompt", "raw prompt text", "contains forbidden raw field"),
+        ("raw_messages", [], "contains forbidden raw field"),
+        ("completion_text", "raw completion text", "contains forbidden raw field"),
+        ("request_payload", {}, "contains forbidden raw field"),
+        ("unknown_key", "extra", "contains unknown ledger field"),
         ("duration_s", float("nan"), "duration_s must be a finite number"),
+        ("temperature", float("inf"), "temperature must be a finite number"),
+        ("span_kind", "tool_span", "span_kind must be generation_span"),
     ],
 )
 def test_verify_llm_smoke_output_rejects_invalid_ledger_entry_schema(
