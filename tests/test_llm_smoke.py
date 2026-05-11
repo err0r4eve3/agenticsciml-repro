@@ -205,6 +205,26 @@ def test_verify_llm_smoke_output_rejects_output_dir_mismatch(tmp_path: Path) -> 
     assert any("plan output_dir does not match" in issue for issue in payload["issues"])
 
 
+def test_verify_llm_smoke_output_rejects_manifest_output_dir_mismatch(tmp_path: Path) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    manifest_path = tmp_path / "real_llm_smoke_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["output_dir"] = str(tmp_path / "other-bundle")
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("manifest output_dir does not match" in issue for issue in payload["issues"])
+
+
 def test_verify_llm_smoke_output_reports_malformed_seed_without_crashing(tmp_path: Path) -> None:
     run_llm_smoke(
         benchmark_dir=Path("examples/function_approx").resolve(),
@@ -226,6 +246,94 @@ def test_verify_llm_smoke_output_reports_malformed_seed_without_crashing(tmp_pat
 
     assert verification.passed is False
     assert any("row seed must be an integer" in issue for issue in payload["issues"])
+
+
+def test_verify_llm_smoke_output_rejects_non_integer_plan_seed(tmp_path: Path) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    plan_path = tmp_path / "real_llm_smoke_plan.json"
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    plan["seed"] = 1.7
+    plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True), encoding="utf-8")
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("plan seed must be an integer, not float" in issue for issue in payload["issues"])
+
+
+def test_verify_llm_smoke_output_rejects_malformed_expected_call_range(tmp_path: Path) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    manifest_path = tmp_path / "real_llm_smoke_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["expected_llm_call_range"] = {"min": "abc", "max": 0}
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("expected_llm_call_range.min must be an integer string" in issue for issue in payload["issues"])
+    assert any("expected_llm_call_range.max must be >= 1" in issue for issue in payload["issues"])
+
+
+def test_verify_llm_smoke_output_rejects_missing_expected_call_range_bounds(tmp_path: Path) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    manifest_path = tmp_path / "real_llm_smoke_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["expected_llm_call_range"] = {}
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("expected_llm_call_range.min is required" in issue for issue in payload["issues"])
+    assert any("expected_llm_call_range.max is required" in issue for issue in payload["issues"])
+
+
+@pytest.mark.parametrize("bad_value", [1.5, True])
+def test_verify_llm_smoke_output_rejects_non_integer_parallel_mutations(
+    tmp_path: Path,
+    bad_value: object,
+) -> None:
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    plan_path = tmp_path / "real_llm_smoke_plan.json"
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    for entry in plan["runs"]:
+        if entry["variant"] == "branch_context":
+            entry["parallel_mutations"] = bad_value
+    plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True), encoding="utf-8")
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("branch_context: plan parallel_mutations must be an integer" in issue for issue in payload["issues"])
 
 
 def test_cli_verify_smoke_llm_command(tmp_path: Path, cli_env: dict[str, str]) -> None:

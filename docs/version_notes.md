@@ -48,6 +48,7 @@
 - real LLM smoke gate：真实 smoke 是 exact paired contrast，必须且只能包含 `branch_context` 和 `no_branch_context`；会先写 `real_llm_smoke_manifest.json`，读取 `trace_summary.json`、要求两侧正数 LLM call count，验证 request-side branch-context prompt-delivery 证据，并检查 no-branch request prompt 不泄漏分支字段。gate 失败时 CLI non-zero，而不是只输出正常报告。
 - real LLM smoke verifier：新增 `agenticsciml verify-smoke-llm <output_dir>`，可在真实 smoke 后离线校验 plan/manifest/runs CSV、重算 paired gate，并检查 `parallel_mutations > 1` 时的 parallel-child trace evidence。
 - smoke verifier provenance：`verify-smoke-llm` 会锚定 `plan.output_dir` / `manifest.output_dir` 到当前 evidence bundle，并把 CSV/manifest 数字字段类型错误记录为 fail-closed issue，而不是让 verifier crash。
+- smoke verifier schema：`verify-smoke-llm` 对 seed、`parallel_mutations`、`expected_llm_call_range.min/max` 使用 strict integer schema，拒绝 bool、float、空缺 bounds 和不完整 call-range。
 - faithful-small benchmark seed：新增 `examples/poisson_lshape_faithful_small`，在 L-shaped Poisson 任务中加入 boundary/residual collocation 数据和 finite-difference residual composite score，用于缩小 proxy 与论文 PINN 任务结构的差距；仍不声明 paper-like 分数。
 - benchmark-aware retrieval query：`RetrievalQueryBuilder` 使用 benchmark family/metric/description、parent analysis、failure kind、method tags 和 leaderboard top-k 生成检索 query。
 - KB ablation switches：`use_kb=False` 不注入 KB，`random_kb=True` 使用 seed-controlled random KB retrieval。
