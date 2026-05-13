@@ -7,6 +7,7 @@
 - [项目概览](../README.md)：MVP 目标、快速运行方式和 artifact 输出。
 - [项目 Agent 规则](../AGENTS.md)：仓库工作边界、验证命令和多 Agent 设计规则。
 - [版本说明](version_notes.md)：当前版本能力、验证状态和后续路线。
+- [导师进度汇报图与架构说明](mentor_progress_figures.md)：三张汇报用图、当前架构解读和汇报口径。
 
 ## 设计与依据
 
