@@ -19,6 +19,10 @@ agent output schemas、以及 sanitized `openai_sdk_trace.json` trace export
 bridge。剩余主要升级项转为 trace grading eval set、container/sandbox
 backend、human review pause/resume 和 MCP/hosted tools sidecar。
 
+同日临时禁用项目内 ChatGPT Pro 外部审计流程：`AGENTS.md` 现在要求不再
+自动调用 `codex-chatgpt-pro-research`、ChatGPT Pro 或外部审计 brief；
+只有用户明确恢复该策略或点名一次性 Pro review 时才允许重新启用。
+
 ## v0.1.0 MVP
 
 当前版本目标是复刻 AgenticSciML 的多 Agent workflow，而不是复现论文分数。
