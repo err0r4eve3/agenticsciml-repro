@@ -233,5 +233,6 @@ class MockLLMClient(LLMClient):
                 "patch": "",
                 "files_changed": ["solution.py"],
                 "risks": [],
+                "full_file_map": {},
             }
         return {"text": json.dumps({"schema_name": schema_name, "mock": True})}

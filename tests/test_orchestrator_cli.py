@@ -75,6 +75,7 @@ class MalformedDebuggerLLM(MockLLMClient):
                 "patch": "not a unified patch",
                 "files_changed": ["solution.py"],
                 "risks": ["fixture intentionally malformed"],
+                "full_file_map": {"not_solution.py": "still malformed"},
             }
         return super().complete_json(prompt, schema_name, system=system, temperature=temperature)
 

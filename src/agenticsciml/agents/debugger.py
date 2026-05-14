@@ -42,13 +42,13 @@ class DebuggerAgent(AgentBase):
         prompt = (
             "Patch the generated solution while preserving the evaluation contract. "
             "Return JSON with summary, failure_kind, minimal_fix, parent_digest, "
-            "patch, files_changed, risks, and optional full_file_map. `risks` and "
-            "`files_changed` must be JSON arrays of strings. Set `files_changed` to "
-            "exactly [\"solution.py\"]. Use exactly one code-change channel: either a "
-            "unified diff `patch`, or an empty `patch` plus `full_file_map` containing "
-            "the complete `solution.py`. Prefer a patch for small edits, but use "
-            "`full_file_map.solution.py` when exact current-code context may be "
-            "unreliable.\n\n"
+            "patch, files_changed, risks, and full_file_map. `risks` and `files_changed` "
+            "must be JSON arrays of strings. Set `files_changed` to exactly "
+            "[\"solution.py\"]. Always include `full_file_map` with exactly one key, "
+            "`solution.py`, containing the complete repaired file. You may also include "
+            "a unified diff `patch`, but the complete file is mandatory because patch "
+            "context from LLMs can drift. `--mode=validate` must run without requiring "
+            "`model.pkl`, prior training, or synthetic fallback.\n\n"
             "## ProblemBundle Summary\n\n"
             f"{problem_bundle.summary()}\n\n"
             "## EvaluationContract JSON\n\n"
@@ -62,6 +62,12 @@ class DebuggerAgent(AgentBase):
             "- Predict mode may read only `predict_input.npz` and must write `predictions.npz`.\n"
             "- Do not modify evaluator files.\n"
             "- Do not use network, subprocess, absolute paths, or home-directory helpers.\n\n"
+            "## Contract-Specific Repair Requirements\n\n"
+            "- `solution.py --mode=validate` must only check imports, CLI wiring, data "
+            "schema assumptions, and MODEL API shape; it must not load `model.pkl`.\n"
+            "- If training data keys are `x_train` and `u_train`, use them directly even "
+            "when their shapes match.\n"
+            "- If data loading fails, raise an error; do not fabricate synthetic training data.\n\n"
             f"parent_digest: {current_digest}\n\n"
             f"## Error log\n\n{error_log[-4000:]}\n\n"
             f"## Current solution.py\n\n{current_code[:8000]}"
@@ -77,6 +83,7 @@ class DebuggerAgent(AgentBase):
                 "patch",
                 "files_changed",
                 "risks",
+                "full_file_map",
             ),
         )
         self._save_messages(solution_id, [AgentMessage(self.role, prompt, str(response))])

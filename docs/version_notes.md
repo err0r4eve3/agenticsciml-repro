@@ -54,6 +54,10 @@ backend、human review pause/resume 和 MCP/hosted tools sidecar。
   `full_file_map.solution.py`，当真实 LLM 返回的 unified diff context 与当前
   `solution.py` 不匹配时，可在 `parent_digest` 和 `files_changed=["solution.py"]`
   约束下用完整文件兜底，降低真实 provider patch 漂移导致的无效 repair。
+- Debugger full-file repair contract：真实 DeepSeek run 证明可选
+  `full_file_map` 仍可能被模型省略；Debugger 现在要求每次 repair 都返回完整
+  `full_file_map.solution.py`，并在 prompt 中明确 `--mode=validate` 不得依赖
+  `model.pkl` 或训练前置状态。
 - training-data integrity guard：`validate` / `train` 阶段若返回 0 但日志显示
   训练数据加载失败或 synthetic fallback，runner 会 fail closed，避免真实 LLM
   solution 用自造数据通过 benchmark 流程。

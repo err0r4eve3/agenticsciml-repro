@@ -45,6 +45,7 @@ class RecordingContextLLM(LLMClient):
                 "patch": make_unified_patch("broken\n", "fixed\n"),
                 "files_changed": ["solution.py"],
                 "risks": ["minimal fixture patch only"],
+                "full_file_map": {"solution.py": "fixed\n"},
             }
         return {
             "mutation_summary": "replace implementation",
@@ -186,6 +187,7 @@ def test_debugger_prompt_includes_contract_context_and_applies_patch(tmp_path: P
     assert "Failure Phase" in prompt
     assert "parent_digest:" in prompt
     assert "full_file_map" in prompt
+    assert "model.pkl" in prompt
     assert contract.contract_hash in prompt
     assert "ProblemBundle Summary" in prompt
     assert (workspace / "solution.py").read_text(encoding="utf-8") == "fixed\n"
