@@ -8,6 +8,7 @@ from agenticsciml.llm.base import LLMClient
 from agenticsciml.state import AgentMessage
 from agenticsciml.storage import ExperimentStorage
 from agenticsciml.agents.specs import AGENT_SPECS, AgentSpec
+from agenticsciml.agents.output_schemas import validate_output_payload
 
 
 class ArtifactMissingError(RuntimeError):
@@ -38,6 +39,7 @@ class AgentBase:
             "state_node": self.spec.state_node,
             "tools": list(self.spec.tools),
             "budget": self.spec.budget,
+            "output_model": self.spec.output_model,
         }
 
     def _estimate_tokens(self, text: str) -> int:
@@ -203,6 +205,30 @@ class AgentBase:
                     **self._llm_call_metadata(),
                 },
             )
+            try:
+                data = validate_output_payload(
+                    data,
+                    schema_name=schema_name,
+                    output_model=self.spec.output_model if self.spec is not None else None,
+                )
+            except ValueError as exc:
+                last_error = f"{schema_name} output failed typed schema validation: {exc}"
+                self.storage.record_trace(
+                    "guardrail_span",
+                    f"{self.role}:{schema_name}:structured_output",
+                    {
+                        **self._spec_metadata(),
+                        "passed": False,
+                        "attempt": attempt + 1,
+                        "required_fields": list(required_fields),
+                        "error": last_error,
+                    },
+                )
+                current_prompt = (
+                    f"{prompt}\n\nPrevious output failed schema validation: {last_error}. "
+                    "Return corrected JSON only."
+                )
+                continue
             missing = [field for field in required_fields if field not in data]
             if not missing:
                 self.storage.record_trace(
@@ -260,5 +286,15 @@ class AgentBase:
         metadata = getattr(self.llm, "last_call_metadata", None)
         if not isinstance(metadata, dict):
             return {}
-        allowed = {"llm_call_id", "span_kind", "provider", "model", "method", "schema_name"}
+        allowed = {
+            "adapter_type",
+            "llm_call_id",
+            "method",
+            "model",
+            "provider",
+            "provider_capabilities",
+            "schema_name",
+            "span_kind",
+            "usage",
+        }
         return {key: value for key, value in metadata.items() if key in allowed}

@@ -8,6 +8,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },
+    { name = "pydantic" },
 ]
 
 [package.optional-dependencies]
@@ -25,6 +26,7 @@ sciml = [
 requires-dist = [
     { name = "numpy", specifier = ">=1.26" },
     { name = "openai", marker = "extra == 'real-llm'", specifier = ">=1.0" },
+    { name = "pydantic", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "torch", marker = "extra == 'sciml'", specifier = ">=2.2" },
 ]

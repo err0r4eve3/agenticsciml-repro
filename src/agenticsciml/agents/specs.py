@@ -18,6 +18,7 @@ class AgentSpec:
     budget: dict[str, Any]
     artifacts: tuple[str, ...]
     failure_policy: str
+    output_model: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -32,6 +33,7 @@ class AgentSpec:
             "budget": self.budget,
             "artifacts": list(self.artifacts),
             "failure_policy": self.failure_policy,
+            "output_model": self.output_model,
         }
 
     @classmethod
@@ -48,6 +50,7 @@ class AgentSpec:
             budget=dict(data.get("budget", {})),
             artifacts=tuple(str(item) for item in data.get("artifacts", [])),
             failure_policy=str(data.get("failure_policy", "")),
+            output_model=str(data["output_model"]) if data.get("output_model") is not None else None,
         )
 
 
@@ -75,6 +78,7 @@ AGENT_SPECS: dict[str, AgentSpec] = {
         non_role=("write solution code", "change evaluator"),
         input_schema=("benchmark_dir",),
         output_schema=("data_report",),
+        output_model="data_analyst",
         visible_context=("problem bundle", "data config", "dataset metadata"),
         tools=("llm", "filesystem read"),
         budget={"calls": 1},
@@ -88,6 +92,7 @@ AGENT_SPECS: dict[str, AgentSpec] = {
         non_role=("optimize model", "adjust scoring for a candidate solution"),
         input_schema=("problem_bundle", "data_report"),
         output_schema=("metric_name", "higher_is_better", "checkpoint_path"),
+        output_model="evaluator",
         visible_context=("problem bundle", "data analysis"),
         tools=("llm", "filesystem write"),
         budget={"calls": 1},
@@ -101,6 +106,7 @@ AGENT_SPECS: dict[str, AgentSpec] = {
         non_role=("use KB", "compare multiple parents", "modify evaluator"),
         input_schema=("solution_id", "problem_bundle", "contract", "guidelines", "data_report"),
         output_schema=("code", "proposal"),
+        output_model="root_engineer",
         visible_context=("problem bundle", "evaluation contract"),
         tools=("llm", "filesystem write"),
         budget={"calls": 1},
@@ -114,6 +120,7 @@ AGENT_SPECS: dict[str, AgentSpec] = {
         non_role=("generate proposal", "write code", "change scores"),
         input_schema=("candidates", "best_node_id", "max_to_select"),
         output_schema=("selected_parent_ids", "rationale"),
+        output_model="selector",
         visible_context=("leaderboard summary", "solution metadata"),
         tools=("llm",),
         budget={"calls": "selector_vote_count"},
@@ -127,6 +134,7 @@ AGENT_SPECS: dict[str, AgentSpec] = {
         non_role=("return many KB entries", "rewrite KB", "generate proposal"),
         input_schema=("solution_id", "query", "enabled"),
         output_schema=("entry_id",),
+        output_model="retriever",
         visible_context=("KB descriptions", "parent analysis"),
         tools=("lexical retrieval", "filesystem read"),
         budget={"calls": 0},
@@ -140,6 +148,7 @@ AGENT_SPECS: dict[str, AgentSpec] = {
         non_role=("write code", "modify evaluator", "claim unverified score gains"),
         input_schema=("solution_id", "parent_summary", "kb_entry", "related_reports", "branch_context"),
         output_schema=("title", "diagnosis", "mutation_plan", "expected_effect", "risks"),
+        output_model="proposal",
         visible_context=("parent analysis", "one KB entry", "local related reports"),
         tools=("llm", "critic feedback"),
         budget={"rounds": 4, "calls": 4},
@@ -183,6 +192,7 @@ AGENT_SPECS: dict[str, AgentSpec] = {
             "patch",
             "files_changed",
         ),
+        output_model="engineer",
         visible_context=(
             "problem bundle",
             "parent code",
@@ -213,6 +223,7 @@ AGENT_SPECS: dict[str, AgentSpec] = {
             "failure_phase",
         ),
         output_schema=("summary", "failure_kind", "minimal_fix", "parent_digest", "patch", "files_changed", "risks"),
+        output_model="debugger",
         visible_context=("error log", "solution code", "evaluation contract"),
         tools=("llm", "filesystem write"),
         budget={"calls": "max_debug_retries"},
@@ -226,6 +237,7 @@ AGENT_SPECS: dict[str, AgentSpec] = {
         non_role=("change score", "edit code", "select champion"),
         input_schema=("solution_id", "workspace"),
         output_schema=("summary", "strengths", "weaknesses", "next_steps"),
+        output_model="result_analyst",
         visible_context=("eval.json", "train.log"),
         tools=("llm", "filesystem write"),
         budget={"calls": 1},

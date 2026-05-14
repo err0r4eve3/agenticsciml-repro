@@ -14,7 +14,7 @@ from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.llm_smoke import DEFAULT_SMOKE_VARIANTS, run_llm_smoke, verify_llm_smoke_output
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
-from agenticsciml.reporting import write_trace_summary
+from agenticsciml.reporting import write_sdk_trace_export, write_trace_summary
 
 
 def _default_experiment_id(mock: bool) -> str:
@@ -106,6 +106,12 @@ def cmd_trace_summary(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_export_sdk_trace(args: argparse.Namespace) -> int:
+    path = write_sdk_trace_export(Path(args.run_dir))
+    print(path.resolve())
+    return 0
+
+
 def cmd_ablate(args: argparse.Namespace) -> int:
     variants = [item.strip() for item in args.variants.split(",") if item.strip()]
     result = run_ablation(
@@ -193,6 +199,10 @@ def build_parser() -> argparse.ArgumentParser:
     trace_summary = sub.add_parser("trace-summary")
     trace_summary.add_argument("run_dir")
     trace_summary.set_defaults(func=cmd_trace_summary)
+
+    sdk_trace = sub.add_parser("export-sdk-trace")
+    sdk_trace.add_argument("run_dir")
+    sdk_trace.set_defaults(func=cmd_export_sdk_trace)
 
     ablate = sub.add_parser("ablate")
     ablate.add_argument("benchmark_dir")

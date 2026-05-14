@@ -18,6 +18,7 @@ available, so this project implements a source-grounded approximation:
 - benchmark-aware 0-1 knowledge-base retrieval per mutation, with deterministic
   `random_kb` mode for ablation
 - proposer/critic debate with concise rationale summaries
+- typed Pydantic schemas for code-consumed agent JSON outputs
 - engineer and debugger roles around generated code
 - digest-checked patch mutation for generated `solution.py`
 - contract-aware debugger repairs using digest-checked unified diff patches
@@ -82,6 +83,7 @@ The mock run writes a directory under `runs/` with:
 - `checkpoint.json`
 - `trace.jsonl`
 - `trace_summary.json`
+- `openai_sdk_trace.json`
 - `run_metadata.json` with wall time, champion, solution count, and LLM call
   count/token-estimate placeholders, plus `llm_mode`,
   `benchmark_fidelity_level`, `evidence_mode`, and `scientific_claim`
@@ -108,6 +110,18 @@ optional and requires an adapter dependency and API credentials:
 export OPENAI_API_KEY=...
 export OPENAI_MODEL=gpt-5-mini
 uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx --max-iterations 1
+```
+
+OpenAI-native runs use Responses structured outputs when `OPENAI_BASE_URL` is
+unset. OpenAI-compatible providers keep the chat/JSON fallback and record their
+capability matrix in run artifacts. Optional real-LLM budget gates:
+
+```bash
+export AGENTICSCIML_MAX_LLM_CALLS=80
+export AGENTICSCIML_MAX_PROMPT_TOKENS=200000
+export AGENTICSCIML_MAX_OUTPUT_TOKENS=80000
+export AGENTICSCIML_MAX_COST_USD=5
+export AGENTICSCIML_COST_PER_1K_TOKENS_USD=0.01
 ```
 
 The benchmark catalog now includes all six paper task families as lightweight

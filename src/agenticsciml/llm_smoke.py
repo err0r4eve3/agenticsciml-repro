@@ -17,6 +17,8 @@ from typing import Any
 from agenticsciml.config import EvolutionConfig, ExperimentConfig
 from agenticsciml.evidence import EVIDENCE_MODE_REAL_LLM_SMOKE, SCIENTIFIC_CLAIM_NOT_SUPPORTED
 from agenticsciml.llm.base import LLMClient
+from agenticsciml.llm.budget import LLMBudget
+from agenticsciml.llm.capabilities import capabilities_for_openai_compatible
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 
@@ -39,11 +41,14 @@ class LLMSmokeVerification:
 
 
 class _RecordingLLMClient(LLMClient):
-    def __init__(self, inner: LLMClient, ledger_path: Path):
+    def __init__(self, inner: LLMClient, ledger_path: Path, budget: LLMBudget):
         self.inner = inner
         self.ledger_path = ledger_path
-        self.provider = type(inner).__name__
+        self.provider = _llm_provider_name(inner)
         self.model = getattr(inner, "model", None) or os.environ.get("OPENAI_MODEL", "gpt-5-mini")
+        self.adapter_type = getattr(inner, "adapter_type", type(inner).__name__)
+        self.provider_capabilities = _llm_provider_capabilities(inner)
+        self.budget = budget
         self._call_count = 0
         self._lock = threading.Lock()
         self._local = threading.local()
@@ -94,7 +99,9 @@ class _RecordingLLMClient(LLMClient):
         temperature: float,
         call: Any,
     ) -> Any:
+        prompt_tokens = _estimate_tokens(prompt)
         with self._lock:
+            self.budget.reserve_call(prompt_tokens)
             self._call_count += 1
             call_id = f"llm_call_{self._call_count:06d}"
         started_wall = time.time()
@@ -104,11 +111,14 @@ class _RecordingLLMClient(LLMClient):
             "call_id": call_id,
             "provider": self.provider,
             "model": self.model,
+            "adapter_type": self.adapter_type,
+            "provider_capabilities": self.provider_capabilities,
             "method": method,
             "schema_name": schema_name,
             "span_kind": "generation_span",
             "prompt_hash": _hash_text(prompt),
             "system_hash": _hash_text(system or ""),
+            "prompt_token_estimate": prompt_tokens,
             "temperature": temperature,
             "started_at_unix": started_wall,
         }
@@ -125,10 +135,14 @@ class _RecordingLLMClient(LLMClient):
             self._local.last_call_metadata = _trace_call_metadata(record)
             self._append_ledger(record)
             raise
+        response_tokens = _response_token_count(response, getattr(self.inner, "last_call_metadata", None))
+        with self._lock:
+            self.budget.record_response(output_tokens=response_tokens)
         record.update(
             {
                 "success": True,
                 "response_hash": _hash_payload(response) if isinstance(response, dict) else _hash_text(str(response)),
+                "response_token_estimate": response_tokens,
                 "duration_s": time.monotonic() - started,
             }
         )
@@ -161,6 +175,7 @@ def run_llm_smoke(
     if not dry_run:
         _require_paired_contrast(selected_variants)
     output_dir.mkdir(parents=True, exist_ok=True)
+    budget = LLMBudget.from_env()
     plan = _build_plan(
         benchmark_dir,
         output_dir,
@@ -173,7 +188,7 @@ def run_llm_smoke(
     )
     plan_path = output_dir / "real_llm_smoke_plan.json"
     plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True), encoding="utf-8")
-    manifest = _build_manifest(plan, llm_client=llm_client)
+    manifest = _build_manifest(plan, llm_client=llm_client, budget=budget)
     manifest_path = output_dir / "real_llm_smoke_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -211,7 +226,7 @@ def run_llm_smoke(
             use_mock=False,
         )
         try:
-            recording_llm = _RecordingLLMClient(llm, ledger_path)
+            recording_llm = _RecordingLLMClient(llm, ledger_path, budget)
             run_dir = AgenticSciMLOrchestrator(config, recording_llm).run()
         except Exception as exc:
             report_path = output_dir / "real_llm_smoke_report.md"
@@ -649,11 +664,15 @@ def _validate_llm_call_ledger_entry(
         "call_id",
         "provider",
         "model",
+        "adapter_type",
+        "provider_capabilities",
         "method",
         "schema_name",
         "span_kind",
         "prompt_hash",
         "system_hash",
+        "prompt_token_estimate",
+        "response_token_estimate",
         "temperature",
         "started_at_unix",
         "success",
@@ -688,6 +707,8 @@ def _validate_llm_call_ledger_entry(
         seen_call_ids.add(call_id)
     _required_non_empty_string(entry.get("provider"), f"{prefix} provider", issues)
     _required_non_empty_string(entry.get("model"), f"{prefix} model", issues)
+    _required_non_empty_string(entry.get("adapter_type"), f"{prefix} adapter_type", issues)
+    _validate_provider_capabilities(entry.get("provider_capabilities"), f"{prefix} provider_capabilities", issues)
     method = _required_non_empty_string(entry.get("method"), f"{prefix} method", issues)
     if method and method not in {"complete_text", "complete_json"}:
         issues.append(f"{prefix} method must be complete_text or complete_json")
@@ -700,10 +721,12 @@ def _validate_llm_call_ledger_entry(
         _required_non_empty_string(schema_name, f"{prefix} schema_name", issues)
     for field in ("prompt_hash", "system_hash"):
         _validate_sha256_hex(entry.get(field), f"{prefix} {field}", issues)
+    _validate_non_negative_finite_number(entry.get("prompt_token_estimate"), f"{prefix} prompt_token_estimate", issues)
     if not isinstance(success, bool):
         issues.append(f"{prefix} success must be boolean")
     elif success:
         _validate_sha256_hex(entry.get("response_hash"), f"{prefix} response_hash", issues)
+        _validate_non_negative_finite_number(entry.get("response_token_estimate"), f"{prefix} response_token_estimate", issues)
     else:
         issues.append(f"{prefix} success must be true for completed smoke evidence")
         _required_non_empty_string(entry.get("error_type"), f"{prefix} error_type", issues)
@@ -851,6 +874,9 @@ def _manifest_schema_issues(manifest: dict[str, Any], output_dir: Path) -> tuple
         issues.append("manifest real_mode_explicit must be true for smoke verification")
     _required_non_empty_string(manifest.get("provider"), "manifest provider", issues)
     _required_non_empty_string(manifest.get("model"), "manifest model", issues)
+    _required_non_empty_string(manifest.get("adapter_type"), "manifest adapter_type", issues)
+    _validate_provider_capabilities(manifest.get("provider_capabilities"), "manifest provider_capabilities", issues)
+    _validate_budget_schema(manifest.get("token_budget"), "manifest token_budget", issues)
 
     call_range = manifest.get("expected_llm_call_range", {})
     if not isinstance(call_range, dict):
@@ -1144,10 +1170,14 @@ def _truthy(value: Any) -> bool:
     return bool(value)
 
 
-def _build_manifest(plan: dict[str, Any], *, llm_client: LLMClient | None) -> dict[str, Any]:
+def _build_manifest(plan: dict[str, Any], *, llm_client: LLMClient | None, budget: LLMBudget) -> dict[str, Any]:
     plan_hash = _hash_payload(plan)
     model = getattr(llm_client, "model", None) or os.environ.get("OPENAI_MODEL", "gpt-5-mini")
-    provider = type(llm_client).__name__ if llm_client is not None else "OpenAIAdapter"
+    provider = _llm_provider_name(llm_client) if llm_client is not None else _default_provider_capabilities().provider
+    adapter_type = getattr(llm_client, "adapter_type", None) or (
+        type(llm_client).__name__ if llm_client is not None else _default_provider_capabilities().adapter_type
+    )
+    provider_capabilities = _llm_provider_capabilities(llm_client) if llm_client is not None else _default_provider_capabilities().to_dict()
     run_count = len(plan.get("runs", []))
     return {
         "schema_version": 1,
@@ -1155,6 +1185,8 @@ def _build_manifest(plan: dict[str, Any], *, llm_client: LLMClient | None) -> di
         "real_mode_explicit": plan["real_mode_explicit"],
         "provider": provider,
         "model": model,
+        "adapter_type": adapter_type,
+        "provider_capabilities": provider_capabilities,
         "python_version": sys.version.split()[0],
         "package_versions": _package_versions(),
         "seed": plan["seed"],
@@ -1165,11 +1197,7 @@ def _build_manifest(plan: dict[str, Any], *, llm_client: LLMClient | None) -> di
         "output_dir": plan["output_dir"],
         "plan_hash": plan_hash,
         "config_hash": plan_hash,
-        "token_budget": {
-            "prompt_token_ceiling": "not_configured",
-            "completion_token_ceiling": "not_configured",
-            "cost_ceiling_usd": "not_configured",
-        },
+        "token_budget": budget.to_dict(),
         "expected_llm_call_range": {
             "min": max(1, run_count * 8),
             "max": max(1, run_count * 80),
@@ -1193,9 +1221,119 @@ def _trace_call_metadata(record: dict[str, Any]) -> dict[str, Any]:
         "span_kind": record["span_kind"],
         "provider": record["provider"],
         "model": record["model"],
+        "adapter_type": record["adapter_type"],
+        "provider_capabilities": record["provider_capabilities"],
         "method": record["method"],
         "schema_name": record["schema_name"],
     }
+
+
+def _default_provider_capabilities() -> Any:
+    return capabilities_for_openai_compatible(os.environ.get("OPENAI_BASE_URL"))
+
+
+def _llm_provider_name(llm_client: LLMClient | None) -> str:
+    if llm_client is None:
+        return _default_provider_capabilities().provider
+    provider_name = getattr(llm_client, "provider_name", None)
+    if isinstance(provider_name, str) and provider_name:
+        return provider_name
+    return type(llm_client).__name__
+
+
+def _llm_provider_capabilities(llm_client: LLMClient | None) -> dict[str, object]:
+    capabilities = getattr(llm_client, "provider_capabilities", None)
+    if hasattr(capabilities, "to_dict"):
+        return capabilities.to_dict()
+    if isinstance(capabilities, dict):
+        return capabilities
+    provider = _llm_provider_name(llm_client)
+    return {
+        "provider": provider,
+        "adapter_type": getattr(llm_client, "adapter_type", type(llm_client).__name__ if llm_client is not None else "unknown"),
+        "supports_responses": False,
+        "supports_structured_outputs": False,
+        "supports_usage": False,
+        "supports_trace_export": False,
+        "supports_prompt_cache": False,
+    }
+
+
+def _estimate_tokens(text: str) -> int:
+    return max(1, (len(text) + 3) // 4)
+
+
+def _response_token_count(response: Any, metadata: Any = None) -> int:
+    if isinstance(metadata, dict):
+        usage = metadata.get("usage")
+        if isinstance(usage, dict):
+            for key in ("completion_tokens", "output_tokens"):
+                value = usage.get(key)
+                if isinstance(value, int) and not isinstance(value, bool):
+                    return value
+    if isinstance(response, dict):
+        return _estimate_tokens(json.dumps(response, sort_keys=True, default=str))
+    return _estimate_tokens(str(response))
+
+
+def _validate_provider_capabilities(value: Any, label: str, issues: list[str]) -> None:
+    required = {
+        "provider": str,
+        "adapter_type": str,
+        "supports_responses": bool,
+        "supports_structured_outputs": bool,
+        "supports_usage": bool,
+        "supports_trace_export": bool,
+        "supports_prompt_cache": bool,
+    }
+    if not isinstance(value, dict):
+        issues.append(f"{label} must be an object")
+        return
+    unknown = sorted(set(value) - set(required))
+    if unknown:
+        issues.append(f"{label} contains unknown field(s): {', '.join(unknown)}")
+    for field, expected_type in required.items():
+        item = value.get(field)
+        if expected_type is str:
+            _required_non_empty_string(item, f"{label}.{field}", issues)
+        elif not isinstance(item, bool):
+            issues.append(f"{label}.{field} must be boolean")
+
+
+def _validate_budget_schema(value: Any, label: str, issues: list[str]) -> None:
+    required = {
+        "max_prompt_tokens",
+        "max_output_tokens",
+        "max_total_tokens",
+        "max_calls",
+        "max_cost_usd",
+        "cost_per_1k_tokens_usd",
+        "calls_used",
+        "prompt_tokens_used",
+        "output_tokens_used",
+        "estimated_cost_usd",
+    }
+    if not isinstance(value, dict):
+        issues.append(f"{label} must be an object")
+        return
+    unknown = sorted(set(value) - required)
+    if unknown:
+        issues.append(f"{label} contains unknown field(s): {', '.join(unknown)}")
+    for field in required:
+        if field not in value:
+            issues.append(f"{label}.{field} is required")
+    for field in ("max_prompt_tokens", "max_output_tokens", "max_total_tokens", "max_calls"):
+        item = value.get(field)
+        if item is not None:
+            parsed = _parse_strict_int(item, f"{label}.{field}", issues)
+            if parsed is not None and parsed <= 0:
+                issues.append(f"{label}.{field} must be positive when configured")
+    for field in ("max_cost_usd", "cost_per_1k_tokens_usd", "estimated_cost_usd"):
+        item = value.get(field)
+        if item is not None:
+            _validate_non_negative_finite_number(item, f"{label}.{field}", issues)
+    for field in ("calls_used", "prompt_tokens_used", "output_tokens_used"):
+        _parse_strict_int(value.get(field), f"{label}.{field}", issues)
 
 
 def _package_versions() -> dict[str, str]:

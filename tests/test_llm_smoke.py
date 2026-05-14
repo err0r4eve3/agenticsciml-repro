@@ -2,13 +2,22 @@ import csv
 import json
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
 
 from agenticsciml.evidence import EVIDENCE_MODE_REAL_LLM_SMOKE
+from agenticsciml.llm.budget import LLMBudget
 from agenticsciml.llm.mock import MockLLMClient
-from agenticsciml.llm_smoke import _paired_contrast_gate, _smoke_gate, run_llm_smoke, verify_llm_smoke_output
+from agenticsciml.llm_smoke import (
+    _RecordingLLMClient,
+    _paired_contrast_gate,
+    _smoke_gate,
+    run_llm_smoke,
+    verify_llm_smoke_output,
+)
 
 
 def _rewrite_parallel_child_max_workers(run_dir: Path, value: object) -> None:
@@ -142,6 +151,9 @@ def test_llm_smoke_dry_run_writes_plan_without_api_key(tmp_path: Path, monkeypat
     manifest = json.loads(result.manifest_json.read_text(encoding="utf-8"))
     assert manifest["execution_mode"] == "dry_run"
     assert manifest["expected_llm_call_range"]["min"] > 0
+    assert manifest["provider_capabilities"]["provider"] == "openai"
+    assert manifest["provider_capabilities"]["supports_structured_outputs"] is True
+    assert manifest["token_budget"]["max_calls"] is None
 
 
 def test_llm_smoke_dry_run_rejects_unknown_variant(tmp_path: Path) -> None:
@@ -203,6 +215,9 @@ def test_llm_smoke_real_gate_with_scripted_llm(tmp_path: Path) -> None:
     assert all(row["trace_quality_gate_passed"] == "True" for row in rows)
     assert all(int(row["llm_calls"]) > 0 for row in rows)
     assert result.manifest_json.exists()
+    manifest = json.loads(result.manifest_json.read_text(encoding="utf-8"))
+    assert manifest["provider_capabilities"]["provider"] == "MockLLMClient"
+    assert manifest["token_budget"]["calls_used"] == 0
     no_branch = next(row for row in rows if row["variant"] == "no_branch_context")
     assert no_branch["branch_context_enabled"] == "False"
     assert no_branch["branch_intents"] == ""
@@ -217,6 +232,72 @@ def test_llm_smoke_real_gate_with_scripted_llm(tmp_path: Path) -> None:
         assert int(row["generation_span_count"]) == int(row["llm_calls"])
         assert row["llm_ledger_providers"] == "MockLLMClient"
         assert row["llm_ledger_call_fingerprints"] == row["llm_trace_call_fingerprints"]
+    run_metadata = json.loads(
+        (tmp_path / "runs" / "smoke-branch_context-seed-0" / "run_metadata.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert run_metadata["llm_provider_capabilities"]["provider"] == "MockLLMClient"
+    assert run_metadata["llm_budget"]["calls_used"] > 0
+
+
+def test_llm_smoke_real_mode_enforces_llm_call_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENTICSCIML_MAX_LLM_CALLS", "1")
+
+    with pytest.raises(RuntimeError, match="LLM call budget exceeded"):
+        run_llm_smoke(
+            benchmark_dir=Path("examples/function_approx").resolve(),
+            output_dir=tmp_path,
+            variants=["branch_context", "no_branch_context"],
+            dry_run=False,
+            llm_client=MockLLMClient(),
+        )
+
+
+def test_recording_llm_reserves_call_budget_across_parallel_calls(tmp_path: Path) -> None:
+    class SlowLLM:
+        model = "slow-model"
+        adapter_type = "test-compatible"
+
+        def complete_text(self, prompt: str, system: str | None = None, temperature: float = 0.0) -> str:
+            time.sleep(0.05)
+            return "ok"
+
+        def complete_json(
+            self,
+            prompt: str,
+            schema_name: str,
+            system: str | None = None,
+            temperature: float = 0.0,
+        ) -> dict[str, str]:
+            time.sleep(0.05)
+            return {"ok": "true"}
+
+    budget = LLMBudget(max_calls=1)
+    recording = _RecordingLLMClient(SlowLLM(), tmp_path / "ledger.jsonl", budget)  # type: ignore[arg-type]
+    results: list[str] = []
+    errors: list[str] = []
+
+    def worker() -> None:
+        try:
+            results.append(recording.complete_text("parallel prompt"))
+        except RuntimeError as exc:
+            errors.append(str(exc))
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert results == ["ok"]
+    assert len(errors) == 1
+    assert "LLM call budget exceeded" in errors[0]
+    assert budget.calls_used == 1
+    assert len((tmp_path / "ledger.jsonl").read_text(encoding="utf-8").splitlines()) == 1
 
 
 def test_verify_llm_smoke_output_rejects_dry_run_only(tmp_path: Path) -> None:

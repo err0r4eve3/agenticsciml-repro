@@ -40,7 +40,7 @@ class RecordingContextLLM(LLMClient):
             return {
                 "summary": "replace broken line",
                 "failure_kind": "runtime_error",
-                "minimal_fix": True,
+                "minimal_fix": "replace broken line",
                 "parent_digest": solution_digest("broken\n"),
                 "patch": make_unified_patch("broken\n", "fixed\n"),
                 "files_changed": ["solution.py"],
@@ -175,7 +175,7 @@ def test_debugger_rejects_wrong_parent_digest(tmp_path: Path) -> None:
             {
                 "summary": "bad",
                 "failure_kind": "runtime_error",
-                "minimal_fix": True,
+                "minimal_fix": "bad digest fixture",
                 "parent_digest": "wrong",
                 "patch": make_unified_patch("old\n", "new\n"),
                 "files_changed": ["solution.py"],
@@ -195,7 +195,7 @@ def test_debugger_rejects_malformed_patch(tmp_path: Path) -> None:
             {
                 "summary": "bad",
                 "failure_kind": "runtime_error",
-                "minimal_fix": True,
+                "minimal_fix": "malformed patch fixture",
                 "parent_digest": solution_digest("old\n"),
                 "patch": "not a unified patch",
                 "files_changed": ["solution.py"],

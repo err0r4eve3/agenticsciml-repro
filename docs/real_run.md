@@ -37,6 +37,27 @@ uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx 
 Use the provider's exact model id. For example, if the provider rejects
 `deepseekv4pro` and reports `deepseek-v4-pro`, use the hyphenated id.
 
+When `OPENAI_BASE_URL` is unset, `OpenAIAdapter` treats the provider as an
+OpenAI-native Responses path and uses typed Structured Outputs for agent JSON.
+When `OPENAI_BASE_URL` is set, the adapter records an `openai_compatible_chat`
+capability profile and falls back to chat completions plus local Pydantic
+schema validation.
+
+Optional fail-closed budget gates:
+
+```bash
+export AGENTICSCIML_MAX_LLM_CALLS=80
+export AGENTICSCIML_MAX_PROMPT_TOKENS=200000
+export AGENTICSCIML_MAX_OUTPUT_TOKENS=80000
+export AGENTICSCIML_MAX_TOTAL_TOKENS=280000
+export AGENTICSCIML_MAX_COST_USD=5
+export AGENTICSCIML_COST_PER_1K_TOKENS_USD=0.01
+```
+
+`AGENTICSCIML_MAX_COST_USD` requires
+`AGENTICSCIML_COST_PER_1K_TOKENS_USD`, because provider pricing is not inferred
+from the model name.
+
 For first real runs, prefer root-only smoke before mutation:
 
 ```bash
@@ -127,6 +148,19 @@ consistency, and requires parallel-child trace evidence when
 `run_metadata.json` also records aggregate LLM call counts by role plus prompt
 and response token estimates. These are accounting placeholders, not provider
 billing records.
+
+Real-smoke manifest and run metadata also record provider capability, adapter
+type, and budget state:
+
+- `provider_capabilities`
+- `adapter_type`
+- `token_budget`
+- `llm_provider_capabilities`
+- `llm_budget`
+
+Completed orchestrator runs export `openai_sdk_trace.json`, a sanitized
+SDK-style span bundle derived from local `trace.jsonl`. The local trace remains
+the source of truth.
 
 Resume uses the existing run directory and checkpoint:
 

@@ -70,7 +70,7 @@ class MalformedDebuggerLLM(MockLLMClient):
             return {
                 "summary": "malformed patch fixture",
                 "failure_kind": "runtime_error",
-                "minimal_fix": True,
+                "minimal_fix": "fixture intentionally returns a malformed unified diff",
                 "parent_digest": match.group(1) if match else "",
                 "patch": "not a unified patch",
                 "files_changed": ["solution.py"],
@@ -130,6 +130,7 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert (run_dir / "champion" / "solution.py").exists()
     assert (run_dir / "tree.mmd").exists()
     assert (run_dir / "trace_summary.json").exists()
+    assert (run_dir / "openai_sdk_trace.json").exists()
     run_metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
     assert run_metadata["run_state"] == "exported"
     assert run_metadata["evidence_mode"] == EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE

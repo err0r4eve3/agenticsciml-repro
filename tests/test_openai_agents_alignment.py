@@ -9,6 +9,7 @@ from agenticsciml.agents.proposer import ProposerAgent
 from agenticsciml.config import EvaluationContract
 from agenticsciml.execution.sandbox import prepare_solution_workspace, train_and_evaluate
 from agenticsciml.llm.base import LLMClient
+from agenticsciml.reporting import write_sdk_trace_export
 from agenticsciml.storage import ExperimentStorage
 
 
@@ -70,6 +71,41 @@ class RaisingThenValidJsonLLM(FlakyJsonLLM):
         }
 
 
+class ExtraFieldProposalLLM(FlakyJsonLLM):
+    def complete_json(
+        self,
+        prompt: str,
+        schema_name: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+    ) -> dict[str, Any]:
+        return {
+            "title": "Valid proposal",
+            "diagnosis": "Root underfits.",
+            "mutation_plan": ["Add features."],
+            "expected_effect": "Lower validation MSE.",
+            "risks": ["May overfit."],
+            "unknown": "schema drift",
+        }
+
+
+class WrongTypeProposalLLM(FlakyJsonLLM):
+    def complete_json(
+        self,
+        prompt: str,
+        schema_name: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+    ) -> dict[str, Any]:
+        return {
+            "title": "Invalid proposal",
+            "diagnosis": "Root underfits.",
+            "mutation_plan": "not a list",
+            "expected_effect": "Lower validation MSE.",
+            "risks": ["May overfit."],
+        }
+
+
 class RecordingProposalLLM(LLMClient):
     def __init__(self):
         self.final_prompt = ""
@@ -120,6 +156,26 @@ def test_agent_json_output_fails_closed_after_retry_budget(tmp_path: Path) -> No
             required_fields=("title", "diagnosis", "mutation_plan", "expected_effect", "risks"),
             retries=1,
         )
+
+
+def test_agent_json_output_rejects_unknown_fields(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    agent = ProposerAgent(ExtraFieldProposalLLM(), storage)
+
+    with pytest.raises(StructuredOutputError) as exc:
+        agent.complete_json_checked(prompt="return a proposal", schema_name="proposal", retries=0)
+
+    assert "typed schema validation" in str(exc.value)
+
+
+def test_agent_json_output_rejects_wrong_field_types(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    agent = ProposerAgent(WrongTypeProposalLLM(), storage)
+
+    with pytest.raises(StructuredOutputError) as exc:
+        agent.complete_json_checked(prompt="return a proposal", schema_name="proposal", retries=0)
+
+    assert "typed schema validation" in str(exc.value)
 
 
 def test_agent_json_exception_is_retried_and_traced(tmp_path: Path) -> None:
@@ -183,6 +239,28 @@ def test_trace_records_agent_generation_and_guardrail_events(tmp_path: Path) -> 
         assert metadata["duration_s"] >= 0
         assert metadata["prompt_token_estimate"] > 0
         assert metadata["response_token_estimate"] > 0
+
+
+def test_sdk_trace_export_maps_spans_and_redacts_raw_fields(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    storage.record_trace(
+        "generation_span",
+        "proposer",
+        {
+            "provider": "mock",
+            "model": "mock",
+            "prompt": "raw prompt should not leave local trace",
+            "response_hash": "abc",
+        },
+    )
+
+    path = write_sdk_trace_export(storage.run_dir)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert payload["span_count"] == 1
+    assert payload["spans"][0]["span_kind"] == "generation"
+    assert payload["spans"][0]["metadata"]["prompt"] == "<redacted>"
+    assert payload["spans"][0]["metadata"]["response_hash"] == "<redacted>"
 
 
 def test_sandbox_guardrail_detects_evaluator_mutation(tmp_path: Path) -> None:

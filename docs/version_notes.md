@@ -13,6 +13,12 @@ provider capability matrix、真实 LLM budget gate、Pydantic agent output
 schemas、container/sandbox backend、trace export/eval flywheel 和 human review
 pause/resume。
 
+同日后续实现已修复前五项：OpenAI-native Responses structured outputs、
+provider capability matrix、真实 LLM token/cost budget gate、Pydantic closed
+agent output schemas、以及 sanitized `openai_sdk_trace.json` trace export
+bridge。剩余主要升级项转为 trace grading eval set、container/sandbox
+backend、human review pause/resume 和 MCP/hosted tools sidecar。
+
 ## v0.1.0 MVP
 
 当前版本目标是复刻 AgenticSciML 的多 Agent workflow，而不是复现论文分数。
@@ -22,11 +28,25 @@ pause/resume。
 - Python 3.11 package scaffold。
 - deterministic mock LLM adapter。
 - optional OpenAI adapter。
+- OpenAI-native structured output path：未设置 `OPENAI_BASE_URL` 时，
+  `OpenAIAdapter` 使用 Responses parse + typed Pydantic output model；
+  设置 `OPENAI_BASE_URL` 时保留 OpenAI-compatible chat/JSON fallback，并继续
+  使用本地 Pydantic schema fail closed。
 - OpenAI-compatible provider support：`OpenAIAdapter` 可通过
   `OPENAI_BASE_URL` 指向 DeepSeek 等兼容 endpoint，并通过
   `OPENAI_TIMEOUT_S` 设置 provider 请求超时。
+- provider capability matrix：real-smoke manifest、ledger、trace metadata 和
+  run metadata 记录 provider、adapter type、Responses/Structured Outputs/
+  usage/trace export/prompt-cache capability。
+- real LLM budget gate：`AGENTICSCIML_MAX_LLM_CALLS`、
+  `AGENTICSCIML_MAX_PROMPT_TOKENS`、`AGENTICSCIML_MAX_OUTPUT_TOKENS`、
+  `AGENTICSCIML_MAX_TOTAL_TOKENS`、`AGENTICSCIML_MAX_COST_USD` 和
+  `AGENTICSCIML_COST_PER_1K_TOKENS_USD` 可让真实 LLM run 超预算 fail closed。
 - `AgentSpec` / `PromptTemplate` / artifact guard 基础合同层。
 - runtime `AgentSpec` enforcement：agent 方法入口校验 `input_schema`，JSON 输出默认校验 `output_schema`。
+- Pydantic closed output schemas：Proposal、Evaluator review、RootEngineer、
+  Selector、Engineer、Debugger 和 ResultAnalyst 等代码消费 JSON 输出拒绝
+  unknown fields 与错误类型。
 - OpenAI Agents SDK 对齐的结构化输出校验、JSON retry、trace span 和 guardrail 事件。
 - structured output failure handling：LLM JSON parse/API/schema 失败会在 agent 边界转换为 `StructuredOutputError`，写入 guardrail trace，并在预算内重试。
 - evaluator contract guardrail：检测 generated solution 是否篡改 `evaluate.py` 等受保护评估文件。
@@ -95,6 +115,8 @@ pause/resume。
 - static sandbox guardrail：运行前阻断网络模块、子进程、危险文件操作和明显绝对路径写入。
 - checkpoint/resume：每轮关键阶段写 `checkpoint.json`，CLI 支持 `--resume` 继续已有 run。
 - trace summary：每次 orchestrator 完成后写入 `trace_summary.json`，并提供 `agenticsciml trace-summary <run_dir>` 重新生成和检查 trace quality gate。
+- SDK-style trace export：每次 orchestrator 完成后写入 sanitized
+  `openai_sdk_trace.json`，CLI 提供 `agenticsciml export-sdk-trace <run_dir>`。
 - trace artifact consistency gate：`trace_summary.json` 会检查 `evaluation_contract.json`、`run_metadata.json`、workflow-start trace、`tree.json` 和 `checkpoint.json` 中的 fidelity/evidence、node set、contract hash、benchmark name 与 solution count 一致性；不一致时 quality gate fail closed。
 - completed-run artifact requiredness：当 `run_metadata.run_state` 为 `completed`、`exported` 或 `finalized` 时，`tree.json` 和 `checkpoint.json` 被视为必需 artifact；缺失会使 trace quality gate fail closed。旧 metadata 无 `run_state` 时才回退到 `solution_count`。
 - run metadata：`run_metadata.json` 和 workflow-end trace 记录 `run_state=exported`、wall time、champion、solution count，以及按 role 汇总的 LLM 调用次数和 prompt/response token 估算占位；workflow-start trace 记录 `run_state=partial`。

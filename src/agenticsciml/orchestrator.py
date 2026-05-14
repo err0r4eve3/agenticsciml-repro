@@ -29,6 +29,7 @@ from agenticsciml.retrieval.kb_store import KnowledgeBase
 from agenticsciml.retrieval.query_builder import RetrievalQueryBuilder
 from agenticsciml.reporting import (
     write_leaderboard,
+    write_sdk_trace_export,
     write_trace_summary,
     write_tree_json,
     write_tree_mermaid,
@@ -136,6 +137,7 @@ class AgenticSciMLOrchestrator:
             },
         )
         write_trace_summary(self.storage.run_dir)
+        write_sdk_trace_export(self.storage.run_dir)
         return self.storage.run_dir
 
     def _load_or_create_contract(self) -> EvaluationContract:
@@ -897,6 +899,7 @@ class AgenticSciMLOrchestrator:
                 "champion": best.node_id,
                 "branch_context_enabled": self.config.evolution.use_branch_context,
                 **self._evidence_metadata(),
+                **self._llm_runtime_metadata(),
                 "llm_calls": self._llm_call_summary(),
             },
         )
@@ -948,6 +951,29 @@ class AgenticSciMLOrchestrator:
             use_mock=self.config.use_mock,
             fidelity_level=self.problem_bundle.benchmark_spec.fidelity_level,
         )
+
+    def _llm_runtime_metadata(self) -> dict[str, object]:
+        metadata: dict[str, object] = {}
+        provider_name = getattr(self.llm, "provider", None) or getattr(self.llm, "provider_name", None)
+        model = getattr(self.llm, "model", None)
+        adapter_type = getattr(self.llm, "adapter_type", None)
+        capabilities = getattr(self.llm, "provider_capabilities", None)
+        budget = getattr(self.llm, "budget", None)
+        if isinstance(provider_name, str) and provider_name:
+            metadata["llm_provider"] = provider_name
+        if isinstance(model, str) and model:
+            metadata["llm_model"] = model
+        if isinstance(adapter_type, str) and adapter_type:
+            metadata["llm_adapter_type"] = adapter_type
+        if hasattr(capabilities, "to_dict"):
+            metadata["llm_provider_capabilities"] = capabilities.to_dict()
+        elif isinstance(capabilities, dict):
+            metadata["llm_provider_capabilities"] = capabilities
+        if hasattr(budget, "to_dict"):
+            metadata["llm_budget"] = budget.to_dict()
+        elif isinstance(budget, dict):
+            metadata["llm_budget"] = budget
+        return metadata
 
 
 def _failure_phase(command: list[str]) -> str:
