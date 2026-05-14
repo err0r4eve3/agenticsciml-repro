@@ -45,6 +45,11 @@ backend、human review pause/resume 和 MCP/hosted tools sidecar。
 - OpenAI-compatible provider support：`OpenAIAdapter` 可通过
   `OPENAI_BASE_URL` 指向 DeepSeek 等兼容 endpoint，并通过
   `OPENAI_TIMEOUT_S` 设置 provider 请求超时。
+- DeepSeek real-run hardening：`OpenAIAdapter` 会把 `deepseekv4pro` /
+  `deepseekv4flash` 规范为 DeepSeek API 接受的 `deepseek-v4-pro` /
+  `deepseek-v4-flash`；OpenAI-compatible chat JSON fallback 会把 Pydantic
+  JSON Schema、array 字段规则和 no-extra-field 规则注入 prompt，并能从带说明
+  或 markdown fence 的响应中提取首个 JSON object 后再做 closed schema 校验。
 - provider capability matrix：real-smoke manifest、ledger、trace metadata 和
   run metadata 记录 provider、adapter type、Responses/Structured Outputs/
   usage/trace export/prompt-cache capability。
@@ -76,6 +81,9 @@ backend、human review pause/resume 和 MCP/hosted tools sidecar。
 - clean subprocess env：generated solution validate/train/predict/evaluate 使用最小安全环境，不继承宿主 API key、代理、SSH agent、真实 `HOME` 等变量。
 - agent context hardening：RootEngineer / Engineer prompt 显式包含 `ProblemBundle`、`EvaluationContract` JSON、`guidelines.md` 和可用分析上下文。
 - patch-based mutation：Engineer 输出包含 `parent_digest` 和 patch/file map；Python 端校验 parent digest 后才写入 `solution.py`。
+- patch fallback hardening：Engineer 仍优先使用 digest-checked unified diff，
+  但当 provider 同时返回显式 `full_file_map.solution.py` 且 patch context
+  不匹配时，可用 file map 兜底，减少真实兼容模型长 patch 的上下文漂移失败。
 - failed mutation containment：Engineer patch/schema 失败会生成 failed child node、`engineering_error.md` 和 guardrail trace，不再中断整次 run。
 - contract-aware debugger：Debugger prompt 显式包含当前代码、`parent_digest`、`ProblemBundle`、`EvaluationContract` JSON、`guidelines.md`、失败阶段和错误日志；修复只能通过 digest-checked unified diff patch 修改 `solution.py`。
 - search policy metadata：`SolutionNode` 持久化 `method_tags`、`failure_kind`、`score_delta_from_parent`、`num_debug_attempts`、`benchmark_name` 和 `contract_hash`，供 selector、retriever 和 ablation 使用。

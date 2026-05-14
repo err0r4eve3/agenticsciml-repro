@@ -108,6 +108,8 @@ def test_engineer_prompt_includes_context_and_applies_patch(tmp_path: Path) -> N
 
     prompt = llm.prompts[-1]
     assert "parent_digest:" in prompt
+    assert "full_file_map" in prompt
+    assert '["solution.py"]' in prompt
     assert contract.contract_hash in prompt
     assert "Parent underfits" in prompt
     assert (workspace / "solution.py").read_text(encoding="utf-8") == "new\n"
@@ -131,6 +133,30 @@ def test_engineer_rejects_wrong_parent_digest(tmp_path: Path) -> None:
                 "files_changed": ["solution.py"],
             },
         )
+
+
+def test_engineer_uses_full_file_map_when_patch_context_fails(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    agent = EngineerAgent(RecordingContextLLM(), storage)
+
+    code = agent.apply_mutation_output(
+        solution_id="solution_001",
+        parent_code="old\n",
+        response={
+            "mutation_summary": "replace via file map",
+            "expected_effect": "lower score",
+            "risks": ["full replacement may be larger than a patch"],
+            "parent_digest": solution_digest("old\n"),
+            "patch": "--- solution.py\n+++ solution.py\n@@ -1 +1 @@\n-missing\n+new\n",
+            "files_changed": ["solution.py"],
+            "full_file_map": {"solution.py": "new\n"},
+        },
+    )
+
+    assert code == "new\n"
+    assert (storage.run_dir / "solutions" / "solution_001" / "solution.py").read_text(
+        encoding="utf-8"
+    ) == "new\n"
 
 
 def test_malformed_patch_fails_clearly() -> None:

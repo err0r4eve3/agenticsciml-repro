@@ -19,7 +19,8 @@ class ResultAnalystAgent(AgentBase):
         log = (workspace / "train.log").read_text(encoding="utf-8") if (workspace / "train.log").exists() else ""
         prompt = (
             "Analyze this solution result using concise report fields. "
-            "Return JSON with summary, strengths, weaknesses, next_steps.\n\n"
+            "Return JSON with summary, strengths, weaknesses, next_steps. "
+            "`strengths`, `weaknesses`, and `next_steps` must be JSON arrays of strings, not strings.\n\n"
             f"Eval: {eval_payload}\n\nLog excerpt:\n{log[-2000:]}"
         )
         response = self.complete_json_checked(

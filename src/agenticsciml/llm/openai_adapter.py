@@ -4,7 +4,11 @@ import json
 import os
 from typing import Any
 
-from agenticsciml.agents.output_schemas import output_model_for, validate_output_payload
+from agenticsciml.agents.output_schemas import (
+    json_schema_for,
+    output_model_for,
+    validate_output_payload,
+)
 from agenticsciml.llm.capabilities import ProviderCapabilities, capabilities_for_openai_compatible
 from agenticsciml.llm.base import LLMClient
 
@@ -28,9 +32,10 @@ class OpenAIAdapter(LLMClient):
         base_url: str | None = None,
         timeout_s: float | None = None,
     ):
-        self.model = model or os.environ.get("OPENAI_MODEL", "gpt-5-mini")
+        raw_model = model or os.environ.get("OPENAI_MODEL", "gpt-5-mini")
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self.base_url = base_url or os.environ.get("OPENAI_BASE_URL")
+        self.model = _normalize_model_name(raw_model, self.base_url)
         self.timeout_s = timeout_s if timeout_s is not None else _timeout_from_env()
         self.provider_capabilities: ProviderCapabilities = capabilities_for_openai_compatible(self.base_url)
         self.provider_name = self.provider_capabilities.provider
@@ -133,13 +138,11 @@ class OpenAIAdapter(LLMClient):
         system: str | None,
         temperature: float,
     ) -> dict[str, Any]:
-        json_prompt = (
-            f"{prompt}\n\nReturn only valid JSON for schema '{schema_name}'. "
-            "Do not include markdown fences."
-        )
+        json_prompt = _compatible_json_prompt(prompt, schema_name)
         text = self.complete_text(json_prompt, system=system, temperature=temperature)
+        json_text = _extract_json_object_text(text)
         try:
-            payload = json.loads(text)
+            payload = json.loads(json_text)
         except json.JSONDecodeError as exc:
             raise RuntimeError(f"Model did not return valid JSON for {schema_name}: {text[:300]}") from exc
         if not isinstance(payload, dict):
@@ -164,6 +167,74 @@ def _response_input(prompt: str, system: str | None) -> list[dict[str, str]]:
         items.append({"role": "system", "content": system})
     items.append({"role": "user", "content": prompt})
     return items
+
+
+def _normalize_model_name(model: str, base_url: str | None) -> str:
+    if not base_url or "api.deepseek.com" not in base_url:
+        return model
+    aliases = {
+        "deepseekv4pro": "deepseek-v4-pro",
+        "deepseek-v4-pro": "deepseek-v4-pro",
+        "deepseekv4flash": "deepseek-v4-flash",
+        "deepseek-v4-flash": "deepseek-v4-flash",
+    }
+    return aliases.get(model, model)
+
+
+def _compatible_json_prompt(prompt: str, schema_name: str) -> str:
+    schema = json_schema_for(schema_name)
+    rules = [
+        "Return exactly one valid JSON object and nothing else.",
+        "Do not include markdown fences, comments, prose, or trailing text.",
+        "Honor every JSON Schema type exactly.",
+        "Arrays must be JSON arrays, even when there is only one item.",
+        "Use [] for empty arrays; never encode arrays as strings or numbered paragraphs.",
+        "Do not include fields that are not listed in the schema.",
+    ]
+    schema_block = ""
+    if schema is not None:
+        schema_block = (
+            "\n\n## Required JSON Schema\n\n"
+            f"{json.dumps(schema, indent=2, sort_keys=True)}"
+        )
+    return (
+        f"{prompt}\n\n"
+        f"## JSON Output Rules for schema '{schema_name}'\n\n"
+        + "\n".join(f"- {rule}" for rule in rules)
+        + schema_block
+    )
+
+
+def _extract_json_object_text(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith("{") and stripped.endswith("}"):
+        return stripped
+    start = stripped.find("{")
+    if start == -1:
+        return stripped
+
+    depth = 0
+    in_string = False
+    escape = False
+    for index in range(start, len(stripped)):
+        char = stripped[index]
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return stripped[start : index + 1]
+    return stripped
 
 
 def _extract_parsed_response(response: Any) -> Any:

@@ -42,8 +42,12 @@ class EngineerAgent(AgentBase):
         prompt = (
             "Modify parent solution.py according to the proposal. "
             "Return JSON with mutation_summary, expected_effect, risks, parent_digest, "
-            "patch, and files_changed. Prefer a unified diff patch for solution.py; "
-            "do not return a full replacement file unless explicitly requested.\n\n"
+            "patch, files_changed, and optional full_file_map. `risks` must be a JSON "
+            "array of strings. Set `files_changed` to exactly [\"solution.py\"]. Use exactly "
+            "one code-change channel: either a unified diff `patch`, or an empty `patch` "
+            "plus `full_file_map` containing the complete `solution.py`. Prefer a patch "
+            "for small edits, but use `full_file_map.solution.py` when the change is large "
+            "or exact patch context may be unreliable.\n\n"
             "## ProblemBundle Summary\n\n"
             f"{problem_bundle.summary()}\n\n"
             "## EvaluationContract JSON\n\n"
@@ -107,7 +111,13 @@ class EngineerAgent(AgentBase):
 
         patch = str(response.get("patch", ""))
         if patch:
-            code = apply_unified_patch(parent_code, patch)
+            try:
+                code = apply_unified_patch(parent_code, patch)
+            except PatchApplicationError:
+                full_file_map = response.get("full_file_map")
+                if not isinstance(full_file_map, dict) or "solution.py" not in full_file_map:
+                    raise
+                code = str(full_file_map["solution.py"])
         else:
             full_file_map = response.get("full_file_map")
             if not isinstance(full_file_map, dict) or "solution.py" not in full_file_map:

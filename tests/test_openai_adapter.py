@@ -34,8 +34,10 @@ class FakeResponses:
 
 class FakeChatCompletions:
     response_text = "{}"
+    last_kwargs: dict[str, Any] | None = None
 
     def create(self, **kwargs: Any) -> object:
+        FakeChatCompletions.last_kwargs = kwargs
         return types.SimpleNamespace(
             choices=[types.SimpleNamespace(message=types.SimpleNamespace(content=self.response_text))],
             usage=types.SimpleNamespace(prompt_tokens=7, completion_tokens=3, total_tokens=10),
@@ -64,7 +66,7 @@ def test_openai_adapter_supports_base_url_env(monkeypatch) -> None:
 
     adapter = OpenAIAdapter()
 
-    assert adapter.model == "deepseekv4pro"
+    assert adapter.model == "deepseek-v4-pro"
     assert adapter.base_url == "https://api.deepseek.com"
     assert adapter.timeout_s == 120.0
     assert FakeOpenAI.last_kwargs == {
@@ -138,3 +140,41 @@ def test_openai_adapter_compatible_json_fallback_still_rejects_schema_drift(monk
         assert "extra_forbidden" in str(exc)
     else:
         raise AssertionError("OpenAI-compatible fallback accepted schema drift")
+
+
+def test_openai_adapter_compatible_json_prompt_includes_schema_types(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeChatOpenAI))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.deepseek.com")
+    FakeChatCompletions.last_kwargs = None
+    FakeChatCompletions.response_text = (
+        '{"title":"Proposal","diagnosis":"x","mutation_plan":["y"],'
+        '"expected_effect":"z","risks":["r"]}'
+    )
+
+    adapter = OpenAIAdapter(model="deepseekv4pro")
+    payload = adapter.complete_json("return proposal", "proposal")
+
+    assert payload["risks"] == ["r"]
+    assert FakeChatCompletions.last_kwargs is not None
+    message = FakeChatCompletions.last_kwargs["messages"][-1]["content"]
+    assert "Required JSON Schema" in message
+    assert '"risks"' in message
+    assert '"type": "array"' in message
+    assert "Arrays must be JSON arrays" in message
+
+
+def test_openai_adapter_compatible_json_extracts_object_from_wrapped_text(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeChatOpenAI))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.deepseek.com")
+    FakeChatCompletions.response_text = (
+        "Here is the JSON:\n```json\n"
+        '{"summary":"ok","strengths":["s"],"weaknesses":["w"],"next_steps":["n"]}'
+        "\n```"
+    )
+
+    adapter = OpenAIAdapter(model="deepseek-v4-pro")
+    payload = adapter.complete_json("return analysis", "analysis")
+
+    assert payload["next_steps"] == ["n"]
