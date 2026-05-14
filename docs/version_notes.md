@@ -2,6 +2,17 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-14 OpenAI Agents SDK 升级复盘
+
+新增文档：[OpenAI Agents SDK 升级复盘](openai_agents_sdk_upgrade_review.md)。
+
+本次是文档和路线复盘，没有修改运行时代码。结论是继续保持 Python
+orchestrator 控制 evaluator、solution tree、checkpoint/resume 和 champion
+selection；后续升级优先做 OpenAI-native Structured Outputs adapter、
+provider capability matrix、真实 LLM budget gate、Pydantic agent output
+schemas、container/sandbox backend、trace export/eval flywheel 和 human review
+pause/resume。
+
 ## v0.1.0 MVP
 
 当前版本目标是复刻 AgenticSciML 的多 Agent workflow，而不是复现论文分数。
