@@ -48,6 +48,7 @@
 | Name | Paper section | Fidelity | Local path | Metric | Purpose |
 | --- | --- | --- | --- | --- | --- |
 | `function_approx` | `S1.1` | `proxy` | `examples/function_approx` | `validation_mse` | 不连续振荡函数拟合 |
+| `function_approx_faithful_small` | `S1.1` | `faithful-small` | `examples/function_approx_faithful_small` | `validation_mse` | Paper-described piecewise oscillatory fitting with 200 train / 500 validation samples |
 | `poisson_lshape` | `S1.2` | `proxy` | `examples/poisson_lshape` | `relative_l2` | L-shaped Poisson / corner singularity proxy |
 | `poisson_lshape_faithful_small` | `S1.2` | `faithful-small` | `examples/poisson_lshape_faithful_small` | `poisson_residual_composite` | L-shaped Poisson with boundary/residual collocation scoring |
 | `burgers_pinn` | `S1.3` | `proxy` | `examples/burgers_pinn` | `relative_l2` | Burgers-style time-dependent PINN proxy |
@@ -114,7 +115,7 @@ traversal、`.evaluator` / `private_eval` 字符串引用仍会被 static guardr
 
 1. 每个 benchmark 先跑 `--max-iterations 0`，只验证 root baseline。
 2. 每个 benchmark 跑 `--max-iterations 1 --parallel-mutations 1`，验证 proposal/critic/engineer/debugger 链路。
-3. 对 `function_approx`、`poisson_lshape`、`poisson_lshape_faithful_small`、`burgers_pinn` 跑
+3. 对 `function_approx`、`function_approx_faithful_small`、`poisson_lshape`、`poisson_lshape_faithful_small`、`burgers_pinn` 跑
    `root_only` / `no_kb` / `kb` / `random_kb` / `no_critic` / `no_debugger`
    ablation。
 4. 对 KB ablation 同时比较 `use_kb=False`、lexical KB 和 deterministic

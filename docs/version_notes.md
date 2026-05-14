@@ -30,6 +30,7 @@
 - atomic storage writes：`ExperimentStorage` 对 JSON、transcript、report 和 solution text artifact 使用同目录临时文件 + `os.replace()` 原子写入。
 - thread-safe artifact writes：`ExperimentStorage` 在并行 child jobs 下用进程内锁保护 workspace 创建、trace append、JSON、transcript、report 和 solution artifact 写入。
 - validation leak guardrail：`val_data.npz` 放在 run-private `private_eval/solution_*/` 目录，generated `solution.py` 的 validate/train cwd 下不存在 evaluator-private 目录或验证集。
+- benchmark generator privacy：generated solution workspace 不再复制 `generate_data.py`；缺少数据文件时由 trusted runner 从 benchmark 目录调用 generator，避免 faithful-small 任务把闭式目标函数源码暴露给 candidate solution。
 - prediction-only evaluation：可信代码只把 `x_val` 写入 `predict_input.npz`，generated `solution.py --mode=predict` 写 `predictions.npz`，`evaluate.py` 使用私有 `u_val` 计算分数且不 import `solution.py`。
 - clean subprocess env：generated solution validate/train/predict/evaluate 使用最小安全环境，不继承宿主 API key、代理、SSH agent、真实 `HOME` 等变量。
 - agent context hardening：RootEngineer / Engineer prompt 显式包含 `ProblemBundle`、`EvaluationContract` JSON、`guidelines.md` 和可用分析上下文。
@@ -37,7 +38,12 @@
 - failed mutation containment：Engineer patch/schema 失败会生成 failed child node、`engineering_error.md` 和 guardrail trace，不再中断整次 run。
 - contract-aware debugger：Debugger prompt 显式包含当前代码、`parent_digest`、`ProblemBundle`、`EvaluationContract` JSON、`guidelines.md`、失败阶段和错误日志；修复只能通过 digest-checked unified diff patch 修改 `solution.py`。
 - search policy metadata：`SolutionNode` 持久化 `method_tags`、`failure_kind`、`score_delta_from_parent`、`num_debug_attempts`、`benchmark_name` 和 `contract_hash`，供 selector、retriever 和 ablation 使用。
-- deterministic parent selection：先由 Python `SearchPolicy` 保证 best available node、recent improvement、diverse underexplored node 和 `max_children_per_node` 约束，再允许 LLM selector 做补充。
+- vote-aware parent selection：mature stage 先由 loss 选择 best available node 做 exploitation，
+  再由 selector vote 选择额外 exploration parents，并把 vote counts 写入
+  `reports/selector_votes.json`；不足名额才由 deterministic `SearchPolicy`
+  用 recent improvement、diverse underexplored node 和 `max_children_per_node`
+  约束补齐。当前默认是单 LLM provider 的 `selector_vote_count=1`，不是论文里的
+  GPT/Grok/Gemini 三模型 ensemble；CLI 可用 `--selector-vote-count` 调整重复投票次数。
 - parallel child mutation jobs：当 `parallel_mutations > 1` 时，orchestrator 用 bounded `ThreadPoolExecutor` 并行创建 child solution，并写入 `agenticsciml.parallel_children.*` trace。
 - early-stage mutation fanout：早期只有 root 或 selector 返回 parent 数不足时，orchestrator 会按 mutation budget 对可用 parent 做 deterministic fanout，从同一 parent 生成多个 child 分支，同时遵守 `max_children_per_node`。
 - mutation budget semantics：`parallel_mutations` 同时限制每轮 child job 数和 worker 数；并行 trace 记录 canonical `parent_child_edges`、slot-level `parent_ids`、`unique_parent_ids`、legacy parent-to-child / canonical parent-to-children 映射、duration、child-level start/end、status 和 failure kind。
@@ -64,6 +70,9 @@
 - benchmark claim boundaries：`agenticsciml benchmarks --json` 输出每个 benchmark 的 `claim_boundaries`，普通列表也显示 `fidelity_level` 和 real-LLM `scientific_claim`，避免把 proxy catalog 误读成论文全量 SciML 复现。
 - claim-boundary digest separation：`BenchmarkSpec.contract_digest_metadata()` 将 evaluator contract hash 绑定到任务/指标/fidelity 元数据，而不把公开 catalog 的 `claim_boundaries` 文案变化纳入 contract hash。
 - faithful-small benchmark seed：新增 `examples/poisson_lshape_faithful_small`，在 L-shaped Poisson 任务中加入 boundary/residual collocation 数据和 finite-difference residual composite score，用于缩小 proxy 与论文 PINN 任务结构的差距；仍不声明 paper-like 分数。
+- faithful-small function approximation：新增 `examples/function_approx_faithful_small`，
+  使用论文 S1.1 描述的分段振荡函数、200 个训练样本和 500 个验证样本；
+  problem prompt 不暴露闭式函数，仍不声明论文分数复现。
 - benchmark-aware retrieval query：`RetrievalQueryBuilder` 使用 benchmark family/metric/description、parent analysis、failure kind、method tags 和 leaderboard top-k 生成检索 query。
 - KB ablation switches：`use_kb=False` 不注入 KB，`random_kb=True` 使用 seed-controlled random KB retrieval。
 - ablation runner：`agenticsciml ablate` 和 `scripts/run_ablation.py` 生成 `ablation_runs.csv`、`ablation_summary.csv`、`ablation_report.md`，支持 `root_only`、`no_kb`、`kb`、`random_kb`、`no_critic`、`no_debugger`。
@@ -79,6 +88,7 @@
 - completed-run artifact requiredness：当 `run_metadata.run_state` 为 `completed`、`exported` 或 `finalized` 时，`tree.json` 和 `checkpoint.json` 被视为必需 artifact；缺失会使 trace quality gate fail closed。旧 metadata 无 `run_state` 时才回退到 `solution_count`。
 - run metadata：`run_metadata.json` 和 workflow-end trace 记录 `run_state=exported`、wall time、champion、solution count，以及按 role 汇总的 LLM 调用次数和 prompt/response token 估算占位；workflow-start trace 记录 `run_state=partial`。
 - run state schema：trace summary 校验 `run_state` 只能是 `partial`、`completed`、`exported` 或 `finalized`，要求 exported run state 必须有 workflow-end trace，并要求 `run_metadata.run_state` 与 workflow-end trace `run_state` 一致。
+- existing-run guard：非 `--resume` run 遇到已存在且非空的 run directory 会 fail closed，避免复用 `--experiment-id` 时把旧 trace 和新 tree 混在一起。
 - lifecycle trace ordering：trace summary 会拒绝 workflow-end 早于 workflow-start 的 trace，也会拒绝同一 run 中互相冲突的 workflow-end `run_state`。
 - trace event sequence：`ExperimentStorage.record_trace()` 为新 trace event 写入连续递增的 `event_seq`；trace summary 对 exported run artifact 校验 `event_seq` 必须完整且单调。
 - trace node reference integrity：trace summary 会在 allowlisted solution lifecycle events 上检查 trace metadata 中的 `solution_id`、`parent_id`、`child_id`、ID 列表和 `parent_to_child` 映射是否都能在最终 `tree.json` / `checkpoint.json` node set 中找到，避免误伤非 solution 语义 metadata。
@@ -95,7 +105,7 @@
 - closed node schema：solution node 与 score payload 默认拒绝 unknown fields；`from_dict()`、resume/load 和 trace summary 会对 schema drift fail closed。`tree.json` 和 `trace_summary.json` 写入也使用 `allow_nan=False`。
 - solution tree schema version：`tree.json` 和 `checkpoint.json` 顶层写入 `schema_version=solution_tree.v1`；resume/load 和 trace summary 会拒绝缺失或 unsupported schema version，后续迁移必须显式版本化。
 - artifact path semantics：resume/load 与 trace summary 都会校验 node `workspace` 位于当前 run 的 `solutions/` 下且 basename 匹配 `node_id`，并要求 `proposal_path` / `analysis_path` 位于 node workspace 内且存在，防止 checkpoint/tree 指向外部 artifact。
-- benchmark catalog：6 类论文任务家族都有本地 deterministic engineering proxy，包括 `function_approx`、`poisson_lshape`、`burgers_pinn`、`antiderivative_operator`、`reaction_diffusion_operator`、`cylinder_wake_reconstruction`；另有 `poisson_lshape_faithful_small` 作为首个 faithful-small 升级。每个 catalog entry 记录 `fidelity_level`、expected runtime、dependency flags 和 paper-gap notes。
+- benchmark catalog：6 类论文任务家族都有本地 deterministic engineering proxy，包括 `function_approx`、`poisson_lshape`、`burgers_pinn`、`antiderivative_operator`、`reaction_diffusion_operator`、`cylinder_wake_reconstruction`；另有 `function_approx_faithful_small` 和 `poisson_lshape_faithful_small` 作为 faithful-small 升级。每个 catalog entry 记录 `fidelity_level`、expected runtime、dependency flags 和 paper-gap notes。
 - benchmark metadata validation：`BenchmarkSpec` 构造时校验 `fidelity_level`、expected runtime、dependency flags、paper task name 和 proxy paper-gap notes。
 - fidelity levels document：`docs/fidelity_levels.md` 定义 `proxy`、`faithful-small`、`paper-like` 的准入标准和 claim rules。
 - evaluation contract：`solution.py` 定义 `MODEL`，支持 validate/train/predict，predict 写 `predictions.npz`，`evaluate.py` 输出 `eval.json`。

@@ -173,6 +173,7 @@ class EvolutionConfig:
     use_critic: bool = True
     use_debugger: bool = True
     use_branch_context: bool = True
+    selector_vote_count: int = 1
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -187,6 +188,7 @@ class EvolutionConfig:
             "use_critic": self.use_critic,
             "use_debugger": self.use_debugger,
             "use_branch_context": self.use_branch_context,
+            "selector_vote_count": self.selector_vote_count,
         }
 
     @classmethod
@@ -203,6 +205,7 @@ class EvolutionConfig:
             use_critic=bool(data.get("use_critic", True)),
             use_debugger=bool(data.get("use_debugger", True)),
             use_branch_context=bool(data.get("use_branch_context", True)),
+            selector_vote_count=int(data.get("selector_vote_count", 1)),
         )
 
 

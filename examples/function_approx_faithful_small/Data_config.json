@@ -1,0 +1,5 @@
+{
+  "train_path": "train_data.npz",
+  "validation_path": "val_data.npz",
+  "description": "Faithful-small one-dimensional piecewise oscillatory function approximation data: x_train/u_train shapes (200, 1), x_val/u_val shapes (500, 1)."
+}

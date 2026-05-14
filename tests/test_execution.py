@@ -363,3 +363,19 @@ def test_solution_cannot_open_validation_data_during_train(tmp_path: Path) -> No
 
     assert result.exit_code != 0
     assert "validation data" in result.stderr.lower()
+
+
+def test_solution_cannot_import_benchmark_generator_source(tmp_path: Path) -> None:
+    benchmark = Path("examples/function_approx_faithful_small").resolve()
+    workspace = tmp_path / "generator_leak"
+    prepare_solution_workspace(benchmark, workspace)
+    assert not (workspace / "generate_data.py").exists()
+    (workspace / "solution.py").write_text(
+        "import generate_data\n",
+        encoding="utf-8",
+    )
+
+    result = train_and_evaluate(workspace, EvaluationContract.default_function_approx(), timeout_s=20)
+
+    assert result.exit_code != 0
+    assert "generate_data" in result.stderr

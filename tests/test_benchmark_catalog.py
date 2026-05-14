@@ -18,6 +18,7 @@ from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 
 EXPECTED_BENCHMARKS = {
     "function_approx",
+    "function_approx_faithful_small",
     "poisson_lshape",
     "poisson_lshape_faithful_small",
     "burgers_pinn",
@@ -168,6 +169,35 @@ def test_benchmark_spec_rejects_empty_paper_section() -> None:
         assert "paper_section" in str(exc)
     else:
         raise AssertionError("Expected empty paper_section to fail.")
+
+
+def test_function_approx_faithful_small_matches_paper_shape_and_hides_formula_prompt(tmp_path: Path) -> None:
+    spec = BENCHMARKS["function_approx_faithful_small"]
+    module = _load_generate_module(spec.path / "generate_data.py")
+    module.generate(seed=0, output_dir=tmp_path)
+
+    train = np.load(tmp_path / "train_data.npz")
+    val = np.load(tmp_path / "val_data.npz")
+
+    assert train["x_train"].shape == (200, 1)
+    assert train["u_train"].shape == (200, 1)
+    assert val["x_val"].shape == (500, 1)
+    assert val["u_val"].shape == (500, 1)
+
+    points = np.array([[-0.5], [-0.25], [0.25]])
+    expected = np.array([
+        [(-0.5) ** 2 - 2.0],
+        [(-0.25) ** 2 - 2.0 * np.exp(-3000.0 * (0.25) ** 2)],
+        [np.sin(10.0 * np.pi * 0.25) + 1.0],
+    ])
+    assert np.allclose(module.target_function(points), expected)
+
+    prompt_text = "\n".join(
+        (spec.path / filename).read_text(encoding="utf-8")
+        for filename in ["Problem.md", "Requirements.md", "Evaluation.md", "guidelines.md"]
+    )
+    assert "3000" not in prompt_text
+    assert "sin(10" not in prompt_text
 
 
 def test_all_benchmarks_have_required_artifacts() -> None:

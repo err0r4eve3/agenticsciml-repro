@@ -13,7 +13,7 @@
 
 - [论文机制笔记](paper_notes.md)：AgenticSciML 论文中的阶段、角色、solution tree 和 evaluation contract。
 - [多 Agent 设计方法](multi_agent_design.md)：什么时候使用多 Agent、状态机优先原则、通信方式、可靠性和新增 Agent 检查清单。
-- [Benchmark 与实验设计](benchmark_plan.md)：6 类论文任务家族、本地代理、faithful-small 升级、验证矩阵和真实 LLM 实验顺序。
+- [Benchmark 与实验设计](benchmark_plan.md)：6 类论文任务家族、本地代理、两项 faithful-small 升级、验证矩阵和真实 LLM 实验顺序。
 - [Benchmark Fidelity Levels](fidelity_levels.md)：`proxy`、`faithful-small`、`paper-like` 的准入标准和 claim 边界。
 
 ## 实施与运行

@@ -1,0 +1,20 @@
+[
+  {
+    "id": "piecewise_gated_experts",
+    "title": "Piecewise Gated Experts",
+    "file": "piecewise_gated_experts.md",
+    "description": "Gated experts can fit different function regimes across a discontinuity."
+  },
+  {
+    "id": "fourier_features",
+    "title": "Fourier Features",
+    "file": "fourier_features.md",
+    "description": "Sinusoidal bases help capture high-frequency oscillation."
+  },
+  {
+    "id": "localized_loss_weighting",
+    "title": "Localized Loss Weighting",
+    "file": "localized_loss_weighting.md",
+    "description": "Emphasizing sharp transition regions can reduce discontinuity error."
+  }
+]

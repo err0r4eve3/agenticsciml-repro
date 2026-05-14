@@ -8,7 +8,7 @@
 
 - 多 Agent solution-tree workflow 已经能在本地 mock 模式跑通。
 - 每次 run 都会留下 prompt、response、score、trace、checkpoint、leaderboard 和 champion artifact。
-- 当前 benchmark 覆盖 6 个论文任务家族的本地 `proxy`，另有 1 个 `faithful-small` L-shaped Poisson 升级。
+- 当前 benchmark 覆盖 6 个论文任务家族的本地 `proxy`，另有 2 个 `faithful-small` 升级：S1.1 不连续函数逼近和 S1.2 L-shaped Poisson。
 - 目标是复刻流程与证据链，不是复现论文分数。
 
 不建议汇报为：
@@ -28,7 +28,7 @@ flowchart TB
   orchestrator --> bundle["ProblemBundle<br/>load benchmark sources"]
   orchestrator --> contract["BenchmarkContractFactory<br/>hash-stable EvaluationContract"]
   orchestrator --> storage["ExperimentStorage<br/>atomic artifacts and trace"]
-  orchestrator --> policy["SearchPolicy<br/>best node plus exploration parents"]
+  orchestrator --> policy["Parent selection<br/>best loss plus selector votes"]
 
   orchestrator --> agents["Bounded LLM agents<br/>DataAnalyst, Evaluator, RootEngineer,<br/>Retriever, Proposer, Critic, Engineer,<br/>Debugger, ResultAnalyst, Selector"]
   agents --> llm["LLM client<br/>Mock by default, OpenAI optional"]
@@ -77,7 +77,7 @@ graph TD
 flowchart LR
   subgraph done["已可展示"]
     d1["Mock workflow<br/>root plus mutation"]
-    d2["7 benchmark catalog entries<br/>6 proxy plus 1 faithful-small"]
+    d2["8 benchmark catalog entries<br/>6 proxy plus 2 faithful-small"]
     d3["Artifact persistence<br/>prompt, response, score, logs"]
     d4["Trace quality gate<br/>artifact consistency checks"]
     d5["Checkpoint and resume<br/>fail-closed validation"]
@@ -86,7 +86,7 @@ flowchart LR
 
   subgraph partial["部分完成"]
     p1["Real LLM mode<br/>adapter and smoke tooling exist"]
-    p2["faithful-small benchmark<br/>closer task structure, low budget"]
+    p2["faithful-small benchmarks<br/>closer task structure, low budget"]
     p3["Local sandbox<br/>static guardrails, not container isolation"]
     p4["Branch-context comparison<br/>dry-run and verifier scaffold"]
   end
@@ -113,7 +113,7 @@ flowchart LR
 2. `AgenticSciMLOrchestrator` 加载 `ProblemBundle`，由 Evaluator 生成并持久化 `EvaluationContract`。
 3. RootEngineer 生成 `solution_000`，Runner 在隔离 workspace 中执行 validate、train、predict。
 4. Trusted evaluator 使用私有验证标签计算 score，generated `solution.py` 只看到训练数据和 `x_val`。
-5. SearchPolicy 选择父节点，Retriever / Proposer / Critic / Engineer 生成 child mutation。
+5. 父节点选择先保留 best-loss solution，再用 Selector votes 选 exploration parents，不足时由 deterministic SearchPolicy 补齐；Retriever / Proposer / Critic / Engineer 生成 child mutation。
 6. Debugger 在限定次数内修复失败 child；ResultAnalyst 总结每个 solution。
 7. Storage 写入 checkpoint、trace、leaderboard、tree 和 champion。
 8. Trace summary 对完成态 run 做 quality gate，检查事件、node reference、artifact 和 contract 是否一致。

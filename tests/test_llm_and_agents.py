@@ -39,6 +39,35 @@ class RecordingLLM(LLMClient):
         }
 
 
+class VotingLLM(LLMClient):
+    def __init__(self) -> None:
+        self.responses = [
+            {"selected_parent_ids": ["worse_loss", "promising"], "rationale": "worse has an idea"},
+            {"selected_parent_ids": ["promising"], "rationale": "promising has lower loss"},
+            {"selected_parent_ids": ["worse_loss"], "rationale": "worse is underexplored"},
+        ]
+        self.index = 0
+
+    def complete_text(
+        self,
+        prompt: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+    ) -> str:
+        return "ok"
+
+    def complete_json(
+        self,
+        prompt: str,
+        schema_name: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+    ) -> dict[str, object]:
+        response = self.responses[self.index]
+        self.index += 1
+        return response
+
+
 def test_mock_json_outputs_are_stable() -> None:
     llm = MockLLMClient()
 
@@ -59,6 +88,36 @@ def test_evaluator_prompt_names_required_json_keys(tmp_path: Path) -> None:
     assert "Return exactly one JSON object" in llm.last_prompt
     assert "`metric_name`, `higher_is_better`, and `checkpoint_path`" in llm.last_prompt
     assert "model.pkl" in llm.last_prompt
+
+
+def test_selector_votes_always_include_best_and_tie_break_by_loss(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    selector = SelectorAgent(VotingLLM(), storage)
+    candidates = [
+        {
+            "node_id": "best",
+            "score": {"metric": "validation_mse", "value": 0.1, "higher_is_better": False},
+        },
+        {
+            "node_id": "promising",
+            "score": {"metric": "validation_mse", "value": 0.2, "higher_is_better": False},
+        },
+        {
+            "node_id": "worse_loss",
+            "score": {"metric": "validation_mse", "value": 0.8, "higher_is_better": False},
+        },
+    ]
+
+    result = selector.select_with_votes(
+        candidates=candidates,
+        best_node_id="best",
+        max_to_select=2,
+        vote_count=3,
+    )
+
+    assert result.selected_parent_ids == ["best", "promising"]
+    assert result.vote_counts == {"promising": 2, "worse_loss": 2}
+    assert (storage.run_dir / "reports" / "selector_votes.json").exists()
 
 
 def test_agents_save_transcripts_and_structured_outputs(tmp_path: Path) -> None:

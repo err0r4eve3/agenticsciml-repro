@@ -61,6 +61,11 @@ class AgenticSciMLOrchestrator:
     def __init__(self, config: ExperimentConfig, llm: LLMClient):
         if config.benchmark_dir is None:
             raise ValueError("ExperimentConfig.benchmark_dir is required.")
+        run_dir = config.output_dir / config.experiment_id
+        if not config.resume and run_dir.exists() and any(run_dir.iterdir()):
+            raise FileExistsError(
+                f"Run directory already exists: {run_dir}. Use --resume or choose a new experiment-id."
+            )
         self.config = config
         self.llm = llm
         self.storage = ExperimentStorage.create(config.output_dir, config.experiment_id)
@@ -762,22 +767,40 @@ class AgenticSciMLOrchestrator:
             include_random=True,
         )
         selected = policy.select(self.nodes, max_to_select=self.config.evolution.parallel_mutations)
-        if len(self.nodes) < self.config.evolution.parallel_mutations:
+        if len(available) <= self.config.evolution.parallel_mutations:
             return selected
 
         best = selected[0] if selected else self._best_node(available)
-        llm_selected_ids = self.selector.select(
+        selected = [best]
+        vote_result = self.selector.select_with_votes(
             candidates=[node.to_dict() for node in available],
             best_node_id=best.node_id,
             max_to_select=self.config.evolution.parallel_mutations,
+            vote_count=self.config.evolution.selector_vote_count,
+        )
+        self.storage.record_trace(
+            "agent_span",
+            "selector_votes",
+            {
+                "best_node_id": best.node_id,
+                "selected_parent_ids": vote_result.selected_parent_ids,
+                "vote_counts": vote_result.vote_counts,
+                "vote_count": self.config.evolution.selector_vote_count,
+            },
         )
         by_id = {node.node_id: node for node in available}
         selected_ids = {node.node_id for node in selected}
-        for node_id in llm_selected_ids:
+        for node_id in vote_result.selected_parent_ids:
             if len(selected) >= self.config.evolution.parallel_mutations:
                 break
             node = by_id.get(node_id)
             if node and node.node_id not in selected_ids:
+                selected.append(node)
+                selected_ids.add(node.node_id)
+        for node in policy.select(self.nodes, max_to_select=self.config.evolution.parallel_mutations):
+            if len(selected) >= self.config.evolution.parallel_mutations:
+                break
+            if node.node_id not in selected_ids:
                 selected.append(node)
                 selected_ids.add(node.node_id)
         return selected[: self.config.evolution.parallel_mutations]

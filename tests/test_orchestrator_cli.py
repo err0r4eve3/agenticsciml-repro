@@ -576,6 +576,20 @@ def test_resume_continues_existing_solution_tree_without_rebuilding_root(tmp_pat
     assert "agenticsciml.resume.loaded" in trace_text
 
 
+def test_non_resume_rejects_existing_run_directory(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="existing-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+    )
+    AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+
+    with pytest.raises(FileExistsError, match="Use --resume"):
+        AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+
+
 def test_resume_rejects_stale_evaluation_contract(tmp_path: Path) -> None:
     benchmark_dir = tmp_path / "benchmarks" / "function_approx"
     shutil.copytree(Path("examples/function_approx").resolve(), benchmark_dir)

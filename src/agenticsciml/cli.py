@@ -68,6 +68,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         random_kb=args.random_kb,
         random_seed=args.random_seed,
         use_branch_context=not args.no_branch_context,
+        selector_vote_count=args.selector_vote_count,
     )
     config = ExperimentConfig(
         experiment_id=args.experiment_id or _default_experiment_id(args.mock),
@@ -176,6 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--random-kb", action="store_true")
     run.add_argument("--random-seed", type=int, default=0)
     run.add_argument("--no-branch-context", action="store_true")
+    run.add_argument("--selector-vote-count", type=int, default=1)
     run.add_argument("--resume", action="store_true")
     run.set_defaults(func=cmd_run)
 

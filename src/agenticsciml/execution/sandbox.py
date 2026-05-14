@@ -17,7 +17,6 @@ BENCHMARK_FILES = [
     "Requirements.md",
     "Evaluation.md",
     "Data_config.json",
-    "generate_data.py",
     "guidelines.md",
 ]
 
@@ -29,6 +28,7 @@ GUARDED_FILES = (
 )
 
 BLOCKED_IMPORT_ROOTS = {
+    "generate_data",
     "ftplib",
     "http",
     "paramiko",
@@ -87,7 +87,14 @@ def prepare_solution_workspace(benchmark_dir: Path, workspace: Path) -> None:
     if not (workspace / "train_data.npz").exists() or not (evaluator_dir / "val_data.npz").exists():
         result = run_command(
             workspace,
-            [sys.executable, "generate_data.py", "--seed", "0", "--output-dir", "."],
+            [
+                sys.executable,
+                str(benchmark_dir / "generate_data.py"),
+                "--seed",
+                "0",
+                "--output-dir",
+                ".",
+            ],
             timeout_s=20,
         )
         if result.exit_code != 0:
@@ -176,6 +183,8 @@ def _static_solution_guardrail_violations(solution_path: Path) -> list[str]:
                 violations.append("blocked validation data reference")
             if "AGENTICSCIML_VALIDATION_DATA" in node.value:
                 violations.append("blocked validation data environment reference")
+            if "generate_data.py" in node.value:
+                violations.append("blocked benchmark generator source reference")
     return sorted(set(violations))
 
 

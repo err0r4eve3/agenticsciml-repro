@@ -110,14 +110,14 @@ AGENT_SPECS: dict[str, AgentSpec] = {
     "selector": AgentSpec(
         role="selector",
         state_node="parent selection",
-        purpose="Select parents while balancing exploitation and exploration.",
+        purpose="Vote on exploration parents while the lowest-loss best node is kept for exploitation.",
         non_role=("generate proposal", "write code", "change scores"),
         input_schema=("candidates", "best_node_id", "max_to_select"),
         output_schema=("selected_parent_ids", "rationale"),
         visible_context=("leaderboard summary", "solution metadata"),
         tools=("llm",),
-        budget={"calls": 1},
-        artifacts=("transcripts/selector.json",),
+        budget={"calls": "selector_vote_count"},
+        artifacts=("transcripts/selector.json", "reports/selector_votes.json"),
         failure_policy="fall back to current best parent",
     ),
     "retriever": AgentSpec(
