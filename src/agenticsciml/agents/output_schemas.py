@@ -51,6 +51,7 @@ class DebuggerOutput(StrictOutputModel):
     patch: str
     files_changed: list[str]
     risks: list[str]
+    full_file_map: dict[str, str] | None = None
 
 
 class ResultAnalysisOutput(StrictOutputModel):

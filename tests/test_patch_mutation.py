@@ -185,9 +185,60 @@ def test_debugger_prompt_includes_contract_context_and_applies_patch(tmp_path: P
     assert changed is True
     assert "Failure Phase" in prompt
     assert "parent_digest:" in prompt
+    assert "full_file_map" in prompt
     assert contract.contract_hash in prompt
     assert "ProblemBundle Summary" in prompt
     assert (workspace / "solution.py").read_text(encoding="utf-8") == "fixed\n"
+
+
+def test_debugger_uses_full_file_map_when_patch_context_fails(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    agent = DebuggerAgent(RecordingContextLLM(), storage)
+
+    changed = agent.apply_debug_output(
+        "solution_001",
+        "old\n",
+        {
+            "summary": "replace via file map",
+            "failure_kind": "runtime_error",
+            "minimal_fix": "replace current code after patch context drift",
+            "parent_digest": solution_digest("old\n"),
+            "patch": "--- solution.py\n+++ solution.py\n@@ -1 +1 @@\n-missing\n+new\n",
+            "files_changed": ["solution.py"],
+            "risks": ["full replacement may be larger than a patch"],
+            "full_file_map": {"solution.py": "new\n"},
+        },
+    )
+
+    assert changed is True
+    assert (storage.run_dir / "solutions" / "solution_001" / "solution.py").read_text(
+        encoding="utf-8"
+    ) == "new\n"
+
+
+def test_debugger_uses_full_file_map_without_patch(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    agent = DebuggerAgent(RecordingContextLLM(), storage)
+
+    changed = agent.apply_debug_output(
+        "solution_001",
+        "old\n",
+        {
+            "summary": "replace via file map",
+            "failure_kind": "runtime_error",
+            "minimal_fix": "replace current code after large repair",
+            "parent_digest": solution_digest("old\n"),
+            "patch": "",
+            "files_changed": ["solution.py"],
+            "risks": ["full replacement may be larger than a patch"],
+            "full_file_map": {"solution.py": "new\n"},
+        },
+    )
+
+    assert changed is True
+    assert (storage.run_dir / "solutions" / "solution_001" / "solution.py").read_text(
+        encoding="utf-8"
+    ) == "new\n"
 
 
 def test_debugger_rejects_wrong_parent_digest(tmp_path: Path) -> None:

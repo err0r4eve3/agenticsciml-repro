@@ -50,6 +50,10 @@ backend、human review pause/resume 和 MCP/hosted tools sidecar。
   `deepseek-v4-flash`；OpenAI-compatible chat JSON fallback 会把 Pydantic
   JSON Schema、array 字段规则和 no-extra-field 规则注入 prompt，并能从带说明
   或 markdown fence 的响应中提取首个 JSON object 后再做 closed schema 校验。
+- Debugger patch hardening：`DebuggerOutput` 支持可选
+  `full_file_map.solution.py`，当真实 LLM 返回的 unified diff context 与当前
+  `solution.py` 不匹配时，可在 `parent_digest` 和 `files_changed=["solution.py"]`
+  约束下用完整文件兜底，降低真实 provider patch 漂移导致的无效 repair。
 - provider capability matrix：real-smoke manifest、ledger、trace metadata 和
   run metadata 记录 provider、adapter type、Responses/Structured Outputs/
   usage/trace export/prompt-cache capability。

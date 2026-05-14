@@ -42,10 +42,13 @@ class DebuggerAgent(AgentBase):
         prompt = (
             "Patch the generated solution while preserving the evaluation contract. "
             "Return JSON with summary, failure_kind, minimal_fix, parent_digest, "
-            "patch, files_changed, and risks. Use a unified diff patch for solution.py. "
-            "`risks` and `files_changed` must be JSON arrays of strings. Set "
-            "`files_changed` to exactly [\"solution.py\"]. Use exact current-code context "
-            "in every unified diff hunk. Do not return a full replacement file.\n\n"
+            "patch, files_changed, risks, and optional full_file_map. `risks` and "
+            "`files_changed` must be JSON arrays of strings. Set `files_changed` to "
+            "exactly [\"solution.py\"]. Use exactly one code-change channel: either a "
+            "unified diff `patch`, or an empty `patch` plus `full_file_map` containing "
+            "the complete `solution.py`. Prefer a patch for small edits, but use "
+            "`full_file_map.solution.py` when exact current-code context may be "
+            "unreliable.\n\n"
             "## ProblemBundle Summary\n\n"
             f"{problem_bundle.summary()}\n\n"
             "## EvaluationContract JSON\n\n"
@@ -98,8 +101,23 @@ class DebuggerAgent(AgentBase):
 
         patch = str(response.get("patch", ""))
         if not patch.strip():
-            return False
+            full_file_map = response.get("full_file_map")
+            if not isinstance(full_file_map, dict) or "solution.py" not in full_file_map:
+                return False
+            code = str(full_file_map["solution.py"])
+            self.storage.save_solution_text(
+                solution_id,
+                "solution.py",
+                code if code.endswith("\n") else code + "\n",
+            )
+            return True
 
-        code = apply_unified_patch(current_code, patch)
+        try:
+            code = apply_unified_patch(current_code, patch)
+        except PatchApplicationError:
+            full_file_map = response.get("full_file_map")
+            if not isinstance(full_file_map, dict) or "solution.py" not in full_file_map:
+                raise
+            code = str(full_file_map["solution.py"])
         self.storage.save_solution_text(solution_id, "solution.py", code if code.endswith("\n") else code + "\n")
         return True
