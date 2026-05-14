@@ -54,6 +54,7 @@ class RecordingContextLLM(LLMClient):
             "parent_digest": solution_digest("old\n"),
             "patch": "--- solution.py\n+++ solution.py\n@@ -1 +1 @@\n-old\n+new\n",
             "files_changed": ["solution.py"],
+            "full_file_map": {"solution.py": "new\n"},
         }
 
 
@@ -110,6 +111,7 @@ def test_engineer_prompt_includes_context_and_applies_patch(tmp_path: Path) -> N
     prompt = llm.prompts[-1]
     assert "parent_digest:" in prompt
     assert "full_file_map" in prompt
+    assert "model.pkl" in prompt
     assert '["solution.py"]' in prompt
     assert contract.contract_hash in prompt
     assert "Parent underfits" in prompt

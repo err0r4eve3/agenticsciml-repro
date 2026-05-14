@@ -40,7 +40,7 @@ class EngineerOutput(StrictOutputModel):
     parent_digest: str
     patch: str = ""
     files_changed: list[str]
-    full_file_map: dict[str, str] | None = None
+    full_file_map: dict[str, str]
 
 
 class DebuggerOutput(StrictOutputModel):

@@ -42,12 +42,11 @@ class EngineerAgent(AgentBase):
         prompt = (
             "Modify parent solution.py according to the proposal. "
             "Return JSON with mutation_summary, expected_effect, risks, parent_digest, "
-            "patch, files_changed, and optional full_file_map. `risks` must be a JSON "
-            "array of strings. Set `files_changed` to exactly [\"solution.py\"]. Use exactly "
-            "one code-change channel: either a unified diff `patch`, or an empty `patch` "
-            "plus `full_file_map` containing the complete `solution.py`. Prefer a patch "
-            "for small edits, but use `full_file_map.solution.py` when the change is large "
-            "or exact patch context may be unreliable.\n\n"
+            "patch, files_changed, and full_file_map. `risks` must be a JSON array of "
+            "strings. Set `files_changed` to exactly [\"solution.py\"]. Always include "
+            "`full_file_map` with exactly one key, `solution.py`, containing the complete "
+            "mutated file. You may also include a unified diff `patch`, but the complete "
+            "file is mandatory because patch context from LLMs can drift.\n\n"
             "## ProblemBundle Summary\n\n"
             f"{problem_bundle.summary()}\n\n"
             "## EvaluationContract JSON\n\n"
@@ -64,6 +63,13 @@ class EngineerAgent(AgentBase):
             "with a `predictions` array.\n"
             "- Do not modify evaluator files.\n"
             "- Do not use network, subprocess, absolute paths, or home-directory helpers.\n\n"
+            "## Contract-Specific Implementation Requirements\n\n"
+            "- `solution.py --mode=validate` must run before training and must not require "
+            "`model.pkl` or any previous checkpoint.\n"
+            "- Use `x_train` and `u_train` directly when they exist in `train_data.npz`, even "
+            "if their shapes match.\n"
+            "- If training data cannot be parsed, raise an error; do not fabricate synthetic "
+            "targets or fall back to synthetic data.\n\n"
             f"parent_digest: {parent_digest}\n\n"
             f"Proposal:\n{proposal.to_markdown()}\n\nParent code:\n{parent_code[:8000]}"
         )
@@ -77,6 +83,7 @@ class EngineerAgent(AgentBase):
                 "parent_digest",
                 "patch",
                 "files_changed",
+                "full_file_map",
             ),
         )
         code = self.apply_mutation_output(solution_id, parent_code, response)

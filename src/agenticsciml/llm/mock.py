@@ -208,6 +208,7 @@ class MockLLMClient(LLMClient):
                     FOURIER_RIDGE_SOLUTION + "\n",
                 ),
                 "files_changed": ["solution.py"],
+                "full_file_map": {"solution.py": FOURIER_RIDGE_SOLUTION + "\n"},
             }
         if name == "analysis":
             return {

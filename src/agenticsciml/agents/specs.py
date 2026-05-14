@@ -191,6 +191,7 @@ AGENT_SPECS: dict[str, AgentSpec] = {
             "parent_digest",
             "patch",
             "files_changed",
+            "full_file_map",
         ),
         output_model="engineer",
         visible_context=(
