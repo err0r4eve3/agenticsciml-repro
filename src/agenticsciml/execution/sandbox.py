@@ -242,6 +242,24 @@ def _missing_prediction_output(workspace: Path, command: list[str]) -> str | Non
     return None
 
 
+def _training_data_integrity_violation(phase: str, result: RunResult) -> str | None:
+    if phase not in {"validate", "train"} or result.exit_code != 0:
+        return None
+    text = f"{result.stdout}\n{result.stderr}".lower()
+    markers = (
+        "error loading data",
+        "falling back to synthetic",
+        "synthetic training data",
+        "cannot infer features/targets",
+    )
+    if any(marker in text for marker in markers):
+        return (
+            "Guardrail violation: generated solution reported a training-data "
+            f"loading failure or synthetic-data fallback during {phase}."
+        )
+    return None
+
+
 def train_and_evaluate(
     workspace: Path,
     contract: EvaluationContract,
@@ -323,6 +341,17 @@ def train_and_evaluate(
                 stderr="\n".join(all_stderr),
                 duration_s=total_duration,
                 timed_out=result.timed_out,
+            )
+        data_integrity_violation = _training_data_integrity_violation(phase, result)
+        if data_integrity_violation:
+            all_stderr.append(data_integrity_violation)
+            (workspace / "train.log").write_text("\n".join(all_stdout), encoding="utf-8")
+            return RunResult(
+                command=normalized,
+                exit_code=125,
+                stdout="\n".join(all_stdout),
+                stderr="\n".join(all_stderr),
+                duration_s=total_duration,
             )
         if phase == "predict":
             missing_prediction = _missing_prediction_output(workspace, normalized)

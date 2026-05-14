@@ -54,6 +54,9 @@ backend、human review pause/resume 和 MCP/hosted tools sidecar。
   `full_file_map.solution.py`，当真实 LLM 返回的 unified diff context 与当前
   `solution.py` 不匹配时，可在 `parent_digest` 和 `files_changed=["solution.py"]`
   约束下用完整文件兜底，降低真实 provider patch 漂移导致的无效 repair。
+- training-data integrity guard：`validate` / `train` 阶段若返回 0 但日志显示
+  训练数据加载失败或 synthetic fallback，runner 会 fail closed，避免真实 LLM
+  solution 用自造数据通过 benchmark 流程。
 - provider capability matrix：real-smoke manifest、ledger、trace metadata 和
   run metadata 记录 provider、adapter type、Responses/Structured Outputs/
   usage/trace export/prompt-cache capability。

@@ -258,6 +258,40 @@ if __name__ == "__main__":
 '''
 
 
+SYNTHETIC_FALLBACK_SOLUTION = '''
+import argparse
+import pickle
+
+import numpy as np
+
+MODEL_CHECKPOINT = "model.pkl"
+
+class MODEL:
+    def predict(self, x):
+        return np.zeros((len(x), 1))
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["validate", "train", "predict"], required=True)
+    parser.add_argument("--input", default="predict_input.npz")
+    parser.add_argument("--output", default="predictions.npz")
+    args = parser.parse_args()
+    if args.mode == "validate":
+        print("Error loading data: Cannot infer features/targets.")
+        return
+    if args.mode == "train":
+        print("Falling back to synthetic piecewise data.")
+        with open(MODEL_CHECKPOINT, "wb") as f:
+            pickle.dump(MODEL(), f)
+        return
+    data = np.load(args.input)
+    np.savez(args.output, predictions=MODEL().predict(data["x_val"]))
+
+if __name__ == "__main__":
+    main()
+'''
+
+
 def test_run_command_captures_exit_code_and_logs(tmp_path: Path) -> None:
     result = run_command(tmp_path, ["python", "-c", "print('ok')"], timeout_s=5)
 
@@ -379,3 +413,15 @@ def test_solution_cannot_import_benchmark_generator_source(tmp_path: Path) -> No
 
     assert result.exit_code != 0
     assert "generate_data" in result.stderr
+
+
+def test_solution_cannot_silently_fallback_to_synthetic_training_data(tmp_path: Path) -> None:
+    benchmark = Path("examples/function_approx_faithful_small").resolve()
+    workspace = tmp_path / "synthetic_fallback"
+    prepare_solution_workspace(benchmark, workspace)
+    (workspace / "solution.py").write_text(SYNTHETIC_FALLBACK_SOLUTION, encoding="utf-8")
+
+    result = train_and_evaluate(workspace, EvaluationContract.default_function_approx(), timeout_s=20)
+
+    assert result.exit_code == 125
+    assert "synthetic-data fallback" in result.stderr
