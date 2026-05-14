@@ -17,7 +17,11 @@ class EvaluatorAgent(AgentBase):
         self.require_inputs({"problem_bundle": problem_bundle, "data_report": data_report})
         prompt = (
             "Review the benchmark evaluation contract. The final executable "
-            "contract is produced by BenchmarkContractFactory, not by the LLM.\n\n"
+            "contract is produced by BenchmarkContractFactory, not by the LLM. "
+            "Return exactly one JSON object with these keys: "
+            "`metric_name`, `higher_is_better`, and `checkpoint_path`. "
+            "Use the benchmark summary metric and `model.pkl` as checkpoint_path. "
+            "Do not include alternative key names, markdown, or explanatory text.\n\n"
             f"{problem_bundle.summary()}"
         )
         if data_report:

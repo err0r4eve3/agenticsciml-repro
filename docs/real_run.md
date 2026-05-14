@@ -23,6 +23,20 @@ export OPENAI_MODEL=gpt-5-mini
 uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx --max-iterations 1
 ```
 
+For OpenAI-compatible providers, set `OPENAI_BASE_URL` as well. For example,
+DeepSeek-style endpoints can be used without changing the CLI surface:
+
+```bash
+export OPENAI_BASE_URL=https://api.deepseek.com
+export OPENAI_API_KEY=...
+export OPENAI_MODEL=deepseek-v4-pro
+export OPENAI_TIMEOUT_S=120
+uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx --max-iterations 0
+```
+
+Use the provider's exact model id. For example, if the provider rejects
+`deepseekv4pro` and reports `deepseek-v4-pro`, use the hyphenated id.
+
 For first real runs, prefer root-only smoke before mutation:
 
 ```bash

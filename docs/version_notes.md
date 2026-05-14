@@ -11,6 +11,9 @@
 - Python 3.11 package scaffold。
 - deterministic mock LLM adapter。
 - optional OpenAI adapter。
+- OpenAI-compatible provider support：`OpenAIAdapter` 可通过
+  `OPENAI_BASE_URL` 指向 DeepSeek 等兼容 endpoint，并通过
+  `OPENAI_TIMEOUT_S` 设置 provider 请求超时。
 - `AgentSpec` / `PromptTemplate` / artifact guard 基础合同层。
 - runtime `AgentSpec` enforcement：agent 方法入口校验 `input_schema`，JSON 输出默认校验 `output_schema`。
 - OpenAI Agents SDK 对齐的结构化输出校验、JSON retry、trace span 和 guardrail 事件。

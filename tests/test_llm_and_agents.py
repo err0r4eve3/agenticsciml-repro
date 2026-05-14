@@ -2,11 +2,41 @@ from pathlib import Path
 
 import pytest
 
-from agenticsciml.agents import CriticAgent, ProposerAgent, SelectorAgent
+from agenticsciml.agents import CriticAgent, EvaluatorAgent, ProposerAgent, SelectorAgent
 from agenticsciml.agents.base import ArtifactMissingError, InputContractError
 from agenticsciml.agents.specs import AGENT_SPECS, AgentSpec, PromptTemplate
+from agenticsciml.benchmarks import ProblemBundle
+from agenticsciml.llm.base import LLMClient
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.storage import ExperimentStorage
+
+
+class RecordingLLM(LLMClient):
+    def __init__(self) -> None:
+        self.last_prompt = ""
+
+    def complete_text(
+        self,
+        prompt: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+    ) -> str:
+        self.last_prompt = prompt
+        return "ok"
+
+    def complete_json(
+        self,
+        prompt: str,
+        schema_name: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+    ) -> dict[str, object]:
+        self.last_prompt = prompt
+        return {
+            "metric_name": "validation_mse",
+            "higher_is_better": False,
+            "checkpoint_path": "model.pkl",
+        }
 
 
 def test_mock_json_outputs_are_stable() -> None:
@@ -17,6 +47,18 @@ def test_mock_json_outputs_are_stable() -> None:
 
     assert first == second
     assert first["selected_parent_ids"] == ["solution_000"]
+
+
+def test_evaluator_prompt_names_required_json_keys(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    llm = RecordingLLM()
+    bundle = ProblemBundle.load(Path("examples/function_approx"))
+
+    EvaluatorAgent(llm, storage).create_contract(bundle, data_report="short report")
+
+    assert "Return exactly one JSON object" in llm.last_prompt
+    assert "`metric_name`, `higher_is_better`, and `checkpoint_path`" in llm.last_prompt
+    assert "model.pkl" in llm.last_prompt
 
 
 def test_agents_save_transcripts_and_structured_outputs(tmp_path: Path) -> None:
