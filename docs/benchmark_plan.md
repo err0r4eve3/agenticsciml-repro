@@ -61,6 +61,12 @@ the trusted evaluator asks generated code for function values at solution,
 boundary, residual-center, and finite-difference stencil points, then computes
 a private composite score without importing `solution.py`.
 
+`burgers_pinn` now has a source-grounded local KB seeded from Raissi,
+Perdikaris, and Karniadakis's PINNs paper plus the public `maziarraissi/PINNs`
+Burgers example. The KB is documented in
+[SciML 论文与代码知识库](sciml_knowledge_base.md) and remains a retrieval hint,
+not a paper-score reproduction claim.
+
 `fidelity_level` 的含义：
 
 - `proxy`：本地 NumPy 小规模代理任务，只验证 workflow / evaluator / artifact shape。

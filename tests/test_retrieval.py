@@ -18,6 +18,19 @@ def test_kb_loads_entries() -> None:
     assert "oscillation" in entry.description.lower()
 
 
+def test_burgers_kb_loads_source_grounded_entries() -> None:
+    kb = KnowledgeBase.load(Path("examples/burgers_pinn/kb"))
+
+    residual = kb.get("pinn_residual_objective")
+    collocation = kb.get("collocation_and_scaling")
+    budget = kb.get("budgeted_pinn_mutation")
+
+    assert "10.1016/j.jcp.2018.10.045" in residual.content
+    assert "continuous_time_inference (Burgers)" in collocation.content
+    assert "OpenAI Agents SDK official docs" in budget.content
+    assert "guardrail" in budget.description.lower()
+
+
 def test_lexical_retrieval_is_deterministic() -> None:
     kb = KnowledgeBase.load(Path("examples/function_approx/kb"))
 

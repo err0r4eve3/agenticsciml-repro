@@ -4,5 +4,23 @@
     "title": "Periodic Residual Sampling",
     "file": "periodic_residual_sampling.md",
     "description": "Periodic features and adaptive sampling help Burgers-like steep gradients."
+  },
+  {
+    "id": "pinn_residual_objective",
+    "title": "PINN Residual Objective",
+    "file": "pinn_residual_objective.md",
+    "description": "Paper-grounded data/residual objective hints for Burgers PINN mutations."
+  },
+  {
+    "id": "collocation_and_scaling",
+    "title": "Collocation and Scaling",
+    "file": "collocation_and_scaling.md",
+    "description": "Public-code-grounded collocation, boundary coverage, and input scaling hints."
+  },
+  {
+    "id": "budgeted_pinn_mutation",
+    "title": "Budgeted PINN Mutation",
+    "file": "budgeted_pinn_mutation.md",
+    "description": "Use paper/code experiment dimensions under SDK-style typed output, guardrail, and trace boundaries."
   }
 ]
