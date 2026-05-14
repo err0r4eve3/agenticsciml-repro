@@ -1,6 +1,6 @@
 # 多 Agent 设计方法
 
-[返回文档树](index.md) · 相关文档：[论文机制笔记](paper_notes.md)、[Codex 实施任务](codex_tasks.md)
+[返回文档树](index.md) · 相关文档：[论文机制笔记](paper_notes.md)、[Git 与 Markdown 分层记录方法论](git_markdown_methodology.md)、[Codex 实施任务](codex_tasks.md)
 
 ## 核心原则
 
@@ -93,6 +93,16 @@ leaderboard top-k
 - `run_trace`：agent 调用、prompt、response、stdout、stderr、时间和成本。
 
 记忆不是越多越好。每个 Agent 只能看到完成当前职责所需的最小充分信息。
+
+## Git 与 Markdown 记录层
+
+多 Agent 工作流的长期记忆不靠聊天历史，而靠三层记录互相校验：
+
+- Git commit：记录一次 scoped 变更和验证结果，是项目演化时间轴。
+- Markdown 文档树：记录论文依据、SDK 边界、benchmark fidelity、架构方法和版本叙事，是人可导航的知识图谱。
+- Run artifacts：记录 prompt、response、score、trace、checkpoint 和 leaderboard，是单次实验机器证据。
+
+AgenticSciML 的每次架构或实验边界变化，都应能从 `docs/index.md` 找到解释，从 Git commit 找到变更点，从 run directory 或测试命令找到证据。具体规则见 [Git 与 Markdown 分层记录方法论](git_markdown_methodology.md)。
 
 ## 可靠性要求
 

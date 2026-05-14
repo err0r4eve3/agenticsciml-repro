@@ -100,6 +100,9 @@ paper-score reproduction.
 
 中文文档入口在 [docs/index.md](docs/index.md)。新增项目说明、设计笔记、
 运行说明或版本说明时，先挂到这个文档树，避免孤立页面。
+项目采用 [Git 与 Markdown 分层记录方法论](docs/git_markdown_methodology.md)：
+Git 记录变更时间轴，互链 Markdown 树记录长期知识结构，run artifacts
+记录单次实验机器证据。
 
 ## Real LLM Mode
 

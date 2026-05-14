@@ -23,6 +23,12 @@ backend、human review pause/resume 和 MCP/hosted tools sidecar。
 自动调用 `codex-chatgpt-pro-research`、ChatGPT Pro 或外部审计 brief；
 只有用户明确恢复该策略或点名一次性 Pro review 时才允许重新启用。
 
+同日新增 [Git 与 Markdown 分层记录方法论](git_markdown_methodology.md)：
+把论文机制、OpenAI Agents SDK 边界、Git commit 时间轴、互链 Markdown
+文档树和 run artifacts 统一为项目记录协议。后续架构、benchmark、SDK
+对齐、claim boundary 和导师汇报，都应能从 `docs/index.md`、Git commit
+和运行/测试证据互相追溯。
+
 ## v0.1.0 MVP
 
 当前版本目标是复刻 AgenticSciML 的多 Agent workflow，而不是复现论文分数。

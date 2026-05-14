@@ -45,6 +45,9 @@ exit non-zero. Use `smoke-llm --real` before expecting verification to pass.
 - `docs/paper_notes.md` records the paper-derived workflow constraints.
 - `docs/index.md` is the documentation tree root.
 - `docs/multi_agent_design.md` records the multi-agent workflow design method.
+- `docs/git_markdown_methodology.md` records the project method for using Git
+  as the change timeline, the Markdown tree as the knowledge graph, and run
+  artifacts as machine evidence.
 - `docs/version_notes.md` records current MVP capabilities and release notes.
 - `docs/benchmark_plan.md` records benchmark catalog, validation matrix, and
   real LLM experiment order.
@@ -59,8 +62,29 @@ exit non-zero. Use `smoke-llm --real` before expecting verification to pass.
   command, path, package, or code symbol is clearer in English.
 - Keep docs tree-shaped and cross-linked. Avoid adding standalone Markdown pages
   that cannot be reached from `docs/index.md`.
+- Keep project knowledge layered: source/tests define behavior, run artifacts
+  hold per-experiment evidence, Markdown explains stable knowledge and claim
+  boundaries, and Git commits bind scoped changes to validation.
 - Version notes should describe verified commands, known boundaries, and next
   version suggestions without implying paper-score reproduction.
+
+## Git And Markdown Methodology
+
+- Follow `docs/git_markdown_methodology.md` when a task changes paper-derived
+  claims, SDK alignment, benchmark design, experiment evidence, architecture,
+  governance, or mentor-facing summaries.
+- Treat Git as the chronological audit log. Each commit should represent one
+  coherent concept and should not mix unrelated documentation, benchmark, and
+  runtime work.
+- Treat `docs/index.md` as the knowledge graph root. Any new long-lived
+  Markdown page must be linked from it and should link back to related docs.
+- Treat run directories as evidence bundles. Do not summarize a run as a fact
+  unless the relevant artifact, trace, score, or verification command exists.
+- When code behavior, benchmark fidelity, SDK boundaries, or claim boundaries
+  change, update the stable Markdown layer in the same change set.
+- For mentor or external reporting, derive claims from code/tests, run
+  artifacts, and the documentation tree; do not write standalone conclusions
+  that cannot be traced back to those layers.
 
 ## GitHub And Versioning Policy
 
