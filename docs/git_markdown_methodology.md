@@ -89,7 +89,10 @@ Agent 只消费最小充分上下文：
 - 论文和 SDK 依据通过短文档摘要进入 prompt。
 - KB 条目通过 Retriever 进入单个 mutation。
 - run artifact 作为事实来源，不把聊天历史当事实来源。
-- ResultAnalyst 只能总结 `eval.json`、`train.log`、`analysis.md`、trace 和 score，不能自行改变 benchmark claim boundary。
+- DataAnalyst 只能把公开训练数据压缩成 `data_observations.json` 和
+  `data_overview.svg`，不能把 private validation labels 写进下游 prompt。
+- ResultAnalyst 只能总结 `eval.json`、`train.log`、prediction-only
+  observation artifacts、trace 和 score，不能自行改变 benchmark claim boundary。
 
 ## 变更流程
 

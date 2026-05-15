@@ -36,6 +36,12 @@ backend、human review pause/resume 和 MCP/hosted tools sidecar。
 已实现能力：
 
 - Python 3.11 package scaffold。
+- Observation artifact layer：`DataAnalystAgent` 生成
+  `reports/data_observations.json` 和 `reports/data_overview.svg`，把公开训练数据
+  的 shape/statistics/overview plot 写入 run evidence；`ResultAnalystAgent`
+  生成 `solution_observations.json` 和 `prediction_overview.svg`，只基于
+  `predict_input.npz`、`predictions.npz`、`eval.json` 和日志摘要分析结果，保持
+  private validation labels 不进入 downstream prompt。
 - deterministic mock LLM adapter。
 - optional OpenAI adapter。
 - OpenAI-native structured output path：未设置 `OPENAI_BASE_URL` 时，
@@ -105,7 +111,7 @@ backend、human review pause/resume 和 MCP/hosted tools sidecar。
   再由 selector vote 选择额外 exploration parents，并把 vote counts 写入
   `reports/selector_votes.json`；不足名额才由 deterministic `SearchPolicy`
   用 recent improvement、diverse underexplored node 和 `max_children_per_node`
-  约束补齐。当前默认是单 LLM provider 的 `selector_vote_count=1`，不是论文里的
+  约束补齐。当前默认是单 LLM provider 的 `selector_vote_count=3`，不是论文里的
   GPT/Grok/Gemini 三模型 ensemble；CLI 可用 `--selector-vote-count` 调整重复投票次数。
 - parallel child mutation jobs：当 `parallel_mutations > 1` 时，orchestrator 用 bounded `ThreadPoolExecutor` 并行创建 child solution，并写入 `agenticsciml.parallel_children.*` trace。
 - early-stage mutation fanout：早期只有 root 或 selector 返回 parent 数不足时，orchestrator 会按 mutation budget 对可用 parent 做 deterministic fanout，从同一 parent 生成多个 child 分支，同时遵守 `max_children_per_node`。

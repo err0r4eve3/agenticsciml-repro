@@ -13,15 +13,17 @@ Sources checked:
 
 1. User input: `Problem.md`, `Requirements.md`, `Evaluation.md`, and optional
    `Data_config.json`.
-2. Data analysis and evaluation criteria: a data analyst writes a text-only
-   report, then an evaluator formalizes a testing contract.
+2. Data analysis and evaluation criteria: a data analyst writes observation
+   artifacts and a text report, then an evaluator formalizes a testing
+   contract.
 3. Solution evolution: a root single-agent baseline is generated, then a
    solution tree is expanded through retrieval, debate, mutation, debugging,
    evaluation, and analysis.
 
 ## Agent Roles
 
-- Data Analyst: inspects data and writes `data_analysis.md`.
+- Data Analyst: inspects public training data and writes `data_analysis.md`,
+  `data_observations.json`, and `data_overview.svg`.
 - Evaluator: creates `evaluate.py`, `guidelines.md`, and the scoring contract.
 - Root Engineer: creates the first baseline solution without KB or debate.
 - Retriever: selects 0-1 relevant KB entries for a parent solution.
@@ -29,7 +31,8 @@ Sources checked:
 - Critic: challenges gaps, risks, and feasibility.
 - Engineer: modifies parent code according to the final proposal.
 - Debugger: fixes execution failures within retry limits.
-- Result Analyst: writes the solution report used by later mutations.
+- Result Analyst: writes the solution report and prediction-only observation
+  artifacts used by later mutations.
 - Selector: votes for exploration parents while the best solution is always
   included for exploitation.
 

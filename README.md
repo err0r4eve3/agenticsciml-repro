@@ -76,7 +76,12 @@ The mock run writes a directory under `runs/` with:
 - `solutions/solution_*/train.log`
 - `solutions/solution_*/eval.json`
 - `solutions/solution_*/analysis.md`
+- `solutions/solution_*/solution_observations.json`
+- `solutions/solution_*/prediction_overview.svg`
 - `solutions/solution_*/retrieval_query.txt`
+- `reports/data_analysis.md`
+- `reports/data_observations.json`
+- `reports/data_overview.svg`
 - `leaderboard.csv`
 - `tree.json`
 - `tree.mmd`

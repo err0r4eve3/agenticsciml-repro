@@ -173,6 +173,11 @@ Phase 4: Champion export
 - `AgentBase.require_artifacts()` 用于检查 Agent 是否写出了约定 artifact。
 - `AgentBase.require_inputs()` 将 `AgentSpec.input_schema` 接入运行时，缺少输入字段会 fail closed 并写入 guardrail trace。
 - `AgentBase.complete_json_checked()` 默认使用 `AgentSpec.output_schema` 校验代码消费的 LLM 输出。
+- `DataAnalystAgent` 会生成 `reports/data_observations.json` 和 `reports/data_overview.svg`，
+  prompt 只消费训练数据观察摘要，不接触 private validation labels。
+- `ResultAnalystAgent` 会生成 `solution_observations.json` 和
+  `prediction_overview.svg`，prompt 只消费 `predict_input.npz`、`predictions.npz`、
+  `eval.json` 和日志摘要，保持 prediction-only 边界。
 - `CriticAgent` 已从 `ProposerAgent` 中拆出，单独写入 `critic.md` 和 critic transcript。
 - `ProposerAgent` 仍负责 4-round proposal flow，但 critic 调用通过独立 Agent 完成。
 - `RootEngineerAgent` 和 `EngineerAgent` 的 prompt 已包含 benchmark、contract、guidelines 和分析上下文，避免脱离评估契约生成代码。
@@ -181,7 +186,9 @@ Phase 4: Champion export
 - Parent selection 分两层：最低 loss 的 best available node 总是进入下一轮作为 exploitation；
   mature stage 的额外 parent 由 selector vote 产生并落盘到 `reports/selector_votes.json`，
   不足名额再由 deterministic `SearchPolicy` 用 recent improvement、diverse underexplored
-  和 `max_children_per_node` 约束补齐。
+  和 `max_children_per_node` 约束补齐。默认 `selector_vote_count=3`，这是同一
+  provider 的多票 evidence；除非后续显式配置多 provider，不声明论文级异构
+  selector ensemble。
 - `RetrievalQueryBuilder` 用 benchmark metadata、parent analysis、failure kind、method tags、score trend 和 leaderboard top-k 构造 KB query；`use_kb` 与 `random_kb` 可用于 ablation。
 - `SolutionNode` 持久化 selector/retriever 需要的结构化元数据，包括 `method_tags`、`failure_kind`、`score_delta_from_parent`、`num_debug_attempts`、`benchmark_name` 和 `contract_hash`。
 - `trace_summary.json` 汇总 `trace.jsonl`，用 required span types 和 guardrail failures 形成最小 trace quality gate。

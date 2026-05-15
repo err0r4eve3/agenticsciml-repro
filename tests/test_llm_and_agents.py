@@ -1,8 +1,17 @@
+import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
-from agenticsciml.agents import CriticAgent, EvaluatorAgent, ProposerAgent, SelectorAgent
+from agenticsciml.agents import (
+    CriticAgent,
+    DataAnalystAgent,
+    EvaluatorAgent,
+    ProposerAgent,
+    ResultAnalystAgent,
+    SelectorAgent,
+)
 from agenticsciml.agents.base import ArtifactMissingError, InputContractError
 from agenticsciml.agents.specs import AGENT_SPECS, AgentSpec, PromptTemplate
 from agenticsciml.benchmarks import ProblemBundle
@@ -32,6 +41,13 @@ class RecordingLLM(LLMClient):
         temperature: float = 0.0,
     ) -> dict[str, object]:
         self.last_prompt = prompt
+        if schema_name in {"analysis", "result_analyst"}:
+            return {
+                "summary": "analyzed observations",
+                "strengths": ["score recorded"],
+                "weaknesses": ["prediction-only plots do not expose labels"],
+                "next_steps": ["compare with sibling observations"],
+            }
         return {
             "metric_name": "validation_mse",
             "higher_is_better": False,
@@ -88,6 +104,57 @@ def test_evaluator_prompt_names_required_json_keys(tmp_path: Path) -> None:
     assert "Return exactly one JSON object" in llm.last_prompt
     assert "`metric_name`, `higher_is_better`, and `checkpoint_path`" in llm.last_prompt
     assert "model.pkl" in llm.last_prompt
+
+
+def test_data_analyst_writes_training_observation_artifacts(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    llm = RecordingLLM()
+
+    DataAnalystAgent(llm, storage).analyze(Path("examples/function_approx"))
+
+    manifest_path = storage.run_dir / "reports" / "data_observations.json"
+    svg_path = storage.run_dir / "reports" / "data_overview.svg"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["benchmark_name"] == "function_approx"
+    assert manifest["source_mode"] in {"generated_seed0", "repo_existing"}
+    assert manifest["plots"][0]["path"] == "reports/data_overview.svg"
+    assert manifest["arrays"]["x_train"]["shape"] == [200, 1]
+    assert manifest["arrays"]["u_train"]["shape"] == [200, 1]
+    assert "val_data" not in manifest_path.read_text(encoding="utf-8")
+    assert svg_path.exists()
+    assert "Observation manifest:" in llm.last_prompt
+    assert "reports/data_overview.svg" in llm.last_prompt
+
+
+def test_result_analyst_writes_prediction_only_observation_artifacts(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    workspace = storage.create_solution_workspace("solution_001")
+    (workspace / "eval.json").write_text(
+        json.dumps({"metric": "validation_mse", "score": 0.25, "higher_is_better": False}),
+        encoding="utf-8",
+    )
+    (workspace / "train.log").write_text("train completed\n", encoding="utf-8")
+    np.savez(workspace / "predict_input.npz", x_val=np.linspace(-1.0, 1.0, 5).reshape(-1, 1))
+    np.savez(workspace / "predictions.npz", predictions=np.linspace(0.0, 1.0, 5).reshape(-1, 1))
+    llm = RecordingLLM()
+
+    ResultAnalystAgent(llm, storage).analyze("solution_001", workspace)
+
+    manifest_path = workspace / "solution_observations.json"
+    svg_path = workspace / "prediction_overview.svg"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["solution_id"] == "solution_001"
+    assert manifest["privacy_boundary"] == "prediction_only_no_validation_labels"
+    assert manifest["plots"][0]["path"] == "solutions/solution_001/prediction_overview.svg"
+    assert manifest["arrays"]["predict_input.x_val"]["shape"] == [5, 1]
+    assert manifest["arrays"]["predictions.predictions"]["shape"] == [5, 1]
+    assert svg_path.exists()
+    assert "Observation manifest:" in llm.last_prompt
+    assert "prediction_overview.svg" in llm.last_prompt
+    assert "val_data" not in llm.last_prompt
+    assert "u_val" not in llm.last_prompt
 
 
 def test_selector_votes_always_include_best_and_tie_break_by_loss(tmp_path: Path) -> None:

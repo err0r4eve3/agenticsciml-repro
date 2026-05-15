@@ -26,6 +26,14 @@ def test_run_cli_accepts_selector_vote_count() -> None:
     assert args.selector_vote_count == 3
 
 
+def test_run_cli_defaults_to_three_selector_votes() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(["run", "examples/function_approx", "--mock"])
+
+    assert args.selector_vote_count == 3
+
+
 def test_module_cli_smoke_dry_run_is_not_real_evidence(tmp_path: Path, cli_env: dict[str, str]) -> None:
     output_dir = tmp_path / "smoke output with spaces"
     smoke = subprocess.run(
