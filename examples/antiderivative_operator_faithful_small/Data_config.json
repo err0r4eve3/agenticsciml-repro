@@ -1,0 +1,5 @@
+{
+  "train_path": "train_data.npz",
+  "validation_path": "val_data.npz",
+  "description": "Faithful-small operator-learning functions mapped to antiderivatives on a shared 100-point grid."
+}

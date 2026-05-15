@@ -138,6 +138,11 @@ backend、human review pause/resume 和 MCP/hosted tools sidecar。
 - CLI smoke invocation boundary：`python -m agenticsciml.cli smoke-llm` / `verify-smoke-llm` 覆盖 checkout 路径和 output-dir 同时含空格的 dry-run bundle，并验证 dry-run artifact 会被 verifier 明确拒绝为真实 LLM evidence。
 - benchmark claim boundaries：`agenticsciml benchmarks --json` 输出每个 benchmark 的 `claim_boundaries`，普通列表也显示 `fidelity_level` 和 real-LLM `scientific_claim`，避免把 proxy catalog 误读成论文全量 SciML 复现。
 - claim-boundary digest separation：`BenchmarkSpec.contract_digest_metadata()` 将 evaluator contract hash 绑定到任务/指标/fidelity 元数据，而不把公开 catalog 的 `claim_boundaries` 文案变化纳入 contract hash。
+- faithful-small Burgers / antiderivative expansion：新增
+  `examples/burgers_pinn_faithful_small` 和
+  `examples/antiderivative_operator_faithful_small`，分别加入
+  IC/BC/collocation 结构与 100 点函数到反导数的 operator-learning 结构；
+  二者仍是 low-budget faithful-small，不声明论文分数复现。
 - faithful-small benchmark seed：新增 `examples/poisson_lshape_faithful_small`，在 L-shaped Poisson 任务中加入 boundary/residual collocation 数据和 finite-difference residual composite score，用于缩小 proxy 与论文 PINN 任务结构的差距；仍不声明 paper-like 分数。
 - faithful-small function approximation：新增 `examples/function_approx_faithful_small`，
   使用论文 S1.1 描述的分段振荡函数、200 个训练样本和 500 个验证样本；
@@ -176,7 +181,7 @@ backend、human review pause/resume 和 MCP/hosted tools sidecar。
 - closed node schema：solution node 与 score payload 默认拒绝 unknown fields；`from_dict()`、resume/load 和 trace summary 会对 schema drift fail closed。`tree.json` 和 `trace_summary.json` 写入也使用 `allow_nan=False`。
 - solution tree schema version：`tree.json` 和 `checkpoint.json` 顶层写入 `schema_version=solution_tree.v1`；resume/load 和 trace summary 会拒绝缺失或 unsupported schema version，后续迁移必须显式版本化。
 - artifact path semantics：resume/load 与 trace summary 都会校验 node `workspace` 位于当前 run 的 `solutions/` 下且 basename 匹配 `node_id`，并要求 `proposal_path` / `analysis_path` 位于 node workspace 内且存在，防止 checkpoint/tree 指向外部 artifact。
-- benchmark catalog：6 类论文任务家族都有本地 deterministic engineering proxy，包括 `function_approx`、`poisson_lshape`、`burgers_pinn`、`antiderivative_operator`、`reaction_diffusion_operator`、`cylinder_wake_reconstruction`；另有 `function_approx_faithful_small` 和 `poisson_lshape_faithful_small` 作为 faithful-small 升级。每个 catalog entry 记录 `fidelity_level`、expected runtime、dependency flags 和 paper-gap notes。
+- benchmark catalog：6 类论文任务家族都有本地 deterministic engineering proxy，包括 `function_approx`、`poisson_lshape`、`burgers_pinn`、`antiderivative_operator`、`reaction_diffusion_operator`、`cylinder_wake_reconstruction`；另有 `function_approx_faithful_small`、`poisson_lshape_faithful_small`、`burgers_pinn_faithful_small` 和 `antiderivative_operator_faithful_small` 作为 faithful-small 升级。每个 catalog entry 记录 `fidelity_level`、expected runtime、dependency flags 和 paper-gap notes。
 - benchmark metadata validation：`BenchmarkSpec` 构造时校验 `fidelity_level`、expected runtime、dependency flags、paper task name 和 proxy paper-gap notes。
 - fidelity levels document：`docs/fidelity_levels.md` 定义 `proxy`、`faithful-small`、`paper-like` 的准入标准和 claim rules。
 - evaluation contract：`solution.py` 定义 `MODEL`，支持 validate/train/predict，predict 写 `predictions.npz`，`evaluate.py` 输出 `eval.json`。
@@ -228,7 +233,7 @@ uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --dry
 - 不保证论文报告的 improvement factor。
 - 不假设官方完整代码、完整 prompt 或模型配置可用。
 - mock mode 只验证 workflow shape，不代表真实 SciML 表现。
-- 当前 benchmark 主要仍是 `fidelity_level=proxy` 的小规模工程代理；`poisson_lshape_faithful_small` 只缩小 L-shaped Poisson 任务结构差距，不是论文原始全预算实验。
+- 当前 benchmark 主要仍是 `fidelity_level=proxy` 的小规模工程代理；faithful-small 任务只缩小对应任务结构差距，不是论文原始全预算实验。
 - `parallel_mutations` 已并行执行多个 child mutation job，并支持早期单 parent fanout；但训练仍在本机 CPU/subprocess 资源上竞争，且不是论文完整分布式 ensemble search。
 - 当前 sandbox 是本地 workspace 隔离，不是强安全容器。
 - prediction-only protocol 降低验证标签泄漏风险，但还不是 OS/container 级强隔离；同用户进程仍不能视为恶意代码安全沙箱。

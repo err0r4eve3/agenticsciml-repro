@@ -133,8 +133,9 @@ export AGENTICSCIML_COST_PER_1K_TOKENS_USD=0.01
 ```
 
 The benchmark catalog now includes all six paper task families as lightweight
-offline examples, plus two `faithful-small` upgrades for S1.1 function
-approximation and S1.2 L-shaped Poisson. Each catalog entry records
+offline examples, plus four `faithful-small` upgrades for S1.1 function
+approximation, S1.2 L-shaped Poisson, S1.3 Burgers, and S1.4 antiderivative
+operator learning. Each catalog entry records
 `fidelity_level`, expected runtime, dependency flags, and paper-gap notes so
 proxy tasks are not mistaken for full paper experiments:
 
@@ -143,20 +144,25 @@ proxy tasks are not mistaken for full paper experiments:
 - `examples/poisson_lshape`
 - `examples/poisson_lshape_faithful_small`
 - `examples/burgers_pinn`
+- `examples/burgers_pinn_faithful_small`
 - `examples/antiderivative_operator`
+- `examples/antiderivative_operator_faithful_small`
 - `examples/reaction_diffusion_operator`
 - `examples/cylinder_wake_reconstruction`
 
 These examples keep PyTorch as an optional `sciml` extra for real generated
 SciML solutions. Most checked-in benchmark fixtures use NumPy to keep local
 verification light; `function_approx_faithful_small` follows the paper's
-piecewise S1.1 data shape, and `poisson_lshape_faithful_small` adds boundary
-and PDE residual collocation arrays without claiming paper-like score parity.
+piecewise S1.1 data shape, `poisson_lshape_faithful_small` adds boundary
+and PDE residual collocation arrays, `burgers_pinn_faithful_small` adds
+IC/BC/collocation structure, and `antiderivative_operator_faithful_small`
+adds 100-point function-to-function operator scoring without claiming
+paper-like score parity.
 
 ## Scope
 
 This is not a claim that the paper's reported improvement factors are reproduced.
 The MVP validates orchestration, persistence, evaluation contracts, and
 deterministic mock behavior first. The benchmark catalog now mixes engineering
-proxies with two faithful-small tasks; none of these are full paper-score
+proxies with four faithful-small tasks; none of these are full paper-score
 reproductions.

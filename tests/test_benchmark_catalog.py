@@ -22,7 +22,9 @@ EXPECTED_BENCHMARKS = {
     "poisson_lshape",
     "poisson_lshape_faithful_small",
     "burgers_pinn",
+    "burgers_pinn_faithful_small",
     "antiderivative_operator",
+    "antiderivative_operator_faithful_small",
     "reaction_diffusion_operator",
     "cylinder_wake_reconstruction",
 }
@@ -198,6 +200,59 @@ def test_function_approx_faithful_small_matches_paper_shape_and_hides_formula_pr
     )
     assert "3000" not in prompt_text
     assert "sin(10" not in prompt_text
+
+
+def test_antiderivative_operator_faithful_small_has_operator_shape_and_linear_structure(tmp_path: Path) -> None:
+    spec = BENCHMARKS["antiderivative_operator_faithful_small"]
+    module = _load_generate_module(spec.path / "generate_data.py")
+    module.generate(seed=0, output_dir=tmp_path)
+
+    train = np.load(tmp_path / "train_data.npz")
+    val = np.load(tmp_path / "val_data.npz")
+
+    assert train["x_train"].shape == (320, 100)
+    assert train["u_train"].shape == (320, 100)
+    assert train["x_grid"].shape == (100,)
+    assert val["x_val"].shape == (160, 100)
+    assert val["u_val"].shape == (160, 100)
+    assert val["length_scales"].shape == (160,)
+
+    constant = np.ones((1, 100), dtype=float)
+    integral = module.antiderivative_samples(constant, train["x_grid"])
+    np.testing.assert_allclose(integral[0], train["x_grid"], atol=1e-12)
+
+    prompt_text = "\n".join(
+        (spec.path / filename).read_text(encoding="utf-8")
+        for filename in ["Problem.md", "Requirements.md", "Evaluation.md", "guidelines.md"]
+    )
+    assert "length_scales" not in prompt_text
+    assert "100" in prompt_text
+
+
+def test_burgers_pinn_faithful_small_has_ic_bc_and_collocation_shape(tmp_path: Path) -> None:
+    spec = BENCHMARKS["burgers_pinn_faithful_small"]
+    module = _load_generate_module(spec.path / "generate_data.py")
+    module.generate(seed=0, output_dir=tmp_path)
+
+    train = np.load(tmp_path / "train_data.npz")
+    val = np.load(tmp_path / "val_data.npz")
+
+    assert train["x_train"].shape == (900, 2)
+    assert train["u_train"].shape == (900, 1)
+    assert train["x_initial"].shape == (160, 2)
+    assert train["u_initial"].shape == (160, 1)
+    assert train["x_boundary"].shape == (240, 2)
+    assert train["u_boundary"].shape == (240, 1)
+    assert train["x_collocation"].shape == (1200, 2)
+    assert val["x_val"].shape == (3600, 2)
+    assert val["u_val"].shape == (3600, 1)
+    assert val["n_initial"].reshape(-1)[0] == 120
+    assert val["n_boundary"].reshape(-1)[0] == 160
+
+    xs = np.array([[-0.75, 0.0], [0.25, 0.0], [1.0, 0.5], [-1.0, 0.5]])
+    values = module.target_solution(xs)
+    assert values.shape == (4, 1)
+    np.testing.assert_allclose(values[2], values[3], atol=1e-12)
 
 
 def test_all_benchmarks_have_required_artifacts() -> None:

@@ -1,0 +1,5 @@
+{
+  "train_path": "train_data.npz",
+  "validation_path": "val_data.npz",
+  "description": "Faithful-small Burgers-style task with supervised anchors, IC/BC data, and unlabeled collocation coordinates."
+}

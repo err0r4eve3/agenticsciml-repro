@@ -52,7 +52,9 @@
 | `poisson_lshape` | `S1.2` | `proxy` | `examples/poisson_lshape` | `relative_l2` | L-shaped Poisson / corner singularity proxy |
 | `poisson_lshape_faithful_small` | `S1.2` | `faithful-small` | `examples/poisson_lshape_faithful_small` | `poisson_residual_composite` | L-shaped Poisson with boundary/residual collocation scoring |
 | `burgers_pinn` | `S1.3` | `proxy` | `examples/burgers_pinn` | `relative_l2` | Burgers-style time-dependent PINN proxy |
+| `burgers_pinn_faithful_small` | `S1.3` | `faithful-small` | `examples/burgers_pinn_faithful_small` | `burgers_pinn_composite` | Time-dependent Burgers task with IC/BC anchors and collocation coordinates |
 | `antiderivative_operator` | `S1.4` | `proxy` | `examples/antiderivative_operator` | `relative_l2` | 函数到反导数的 operator learning |
+| `antiderivative_operator_faithful_small` | `S1.4` | `faithful-small` | `examples/antiderivative_operator_faithful_small` | `relative_l2` | 100-point function-to-antiderivative operator learning with per-sample relative L2 |
 | `reaction_diffusion_operator` | `S1.5` | `proxy` | `examples/reaction_diffusion_operator` | `relative_l2` | 多输入 reaction-diffusion operator proxy |
 | `cylinder_wake_reconstruction` | `S1.6` | `proxy` | `examples/cylinder_wake_reconstruction` | `relative_l2` | 稀疏传感器到 2D 涡量场重建 proxy |
 
@@ -60,6 +62,16 @@
 the trusted evaluator asks generated code for function values at solution,
 boundary, residual-center, and finite-difference stencil points, then computes
 a private composite score without importing `solution.py`.
+
+`burgers_pinn_faithful_small` adds initial-condition, periodic-boundary, and
+unlabeled collocation arrays to the training interface. The evaluator remains
+prediction-only and scores dense solution, initial, and boundary blocks without
+asking generated code to reveal or access private labels.
+
+`antiderivative_operator_faithful_small` upgrades the operator-learning task to
+100-point input/output functions and mean per-sample relative L2 scoring. It is
+intended to pressure DeepONet-style or linear-operator strategies while keeping
+all data local and deterministic.
 
 `burgers_pinn` now has a source-grounded local KB seeded from Raissi,
 Perdikaris, and Karniadakis's PINNs paper plus the public `maziarraissi/PINNs`
@@ -121,7 +133,7 @@ traversal、`.evaluator` / `private_eval` 字符串引用仍会被 static guardr
 
 1. 每个 benchmark 先跑 `--max-iterations 0`，只验证 root baseline。
 2. 每个 benchmark 跑 `--max-iterations 1 --parallel-mutations 1`，验证 proposal/critic/engineer/debugger 链路。
-3. 对 `function_approx`、`function_approx_faithful_small`、`poisson_lshape`、`poisson_lshape_faithful_small`、`burgers_pinn` 跑
+3. 对 `function_approx`、`function_approx_faithful_small`、`poisson_lshape`、`poisson_lshape_faithful_small`、`burgers_pinn`、`burgers_pinn_faithful_small`、`antiderivative_operator_faithful_small` 跑
    `root_only` / `no_kb` / `kb` / `random_kb` / `no_critic` / `no_debugger`
    ablation。
 4. 对 KB ablation 同时比较 `use_kb=False`、lexical KB 和 deterministic

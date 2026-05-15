@@ -62,7 +62,7 @@ computes the metric without importing `solution.py`.
 ## Benchmark Coverage
 
 The local benchmark catalog mirrors the six paper task families with lightweight
-offline proxies and two faithful-small upgrades:
+offline proxies and four faithful-small upgrades:
 
 - `S1.1` `function_approx`: discontinuous oscillatory function approximation proxy.
 - `S1.1` `function_approx_faithful_small`: paper-described piecewise function
@@ -71,7 +71,11 @@ offline proxies and two faithful-small upgrades:
 - `S1.2` `poisson_lshape_faithful_small`: L-shaped Poisson with boundary and
   PDE residual collocation data, still low-budget and not paper-like.
 - `S1.3` `burgers_pinn`: time-dependent Burgers-style PINN proxy.
+- `S1.3` `burgers_pinn_faithful_small`: time-dependent Burgers-style task with
+  IC/BC anchors and collocation coordinates, still low-budget and not paper-like.
 - `S1.4` `antiderivative_operator`: input functions to antiderivatives.
+- `S1.4` `antiderivative_operator_faithful_small`: 100-point
+  function-to-antiderivative operator learning with per-sample relative L2.
 - `S1.5` `reaction_diffusion_operator`: multiple-input reaction-diffusion operator proxy.
 - `S1.6` `cylinder_wake_reconstruction`: sparse sensor to vorticity-field reconstruction proxy.
 
