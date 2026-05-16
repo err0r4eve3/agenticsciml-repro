@@ -828,15 +828,20 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
     if request.assistant_mode == "ask":
         actions: list[dict[str, object]] = []
         if proposed_actions:
-            warnings.append("Ask mode does not return executable actions. Switch to plan to preview actions or agent to run them.")
+            warnings.append(
+                "Ask mode does not return executable actions. "
+                "Switch to plan to preview actions or agent to run them."
+            )
+        reply = _solver_ask_reply(request, proposed_actions, artifacts, warnings, trace_refs)
     else:
         actions = proposed_actions if agent_scope_allowed else []
         if request.assistant_mode == "plan" and actions:
             warnings.append("Plan mode returns proposed actions only. The frontend must not dispatch them automatically.")
+        reply = _solver_reply(request.assistant_mode, actions, artifacts, warnings, trace_refs)
 
     return {
         "assistant_mode": request.assistant_mode,
-        "reply": _solver_reply(request.assistant_mode, actions, artifacts, warnings, trace_refs),
+        "reply": reply,
         "actions": actions,
         "artifacts": artifacts,
         "warnings": warnings,
@@ -860,6 +865,50 @@ def _important_artifacts(run_dir: Path) -> list[dict[str, object]]:
     ]
 
 
+def _solver_ask_reply(
+    request: SolverChatRequest,
+    proposed_actions: list[dict[str, object]],
+    artifacts: list[dict[str, object]],
+    warnings: list[str],
+    trace_refs: list[dict[str, object]],
+) -> str:
+    text = request.message.lower()
+    if trace_refs:
+        gate = trace_refs[0].get("quality_gate")
+        return f"已读取 trace summary。quality_gate={gate}，相关 artifacts={len(artifacts)}。"
+    if _contains_any(text, ("你是谁", "who are you", "身份", "自我介绍", "介绍一下你")):
+        return (
+            "我是 AgenticSciML 助手，负责解释本项目的 SciML 工作流、benchmark、算法策略、"
+            "run、trace 和 artifact。Ask 模式下我只回答问题，不启动实验、不恢复 run，也不打开工作区。"
+        )
+    if _contains_any(text, ("你能做什么", "能做什么", "可以做什么", "功能", "帮助", "help", "capabilities")):
+        return (
+            "我可以解释 AgenticSciML 的项目结构、benchmark 与 claim boundary；解读 run metadata、"
+            "leaderboard、trace_summary 和 artifacts；说明 mock、dry_run、real 的风险；也可以在 Plan 模式"
+            "生成动作计划，在 Agent 模式按当前账号 workspace 执行受控动作。"
+        )
+    if _contains_any(text, ("benchmark", "基准", "算法", "algorithm", "策略")):
+        return (
+            "当前可讨论 benchmark、算法策略目录、运行模式和验证边界。算法目录只表示可选策略和 prompt seed，"
+            "是否有效必须以实际 run artifact、leaderboard、trace_summary 和测试结果为准。"
+        )
+    if proposed_actions:
+        return (
+            "这条请求会触发受控动作。Ask 模式不会执行或返回可执行 action；"
+            "需要预览步骤请切到 Plan，需要执行请切到 Agent。"
+        )
+    if warnings:
+        return "我可以解释这个问题，但当前缺少必要上下文或存在安全边界；请查看 warnings 里的具体原因。"
+    return (
+        "我是 AgenticSciML 助手。你可以问项目结构、benchmark、算法策略、run 状态、trace、artifact、"
+        "VS Code workspace，以及 mock/dry_run/real 模式边界。"
+    )
+
+
+def _contains_any(text: str, tokens: tuple[str, ...]) -> bool:
+    return any(token in text for token in tokens)
+
+
 def _solver_reply(
     assistant_mode: AssistantMode,
     actions: list[dict[str, object]],
@@ -867,11 +916,6 @@ def _solver_reply(
     warnings: list[str],
     trace_refs: list[dict[str, object]],
 ) -> str:
-    if assistant_mode == "ask":
-        if trace_refs:
-            gate = trace_refs[0].get("quality_gate")
-            return f"Ask 模式：已读取 trace summary。quality_gate={gate}，相关 artifacts={len(artifacts)}。"
-        return "Ask 模式：我只回答和解释，不执行动作。需要预览步骤请切到 Plan，需要自动执行受控动作请切到 Agent。"
     if assistant_mode == "plan" and actions:
         return "Plan 模式：已生成建议动作，但不会自动执行。确认后可切到 Agent 执行。"
     if actions and actions[0].get("type") == "start_run":

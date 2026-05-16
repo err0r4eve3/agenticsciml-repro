@@ -36,8 +36,9 @@ ChatUI 前端是单页本地工作台，不引入路由层，但用左侧功能�
 - `ChatUI` 页是纯对话界面：顶部只做页面标识，中间是对话流，底部是主输入框；
   不显示 benchmark、run、quality gate、trace 或 artifact 工作台。
 - ChatUI 和右侧 Agent 面板都有 `ask` / `plan` / `agent` 三种交互模式，默认
-  `ask`。`ask` 只解释不返回可执行动作；`plan` 返回结构化建议动作但前端不自动
-  分发；`agent` 才会自动执行受控 action。
+  `ask`。`ask` 直接回答身份、能力、项目、benchmark、算法、run、trace、artifact
+  和边界问题，动作型请求只解释边界且不返回可执行动作；`plan` 返回结构化建议动作
+  但前端不自动分发；`agent` 才会自动执行受控 action。
 - `VS Code` 页先显示工作空间选择列表，风格参考 UnitaryLab 的 workspace
   页：用户选择一个账号隔离的独立代码目录后进入 AI IDE。编辑态只保留 VS Code Web
   iframe 和右侧可收起 ChatUI 侧边栏，不显示 benchmark、run、quality gate、
@@ -107,7 +108,8 @@ code-server auth、系统用户/容器权限和 secret scanning 提供真实访�
 
 `/api/solver/chat` 还接受 `assistant_mode`：
 
-- `ask`：默认值，只回答和解释，不返回可执行 actions。
+- `ask`：默认值，直接回答普通问题，不返回可执行 actions；当用户请求启动、
+  恢复或打开工作区时，只解释模式边界。
 - `plan`：返回建议 actions 和 warnings，但前端必须只展示，不自动执行。
 - `agent`：允许前端按既有安全分发器执行 `start_run`、`resume_run`、
   `open_code_server` 或 `summarize_artifact`。

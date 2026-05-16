@@ -10,7 +10,9 @@
 已实现：
 
 - `/api/solver/chat` 新增 `assistant_mode` 输入和输出回显。
-- `ask` 模式只回答和解释，不返回可执行 actions。
+- `ask` 模式现在直接回答身份、能力、项目、benchmark、算法、run、trace、
+  artifact 和边界问题；只有动作型请求才提示切换到 `plan` 或 `agent`，且不返回
+  可执行 actions。
 - `plan` 模式返回结构化建议 actions，但前端不会自动分发。
 - `agent` 模式才调用既有安全分发器执行 `start_run`、`resume_run`、
   `open_code_server` 或 `summarize_artifact`。
@@ -18,7 +20,7 @@
   `workspace_scope=account`。
 - ChatUI 首页 composer 和 VS Code Web 右侧 Agent 面板都提供三段切换控件。
 - 删除 ChatUI 首页里“像 ChatGPT 一样输入问题或任务”的文案。
-- repo-local skill 升级到 `version: 0.3.1`，记录三种模式边界。
+- repo-local skill 升级到 `version: 0.3.2`，记录三种模式边界和 Ask 普通问答语义。
 
 边界：
 

@@ -1,7 +1,7 @@
 ---
 name: agenticsciml-chatui-operator
 description: Operate the AgenticSciML local ChatUI, account-scoped workspaces, internal algorithm-tool endpoint, run artifacts, and code-server sidecar while preserving evaluation contracts, artifact integrity, and scientific claim boundaries.
-version: 0.3.1
+version: 0.3.2
 ---
 
 # AgenticSciML ChatUI Operator
@@ -21,9 +21,12 @@ artifacts remain the source of truth.
 - `/api/solver/chat` is an internal algorithm-tool endpoint, not an MCP server.
 - `assistant_mode` has three values: `ask`, `plan`, and `agent`; default to
   `ask`.
-- `ask` answers and explains only; `plan` may return proposed actions but must
-  not dispatch them; `agent` is the only mode that may execute controlled
-  frontend actions.
+- `ask` answers ordinary identity, capability, project, benchmark, algorithm,
+  run, trace, artifact, and boundary questions directly; it must not collapse
+  every message into a mode disclaimer. When the user asks for a controlled
+  action, `ask` explains the boundary and returns no executable actions.
+- `plan` may return proposed actions but must not dispatch them; `agent` is the
+  only mode that may execute controlled frontend actions.
 - `agent` mode requires `account_id` and must operate only inside the current
   account's `account`, `run`, or `solution` workspaces. It must not open or
   mutate the shared repo workspace.

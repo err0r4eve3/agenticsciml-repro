@@ -101,6 +101,42 @@ def test_web_artifacts_reject_path_escape(tmp_path: Path) -> None:
 def test_solver_chat_defaults_to_ask_without_actions(tmp_path: Path) -> None:
     client = TestClient(create_app())
 
+    identity = client.post(
+        "/api/solver/chat",
+        json={
+            "message": "你是谁",
+            "selected_benchmark": "function_approx",
+            "mode": "mock",
+            "workspace_scope": "account",
+            "output_dir": str(tmp_path),
+        },
+    )
+    assert identity.status_code == 200
+    identity_payload = identity.json()
+    assert identity_payload["assistant_mode"] == "ask"
+    assert identity_payload["actions"] == []
+    assert identity_payload["warnings"] == []
+    assert "AgenticSciML 助手" in identity_payload["reply"]
+
+    capabilities = client.post(
+        "/api/solver/chat",
+        json={
+            "message": "你能做什么",
+            "selected_benchmark": "function_approx",
+            "mode": "mock",
+            "workspace_scope": "account",
+            "output_dir": str(tmp_path),
+        },
+    )
+    assert capabilities.status_code == 200
+    capabilities_payload = capabilities.json()
+    assert capabilities_payload["assistant_mode"] == "ask"
+    assert capabilities_payload["actions"] == []
+    assert capabilities_payload["warnings"] == []
+    assert "benchmark" in capabilities_payload["reply"]
+    assert "Plan 模式" in capabilities_payload["reply"]
+    assert "Agent 模式" in capabilities_payload["reply"]
+
     start = client.post(
         "/api/solver/chat",
         json={

@@ -74,7 +74,8 @@ repo-local skill 位于 `.agents/skills/agenticsciml-chatui-operator/SKILL.md`�
 
 交互模式边界：
 
-- `ask` 只回答和解释，不返回可执行 actions。
+- `ask` 直接回答身份、能力、项目、benchmark、算法、run、trace、artifact 和边界
+  问题，不返回可执行 actions；动作型请求只解释模式边界。
 - `plan` 可以返回结构化 actions，但前端必须只展示，不自动分发。
 - `agent` 才允许前端调用安全分发器执行受控 actions；real LLM 仍需显式确认。
 - `agent` 必须带当前 `account_id`，并且不能操作 shared repo workspace 或跨账号
