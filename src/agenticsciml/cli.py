@@ -147,6 +147,25 @@ def cmd_verify_smoke_llm(args: argparse.Namespace) -> int:
     return 0 if result.passed else 1
 
 
+def cmd_web(args: argparse.Namespace) -> int:
+    try:
+        import uvicorn
+    except ImportError:
+        print(
+            "error: install the web extra first, for example `uv run --extra web agenticsciml web`",
+            file=sys.stderr,
+        )
+        return 1
+    uvicorn.run(
+        "agenticsciml.web.app:create_app",
+        factory=True,
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+    )
+    return 0
+
+
 def cmd_benchmarks(args: argparse.Namespace) -> int:
     specs = list_benchmarks()
     if args.json:
@@ -227,6 +246,12 @@ def build_parser() -> argparse.ArgumentParser:
     verify_smoke_llm = sub.add_parser("verify-smoke-llm")
     verify_smoke_llm.add_argument("output_dir")
     verify_smoke_llm.set_defaults(func=cmd_verify_smoke_llm)
+
+    web = sub.add_parser("web")
+    web.add_argument("--host", default="127.0.0.1")
+    web.add_argument("--port", type=int, default=8765)
+    web.add_argument("--reload", action="store_true")
+    web.set_defaults(func=cmd_web)
 
     benchmarks = sub.add_parser("benchmarks")
     benchmarks.add_argument("--json", action="store_true")

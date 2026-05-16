@@ -5,6 +5,9 @@ __pycache__/
 .ruff_cache/
 runs/
 build/
+frontend/dist/
+frontend/node_modules/
+frontend/*.tsbuildinfo
 *.egg-info/
 examples/function_approx/train_data.npz
 examples/function_approx/val_data.npz

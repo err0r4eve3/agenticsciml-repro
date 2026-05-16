@@ -2,6 +2,28 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-16 ChatUI 实验操作台
+
+新增本地优先 Web 控制面：[ChatUI 实验操作台](chatui_console.md)。
+
+已实现能力：
+
+- `agenticsciml web` 启动 FastAPI 后端，默认监听 `127.0.0.1:8765`。
+- Web API 覆盖 benchmark catalog、run 启动/恢复、run status、SSE trace events、
+  read-only artifact browsing、code-server URL 生成和 `/api/solver/chat` 算法 tool。
+- `/api/solver/chat` 只做意图解析和结构化 action 返回，不接管 Python
+  orchestrator 的状态机、evaluator、solution tree 或 champion selection。
+- React/Vite ChatUI 前端提供左侧对话控制、中间 run dashboard 和右侧
+  code-server sidecar 入口。
+- repo-local skill `.agents/skills/agenticsciml-chatui-operator/SKILL.md` 记录
+  ChatUI 操作顺序、artifact 检查顺序、code-server 安全边界和禁止事项。
+
+边界：
+
+- 第一版只面向本地 loopback，不是公网 SaaS。
+- code-server 由用户单独启动，必须使用本机 auth；ChatUI 只生成 workspace 链接。
+- mock run 仍只支持 workflow-shape evidence，不支持科学复现结论。
+
 ## 2026-05-14 OpenAI Agents SDK 升级复盘
 
 新增文档：[OpenAI Agents SDK 升级复盘](openai_agents_sdk_upgrade_review.md)。

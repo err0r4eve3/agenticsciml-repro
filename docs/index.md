@@ -23,10 +23,11 @@
 - [Codex 实施任务](codex_tasks.md)：MVP 的分步实现任务和验收标准。
 - [Real LLM 运行](real_run.md)：真实模型模式、环境变量、dry-run 和 trace summary 检查。
 - [Ablation 说明](ablation.md)：root-only、无 KB、有 KB、随机 KB 的比较边界。
+- [ChatUI 实验操作台](chatui_console.md)：本地 Web 控制台、算法 tool API、code-server sidecar 和 repo-local skill 工作流。
 
 ## 推荐阅读路径
 
 1. 先读 [项目概览](../README.md)，确认本项目只复刻 workflow，不承诺复现论文分数。
 2. 再读 [论文机制笔记](paper_notes.md)、[多 Agent 设计方法](multi_agent_design.md)、[Git 与 Markdown 分层记录方法论](git_markdown_methodology.md) 和 [OpenAI Agents SDK 升级复盘](openai_agents_sdk_upgrade_review.md)，理解为什么采用代码控制的多 Agent 进化搜索、Git/Markdown 分层记录以及后续 SDK 对齐路线。
 3. 开发前读 [项目 Agent 规则](../AGENTS.md) 和 [Codex 实施任务](codex_tasks.md)。
-4. 做实验时读 [Benchmark 与实验设计](benchmark_plan.md)、[Benchmark Fidelity Levels](fidelity_levels.md)、[SciML 论文与代码知识库](sciml_knowledge_base.md)、[Real LLM 运行](real_run.md)、[Ablation 说明](ablation.md) 和 [版本说明](version_notes.md)。
+4. 做实验时读 [Benchmark 与实验设计](benchmark_plan.md)、[Benchmark Fidelity Levels](fidelity_levels.md)、[SciML 论文与代码知识库](sciml_knowledge_base.md)、[Real LLM 运行](real_run.md)、[Ablation 说明](ablation.md)、[ChatUI 实验操作台](chatui_console.md) 和 [版本说明](version_notes.md)。

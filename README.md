@@ -55,6 +55,30 @@ Inspect the trace quality gate for a completed run:
 uv run --python 3.11 --extra dev agenticsciml trace-summary runs/<experiment_id>
 ```
 
+Run the local ChatUI experiment console:
+
+```bash
+uv run --python 3.11 --extra web agenticsciml web --host 127.0.0.1 --port 8765
+cd frontend && npm install && npm run dev
+```
+
+If the checkout path contains spaces and the editable console script cannot
+import `agenticsciml`, use the module form:
+
+```bash
+PYTHONPATH=src uv run --python 3.11 --extra web python -m agenticsciml.cli web --host 127.0.0.1 --port 8765
+```
+
+The Web console keeps the Python orchestrator as the source of truth. It exposes
+benchmark listing, mock/real/dry-run launch, run status, SSE trace events,
+read-only artifact browsing, `/api/solver/chat` as the algorithm tool boundary,
+and a code-server sidecar link. Start code-server separately on loopback with
+auth before opening the VS Code Web link:
+
+```bash
+PASSWORD=<local-token> code-server --bind-addr 127.0.0.1:8080 /path/to/workspace
+```
+
 Run a mock ablation suite:
 
 ```bash
