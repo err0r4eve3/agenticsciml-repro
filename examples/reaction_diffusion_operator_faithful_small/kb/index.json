@@ -1,0 +1,8 @@
+[
+  {
+    "id": "conditioned_operator",
+    "title": "Conditioned Operator",
+    "file": "conditioned_operator.md",
+    "description": "Separate encoders for diffusion, source, and initial condition can improve multiple-input operators."
+  }
+]

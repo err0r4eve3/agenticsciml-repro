@@ -26,6 +26,7 @@ EXPECTED_BENCHMARKS = {
     "antiderivative_operator",
     "antiderivative_operator_faithful_small",
     "reaction_diffusion_operator",
+    "reaction_diffusion_operator_faithful_small",
     "cylinder_wake_reconstruction",
 }
 
@@ -253,6 +254,40 @@ def test_burgers_pinn_faithful_small_has_ic_bc_and_collocation_shape(tmp_path: P
     values = module.target_solution(xs)
     assert values.shape == (4, 1)
     np.testing.assert_allclose(values[2], values[3], atol=1e-12)
+
+
+def test_reaction_diffusion_operator_faithful_small_has_multi_input_spacetime_shape(tmp_path: Path) -> None:
+    spec = BENCHMARKS["reaction_diffusion_operator_faithful_small"]
+    module = _load_generate_module(spec.path / "generate_data.py")
+    module.generate(seed=0, output_dir=tmp_path)
+
+    train = np.load(tmp_path / "train_data.npz")
+    val = np.load(tmp_path / "val_data.npz")
+
+    assert train["x_train"].shape == (64, 150)
+    assert train["u_train"].shape == (64, 2000)
+    assert train["x_grid"].shape == (50,)
+    assert train["t_grid"].shape == (40,)
+    assert train["input_channel_count"].reshape(-1)[0] == 3
+    assert val["x_val"].shape == (24, 150)
+    assert val["u_val"].shape == (24, 2000)
+    assert val["n_x"].reshape(-1)[0] == 50
+    assert val["n_t"].reshape(-1)[0] == 40
+
+    diffusion, source, initial = module.unpack_features(train["x_train"][:2])
+    assert diffusion.shape == source.shape == initial.shape == (2, 50)
+    assert np.all(diffusion > 0.0)
+    reshaped = train["u_train"].reshape(64, 40, 50)
+    np.testing.assert_allclose(reshaped[:2, 0, :], initial, atol=1e-12)
+    np.testing.assert_allclose(reshaped[:, :, 0], 0.0, atol=1e-12)
+    np.testing.assert_allclose(reshaped[:, :, -1], 0.0, atol=1e-12)
+
+    prompt_text = "\n".join(
+        (spec.path / filename).read_text(encoding="utf-8")
+        for filename in ["Problem.md", "Requirements.md", "Evaluation.md", "guidelines.md"]
+    )
+    assert "50" in prompt_text
+    assert "paper-score" in prompt_text
 
 
 def test_all_benchmarks_have_required_artifacts() -> None:
