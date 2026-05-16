@@ -43,6 +43,8 @@ repo-local skill 位于 `.agents/skills/agenticsciml-chatui-operator/SKILL.md`�
 - 不把 mock/proxy/faithful-small 结果写成论文级结论。
 - 不在 ChatUI、skill、artifact、commit 或日志中保存 secrets。
 - 不让 code-server 暴露 token、password、真实 `HOME`、浏览器 profile、云凭据或私有数据集。
+- 不把本地 `account_id` namespace 描述成认证、授权或真实多租户隔离。
+- 不把算法目录条目描述成已经通过 evaluator 验证的实现。
 
 ## Internal Algorithm Tool
 
@@ -54,7 +56,9 @@ repo-local skill 位于 `.agents/skills/agenticsciml-chatui-operator/SKILL.md`�
 - `active_run_id`：当前 run，可为空。
 - `selected_benchmark`：当前 benchmark。
 - `mode`：`mock | real | dry_run`。
-- `workspace_scope`：`repo | run | solution`。
+- `workspace_scope`：`repo | account | run | solution`。
+- `account_id`：可选本地账号 namespace。它只选择 `.agenticsciml/accounts/<id>/`
+  下的工作区和 runs 目录，不代表登录态或权限边界。
 - `output_dir`：run artifact 根目录。
 
 输出语义：
@@ -100,6 +104,8 @@ MCP wrapper 必须具备：
 | Tool | 用途 | readOnlyHint | destructiveHint | openWorldHint | Approval |
 | --- | --- | --- | --- | --- | --- |
 | `agenticsciml.list_benchmarks` | 列出本地 benchmark catalog 和 claim boundary | true | false | false | none |
+| `agenticsciml.list_algorithms` | 列出算法策略目录和每项 claim boundary | true | false | false | none |
+| `agenticsciml.list_accounts` | 列出本地账号 namespace，不返回 secrets | true | false | false | none |
 | `agenticsciml.get_run_status` | 读取 run metadata、status、gate、artifact index | true | false | false | none |
 | `agenticsciml.summarize_artifact` | 总结已有 artifact，不修改文件 | true | false | false | none |
 | `agenticsciml.validate_claim` | 检查一句 claim 是否被证据支持 | true | false | false | none |

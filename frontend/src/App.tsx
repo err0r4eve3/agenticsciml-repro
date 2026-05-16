@@ -12,10 +12,12 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Play,
+  Plus,
   RefreshCw,
   Send,
   Sparkles,
-  TerminalSquare
+  TerminalSquare,
+  Users
 } from "lucide-react";
 
 type Benchmark = {
@@ -71,8 +73,29 @@ type ArtifactPayload =
     };
 
 type RunMode = "mock" | "real" | "dry_run";
-type WorkspaceScope = "repo" | "run" | "solution";
+type WorkspaceScope = "repo" | "account" | "run" | "solution";
 type PageKey = "chat" | "ide" | "library";
+
+type AccountOption = {
+  account_id: string;
+  display_name: string;
+  workspace_root: string;
+  runs_dir: string;
+  isolation: string;
+  auth: string;
+};
+
+type AlgorithmSpec = {
+  id: string;
+  name: string;
+  family: string;
+  compatible_benchmark_families: string[];
+  benchmark_examples: string[];
+  status: string;
+  description: string;
+  claim_boundary: string;
+  safety_notes: string;
+};
 
 type AgentMessage = {
   id: number;
@@ -86,6 +109,7 @@ type SolverAction = {
   payload?: {
     benchmark?: string;
     mode?: RunMode;
+    account_id?: string | null;
     background?: boolean;
     scope?: WorkspaceScope;
     [key: string]: unknown;
@@ -103,12 +127,14 @@ type SolverResponse = {
 
 type CodeServerPayload = {
   scope: WorkspaceScope;
+  account_id?: string | null;
   run_id?: string | null;
   solution_id?: string | null;
   workspace: string;
   url: string;
   warnings: string[];
   command_hint: string;
+  isolation?: string;
 };
 
 type CodeWorkspaceOption = CodeServerPayload & {
@@ -118,17 +144,33 @@ type CodeWorkspaceOption = CodeServerPayload & {
 };
 
 const api = {
+  async getAccounts(): Promise<AccountOption[]> {
+    const payload = await getJson<{ accounts: AccountOption[] }>("/api/accounts");
+    return payload.accounts;
+  },
+  async createAccount(accountId: string, displayName?: string): Promise<AccountOption> {
+    const payload = await postJson<{ account: AccountOption }>("/api/accounts", {
+      account_id: accountId,
+      display_name: displayName ?? accountId
+    });
+    return payload.account;
+  },
   async getBenchmarks(): Promise<Benchmark[]> {
     const payload = await getJson<{ benchmarks: Benchmark[] }>("/api/benchmarks");
     return payload.benchmarks;
   },
-  async getRuns(): Promise<RunSummary[]> {
-    const payload = await getJson<{ runs: RunSummary[] }>("/api/runs");
+  async getAlgorithms(): Promise<AlgorithmSpec[]> {
+    const payload = await getJson<{ algorithms: AlgorithmSpec[] }>("/api/algorithms");
+    return payload.algorithms;
+  },
+  async getRuns(accountId: string): Promise<RunSummary[]> {
+    const payload = await getJson<{ runs: RunSummary[] }>(`/api/runs?${accountParams(accountId)}`);
     return payload.runs;
   },
   async startRun(body: {
     benchmark: string;
     mode: RunMode;
+    account_id: string;
     experiment_id?: string;
     max_iterations?: number;
     parallel_mutations?: number;
@@ -138,33 +180,35 @@ const api = {
     await postJson<unknown>("/api/runs", {
       benchmark: body.benchmark,
       mode: body.mode,
+      account_id: body.account_id,
       experiment_id: id,
       max_iterations: body.max_iterations ?? 0,
       parallel_mutations: body.parallel_mutations ?? 1,
       background: body.background ?? false
     });
-    return api.getRun(id);
+    return api.getRun(id, body.account_id);
   },
-  async resumeRun(runId: string, benchmark: string, mode: RunMode): Promise<RunSummary> {
+  async resumeRun(runId: string, benchmark: string, mode: RunMode, accountId: string): Promise<RunSummary> {
     await postJson<unknown>(`/api/runs/${encodeURIComponent(runId)}/resume`, {
       benchmark,
       mode,
+      account_id: accountId,
       experiment_id: runId,
       max_iterations: 1,
       parallel_mutations: 1,
       background: true
     });
-    return api.getRun(runId);
+    return api.getRun(runId, accountId);
   },
-  async getRun(runId: string): Promise<RunSummary> {
-    return getJson<RunSummary>(`/api/runs/${encodeURIComponent(runId)}`);
+  async getRun(runId: string, accountId: string): Promise<RunSummary> {
+    return getJson<RunSummary>(`/api/runs/${encodeURIComponent(runId)}?${accountParams(accountId)}`);
   },
-  async getArtifact(runId: string, artifactPath: string): Promise<ArtifactPayload> {
+  async getArtifact(runId: string, artifactPath: string, accountId: string): Promise<ArtifactPayload> {
     return getJson<ArtifactPayload>(
       `/api/runs/${encodeURIComponent(runId)}/artifacts/${artifactPath
         .split("/")
         .map(encodeURIComponent)
-        .join("/")}`
+        .join("/")}?${accountParams(accountId)}`
     );
   },
   async askSolver(body: {
@@ -173,11 +217,13 @@ const api = {
     selected_benchmark: string;
     mode: RunMode;
     workspace_scope: WorkspaceScope;
+    account_id: string;
   }): Promise<SolverResponse> {
     return postJson<SolverResponse>("/api/solver/chat", body);
   },
-  async getCodeWorkspaces(runId: string | null): Promise<CodeWorkspaceOption[]> {
+  async getCodeWorkspaces(runId: string | null, accountId: string): Promise<CodeWorkspaceOption[]> {
     const params = new URLSearchParams();
+    params.set("account_id", accountId);
     if (runId) params.set("run_id", runId);
     const payload = await getJson<{ workspaces: CodeWorkspaceOption[] }>(`/api/code-server/workspaces?${params.toString()}`);
     return payload.workspaces;
@@ -186,7 +232,10 @@ const api = {
 
 export function App() {
   const [activePage, setActivePage] = useState<PageKey>("chat");
+  const [accounts, setAccounts] = useState<AccountOption[]>([]);
+  const [activeAccountId, setActiveAccountId] = useState("local");
   const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
+  const [algorithms, setAlgorithms] = useState<AlgorithmSpec[]>([]);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [selectedBenchmark, setSelectedBenchmark] = useState("function_approx");
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
@@ -215,6 +264,15 @@ export function App() {
 
   useEffect(() => {
     api
+      .getAccounts()
+      .then((items) => {
+        setAccounts(items);
+        if (items.length && !items.some((item) => item.account_id === activeAccountId)) {
+          setActiveAccountId(items[0].account_id);
+        }
+      })
+      .catch((exc) => setError(String(exc)));
+    api
       .getBenchmarks()
       .then((items) => {
         setBenchmarks(items);
@@ -223,25 +281,37 @@ export function App() {
         }
       })
       .catch((exc) => setError(String(exc)));
+    api.getAlgorithms().then(setAlgorithms).catch((exc) => setError(String(exc)));
     refreshRuns().catch((exc) => setError(String(exc)));
   }, []);
 
   useEffect(() => {
+    setActiveRun(null);
+    setActiveRunId(null);
+    setSelectedArtifactPath("");
+    setSelectedWorkspaceId(null);
+    refreshRuns().catch((exc) => setError(String(exc)));
+    refreshCodeWorkspaces().catch((exc) => setError(String(exc)));
+  }, [activeAccountId]);
+
+  useEffect(() => {
     if (!activeRunId) return;
     refreshActiveRun(activeRunId).catch((exc) => setError(String(exc)));
-  }, [activeRunId]);
+  }, [activeRunId, activeAccountId]);
 
   useEffect(() => {
     if (!activeRunId) return;
     setEvents([]);
-    const source = new EventSource(`/api/runs/${encodeURIComponent(activeRunId)}/events?follow=false`);
+    const source = new EventSource(
+      `/api/runs/${encodeURIComponent(activeRunId)}/events?follow=false&${accountParams(activeAccountId)}`
+    );
     source.addEventListener("trace", (event) => {
       setEvents((current) => [event.data, ...current].slice(0, 80));
     });
     source.addEventListener("end", () => source.close());
     source.onerror = () => source.close();
     return () => source.close();
-  }, [activeRunId]);
+  }, [activeRunId, activeAccountId]);
 
   useEffect(() => {
     if (!activeRunId || !selectedArtifactPath) {
@@ -249,10 +319,10 @@ export function App() {
       return;
     }
     api
-      .getArtifact(activeRunId, selectedArtifactPath)
+      .getArtifact(activeRunId, selectedArtifactPath, activeAccountId)
       .then(setArtifactPayload)
       .catch((exc) => setError(String(exc)));
-  }, [activeRunId, selectedArtifactPath]);
+  }, [activeRunId, selectedArtifactPath, activeAccountId]);
 
   const selected = useMemo(
     () => benchmarks.find((benchmark) => benchmark.name === selectedBenchmark),
@@ -272,16 +342,16 @@ export function App() {
 
   useEffect(() => {
     refreshCodeWorkspaces().catch((exc) => setError(String(exc)));
-  }, [activeRunId, runs.length]);
+  }, [activeRunId, runs.length, activeAccountId]);
 
   async function refreshRuns() {
-    const payload = await api.getRuns();
+    const payload = await api.getRuns(activeAccountId);
     setRuns(payload);
   }
 
   async function refreshActiveRun(runId = activeRunId) {
     if (!runId) return;
-    const run = await api.getRun(runId);
+    const run = await api.getRun(runId, activeAccountId);
     setActiveRun(run);
     setRuns((current) => [run, ...current.filter((item) => item.run_id !== run.run_id)]);
   }
@@ -294,7 +364,7 @@ export function App() {
   }
 
   async function refreshCodeWorkspaces() {
-    const workspaces = await api.getCodeWorkspaces(activeRunId);
+    const workspaces = await api.getCodeWorkspaces(activeRunId, activeAccountId);
     setCodeWorkspaces(workspaces);
     setSelectedWorkspaceId((current) => (current && workspaces.some((workspace) => workspace.id === current) ? current : null));
   }
@@ -314,6 +384,7 @@ export function App() {
       const run = await api.startRun({
         benchmark: selectedBenchmark,
         mode: nextMode,
+        account_id: activeAccountId,
         max_iterations: 0,
         parallel_mutations: 1,
         background
@@ -347,7 +418,8 @@ export function App() {
         active_run_id: activeRunId,
         selected_benchmark: selectedBenchmark,
         mode: overrides.mode ?? mode,
-        workspace_scope: requestWorkspaceScope
+        workspace_scope: requestWorkspaceScope,
+        account_id: activeAccountId
       });
       setMessages((current) => [
         ...current,
@@ -398,14 +470,14 @@ export function App() {
           setPendingRealAction(action);
           continue;
         }
-        const run = await api.resumeRun(action.run_id, selectedBenchmark, mode);
+        const run = await api.resumeRun(action.run_id, selectedBenchmark, mode, activeAccountId);
         setActiveRun(run);
         setActiveRunId(run.run_id);
         await refreshRuns();
       }
       if (action.type === "open_code_server") {
         const nextScope = action.payload?.scope;
-        if (nextScope === "repo" || nextScope === "run" || nextScope === "solution") {
+        if (nextScope === "repo" || nextScope === "account" || nextScope === "run" || nextScope === "solution") {
           setWorkspaceScope(nextScope);
         }
         setActivePage("ide");
@@ -445,9 +517,32 @@ export function App() {
     setSelectedWorkspaceId(workspace.id);
   }
 
+  async function createLocalAccount() {
+    const nextId = `user_${new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 12)}`;
+    setBusy(true);
+    setError(null);
+    try {
+      const account = await api.createAccount(nextId, nextId);
+      setAccounts((current) => [...current.filter((item) => item.account_id !== account.account_id), account]);
+      setActiveAccountId(account.account_id);
+      setActivePage("ide");
+    } catch (exc) {
+      setError(String(exc));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main className={`workbench ${agentCollapsed ? "agent-is-collapsed" : ""}`}>
-      <FunctionNav activePage={activePage} onSelectPage={selectPage} />
+      <FunctionNav
+        accounts={accounts}
+        activeAccountId={activeAccountId}
+        activePage={activePage}
+        onAccountChange={setActiveAccountId}
+        onCreateAccount={createLocalAccount}
+        onSelectPage={selectPage}
+      />
       {activePage === "chat" ? (
         <section className="chatgpt-page" aria-label="ChatUI 页面">
           <PageHeader title="AgenticSciML" subtitle="ChatUI" />
@@ -483,10 +578,12 @@ export function App() {
             </>
           ) : (
             <WorkspaceSelector
-              activeRunId={activeRunId}
+            activeRunId={activeRunId}
+              accountId={activeAccountId}
               busy={busy}
               error={error}
               workspaces={codeWorkspaces}
+              onCreateAccount={createLocalAccount}
               onOpenWorkspace={openWorkspace}
               onRefresh={refreshCodeWorkspaces}
             />
@@ -512,6 +609,7 @@ export function App() {
           <AlgorithmLibraryPage
             activeRun={activeRun}
             activeRunId={activeRunId}
+            algorithms={algorithms}
             artifactPayload={artifactPayload}
             events={filteredEvents}
             filter={traceFilter}
@@ -533,10 +631,18 @@ export function App() {
 }
 
 function FunctionNav({
+  accounts,
+  activeAccountId,
   activePage,
+  onAccountChange,
+  onCreateAccount,
   onSelectPage
 }: {
+  accounts: AccountOption[];
+  activeAccountId: string;
   activePage: PageKey;
+  onAccountChange: (accountId: string) => void;
+  onCreateAccount: () => void;
   onSelectPage: (page: PageKey) => void;
 }) {
   const pages: Array<{ key: PageKey; label: string; icon: ReactNode }> = [
@@ -565,6 +671,23 @@ function FunctionNav({
           </button>
         ))}
       </nav>
+      <div className="nav-account" title="本地账号空间">
+        <Users size={15} />
+        <select
+          aria-label="本地账号空间"
+          value={activeAccountId}
+          onChange={(event) => onAccountChange(event.target.value)}
+        >
+          {accounts.map((account) => (
+            <option key={account.account_id} value={account.account_id}>
+              {account.display_name}
+            </option>
+          ))}
+        </select>
+        <button aria-label="新建账号空间" type="button" onClick={onCreateAccount}>
+          <Plus size={14} />
+        </button>
+      </div>
     </aside>
   );
 }
@@ -723,6 +846,7 @@ function TopBar({
 function AlgorithmLibraryPage({
   activeRun,
   activeRunId,
+  algorithms,
   artifactPayload,
   events,
   filter,
@@ -739,6 +863,7 @@ function AlgorithmLibraryPage({
 }: {
   activeRun: RunSummary | null;
   activeRunId: string | null;
+  algorithms: AlgorithmSpec[];
   artifactPayload: ArtifactPayload | null;
   events: string[];
   filter: string;
@@ -762,6 +887,7 @@ function AlgorithmLibraryPage({
           <span>集中管理 benchmark、run、leaderboard、trace 和 artifact。ChatUI 与 VS Code Web 页面保持轻量。</span>
         </div>
       </section>
+      <AlgorithmCatalog algorithms={algorithms} />
       <DashboardView
         activeRun={activeRun}
         events={events}
@@ -786,6 +912,31 @@ function AlgorithmLibraryPage({
         onSelectArtifact={onSelectArtifact}
       />
     </section>
+  );
+}
+
+function AlgorithmCatalog({ algorithms }: { algorithms: AlgorithmSpec[] }) {
+  const visible = algorithms;
+  return (
+    <DataRegion title="Algorithm catalog">
+      <div className="algorithm-grid">
+        {visible.map((algorithm) => (
+          <article className="algorithm-card" key={algorithm.id}>
+            <div>
+              <span>{algorithm.family}</span>
+              <h3>{algorithm.name}</h3>
+            </div>
+            <p>{algorithm.description}</p>
+            <div className="algorithm-meta">
+              <small>{algorithm.status}</small>
+              <small>{algorithm.compatible_benchmark_families.join(" / ")}</small>
+            </div>
+            <strong>{algorithm.safety_notes}</strong>
+          </article>
+        ))}
+        {visible.length === 0 ? <p className="muted">算法目录暂未加载。</p> : null}
+      </div>
+    </DataRegion>
   );
 }
 
@@ -1071,17 +1222,21 @@ function CodeView({
 }
 
 function WorkspaceSelector({
+  accountId,
   activeRunId,
   busy,
   error,
   workspaces,
+  onCreateAccount,
   onOpenWorkspace,
   onRefresh
 }: {
+  accountId: string;
   activeRunId: string | null;
   busy: boolean;
   error: string | null;
   workspaces: CodeWorkspaceOption[];
+  onCreateAccount: () => void;
   onOpenWorkspace: (workspace: CodeWorkspaceOption) => void;
   onRefresh: () => void;
 }) {
@@ -1090,12 +1245,22 @@ function WorkspaceSelector({
       <header className="workspace-selector-head">
         <div>
           <h1>工作空间</h1>
-          <span>{activeRunId ? `active run: ${activeRunId}` : "选择一个独立代码目录进入 AI IDE"}</span>
+          <span>
+            {activeRunId
+              ? `account: ${accountId} / active run: ${activeRunId}`
+              : `account: ${accountId} / 选择一个独立代码目录进入 AI IDE`}
+          </span>
         </div>
-        <button className="icon-text-button" disabled={busy} type="button" onClick={onRefresh}>
-          <RefreshCw size={15} />
-          刷新
-        </button>
+        <div className="workspace-actions">
+          <button className="icon-text-button" disabled={busy} type="button" onClick={onCreateAccount}>
+            <Plus size={15} />
+            新建账号空间
+          </button>
+          <button className="icon-text-button" disabled={busy} type="button" onClick={onRefresh}>
+            <RefreshCw size={15} />
+            刷新
+          </button>
+        </div>
       </header>
       {error ? <div className="error-line inline">{error}</div> : null}
       <div className="workspace-table">
@@ -1103,6 +1268,7 @@ function WorkspaceSelector({
           <thead>
             <tr>
               <th>名称</th>
+              <th>账号</th>
               <th>类型</th>
               <th>代码目录</th>
               <th>状态</th>
@@ -1113,6 +1279,7 @@ function WorkspaceSelector({
             {workspaces.map((workspace) => (
               <tr key={workspace.id} onClick={() => onOpenWorkspace(workspace)}>
                 <td>{workspace.label}</td>
+                <td>{workspace.account_id ?? "shared"}</td>
                 <td>{workspace.scope}</td>
                 <td>{workspace.workspace}</td>
                 <td>{workspace.status}</td>
@@ -1132,7 +1299,7 @@ function WorkspaceSelector({
             ))}
             {workspaces.length === 0 ? (
               <tr>
-                <td colSpan={5}>暂无可用工作空间。</td>
+                <td colSpan={6}>暂无可用工作空间。</td>
               </tr>
             ) : null}
           </tbody>
@@ -1381,4 +1548,10 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   });
   if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
   return response.json() as Promise<T>;
+}
+
+function accountParams(accountId: string) {
+  const params = new URLSearchParams();
+  params.set("account_id", accountId);
+  return params.toString();
 }

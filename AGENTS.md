@@ -159,6 +159,11 @@ exit non-zero. Use `smoke-llm --real` before expecting verification to pass.
 - The internal endpoint may parse intent and return structured `reply`,
   `actions`, `artifacts`, `warnings`, and `trace_refs`. It must not own global
   workflow state.
+- `account_id` is a local workspace namespace for separating code directories
+  and run roots. It is not authentication, authorization, or a multi-tenant
+  security boundary.
+- Algorithm catalog entries are strategy descriptions and prompt-seeding aids;
+  they are not evaluated implementations until a run artifact proves them.
 - Valid action categories are currently `start_run`, `resume_run`,
   `open_code_server`, and `summarize_artifact`.
 - New action categories require schema updates, tests, guardrails, trace output,
@@ -181,6 +186,8 @@ exit non-zero. Use `smoke-llm --real` before expecting verification to pass.
 - Do not expose the real `HOME`, browser profiles, cloud credentials, API keys,
   private datasets, or generated run artifacts as editable truth through
   code-server.
+- Prefer account-scoped `.agenticsciml/accounts/<account_id>/` directories for
+  local VS Code Web sessions when the UI has an active account namespace.
 
 ## Prompt Injection Boundary
 

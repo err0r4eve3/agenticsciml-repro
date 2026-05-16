@@ -2,6 +2,37 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-17 账号隔离工作空间与算法目录
+
+本次继续迭代 ChatUI / VS Code Web / 算法库三页结构，新增本地账号 namespace 和
+算法策略目录。
+
+已实现：
+
+- 新增 `GET /api/accounts` / `POST /api/accounts`，创建
+  `.agenticsciml/accounts/<account_id>/workspace/` 与独立 `runs/` 目录。
+- run、artifact、SSE、code-server workspace 和 `/api/solver/chat` 支持可选
+  `account_id`；未传时保持旧 shared `runs/` 兼容，前端默认使用 `local` 账号。
+- `GET /api/code-server/workspaces?account_id=<id>` 只返回该账号下的独立
+  code-server 目录，不混入 shared repo 根目录。
+- 新增 `GET /api/algorithms` 和 `src/agenticsciml/algorithm_catalog.py`，提供
+  MLP、Fourier feature、PINN、weak-form PINN、XPINN、DeepONet、FNO-lite、
+  kernel surrogate、low-rank operator、sparse sensor reconstruction、SINDy
+  sparse discovery 等策略条目。它们是 planning / prompt-seeding aids，不是
+  已验证科学结果。
+- 前端左侧增加本地账号切换/创建；`VS Code` 工作空间选择页展示账号隔离目录；
+  进入编辑态后仍只保留 VS Code Web iframe 和右侧 ChatUI。
+- `算法库` 页新增算法策略卡片，同时继续承载 benchmark/run/trace/artifact 工作台。
+- repo-local skill `.agents/skills/agenticsciml-chatui-operator/SKILL.md` 升级到
+  `version: 0.3.0`，记录本地账号 namespace、算法目录和 code-server workspace
+  边界。
+
+边界：
+
+- 本地账号 namespace 不是公网认证、ACL 或多租户安全模型。
+- 算法目录不绕过 evaluator、selector、champion selection 或 artifact schema。
+- `.agenticsciml/` 属于本地生成状态，不提交到 Git。
+
 ## 2026-05-17 AgenticSciML Assistant 规范
 
 新增文档：[AgenticSciML Assistant 规范](agenticsciml_assistant.md)。

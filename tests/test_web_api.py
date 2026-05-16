@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,26 @@ def test_web_benchmarks_match_catalog() -> None:
     assert response.status_code == 200
     names = {item["name"] for item in response.json()["benchmarks"]}
     assert "function_approx" in names
+
+
+def test_web_algorithms_expose_professional_catalog() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/api/algorithms")
+
+    assert response.status_code == 200
+    payload = response.json()
+    algorithms = {item["id"]: item for item in payload["algorithms"]}
+    assert "Algorithm catalog entries are planning" in payload["claim_boundary"]
+    assert "pinn_residual_minimizer" in algorithms
+    assert "weak_form_pinn" in algorithms
+    assert "xpinn_domain_decomposition" in algorithms
+    assert "deeponet_operator" in algorithms
+    assert "kernel_surrogate_regression" in algorithms
+    assert "sindy_sparse_discovery" in algorithms
+    assert algorithms["pinn_residual_minimizer"]["status"] == "strategy_blueprint"
+    assert len(algorithms) >= 14
+    assert "paper-level" in algorithms["sparse_sensor_reconstructor"]["safety_notes"]
 
 
 def test_web_mock_run_writes_required_artifacts(tmp_path: Path) -> None:
@@ -148,3 +169,74 @@ def test_code_server_workspaces_list_independent_directories(tmp_path: Path) -> 
     )
     for item in workspaces.values():
         assert "PASSWORD=" not in item["url"]
+
+
+def test_account_workspaces_are_isolated_local_namespaces(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTICSCIML_ACCOUNTS_ROOT", str(tmp_path / "accounts"))
+    client = TestClient(create_app())
+
+    created = client.post("/api/accounts", json={"account_id": "alice", "display_name": "Alice"})
+    assert created.status_code == 200
+    account = created.json()["account"]
+    assert account["account_id"] == "alice"
+    assert account["auth"] == "not_implemented"
+    assert Path(account["workspace_root"]).is_relative_to(tmp_path / "accounts" / "alice")
+
+    run_dir = Path(account["runs_dir"]) / "alice-run"
+    (run_dir / "solutions" / "solution_000").mkdir(parents=True)
+    (run_dir / "run_metadata.json").write_text('{"run_state": "partial"}', encoding="utf-8")
+
+    response = client.get("/api/code-server/workspaces", params={"account_id": "alice"})
+
+    assert response.status_code == 200
+    workspaces = {item["id"]: item for item in response.json()["workspaces"]}
+    assert "repo" not in workspaces
+    assert workspaces["account:alice"]["scope"] == "account"
+    assert workspaces["account:alice"]["isolation"] == "account"
+    assert workspaces["account:alice"]["workspace"] == account["workspace_root"]
+    assert workspaces["run:alice-run"]["workspace"] == str(run_dir.resolve())
+    assert workspaces["solution:alice-run:solution_000"]["account_id"] == "alice"
+
+    invalid = client.get("/api/code-server/workspaces", params={"account_id": "../alice"})
+    assert invalid.status_code == 400
+
+
+def test_accounts_endpoint_tolerates_parallel_reads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTICSCIML_ACCOUNTS_ROOT", str(tmp_path / "accounts"))
+    client = TestClient(create_app())
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        responses = list(executor.map(lambda _: client.get("/api/accounts"), range(12)))
+
+    assert {response.status_code for response in responses} == {200}
+    assert all(response.json()["accounts"][0]["account_id"] == "local" for response in responses)
+
+
+def test_account_run_records_do_not_collide(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTICSCIML_ACCOUNTS_ROOT", str(tmp_path / "accounts"))
+    client = TestClient(create_app())
+
+    for account_id in ("alice", "bob"):
+        response = client.post(
+            "/api/runs",
+            json={
+                "benchmark": "function_approx",
+                "mode": "dry_run",
+                "account_id": account_id,
+                "experiment_id": "same-run-id",
+            },
+        )
+        assert response.status_code == 200
+
+    alice = client.get("/api/runs/same-run-id", params={"account_id": "alice"})
+    bob = client.get("/api/runs/same-run-id", params={"account_id": "bob"})
+
+    assert alice.status_code == 200
+    assert bob.status_code == 200
+    alice_record = alice.json()["record"]
+    bob_record = bob.json()["record"]
+    assert alice_record["status"] == "dry_run"
+    assert bob_record["status"] == "dry_run"
+    assert "/alice/" in alice_record["run_dir"]
+    assert "/bob/" in bob_record["run_dir"]
+    assert alice_record["run_dir"] != bob_record["run_dir"]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
 import threading
 import time
 from dataclasses import asdict, dataclass
@@ -16,6 +17,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from agenticsciml.algorithm_catalog import ALGORITHM_CLAIM_BOUNDARY, list_algorithms
 from agenticsciml.benchmarks import REPO_ROOT, benchmark_for_path, list_benchmarks
 from agenticsciml.config import EvolutionConfig, ExperimentConfig
 from agenticsciml.llm.mock import MockLLMClient
@@ -24,7 +26,9 @@ from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 
 
 RunMode = Literal["mock", "real", "dry_run"]
-WorkspaceScope = Literal["repo", "run", "solution"]
+WorkspaceScope = Literal["repo", "account", "run", "solution"]
+DEFAULT_ACCOUNT_ID = "local"
+ACCOUNT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$")
 
 PLANNED_AGENT_CALLS = (
     "data_analyst",
@@ -44,6 +48,7 @@ class RunStartRequest(BaseModel):
     benchmark: str = "function_approx"
     benchmark_dir: str | None = None
     mode: RunMode = "mock"
+    account_id: str | None = None
     max_iterations: int = Field(default=1, ge=0)
     parallel_mutations: int = Field(default=2, ge=1)
     timeout_s: int = Field(default=60, ge=1)
@@ -64,7 +69,13 @@ class SolverChatRequest(BaseModel):
     selected_benchmark: str = "function_approx"
     mode: RunMode = "mock"
     workspace_scope: WorkspaceScope = "repo"
+    account_id: str | None = None
     output_dir: str = "runs"
+
+
+class AccountCreateRequest(BaseModel):
+    account_id: str = Field(min_length=1, max_length=48)
+    display_name: str | None = Field(default=None, max_length=80)
 
 
 @dataclass(slots=True)
@@ -102,9 +113,27 @@ def create_app() -> FastAPI:
         specs = list_benchmarks()
         return {"benchmarks": [spec.to_dict() for spec in specs]}
 
+    @app.get("/api/algorithms")
+    def algorithms(family: str | None = Query(default=None)) -> dict[str, object]:
+        return {
+            "algorithms": [spec.to_dict() for spec in list_algorithms(family)],
+            "claim_boundary": ALGORITHM_CLAIM_BOUNDARY,
+        }
+
+    @app.get("/api/accounts")
+    def accounts() -> dict[str, object]:
+        return {"accounts": _list_accounts()}
+
+    @app.post("/api/accounts")
+    def create_account(request: AccountCreateRequest) -> dict[str, object]:
+        return {"account": _ensure_account(request.account_id, request.display_name)}
+
     @app.get("/api/runs")
-    def runs(output_dir: str = Query(default="runs")) -> dict[str, object]:
-        base = _resolve_output_dir(output_dir)
+    def runs(
+        account_id: str | None = Query(default=None),
+        output_dir: str = Query(default="runs"),
+    ) -> dict[str, object]:
+        base = _resolve_output_dir(output_dir, account_id=account_id)
         records = []
         if base.exists():
             for child in sorted(base.iterdir()):
@@ -115,7 +144,7 @@ def create_app() -> FastAPI:
     @app.post("/api/runs")
     def start_run(request: RunStartRequest) -> dict[str, object]:
         run_id = request.experiment_id or _default_experiment_id(request.mode)
-        output_dir = _resolve_output_dir(request.output_dir)
+        output_dir = _resolve_output_dir(request.output_dir, account_id=request.account_id)
         benchmark_dir = _resolve_benchmark_dir(request.benchmark, request.benchmark_dir)
         benchmark_spec = benchmark_for_path(benchmark_dir)
         benchmark_name = benchmark_spec.name if benchmark_spec else benchmark_dir.name
@@ -167,17 +196,22 @@ def create_app() -> FastAPI:
         return start_run(resume_request)
 
     @app.get("/api/runs/{run_id}")
-    def get_run(run_id: str, output_dir: str = Query(default="runs")) -> dict[str, object]:
-        return _describe_run(run_id, _resolve_output_dir(output_dir))
+    def get_run(
+        run_id: str,
+        account_id: str | None = Query(default=None),
+        output_dir: str = Query(default="runs"),
+    ) -> dict[str, object]:
+        return _describe_run(run_id, _resolve_output_dir(output_dir, account_id=account_id))
 
     @app.get("/api/runs/{run_id}/events")
     def run_events(
         run_id: str,
+        account_id: str | None = Query(default=None),
         output_dir: str = Query(default="runs"),
         follow: bool = Query(default=True),
         timeout_s: float = Query(default=30.0, ge=0.1, le=300.0),
     ) -> StreamingResponse:
-        run_dir = _resolve_run_dir(run_id, _resolve_output_dir(output_dir))
+        run_dir = _resolve_run_dir(run_id, _resolve_output_dir(output_dir, account_id=account_id))
         return StreamingResponse(
             _stream_trace_events(run_id, run_dir, follow=follow, timeout_s=timeout_s),
             media_type="text/event-stream",
@@ -187,9 +221,10 @@ def create_app() -> FastAPI:
     def get_artifact(
         run_id: str,
         artifact_path: str,
+        account_id: str | None = Query(default=None),
         output_dir: str = Query(default="runs"),
     ) -> dict[str, object]:
-        run_dir = _resolve_run_dir(run_id, _resolve_output_dir(output_dir))
+        run_dir = _resolve_run_dir(run_id, _resolve_output_dir(output_dir, account_id=account_id))
         target = _safe_run_child(run_dir, artifact_path)
         if target.is_dir():
             return {
@@ -210,18 +245,26 @@ def create_app() -> FastAPI:
     @app.get("/api/code-server/url")
     def code_server_url(
         scope: WorkspaceScope = Query(default="repo"),
+        account_id: str | None = Query(default=None),
         run_id: str | None = Query(default=None),
         solution_id: str | None = Query(default=None),
         output_dir: str = Query(default="runs"),
     ) -> dict[str, object]:
-        return _code_server_payload(scope, run_id=run_id, solution_id=solution_id, output_dir=output_dir)
+        return _code_server_payload(
+            scope,
+            account_id=account_id,
+            run_id=run_id,
+            solution_id=solution_id,
+            output_dir=output_dir,
+        )
 
     @app.get("/api/code-server/workspaces")
     def code_server_workspaces(
+        account_id: str | None = Query(default=None),
         run_id: str | None = Query(default=None),
         output_dir: str = Query(default="runs"),
     ) -> dict[str, object]:
-        return {"workspaces": _code_server_workspaces(run_id=run_id, output_dir=output_dir)}
+        return {"workspaces": _code_server_workspaces(account_id=account_id, run_id=run_id, output_dir=output_dir)}
 
     @app.post("/api/solver/chat")
     def solver_chat(request: SolverChatRequest) -> dict[str, object]:
@@ -273,17 +316,21 @@ def _run_orchestrator(
 
 def _store_record(record: RunRecord) -> None:
     with _RUNS_LOCK:
-        _RUNS[record.run_id] = record
+        _RUNS[_record_key(record.run_dir)] = record
 
 
-def _record_for(run_id: str) -> RunRecord | None:
+def _record_for(run_dir: Path) -> RunRecord | None:
     with _RUNS_LOCK:
-        return _RUNS.get(run_id)
+        return _RUNS.get(_record_key(run_dir))
+
+
+def _record_key(run_dir: str | Path) -> str:
+    return str(Path(run_dir).resolve(strict=False))
 
 
 def _describe_run(run_id: str, output_dir: Path) -> dict[str, object]:
     run_dir = output_dir / run_id
-    record = _record_for(run_id)
+    record = _record_for(run_dir)
     if not run_dir.exists() and record is None:
         raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
 
@@ -313,7 +360,9 @@ def _infer_run_status(run_dir: Path, metadata: dict[str, Any] | None) -> str:
     return "unknown"
 
 
-def _resolve_output_dir(value: str) -> Path:
+def _resolve_output_dir(value: str, *, account_id: str | None = None) -> Path:
+    if account_id and value == "runs":
+        return _account_runs_dir(account_id)
     path = Path(value).expanduser()
     if not path.is_absolute():
         path = REPO_ROOT / path
@@ -342,6 +391,84 @@ def _resolve_benchmark_dir(benchmark: str, benchmark_dir: str | None) -> Path:
         if spec.name == benchmark:
             return spec.path.resolve()
     raise HTTPException(status_code=404, detail=f"Unknown benchmark: {benchmark}")
+
+
+def _resolve_account_id(value: str | None) -> str:
+    account_id = (value or DEFAULT_ACCOUNT_ID).strip()
+    if not ACCOUNT_ID_RE.fullmatch(account_id):
+        raise HTTPException(
+            status_code=400,
+            detail="account_id must start with a letter or number and contain only letters, numbers, _ or -",
+        )
+    return account_id
+
+
+def _accounts_root() -> Path:
+    configured = os.environ.get("AGENTICSCIML_ACCOUNTS_ROOT")
+    root = Path(configured).expanduser() if configured else REPO_ROOT / ".agenticsciml" / "accounts"
+    return root.resolve()
+
+
+def _account_root(account_id: str | None, *, create: bool = True) -> Path:
+    resolved_id = _resolve_account_id(account_id)
+    root = _accounts_root()
+    if create:
+        root.mkdir(parents=True, exist_ok=True)
+    account_root = (root / resolved_id).resolve(strict=False)
+    if account_root != root and root not in account_root.parents:
+        raise HTTPException(status_code=400, detail="account workspace escapes accounts root")
+    if create:
+        (account_root / "workspace").mkdir(parents=True, exist_ok=True)
+        (account_root / "runs").mkdir(parents=True, exist_ok=True)
+    return account_root
+
+
+def _account_workspace_dir(account_id: str | None) -> Path:
+    return (_account_root(account_id) / "workspace").resolve(strict=True)
+
+
+def _account_runs_dir(account_id: str | None) -> Path:
+    return (_account_root(account_id) / "runs").resolve(strict=True)
+
+
+def _ensure_account(account_id: str | None, display_name: str | None = None) -> dict[str, object]:
+    resolved_id = _resolve_account_id(account_id)
+    root = _account_root(resolved_id)
+    metadata_path = root / "account.json"
+    if metadata_path.exists():
+        existing = _read_optional_json(metadata_path) or {}
+    else:
+        existing = {}
+    payload = {
+        "schema_version": 1,
+        "account_id": resolved_id,
+        "display_name": display_name or existing.get("display_name") or resolved_id,
+        "workspace_root": str((root / "workspace").resolve()),
+        "runs_dir": str((root / "runs").resolve()),
+        "isolation": "local_namespace",
+        "auth": "not_implemented",
+    }
+    if existing == payload:
+        return payload
+    tmp_path = metadata_path.with_name(f".{metadata_path.name}.{threading.get_ident()}.{time.time_ns()}.tmp")
+    tmp_path.write_text(json.dumps(payload, ensure_ascii=False, allow_nan=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp_path, metadata_path)
+    return payload
+
+
+def _list_accounts() -> list[dict[str, object]]:
+    accounts_by_id = {DEFAULT_ACCOUNT_ID: _ensure_account(DEFAULT_ACCOUNT_ID, "Local")}
+    root = _accounts_root()
+    if root.exists():
+        for child in sorted(root.iterdir()):
+            if not child.is_dir():
+                continue
+            try:
+                account_id = _resolve_account_id(child.name)
+            except HTTPException:
+                continue
+            accounts_by_id[account_id] = _ensure_account(account_id)
+    return list(accounts_by_id.values())
 
 
 def _default_experiment_id(mode: str) -> str:
@@ -427,7 +554,7 @@ def _stream_trace_events(run_id: str, run_dir: Path, *, follow: bool, timeout_s:
                     if line:
                         yield f"event: trace\ndata: {line}\n\n"
                 offset = f.tell()
-        record = _record_for(run_id)
+        record = _record_for(run_dir)
         if not follow or (record and record.status in {"completed", "failed", "dry_run"}):
             yield "event: end\ndata: {}\n\n"
             return
@@ -440,14 +567,23 @@ def _stream_trace_events(run_id: str, run_dir: Path, *, follow: bool, timeout_s:
 def _code_server_payload(
     scope: WorkspaceScope,
     *,
+    account_id: str | None,
     run_id: str | None,
     solution_id: str | None,
     output_dir: str,
 ) -> dict[str, object]:
-    workspace = _workspace_for_scope(scope, run_id=run_id, solution_id=solution_id, output_dir=output_dir)
+    workspace = _workspace_for_scope(
+        scope,
+        account_id=account_id,
+        run_id=run_id,
+        solution_id=solution_id,
+        output_dir=output_dir,
+    )
+    resolved_account_id = _resolve_account_id(account_id) if account_id else None
     base_url = os.environ.get("AGENTICSCIML_CODE_SERVER_URL", "http://127.0.0.1:8080").rstrip("/")
     return {
         "scope": scope,
+        "account_id": resolved_account_id,
         "run_id": run_id,
         "solution_id": solution_id,
         "workspace": str(workspace),
@@ -464,15 +600,18 @@ def _code_server_payload(
 def _workspace_for_scope(
     scope: WorkspaceScope,
     *,
+    account_id: str | None,
     run_id: str | None,
     solution_id: str | None,
     output_dir: str,
 ) -> Path:
+    if scope == "account":
+        return _account_workspace_dir(account_id)
     if scope == "repo":
         return REPO_ROOT.resolve()
     if not run_id:
         raise HTTPException(status_code=400, detail="run_id is required for run or solution workspace scope")
-    run_dir = _resolve_run_dir(run_id, _resolve_output_dir(output_dir))
+    run_dir = _resolve_run_dir(run_id, _resolve_output_dir(output_dir, account_id=account_id))
     if scope == "run":
         return run_dir
     if solution_id in {None, "", "champion"}:
@@ -484,19 +623,43 @@ def _workspace_for_scope(
     return workspace.resolve(strict=True)
 
 
-def _code_server_workspaces(*, run_id: str | None, output_dir: str) -> list[dict[str, object]]:
-    workspaces = [
-        _workspace_option(
-            "repo",
-            label="Repository",
-            scope="repo",
-            run_id=None,
-            solution_id=None,
-            workspace=REPO_ROOT.resolve(),
-            status="ready",
-        )
-    ]
-    base = _resolve_output_dir(output_dir)
+def _code_server_workspaces(
+    *,
+    account_id: str | None,
+    run_id: str | None,
+    output_dir: str,
+) -> list[dict[str, object]]:
+    workspaces: list[dict[str, object]]
+    if account_id:
+        resolved_account_id = _resolve_account_id(account_id)
+        account = _ensure_account(resolved_account_id)
+        workspaces = [
+            _workspace_option(
+                f"account:{resolved_account_id}",
+                label=f"{account['display_name']} / workspace",
+                scope="account",
+                account_id=resolved_account_id,
+                run_id=None,
+                solution_id=None,
+                workspace=Path(str(account["workspace_root"])).resolve(),
+                status="account-isolated",
+            )
+        ]
+    else:
+        resolved_account_id = None
+        workspaces = [
+            _workspace_option(
+                "repo",
+                label="Repository",
+                scope="repo",
+                account_id=None,
+                run_id=None,
+                solution_id=None,
+                workspace=REPO_ROOT.resolve(),
+                status="ready",
+            )
+        ]
+    base = _resolve_output_dir(output_dir, account_id=resolved_account_id)
     run_dirs: list[Path] = []
     if run_id:
         run_dirs = [_resolve_run_dir(run_id, base)]
@@ -511,6 +674,7 @@ def _code_server_workspaces(*, run_id: str | None, output_dir: str) -> list[dict
                 f"run:{current_run_id}",
                 label=current_run_id,
                 scope="run",
+                account_id=resolved_account_id,
                 run_id=current_run_id,
                 solution_id=None,
                 workspace=run_dir,
@@ -524,6 +688,7 @@ def _code_server_workspaces(*, run_id: str | None, output_dir: str) -> list[dict
                     f"champion:{current_run_id}",
                     label=f"{current_run_id} / champion",
                     scope="solution",
+                    account_id=resolved_account_id,
                     run_id=current_run_id,
                     solution_id="champion",
                     workspace=champion_dir.resolve(),
@@ -540,6 +705,7 @@ def _code_server_workspaces(*, run_id: str | None, output_dir: str) -> list[dict
                         f"solution:{current_run_id}:{solution_dir.name}",
                         label=f"{current_run_id} / {solution_dir.name}",
                         scope="solution",
+                        account_id=resolved_account_id,
                         run_id=current_run_id,
                         solution_id=solution_dir.name,
                         workspace=solution_dir.resolve(),
@@ -554,6 +720,7 @@ def _workspace_option(
     *,
     label: str,
     scope: WorkspaceScope,
+    account_id: str | None,
     run_id: str | None,
     solution_id: str | None,
     workspace: Path,
@@ -564,10 +731,12 @@ def _workspace_option(
         "id": workspace_id,
         "label": label,
         "scope": scope,
+        "account_id": account_id,
         "run_id": run_id,
         "solution_id": solution_id,
         "workspace": str(workspace),
         "status": status,
+        "isolation": "account" if account_id else "shared",
         "url": f"{base_url}/?folder={quote(str(workspace))}",
         "configured": bool(base_url),
         "warnings": [
@@ -595,6 +764,7 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
                 "payload": {
                     "benchmark": request.selected_benchmark,
                     "mode": request.mode,
+                    "account_id": _resolve_account_id(request.account_id) if request.account_id else None,
                     "background": True,
                 },
             }
@@ -608,6 +778,7 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
                     "type": "open_code_server",
                     "payload": _code_server_payload(
                         request.workspace_scope,
+                        account_id=request.account_id,
                         run_id=request.active_run_id,
                         solution_id="champion" if "champion" in text else None,
                         output_dir=request.output_dir,
@@ -620,7 +791,10 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
         if not request.active_run_id:
             warnings.append("Select an active run before asking for artifact or trace summaries.")
         else:
-            run_dir = _resolve_run_dir(request.active_run_id, _resolve_output_dir(request.output_dir))
+            run_dir = _resolve_run_dir(
+                request.active_run_id,
+                _resolve_output_dir(request.output_dir, account_id=request.account_id),
+            )
             summary = _read_optional_json(run_dir / "trace_summary.json")
             leaderboard = _read_leaderboard(run_dir / "leaderboard.csv")
             artifacts.extend(_important_artifacts(run_dir))
