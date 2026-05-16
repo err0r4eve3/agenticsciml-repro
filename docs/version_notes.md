@@ -13,11 +13,13 @@
   read-only artifact browsing、code-server URL 生成和 `/api/solver/chat` 算法 tool。
 - `/api/solver/chat` 只做意图解析和结构化 action 返回，不接管 Python
   orchestrator 的状态机、evaluator、solution tree 或 champion selection。
-- React/Vite ChatUI 前端提供分页式本地工作台：左侧功能栏切换 `ChatUI` 和
-  `AI IDE`；`ChatUI` 页是接近 ChatGPT 网页版的纯对话界面，`AI IDE` 页是
-  左侧 VS Code Web / code-server workspace 加右侧可收起 ChatUI Agent 侧边栏。
-- ChatUI 主入口用于对话式启动 mock、解释 trace、打开 champion workspace、
-  切换到 AI IDE 或发起 run 比较请求。
+- React/Vite ChatUI 前端提供 UnitaryLab 风格的分页式本地工作台：左侧功能栏
+  切换 `ChatUI`、`VS Code Web` 和 `算法库`。
+- `ChatUI` 页保持接近 ChatGPT 网页版的纯对话界面；`VS Code Web` 页只显示
+  code-server workspace 和右侧可收起 ChatUI Agent 侧边栏；benchmark/run/gate、
+  dashboard、trace 和 artifact 工作台集中放到 `算法库` 页。
+- ChatUI 主入口用于自然语言交互和切换到算法库 / VS Code Web；实验运行与证据
+  浏览从算法库页进入。
 - 前端视觉调整为 Claude Code 风格的暖米色工作台，保留本地实验控制台的高密度
   信息结构。
 - Agent 面板会展示 `/api/solver/chat` 返回的结构化 actions、warnings、

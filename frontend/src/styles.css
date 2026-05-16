@@ -145,6 +145,7 @@ ul {
 .function-nav,
 .chatgpt-page,
 .ide-page,
+.library-page,
 .ide-workspace {
   min-width: 0;
   min-height: 0;
@@ -211,12 +212,35 @@ ul {
     var(--bg);
 }
 
+.page-header {
+  display: flex;
+  align-items: center;
+  min-height: 72px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 250, 242, 0.92);
+  padding: 12px 20px;
+}
+
+.page-header span {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
 .ide-page {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
   gap: 12px;
   overflow: hidden;
   padding: 12px;
+  background: #efe4d3;
+}
+
+.library-page {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: #efe4d3;
 }
 
@@ -300,6 +324,48 @@ ul {
   min-height: 0;
   overflow: auto;
   padding: 18px;
+}
+
+.library-content {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px;
+}
+
+.library-hero {
+  display: flex;
+  align-items: center;
+  min-height: 150px;
+  overflow: hidden;
+  border: 1px solid rgba(31, 49, 76, 0.32);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 78% 52%, rgba(71, 132, 205, 0.58), transparent 34%),
+    radial-gradient(circle at 45% 24%, rgba(39, 84, 137, 0.42), transparent 35%),
+    linear-gradient(135deg, #151914 0%, #1a2330 54%, #0f1714 100%);
+  color: #f6ead8;
+  padding: 24px 28px;
+}
+
+.library-hero .eyebrow {
+  color: rgba(246, 234, 216, 0.72);
+}
+
+.library-hero h2 {
+  color: #fff8ec;
+  font-size: 30px;
+}
+
+.library-hero span {
+  display: block;
+  max-width: 650px;
+  margin-top: 8px;
+  color: rgba(246, 234, 216, 0.76);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .pure-chat {

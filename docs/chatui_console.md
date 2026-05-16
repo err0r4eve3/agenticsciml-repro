@@ -30,14 +30,17 @@ PYTHONPATH=src uv run --python 3.11 --extra web python -m agenticsciml.cli web -
 ChatUI 前端是单页本地工作台，不引入路由层，但用左侧功能栏做页内切换：
 
 - 左侧功能栏选择 `ChatUI` 或 `AI IDE`。
-- `ChatUI` 页是纯对话界面，接近 ChatGPT 网页版：顶部只保留 benchmark、运行
-  模式、quality gate 和 refresh/run 控件，中间是对话流，底部是主输入框。
-- `ChatUI` 页快捷指令包括“跑 mock”、“解释 trace”、“打开 champion”和“打开
-  AI IDE”。自然语言输入仍调用 `/api/solver/chat`。
-- `AI IDE` 页采用 AI IDE 布局：左侧为 VS Code Web / code-server workspace，
-  右侧为可收起 ChatUI Agent 侧边栏。
+- `ChatUI` 页是纯对话界面，接近 ChatGPT 网页版：顶部只做页面标识，中间是
+  对话流，底部是主输入框；不显示 benchmark、run、quality gate、trace 或
+  artifact 工作台。
+- `VS Code Web` 页采用 AI IDE 布局：左侧为 VS Code Web / code-server
+  workspace，右侧为可收起 ChatUI Agent 侧边栏；不显示实验工作台控件。
+- `算法库` 页承载实验工作台：benchmark、运行模式、run/gate 状态、run
+  dashboard、run 列表、leaderboard、trace preview 和 artifact 浏览。
+- ChatUI 自然语言输入仍调用 `/api/solver/chat`；`open_code_server` action 会切到
+  `VS Code Web` 页，`summarize_artifact` action 会切到 `算法库` 页。
 - Agent 侧边栏负责自然语言意图、结构化 actions、warnings、artifacts 和 trace
-  refs 展示；`open_code_server` action 会切换到 `AI IDE` 页。
+  refs 展示。
 - 视觉语言采用 Claude Code 风格的暖米色工作台：纸面背景、深棕文字、陶土色主
   action、低饱和边框和暗色 trace/code 区域。
 
@@ -56,9 +59,9 @@ PASSWORD=<local-token> code-server --bind-addr 127.0.0.1:8080 /path/to/workspace
 `AGENTICSCIML_CODE_SERVER_URL` 覆盖 base URL，但第一版不支持公网、多用户鉴权
 或代理层权限模型。
 
-`AI IDE` 页显示 `repo`、`run` 或 `solution` workspace 路径、启动命令、VS Code
-Web iframe 和新标签页打开链接。ChatUI 不携带 code-server token，不自动启动
-sidecar，iframe 也必须经过 code-server 自身鉴权。
+`VS Code Web` 页显示 `repo`、`run` 或 `solution` workspace 路径、启动命令、VS
+Code Web iframe 和新标签页打开链接。ChatUI 不携带 code-server token，不自动
+启动 sidecar，iframe 也必须经过 code-server 自身鉴权。
 
 ## API 边界
 

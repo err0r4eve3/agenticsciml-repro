@@ -8,6 +8,7 @@ import {
   FileText,
   FolderTree,
   MessageSquare,
+  PackageSearch,
   PanelRightClose,
   PanelRightOpen,
   Play,
@@ -72,7 +73,7 @@ type ArtifactPayload =
 
 type RunMode = "mock" | "real" | "dry_run";
 type WorkspaceScope = "repo" | "run" | "solution";
-type PageKey = "chat" | "ide";
+type PageKey = "chat" | "ide" | "library";
 
 type AgentMessage = {
   id: number;
@@ -192,7 +193,7 @@ export function App() {
     {
       id: 1,
       role: "assistant",
-      text: "选择 benchmark 后可启动 mock run、解释 trace、浏览 artifact，并打开 code-server 工作区。"
+      text: "可以直接提问或描述任务。需要更多工具时，请使用左侧分页切换。"
     }
   ]);
   const [mode, setMode] = useState<RunMode>("mock");
@@ -397,6 +398,7 @@ export function App() {
         if (typeof artifactPath === "string") {
           setSelectedArtifactPath(artifactPath);
         }
+        setActivePage("library");
       }
     }
   }
@@ -416,48 +418,24 @@ export function App() {
       <FunctionNav activePage={activePage} onSelectPage={setActivePage} />
       {activePage === "chat" ? (
         <section className="chatgpt-page" aria-label="ChatUI 页面">
-          <TopBar
-            activeRunId={activeRunId}
-            busy={busy}
-            mode={mode}
-            qualityGate={qualityGate}
-            runState={runState}
-            selectedBenchmark={selectedBenchmark}
-            benchmarks={benchmarks}
-            onModeChange={setMode}
-            onRefresh={refreshAll}
-            onRun={() => startRun(mode, false)}
-            onSelectBenchmark={setSelectedBenchmark}
-          />
+          <PageHeader title="AgenticSciML" subtitle="ChatUI" />
           {error ? <div className="error-line">{error}</div> : null}
           <PureChatUI
-            activeRunId={activeRunId}
             busy={busy}
             mainPrompt={mainPrompt}
             messages={messages}
-            selectedBenchmark={selected?.name ?? "function_approx"}
             onChange={setMainPrompt}
             onOpenIde={() => setActivePage("ide")}
+            onOpenLibrary={() => setActivePage("library")}
             onQuickPrompt={(text, options) => submitAgentMessage(text, options)}
             onSubmit={sendMainPrompt}
           />
         </section>
-      ) : (
+      ) : null}
+      {activePage === "ide" ? (
         <section className="ide-page" aria-label="AI IDE 页面">
           <div className="ide-workspace">
-            <TopBar
-              activeRunId={activeRunId}
-              busy={busy}
-              mode={mode}
-              qualityGate={qualityGate}
-              runState={runState}
-              selectedBenchmark={selectedBenchmark}
-              benchmarks={benchmarks}
-              onModeChange={setMode}
-              onRefresh={refreshAll}
-              onRun={() => startRun(mode, false)}
-              onSelectBenchmark={setSelectedBenchmark}
-            />
+            <PageHeader title="VS Code Web" subtitle="code-server sidecar" />
             {error ? <div className="error-line">{error}</div> : null}
             <CodeView
               activeRunId={activeRunId}
@@ -479,7 +457,42 @@ export function App() {
             onDismissRealAction={() => setPendingRealAction(null)}
           />
         </section>
-      )}
+      ) : null}
+      {activePage === "library" ? (
+        <section className="library-page" aria-label="算法库页面">
+          <TopBar
+            activeRunId={activeRunId}
+            busy={busy}
+            mode={mode}
+            qualityGate={qualityGate}
+            runState={runState}
+            selectedBenchmark={selectedBenchmark}
+            benchmarks={benchmarks}
+            onModeChange={setMode}
+            onRefresh={refreshAll}
+            onRun={() => startRun(mode, false)}
+            onSelectBenchmark={setSelectedBenchmark}
+          />
+          {error ? <div className="error-line">{error}</div> : null}
+          <AlgorithmLibraryPage
+            activeRun={activeRun}
+            activeRunId={activeRunId}
+            artifactPayload={artifactPayload}
+            events={filteredEvents}
+            filter={traceFilter}
+            runs={runs}
+            selected={selected}
+            selectedArtifactPath={selectedArtifactPath}
+            onFilterChange={setTraceFilter}
+            onOpenArtifacts={() => setSelectedArtifactPath("trace_summary.json")}
+            onOpenCode={() => setActivePage("ide")}
+            onRefreshRuns={refreshRuns}
+            onSelectArtifact={setSelectedArtifactPath}
+            onSelectRun={selectRun}
+            onStartMock={() => startRun("mock", false)}
+          />
+        </section>
+      ) : null}
     </main>
   );
 }
@@ -493,7 +506,8 @@ function FunctionNav({
 }) {
   const pages: Array<{ key: PageKey; label: string; icon: ReactNode }> = [
     { key: "chat", label: "ChatUI", icon: <MessageSquare size={19} /> },
-    { key: "ide", label: "AI IDE", icon: <Code2 size={19} /> }
+    { key: "ide", label: "VS Code", icon: <Code2 size={19} /> },
+    { key: "library", label: "算法库", icon: <PackageSearch size={19} /> }
   ];
 
   return (
@@ -520,24 +534,33 @@ function FunctionNav({
   );
 }
 
+function PageHeader({ subtitle, title }: { subtitle: string; title: string }) {
+  return (
+    <header className="page-header">
+      <div>
+        <h1>{title}</h1>
+        <span>{subtitle}</span>
+      </div>
+    </header>
+  );
+}
+
 function PureChatUI({
-  activeRunId,
   busy,
   mainPrompt,
   messages,
-  selectedBenchmark,
   onChange,
   onOpenIde,
+  onOpenLibrary,
   onQuickPrompt,
   onSubmit
 }: {
-  activeRunId: string | null;
   busy: boolean;
   mainPrompt: string;
   messages: AgentMessage[];
-  selectedBenchmark: string;
   onChange: (value: string) => void;
   onOpenIde: () => void;
+  onOpenLibrary: () => void;
   onQuickPrompt: (text: string, options?: { mode?: RunMode; workspaceScope?: WorkspaceScope }) => void;
   onSubmit: (event: FormEvent) => void;
 }) {
@@ -549,24 +572,20 @@ function PureChatUI({
             <div className="command-orb">
               <Sparkles size={18} />
             </div>
-            <h2>今天要做哪个实验？</h2>
-            <p>像 ChatGPT 一样输入实验意图；运行、解释、打开 IDE 都会通过受控 action 分发到后端。</p>
+            <h2>今天要做什么？</h2>
+            <p>像 ChatGPT 一样输入问题或任务；需要更多工具时，使用左侧分页切换。</p>
             <div className="prompt-pills">
-              <button type="button" onClick={() => onQuickPrompt(`跑一个 ${selectedBenchmark} mock 实验`, { mode: "mock" })}>
-                跑 mock
+              <button type="button" onClick={() => onQuickPrompt("介绍一下这个项目当前能做什么")}>
+                介绍项目
               </button>
-              <button type="button" disabled={!activeRunId} onClick={() => onQuickPrompt("解释这个 trace")}>
-                解释 trace
+              <button type="button" onClick={() => onQuickPrompt("帮我规划下一步")}>
+                规划任务
               </button>
-              <button
-                type="button"
-                disabled={!activeRunId}
-                onClick={() => onQuickPrompt("打开 champion solution", { workspaceScope: "solution" })}
-              >
-                打开 champion
+              <button type="button" onClick={onOpenLibrary}>
+                打开算法库
               </button>
               <button type="button" onClick={onOpenIde}>
-                打开 AI IDE
+                打开 VS Code Web
               </button>
             </div>
           </div>
@@ -577,7 +596,7 @@ function PureChatUI({
         <input
           value={mainPrompt}
           onChange={(event) => onChange(event.target.value)}
-          placeholder="给 AgenticSciML 发消息，例如：跑 mock、解释这个 trace、打开 champion"
+          placeholder="给 AgenticSciML 发消息"
         />
         <div className="composer-tools">
           <button type="button" title="Artifact context">
@@ -620,8 +639,8 @@ function TopBar({
   return (
     <header className="topbar">
       <div className="topbar-title">
-        <h1>AgenticSciML</h1>
-        <span>本地实验工作台</span>
+        <h1>算法库</h1>
+        <span>实验工作台</span>
       </div>
       <div className="topbar-controls">
         <label className="compact-field">
@@ -666,65 +685,48 @@ function TopBar({
   );
 }
 
-function ChatUIPage({
+function AlgorithmLibraryPage({
   activeRun,
   activeRunId,
   artifactPayload,
-  busy,
   events,
   filter,
-  mainPrompt,
-  messages,
   runs,
   selected,
   selectedArtifactPath,
   onFilterChange,
   onOpenArtifacts,
   onOpenCode,
-  onPromptChange,
-  onQuickPrompt,
   onRefreshRuns,
   onSelectArtifact,
   onSelectRun,
-  onStartMock,
-  onSubmitPrompt
+  onStartMock
 }: {
   activeRun: RunSummary | null;
   activeRunId: string | null;
   artifactPayload: ArtifactPayload | null;
-  busy: boolean;
   events: string[];
   filter: string;
-  mainPrompt: string;
-  messages: AgentMessage[];
   runs: RunSummary[];
   selected?: Benchmark;
   selectedArtifactPath: string;
   onFilterChange: (value: string) => void;
   onOpenArtifacts: () => void;
   onOpenCode: () => void;
-  onPromptChange: (value: string) => void;
-  onQuickPrompt: (text: string, options?: { mode?: RunMode; workspaceScope?: WorkspaceScope }) => void;
   onRefreshRuns: () => void;
   onSelectArtifact: (value: string) => void;
   onSelectRun: (run: RunSummary) => void;
   onStartMock: () => void;
-  onSubmitPrompt: (event: FormEvent) => void;
 }) {
   return (
-    <section className="chat-page">
-      <CommandCenter
-        activeRunId={activeRun?.run_id ?? null}
-        busy={busy}
-        mainPrompt={mainPrompt}
-        onChange={onPromptChange}
-        onQuickPrompt={onQuickPrompt}
-        onSubmit={onSubmitPrompt}
-        selectedBenchmark={selected?.name ?? "function_approx"}
-      />
-      <DataRegion title="ChatUI conversation">
-        <ChatTranscript messages={messages} />
-      </DataRegion>
+    <section className="library-content">
+      <section className="library-hero">
+        <div>
+          <p className="eyebrow">Algorithm Library</p>
+          <h2>算法库</h2>
+          <span>集中管理 benchmark、run、leaderboard、trace 和 artifact。ChatUI 与 VS Code Web 页面保持轻量。</span>
+        </div>
+      </section>
       <DashboardView
         activeRun={activeRun}
         events={events}
