@@ -258,7 +258,7 @@ export function App() {
   ]);
   const [mode, setMode] = useState<RunMode>("mock");
   const [assistantMode, setAssistantMode] = useState<AssistantMode>("ask");
-  const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScope>("repo");
+  const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScope>("account");
   const [codeWorkspaces, setCodeWorkspaces] = useState<CodeWorkspaceOption[]>([]);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
   const [agentCollapsed, setAgentCollapsed] = useState(false);
@@ -294,6 +294,7 @@ export function App() {
     setActiveRunId(null);
     setSelectedArtifactPath("");
     setSelectedWorkspaceId(null);
+    setWorkspaceScope("account");
     refreshRuns().catch((exc) => setError(String(exc)));
     refreshCodeWorkspaces().catch((exc) => setError(String(exc)));
   }, [activeAccountId]);
@@ -471,6 +472,7 @@ export function App() {
     for (const action of actions) {
       if (action.type === "start_run") {
         const actionMode = action.payload?.mode ?? mode;
+        if (!actionBelongsToActiveAccount(action)) continue;
         if (actionMode === "real") {
           setPendingRealAction(action);
           continue;
@@ -478,6 +480,7 @@ export function App() {
         await startRun(actionMode, Boolean(action.payload?.background));
       }
       if (action.type === "resume_run" && action.run_id) {
+        if (!actionBelongsToActiveAccount(action)) continue;
         if (mode === "real") {
           setPendingRealAction(action);
           continue;
@@ -489,13 +492,19 @@ export function App() {
       }
       if (action.type === "open_code_server") {
         const nextScope = action.payload?.scope;
-        if (nextScope === "repo" || nextScope === "account" || nextScope === "run" || nextScope === "solution") {
+        if (!actionBelongsToActiveAccount(action)) continue;
+        if (nextScope === "repo") {
+          addAssistantMessage("Agent 模式不能打开 shared repo；请使用当前账号 workspace。");
+          continue;
+        }
+        if (nextScope === "account" || nextScope === "run" || nextScope === "solution") {
           setWorkspaceScope(nextScope);
         }
         setActivePage("ide");
         setSelectedWorkspaceId(null);
       }
       if (action.type === "summarize_artifact") {
+        if (!actionBelongsToActiveAccount(action)) continue;
         const artifactPath = action.payload?.path;
         if (typeof artifactPath === "string") {
           setSelectedArtifactPath(artifactPath);
@@ -503,6 +512,15 @@ export function App() {
         setActivePage("library");
       }
     }
+  }
+
+  function actionBelongsToActiveAccount(action: SolverAction) {
+    const actionAccountId = action.payload?.account_id;
+    if (typeof actionAccountId === "string" && actionAccountId !== activeAccountId) {
+      addAssistantMessage("已拦截跨账号 action：Agent 只能操作当前账号创建的工作区内容。");
+      return false;
+    }
+    return true;
   }
 
   function addAssistantMessage(text: string) {
@@ -751,7 +769,7 @@ function PureChatUI({
               <Sparkles size={18} />
             </div>
             <h2>今天要做什么？</h2>
-            <p>像 ChatGPT 一样输入问题或任务；需要更多工具时，使用左侧分页切换。</p>
+            <p>输入问题或任务；需要更多工具时，使用左侧分页切换。</p>
             <div className="prompt-pills">
               <button type="button" onClick={() => onQuickPrompt("介绍一下这个项目当前能做什么")}>
                 介绍项目

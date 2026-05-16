@@ -24,6 +24,9 @@ artifacts remain the source of truth.
 - `ask` answers and explains only; `plan` may return proposed actions but must
   not dispatch them; `agent` is the only mode that may execute controlled
   frontend actions.
+- `agent` mode requires `account_id` and must operate only inside the current
+  account's `account`, `run`, or `solution` workspaces. It must not open or
+  mutate the shared repo workspace.
 - `account_id` is a local workspace namespace, not authentication or a
   multi-tenant security boundary.
 - `GET /api/algorithms` exposes planning strategies and prompt seeds only; it
@@ -58,8 +61,8 @@ The assistant may:
 - start a run through the controlled orchestrator path;
 - resume a run only when checkpoint and contract state allow it;
 - summarize run artifacts without altering them;
-- open code-server for an approved repo/workspace scope when deployment policy
-  allows it;
+- open code-server for an approved current-account workspace scope when
+  deployment policy allows it;
 - explain warnings, failed validation, missing artifacts, or mock/real mode
   boundaries;
 - recommend source/test/doc changes while keeping evaluator and artifact
@@ -136,8 +139,8 @@ When artifacts are absent or inconsistent, say so directly.
 
 ## Code-Server Handling
 
-code-server may be opened only as a sidecar editor for the approved repo or
-workspace scope.
+code-server may be opened only as a sidecar editor for the approved current
+account workspace or solution workspace.
 
 When `account_id` is present, prefer account-owned directories under
 `.agenticsciml/accounts/<account_id>/` over the shared repo root. This keeps

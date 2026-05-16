@@ -162,6 +162,9 @@ exit non-zero. Use `smoke-llm --real` before expecting verification to pass.
 - ChatUI assistant mode defaults to `ask`. `ask` answers only, `plan` previews
   structured actions without dispatch, and `agent` is the only mode that may
   execute controlled frontend actions.
+- `agent` mode must require `account_id` and must not dispatch actions against
+  the shared repo workspace; it may operate only current-account `account`,
+  `run`, or `solution` workspaces.
 - `account_id` is a local workspace namespace for separating code directories
   and run roots. It is not authentication, authorization, or a multi-tenant
   security boundary.

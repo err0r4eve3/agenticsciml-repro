@@ -14,13 +14,17 @@
 - `plan` 模式返回结构化建议 actions，但前端不会自动分发。
 - `agent` 模式才调用既有安全分发器执行 `start_run`、`resume_run`、
   `open_code_server` 或 `summarize_artifact`。
+- `agent` 模式要求当前 `account_id`，并拒绝 shared repo workspace；前端默认
+  `workspace_scope=account`。
 - ChatUI 首页 composer 和 VS Code Web 右侧 Agent 面板都提供三段切换控件。
+- 删除 ChatUI 首页里“像 ChatGPT 一样输入问题或任务”的文案。
 - repo-local skill 升级到 `version: 0.3.1`，记录三种模式边界。
 
 边界：
 
 - `agent` 模式仍不能绕过 real LLM 显式确认、evaluator、selector、champion
   selection 或 artifact schema。
+- `agent` 模式只能操作当前账号创建的 workspace/run/solution，不能跨账号操作。
 - `plan` 模式只展示动作计划，不代表用户已经授权执行。
 
 ## 2026-05-17 账号隔离工作空间与算法目录
@@ -101,8 +105,8 @@
   orchestrator 的状态机、evaluator、solution tree 或 champion selection。
 - React/Vite ChatUI 前端提供 UnitaryLab 风格的分页式本地工作台：左侧功能栏
   切换 `ChatUI`、`VS Code Web` 和 `算法库`。
-- `ChatUI` 页保持接近 ChatGPT 网页版的纯对话界面；`VS Code Web` 页只显示
-  code-server workspace 和右侧可收起 ChatUI Agent 侧边栏；benchmark/run/gate、
+- `ChatUI` 页保持纯对话界面；`VS Code Web` 页只显示 code-server workspace
+  和右侧可收起 ChatUI Agent 侧边栏；benchmark/run/gate、
   dashboard、trace 和 artifact 工作台集中放到 `算法库` 页。
 - ChatUI 主入口用于自然语言交互和切换到算法库 / VS Code Web；实验运行与证据
   浏览从算法库页进入。

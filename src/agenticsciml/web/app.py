@@ -70,7 +70,7 @@ class SolverChatRequest(BaseModel):
     selected_benchmark: str = "function_approx"
     mode: RunMode = "mock"
     assistant_mode: AssistantMode = "ask"
-    workspace_scope: WorkspaceScope = "repo"
+    workspace_scope: WorkspaceScope = "account"
     account_id: str | None = None
     output_dir: str = "runs"
 
@@ -755,9 +755,18 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
     artifacts: list[dict[str, object]] = []
     warnings: list[str] = []
     trace_refs: list[dict[str, object]] = []
+    resolved_account_id = _resolve_account_id(request.account_id) if request.account_id else None
+    agent_scope_allowed = True
 
     if request.mode == "real":
         warnings.append("Real LLM mode requires explicit credentials and keeps existing budget/claim boundaries.")
+    if request.assistant_mode == "agent":
+        if not resolved_account_id:
+            agent_scope_allowed = False
+            warnings.append("Agent mode requires account_id and can only operate inside the current account workspace.")
+        if request.workspace_scope == "repo":
+            agent_scope_allowed = False
+            warnings.append("Agent mode cannot operate the shared repo workspace; use account, run, or solution scope.")
 
     if any(token in text for token in ("跑", "run", "start", "mock", "实验")):
         proposed_actions.append(
@@ -766,14 +775,14 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
                 "payload": {
                     "benchmark": request.selected_benchmark,
                     "mode": request.mode,
-                    "account_id": _resolve_account_id(request.account_id) if request.account_id else None,
+                    "account_id": resolved_account_id,
                     "background": True,
                 },
             }
         )
     if any(token in text for token in ("resume", "恢复", "继续")) and request.active_run_id:
         proposed_actions.append({"type": "resume_run", "run_id": request.active_run_id})
-    if any(token in text for token in ("code", "vscode", "代码", "打开", "champion", "solution")):
+    if agent_scope_allowed and any(token in text for token in ("code", "vscode", "代码", "打开", "champion", "solution")):
         try:
             proposed_actions.append(
                 {
@@ -821,7 +830,7 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
         if proposed_actions:
             warnings.append("Ask mode does not return executable actions. Switch to plan to preview actions or agent to run them.")
     else:
-        actions = proposed_actions
+        actions = proposed_actions if agent_scope_allowed else []
         if request.assistant_mode == "plan" and actions:
             warnings.append("Plan mode returns proposed actions only. The frontend must not dispatch them automatically.")
 

@@ -33,9 +33,8 @@ ChatUI 前端是单页本地工作台，不引入路由层，但用左侧功能�
 - 左侧底部的本地账号选择器只切换 workspace namespace，不是登录系统。默认
   `local` 账号会使用 `.agenticsciml/accounts/local/` 下的独立代码目录和 runs
   目录；新建账号只创建本地目录和 `account.json` 元数据，不写入密钥。
-- `ChatUI` 页是纯对话界面，接近 ChatGPT 网页版：顶部只做页面标识，中间是
-  对话流，底部是主输入框；不显示 benchmark、run、quality gate、trace 或
-  artifact 工作台。
+- `ChatUI` 页是纯对话界面：顶部只做页面标识，中间是对话流，底部是主输入框；
+  不显示 benchmark、run、quality gate、trace 或 artifact 工作台。
 - ChatUI 和右侧 Agent 面板都有 `ask` / `plan` / `agent` 三种交互模式，默认
   `ask`。`ask` 只解释不返回可执行动作；`plan` 返回结构化建议动作但前端不自动
   分发；`agent` 才会自动执行受控 action。
@@ -112,6 +111,10 @@ code-server auth、系统用户/容器权限和 secret scanning 提供真实访�
 - `plan`：返回建议 actions 和 warnings，但前端必须只展示，不自动执行。
 - `agent`：允许前端按既有安全分发器执行 `start_run`、`resume_run`、
   `open_code_server` 或 `summarize_artifact`。
+
+`agent` 模式必须带当前 `account_id`，并且只能操作当前账号创建的 `account`、
+`run` 或 `solution` workspace。它不能打开 shared repo workspace，也不能跨账号
+操作 run、artifact 或 code-server workspace。
 
 未来如果接入 OpenAI Apps SDK / MCP，应新增 thin wrapper，保留 `/api/solver/chat`
 作为内部 endpoint。wrapper 需要列出 tools、声明 JSON Schema input/output、

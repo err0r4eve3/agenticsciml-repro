@@ -145,7 +145,8 @@ def test_solver_chat_plan_and_agent_modes_return_structured_actions(tmp_path: Pa
             "selected_benchmark": "function_approx",
             "mode": "mock",
             "assistant_mode": "agent",
-            "workspace_scope": "repo",
+            "account_id": "alice",
+            "workspace_scope": "account",
             "output_dir": str(tmp_path),
         },
     )
@@ -153,7 +154,51 @@ def test_solver_chat_plan_and_agent_modes_return_structured_actions(tmp_path: Pa
     start_payload = start.json()
     assert start_payload["assistant_mode"] == "agent"
     assert start_payload["actions"][0]["type"] == "start_run"
+    assert start_payload["actions"][0]["payload"]["account_id"] == "alice"
     assert start_payload["actions"][0]["payload"]["background"] is True
+
+
+def test_solver_chat_agent_rejects_shared_repo_scope(tmp_path: Path) -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/solver/chat",
+        json={
+            "message": "打开代码",
+            "selected_benchmark": "function_approx",
+            "mode": "mock",
+            "assistant_mode": "agent",
+            "account_id": "alice",
+            "workspace_scope": "repo",
+            "output_dir": str(tmp_path),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["actions"] == []
+    assert any("shared repo workspace" in warning for warning in payload["warnings"])
+
+
+def test_solver_chat_agent_requires_account_id(tmp_path: Path) -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/solver/chat",
+        json={
+            "message": "跑一个 mock 实验",
+            "selected_benchmark": "function_approx",
+            "mode": "mock",
+            "assistant_mode": "agent",
+            "workspace_scope": "account",
+            "output_dir": str(tmp_path),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["actions"] == []
+    assert any("requires account_id" in warning for warning in payload["warnings"])
 
 
 def test_solver_chat_returns_real_mode_warnings(tmp_path: Path) -> None:
