@@ -7,8 +7,6 @@ import {
   Database,
   FileText,
   FolderTree,
-  LayoutDashboard,
-  ListTree,
   PanelRightClose,
   PanelRightOpen,
   Play,
@@ -73,7 +71,6 @@ type ArtifactPayload =
 
 type RunMode = "mock" | "real" | "dry_run";
 type WorkspaceScope = "repo" | "run" | "solution";
-type ViewKey = "dashboard" | "runs" | "artifacts" | "code";
 
 type AgentMessage = {
   id: number;
@@ -109,13 +106,6 @@ type CodeServerPayload = {
   warnings: string[];
   command_hint: string;
 };
-
-const views: Array<{ key: ViewKey; label: string; icon: ReactNode }> = [
-  { key: "dashboard", label: "Dashboard", icon: <LayoutDashboard size={18} /> },
-  { key: "runs", label: "Runs", icon: <ListTree size={18} /> },
-  { key: "artifacts", label: "Artifacts / Trace", icon: <FolderTree size={18} /> },
-  { key: "code", label: "Code", icon: <Code2 size={18} /> }
-];
 
 const api = {
   async getBenchmarks(): Promise<Benchmark[]> {
@@ -184,7 +174,6 @@ const api = {
 };
 
 export function App() {
-  const [activeView, setActiveView] = useState<ViewKey>("dashboard");
   const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [selectedBenchmark, setSelectedBenchmark] = useState("function_approx");
@@ -310,7 +299,6 @@ export function App() {
       });
       setActiveRun(run);
       setActiveRunId(run.run_id);
-      setActiveView("dashboard");
       await refreshRuns();
       if (background) {
         window.setTimeout(() => {
@@ -399,10 +387,12 @@ export function App() {
         if (nextScope === "repo" || nextScope === "run" || nextScope === "solution") {
           setWorkspaceScope(nextScope);
         }
-        setActiveView("code");
       }
       if (action.type === "summarize_artifact") {
-        setActiveView("artifacts");
+        const artifactPath = action.payload?.path;
+        if (typeof artifactPath === "string") {
+          setSelectedArtifactPath(artifactPath);
+        }
       }
     }
   }
@@ -415,32 +405,11 @@ export function App() {
     setActiveRun(run);
     setActiveRunId(run.run_id);
     setSelectedArtifactPath("");
-    setActiveView("dashboard");
   }
 
   return (
     <main className={`workbench ${agentCollapsed ? "agent-is-collapsed" : ""}`}>
-      <aside className="rail" aria-label="主导航">
-        <div className="rail-logo" title="AgenticSciML">
-          AS
-        </div>
-        <nav className="rail-nav">
-          {views.map((view) => (
-            <button
-              aria-label={view.label}
-              className={activeView === view.key ? "rail-button selected" : "rail-button"}
-              key={view.key}
-              onClick={() => setActiveView(view.key)}
-              title={view.label}
-              type="button"
-            >
-              {view.icon}
-            </button>
-          ))}
-        </nav>
-      </aside>
-
-      <section className="shell">
+      <section className="chatui-column" aria-label="完整 ChatUI 页面">
         <TopBar
           activeRunId={activeRunId}
           busy={busy}
@@ -455,64 +424,50 @@ export function App() {
           onSelectBenchmark={setSelectedBenchmark}
         />
         {error ? <div className="error-line">{error}</div> : null}
-        <section className="main-region">
-          {activeView === "dashboard" ? (
-            <DashboardView
-              activeRun={activeRun}
-              busy={busy}
-              events={events}
-              mainPrompt={mainPrompt}
-              onOpenArtifacts={() => setActiveView("artifacts")}
-              onOpenCode={() => setActiveView("code")}
-              onPromptChange={setMainPrompt}
-              onQuickPrompt={(text, options) => submitAgentMessage(text, options)}
-              onSubmitPrompt={sendMainPrompt}
-              selected={selected}
-            />
-          ) : null}
-          {activeView === "runs" ? (
-            <RunsView
-              activeRunId={activeRunId}
-              runs={runs}
-              onRefresh={refreshRuns}
-              onSelectRun={selectRun}
-              onStartMock={() => startRun("mock", false)}
-            />
-          ) : null}
-          {activeView === "artifacts" ? (
-            <ArtifactsView
-              activeRun={activeRun}
-              artifactPayload={artifactPayload}
-              events={filteredEvents}
-              filter={traceFilter}
-              selectedArtifactPath={selectedArtifactPath}
-              onFilterChange={setTraceFilter}
-              onSelectArtifact={setSelectedArtifactPath}
-            />
-          ) : null}
-          {activeView === "code" ? (
-            <CodeView
-              activeRunId={activeRunId}
-              codeServer={codeServer}
-              scope={workspaceScope}
-              onScopeChange={setWorkspaceScope}
-            />
-          ) : null}
-        </section>
+        <ChatUIPage
+          activeRun={activeRun}
+          activeRunId={activeRunId}
+          artifactPayload={artifactPayload}
+          busy={busy}
+          events={filteredEvents}
+          filter={traceFilter}
+          mainPrompt={mainPrompt}
+          messages={messages}
+          runs={runs}
+          selected={selected}
+          selectedArtifactPath={selectedArtifactPath}
+          onFilterChange={setTraceFilter}
+          onOpenArtifacts={() => setSelectedArtifactPath("trace_summary.json")}
+          onOpenCode={() => setWorkspaceScope("solution")}
+          onPromptChange={setMainPrompt}
+          onQuickPrompt={(text, options) => submitAgentMessage(text, options)}
+          onRefreshRuns={refreshRuns}
+          onSelectArtifact={setSelectedArtifactPath}
+          onSelectRun={selectRun}
+          onStartMock={() => startRun("mock", false)}
+          onSubmitPrompt={sendMainPrompt}
+        />
       </section>
-
-      <AgentPanel
-        collapsed={agentCollapsed}
-        message={message}
-        messages={messages}
-        mode={mode}
-        pendingRealAction={pendingRealAction}
-        busy={busy}
-        onChangeMessage={setMessage}
-        onSend={sendMessage}
-        onToggle={() => setAgentCollapsed((current) => !current)}
-        onDismissRealAction={() => setPendingRealAction(null)}
-      />
+      <section className="vscode-column" aria-label="VS Code Web 与 ChatUI 侧边栏">
+        <CodeView
+          activeRunId={activeRunId}
+          codeServer={codeServer}
+          scope={workspaceScope}
+          onScopeChange={setWorkspaceScope}
+        />
+        <AgentPanel
+          collapsed={agentCollapsed}
+          message={message}
+          messages={messages}
+          mode={mode}
+          pendingRealAction={pendingRealAction}
+          busy={busy}
+          onChangeMessage={setMessage}
+          onSend={sendMessage}
+          onToggle={() => setAgentCollapsed((current) => !current)}
+          onDismissRealAction={() => setPendingRealAction(null)}
+        />
+      </section>
     </main>
   );
 }
@@ -591,33 +546,53 @@ function TopBar({
   );
 }
 
-function DashboardView({
+function ChatUIPage({
   activeRun,
+  activeRunId,
+  artifactPayload,
   busy,
   events,
+  filter,
   mainPrompt,
+  messages,
+  runs,
+  selected,
+  selectedArtifactPath,
+  onFilterChange,
   onOpenArtifacts,
   onOpenCode,
   onPromptChange,
   onQuickPrompt,
-  onSubmitPrompt,
-  selected
+  onRefreshRuns,
+  onSelectArtifact,
+  onSelectRun,
+  onStartMock,
+  onSubmitPrompt
 }: {
   activeRun: RunSummary | null;
+  activeRunId: string | null;
+  artifactPayload: ArtifactPayload | null;
   busy: boolean;
   events: string[];
+  filter: string;
   mainPrompt: string;
+  messages: AgentMessage[];
+  runs: RunSummary[];
+  selected?: Benchmark;
+  selectedArtifactPath: string;
+  onFilterChange: (value: string) => void;
   onOpenArtifacts: () => void;
   onOpenCode: () => void;
   onPromptChange: (value: string) => void;
   onQuickPrompt: (text: string, options?: { mode?: RunMode; workspaceScope?: WorkspaceScope }) => void;
+  onRefreshRuns: () => void;
+  onSelectArtifact: (value: string) => void;
+  onSelectRun: (run: RunSummary) => void;
+  onStartMock: () => void;
   onSubmitPrompt: (event: FormEvent) => void;
-  selected?: Benchmark;
 }) {
-  const metadata = activeRun?.metadata;
-  const qualityGate = activeRun?.trace_summary?.quality_gate?.passed;
   return (
-    <div className="view-stack">
+    <section className="chat-page">
       <CommandCenter
         activeRunId={activeRun?.run_id ?? null}
         busy={busy}
@@ -627,6 +602,53 @@ function DashboardView({
         onSubmit={onSubmitPrompt}
         selectedBenchmark={selected?.name ?? "function_approx"}
       />
+      <DataRegion title="ChatUI conversation">
+        <ChatTranscript messages={messages} />
+      </DataRegion>
+      <DashboardView
+        activeRun={activeRun}
+        events={events}
+        onOpenArtifacts={onOpenArtifacts}
+        onOpenCode={onOpenCode}
+        selected={selected}
+      />
+      <RunsView
+        activeRunId={activeRunId}
+        runs={runs}
+        onRefresh={onRefreshRuns}
+        onSelectRun={onSelectRun}
+        onStartMock={onStartMock}
+      />
+      <ArtifactsView
+        activeRun={activeRun}
+        artifactPayload={artifactPayload}
+        events={events}
+        filter={filter}
+        selectedArtifactPath={selectedArtifactPath}
+        onFilterChange={onFilterChange}
+        onSelectArtifact={onSelectArtifact}
+      />
+    </section>
+  );
+}
+
+function DashboardView({
+  activeRun,
+  events,
+  onOpenArtifacts,
+  onOpenCode,
+  selected
+}: {
+  activeRun: RunSummary | null;
+  events: string[];
+  onOpenArtifacts: () => void;
+  onOpenCode: () => void;
+  selected?: Benchmark;
+}) {
+  const metadata = activeRun?.metadata;
+  const qualityGate = activeRun?.trace_summary?.quality_gate?.passed;
+  return (
+    <div className="view-stack">
       <section className="section-head">
         <div>
           <p className="eyebrow">Run dashboard</p>
@@ -884,7 +906,7 @@ function CodeView({
   onScopeChange: (scope: WorkspaceScope) => void;
 }) {
   return (
-    <div className="view-stack">
+    <div className="code-workspace">
       <section className="section-head">
         <div>
           <p className="eyebrow">VS Code Web</p>
@@ -899,37 +921,49 @@ function CodeView({
           </select>
         </label>
       </section>
-      <div className="code-grid">
-        <section className="code-block">
-          <TerminalSquare size={20} />
+      <section className="vscode-frame">
+        {codeServer ? (
+          <iframe className="vscode-iframe" src={codeServer.url} title="VS Code Web" />
+        ) : (
+          <div className="vscode-empty">
+            <TerminalSquare size={22} />
+            <p>选择 active run 后可打开 run 或 solution workspace。</p>
+          </div>
+        )}
+      </section>
+      <section className="code-block">
+        <div className="code-block-head">
+          <TerminalSquare size={18} />
           <h3>Workspace</h3>
-          <div className="workspace-path">{codeServer?.workspace ?? "选择 active run 后可打开 run 或 solution workspace。"}</div>
-          <a
-            aria-disabled={!codeServer}
-            className={codeServer ? "code-link" : "code-link disabled"}
-            href={codeServer?.url ?? "#"}
-            rel="noreferrer"
-            target="_blank"
-          >
-            Open VS Code Web
-            <ChevronRight size={15} />
-          </a>
-        </section>
-        <section className="code-block">
-          <ShieldCheck size={20} />
+        </div>
+        <div className="workspace-path">{codeServer?.workspace ?? "选择 active run 后可打开 run 或 solution workspace。"}</div>
+        <a
+          aria-disabled={!codeServer}
+          className={codeServer ? "code-link" : "code-link disabled"}
+          href={codeServer?.url ?? "#"}
+          rel="noreferrer"
+          target="_blank"
+        >
+          Open VS Code Web
+          <ChevronRight size={15} />
+        </a>
+      </section>
+      <section className="code-block compact">
+        <div className="code-block-head">
+          <ShieldCheck size={18} />
           <h3>Sidecar boundary</h3>
-          <pre>{codeServer?.command_hint ?? "PASSWORD=<local-token> code-server --bind-addr 127.0.0.1:8080 <workspace>"}</pre>
-          <ul>
-            {(codeServer?.warnings ?? [
-              "code-server 必须单独启动在 127.0.0.1。",
-              "ChatUI 不携带 token，也不自动绕过鉴权。"
-            ]).map((warning) => (
-              <li key={warning}>{warning}</li>
-            ))}
-            {!activeRunId && scope !== "repo" ? <li>run / solution scope 需要先选择 active run。</li> : null}
-          </ul>
-        </section>
-      </div>
+        </div>
+        <pre>{codeServer?.command_hint ?? "PASSWORD=<local-token> code-server --bind-addr 127.0.0.1:8080 <workspace>"}</pre>
+        <ul>
+          {(codeServer?.warnings ?? [
+            "code-server 必须单独启动在 127.0.0.1。",
+            "ChatUI 不携带 token，也不自动绕过鉴权。"
+          ]).map((warning) => (
+            <li key={warning}>{warning}</li>
+          ))}
+          {!activeRunId && scope !== "repo" ? <li>run / solution scope 需要先选择 active run。</li> : null}
+        </ul>
+      </section>
     </div>
   );
 }
@@ -1014,6 +1048,20 @@ function AgentPanel({
         </button>
       </form>
     </aside>
+  );
+}
+
+function ChatTranscript({ messages }: { messages: AgentMessage[] }) {
+  return (
+    <div className="chat-transcript">
+      {messages.map((item) => (
+        <article className={`message ${item.role}`} key={item.id}>
+          <span>{item.role}</span>
+          <p>{item.text}</p>
+          {item.response ? <StructuredResponse response={item.response} /> : null}
+        </article>
+      ))}
+    </div>
   );
 }
 

@@ -29,14 +29,16 @@ PYTHONPATH=src uv run --python 3.11 --extra web python -m agenticsciml.cli web -
 
 ChatUI 前端是单页本地工作台，不引入路由层：
 
-- 顶栏显示项目名、当前 active run、benchmark、运行模式、quality gate 和刷新入口。
-- 左侧图标导航在 `Dashboard`、`Runs`、`Artifacts / Trace` 和 `Code` 之间切换。
-- 中间主工作区展示 run 状态卡、leaderboard、trace preview、artifact 浏览和
-  code-server 工作区入口。
-- `Dashboard` 顶部提供主 ChatUI 入口，可直接输入实验意图或点击“跑 mock”、
-  “解释 trace”、“打开 champion”、“比较 run”等快捷指令。
-- 右侧 Agent 面板可收起，负责自然语言意图、结构化 actions、warnings、
-  artifacts 和 trace refs 展示。
+- 第一栏是完整 ChatUI 页面，包含顶栏、主对话输入、对话转录、run 状态卡、
+  leaderboard、trace preview、run 列表和 artifact 浏览。
+- 顶栏显示项目名、benchmark、运行模式、quality gate 和刷新入口，active run
+  状态在 ChatUI 内容区内展示，避免挤占对话空间。
+- ChatUI 主输入可直接输入实验意图或点击“跑 mock”、“解释 trace”、“打开
+  champion”、“比较 run”等快捷指令。
+- 第二栏是 `code-server` 工作区和 ChatUI 侧边栏：左侧显示 VS Code Web iframe /
+  workspace 链接 / sidecar 边界，右侧 Agent 面板负责自然语言意图、结构化
+  actions、warnings、artifacts 和 trace refs 展示。
+- Agent 面板可收起；收起后第二栏把更多宽度让给 VS Code Web。
 - 视觉语言采用 Claude Code 风格的暖米色工作台：纸面背景、深棕文字、陶土色主
   action、低饱和边框和暗色 trace/code 区域。
 
@@ -55,9 +57,9 @@ PASSWORD=<local-token> code-server --bind-addr 127.0.0.1:8080 /path/to/workspace
 `AGENTICSCIML_CODE_SERVER_URL` 覆盖 base URL，但第一版不支持公网、多用户鉴权
 或代理层权限模型。
 
-`Code` 视图只显示 `repo`、`run` 或 `solution` workspace 路径、启动命令和新标签页
-打开链接。ChatUI 不携带 code-server token，不自动启动 sidecar，也不通过 iframe
-绕过鉴权。
+第二栏显示 `repo`、`run` 或 `solution` workspace 路径、启动命令、VS Code Web
+iframe 和新标签页打开链接。ChatUI 不携带 code-server token，不自动启动 sidecar，
+iframe 也必须经过 code-server 自身鉴权。
 
 ## API 边界
 

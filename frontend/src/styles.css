@@ -33,7 +33,7 @@
 
 body {
   margin: 0;
-  min-width: 1180px;
+  min-width: 1280px;
   background: var(--bg);
 }
 
@@ -132,66 +132,54 @@ ul {
 
 .workbench {
   display: grid;
-  grid-template-columns: 62px minmax(720px, 1fr) 360px;
+  grid-template-columns: minmax(500px, 0.45fr) minmax(720px, 0.55fr);
+  gap: 0;
   height: 100vh;
   overflow: hidden;
 }
 
 .workbench.agent-is-collapsed {
-  grid-template-columns: 62px minmax(720px, 1fr) 56px;
+  grid-template-columns: minmax(520px, 0.48fr) minmax(640px, 0.52fr);
 }
 
-.rail {
+.chatui-column,
+.vscode-column {
+  min-width: 0;
+  min-height: 0;
+}
+
+.chatui-column {
   display: flex;
-  align-items: center;
   flex-direction: column;
-  gap: 18px;
+  overflow: hidden;
   border-right: 1px solid var(--line);
-  background: #f7efe3;
-  padding: 14px 10px;
+  background:
+    radial-gradient(circle at 4% 0%, rgba(191, 121, 59, 0.1), transparent 26%),
+    var(--bg);
 }
 
-.rail-logo {
+.vscode-column {
   display: grid;
-  width: 38px;
-  height: 38px;
-  place-items: center;
-  border: 1px solid #5b3922;
-  border-radius: 10px;
-  background: #2a2018;
-  color: #f7e6cb;
-  font-size: 12px;
-  font-weight: 800;
+  grid-template-columns: minmax(380px, 1fr) 340px;
+  gap: 12px;
+  overflow: hidden;
+  padding: 12px;
+  background: #efe4d3;
 }
 
-.rail-nav {
-  display: grid;
-  gap: 8px;
+.agent-is-collapsed .vscode-column {
+  grid-template-columns: minmax(380px, 1fr) 56px;
 }
 
-.rail-button,
 .icon-button {
   width: 38px;
   min-height: 38px;
   padding: 0;
 }
 
-.rail-button.selected {
-  border-color: rgba(183, 106, 42, 0.45);
-  background: #f3dfc7;
-  color: var(--green-strong);
-}
-
-.shell {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  overflow: hidden;
-}
-
 .topbar {
   display: grid;
-  grid-template-columns: minmax(180px, 240px) minmax(520px, 1fr) minmax(160px, 240px);
+  grid-template-columns: minmax(160px, 220px) minmax(360px, 1fr);
   align-items: center;
   gap: 16px;
   min-height: 72px;
@@ -229,7 +217,7 @@ ul {
 }
 
 .active-run {
-  display: grid;
+  display: none;
   min-width: 0;
   gap: 4px;
   justify-items: end;
@@ -243,7 +231,10 @@ ul {
   white-space: nowrap;
 }
 
-.main-region {
+.chat-page {
+  display: grid;
+  align-content: start;
+  gap: 14px;
   min-height: 0;
   overflow: auto;
   padding: 18px;
@@ -661,10 +652,13 @@ tbody tr:hover,
   font-weight: 700;
 }
 
-.code-grid {
+.code-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
-  gap: 14px;
+  grid-template-rows: auto minmax(320px, 1fr) auto auto;
+  min-width: 0;
+  min-height: 0;
+  gap: 12px;
+  overflow: hidden;
 }
 
 .code-block {
@@ -672,6 +666,44 @@ tbody tr:hover,
   align-content: start;
   gap: 12px;
   padding: 16px;
+}
+
+.code-block.compact {
+  max-height: 190px;
+  overflow: auto;
+}
+
+.code-block-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vscode-frame {
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #211a14;
+  box-shadow: var(--shadow);
+}
+
+.vscode-iframe {
+  width: 100%;
+  height: 100%;
+  min-height: 360px;
+  border: 0;
+  background: #211a14;
+}
+
+.vscode-empty {
+  display: grid;
+  min-height: 360px;
+  place-items: center;
+  gap: 10px;
+  color: #f2dfc4;
+  padding: 20px;
+  text-align: center;
 }
 
 .workspace-path {
@@ -709,7 +741,7 @@ tbody tr:hover,
   min-width: 0;
   flex-direction: column;
   gap: 12px;
-  margin: 12px 12px 12px 0;
+  margin: 0;
   overflow: hidden;
   padding: 14px;
 }
@@ -738,7 +770,8 @@ tbody tr:hover,
   align-items: center;
   flex-direction: column;
   gap: 18px;
-  border-left: 1px solid var(--line);
+  border: 1px solid var(--line);
+  border-radius: 10px;
   background: #f7efe3;
   padding: 12px 8px;
 }
@@ -768,6 +801,13 @@ tbody tr:hover,
   flex-direction: column;
   gap: 10px;
   overflow: auto;
+}
+
+.chat-transcript {
+  display: grid;
+  max-height: 420px;
+  overflow: auto;
+  gap: 10px;
 }
 
 .message {
@@ -850,9 +890,19 @@ tbody tr:hover,
 
   .workbench,
   .workbench.agent-is-collapsed {
-    grid-template-columns: 52px 1fr;
+    grid-template-columns: 1fr;
     height: auto;
     min-height: 100vh;
+  }
+
+  .chatui-column,
+  .vscode-column {
+    border-right: 0;
+  }
+
+  .vscode-column,
+  .agent-is-collapsed .vscode-column {
+    grid-template-columns: 1fr;
   }
 
   .topbar {
@@ -870,17 +920,12 @@ tbody tr:hover,
 
   .agent-panel,
   .agent-collapsed {
-    grid-column: 1 / -1;
     margin: 0;
-    border-right: 0;
-    border-left: 0;
-    border-radius: 0;
   }
 
   .metric-grid,
   .split-grid,
   .artifact-workspace,
-  .code-grid,
   .main-composer {
     grid-template-columns: 1fr;
   }
