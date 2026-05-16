@@ -17,6 +17,8 @@
   中间 run/artifact/code 任务工作区和右侧可收起 Agent 面板。
 - Dashboard 顶部新增主 ChatUI 入口，用于对话式启动 mock、解释 trace、
   打开 champion workspace 或发起 run 比较请求。
+- 前端视觉调整为 Claude Code 风格的暖米色工作台，保留本地实验控制台的高密度
+  信息结构。
 - Agent 面板会展示 `/api/solver/chat` 返回的结构化 actions、warnings、
   artifact refs 和 trace refs；`real` mode action 默认拦截为显式确认状态。
 - repo-local skill `.agents/skills/agenticsciml-chatui-operator/SKILL.md` 记录

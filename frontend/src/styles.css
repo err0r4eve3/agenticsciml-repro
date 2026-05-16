@@ -8,23 +8,23 @@
     "SF Pro Text",
     "Segoe UI",
     sans-serif;
-  background: #f6f7f4;
-  color: #17211d;
-  --bg: #f6f7f4;
-  --surface: #ffffff;
-  --surface-soft: #f9faf8;
-  --surface-strong: #eef2ef;
-  --ink: #17211d;
-  --ink-muted: #64706a;
-  --ink-subtle: #87918c;
-  --line: #dce3df;
-  --line-strong: #c6d1cb;
-  --green: #0f7a5a;
-  --green-strong: #0a5f47;
-  --blue: #2764d9;
-  --amber: #a16207;
-  --red: #a23a2f;
-  --shadow: 0 18px 42px rgba(26, 36, 31, 0.08);
+  background: #f4eee3;
+  color: #2b2118;
+  --bg: #f4eee3;
+  --surface: #fffaf2;
+  --surface-soft: #faf2e6;
+  --surface-strong: #eadfce;
+  --ink: #2b2118;
+  --ink-muted: #766b5f;
+  --ink-subtle: #a09384;
+  --line: #dfd1bd;
+  --line-strong: #cbb79a;
+  --green: #8a5a2b;
+  --green-strong: #6f411c;
+  --blue: #5d6f9f;
+  --amber: #b76a2a;
+  --red: #a0442d;
+  --shadow: 0 18px 42px rgba(64, 43, 24, 0.1);
 }
 
 * {
@@ -68,7 +68,7 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 a:focus-visible {
-  outline: 3px solid rgba(15, 122, 90, 0.25);
+  outline: 3px solid rgba(183, 106, 42, 0.28);
   outline-offset: 2px;
 }
 
@@ -92,7 +92,7 @@ h2 {
 }
 
 h3 {
-  color: #26332d;
+  color: #3a2b1f;
   font-size: 13px;
   line-height: 1.2;
   letter-spacing: 0;
@@ -104,7 +104,7 @@ input {
   min-height: 36px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
+  background: #fffaf2;
   color: var(--ink);
   padding: 0 10px;
   font-size: 12px;
@@ -114,8 +114,8 @@ pre {
   margin: 0;
   overflow: auto;
   border-radius: 8px;
-  background: #111814;
-  color: #d7efe4;
+  background: #211a14;
+  color: #f2dfc4;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 11px;
   line-height: 1.5;
@@ -147,7 +147,7 @@ ul {
   flex-direction: column;
   gap: 18px;
   border-right: 1px solid var(--line);
-  background: #fbfcfb;
+  background: #f7efe3;
   padding: 14px 10px;
 }
 
@@ -156,10 +156,10 @@ ul {
   width: 38px;
   height: 38px;
   place-items: center;
-  border: 1px solid var(--line-strong);
+  border: 1px solid #5b3922;
   border-radius: 10px;
-  background: #10231d;
-  color: #ffffff;
+  background: #2a2018;
+  color: #f7e6cb;
   font-size: 12px;
   font-weight: 800;
 }
@@ -177,8 +177,8 @@ ul {
 }
 
 .rail-button.selected {
-  border-color: rgba(15, 122, 90, 0.35);
-  background: #e7f3ed;
+  border-color: rgba(183, 106, 42, 0.45);
+  background: #f3dfc7;
   color: var(--green-strong);
 }
 
@@ -196,7 +196,7 @@ ul {
   gap: 16px;
   min-height: 72px;
   border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 250, 242, 0.92);
   padding: 12px 18px;
 }
 
@@ -260,8 +260,8 @@ ul {
   border: 1px solid var(--line);
   border-radius: 12px;
   background:
-    radial-gradient(circle at 18% 10%, rgba(15, 122, 90, 0.11), transparent 32%),
-    linear-gradient(180deg, #ffffff 0%, #f8faf8 100%);
+    radial-gradient(circle at 18% 10%, rgba(191, 121, 59, 0.16), transparent 34%),
+    linear-gradient(180deg, #fffaf2 0%, #f7ecdc 100%);
   box-shadow: var(--shadow);
   padding: 18px;
 }
@@ -290,9 +290,9 @@ ul {
   height: 42px;
   flex: 0 0 auto;
   place-items: center;
-  border: 1px solid rgba(15, 122, 90, 0.22);
+  border: 1px solid rgba(183, 106, 42, 0.3);
   border-radius: 12px;
-  background: #e8f4ee;
+  background: #f0dac2;
   color: var(--green-strong);
 }
 
@@ -302,7 +302,7 @@ ul {
   gap: 10px;
   border: 1px solid var(--line-strong);
   border-radius: 12px;
-  background: #ffffff;
+  background: #fffaf2;
   padding: 8px;
 }
 
@@ -336,7 +336,7 @@ ul {
   width: 40px;
   border-color: var(--green);
   background: var(--green);
-  color: #ffffff;
+  color: #fff6e9;
 }
 
 .prompt-pills {
@@ -348,14 +348,14 @@ ul {
 .prompt-pills button {
   min-height: 30px;
   border-radius: 999px;
-  background: #fbfcfb;
-  color: #334039;
+  background: #fff7eb;
+  color: #4b3828;
   padding: 0 12px;
 }
 
 .prompt-pills button:hover:not(:disabled) {
-  border-color: rgba(15, 122, 90, 0.35);
-  background: #e7f3ed;
+  border-color: rgba(183, 106, 42, 0.45);
+  background: #f3dfc7;
   color: var(--green-strong);
 }
 
@@ -397,16 +397,16 @@ ul {
 }
 
 .segmented .selected {
-  border-color: #ffffff;
-  background: #ffffff;
-  box-shadow: 0 1px 4px rgba(20, 30, 25, 0.08);
+  border-color: #fff8ed;
+  background: #fff8ed;
+  box-shadow: 0 1px 4px rgba(64, 43, 24, 0.08);
   color: var(--green-strong);
 }
 
 .icon-text-button {
   border-color: var(--green);
   background: var(--green);
-  color: #ffffff;
+  color: #fff6e9;
   padding: 0 12px;
 }
 
@@ -423,21 +423,21 @@ ul {
 
 .status-badge.neutral {
   background: var(--surface-strong);
-  color: #52605a;
+  color: #65584b;
 }
 
 .status-badge.good {
-  background: #e5f4ec;
+  background: #f0ddc5;
   color: var(--green-strong);
 }
 
 .status-badge.bad {
-  background: #fff0ed;
+  background: #fae7df;
   color: var(--red);
 }
 
 .status-badge.info {
-  background: #eaf0ff;
+  background: #e7e2d5;
   color: var(--blue);
 }
 
@@ -455,7 +455,7 @@ ul {
 .artifact-detail {
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 250, 242, 0.94);
   box-shadow: var(--shadow);
 }
 
@@ -518,7 +518,7 @@ td {
 }
 
 th {
-  background: #f6f8f6;
+  background: #f5ecdf;
   color: var(--ink-muted);
   font-weight: 650;
 }
@@ -529,7 +529,7 @@ tbody tr {
 
 tbody tr:hover,
 .selected-row {
-  background: #eef6f2;
+  background: #f4e3ce;
 }
 
 .artifact-chips {
@@ -543,8 +543,8 @@ tbody tr:hover,
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fbfcfb;
-  color: #334039;
+  background: #fff7eb;
+  color: #4b3828;
   font-size: 12px;
   padding: 7px 9px;
   text-overflow: ellipsis;
@@ -597,8 +597,8 @@ tbody tr:hover,
 }
 
 .artifact-row.selected {
-  border-color: rgba(15, 122, 90, 0.35);
-  background: #e7f3ed;
+  border-color: rgba(183, 106, 42, 0.45);
+  background: #f3dfc7;
 }
 
 .artifact-content {
@@ -640,14 +640,14 @@ tbody tr:hover,
   gap: 7px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #111814;
+  background: #211a14;
   padding: 10px;
 }
 
 .event-log code {
   display: grid;
   gap: 4px;
-  color: #d7efe4;
+  color: #f2dfc4;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 11px;
   line-height: 1.45;
@@ -656,7 +656,7 @@ tbody tr:hover,
 }
 
 .event-log code span {
-  color: #8fd8bd;
+  color: #e3a15f;
   font-family: inherit;
   font-weight: 700;
 }
@@ -677,8 +677,8 @@ tbody tr:hover,
 .workspace-path {
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fbfcfb;
-  color: #334039;
+  background: #fff7eb;
+  color: #4b3828;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 12px;
   line-height: 1.5;
@@ -694,7 +694,7 @@ tbody tr:hover,
   min-height: 38px;
   border-radius: 8px;
   background: var(--green);
-  color: #ffffff;
+  color: #fff6e9;
   font-size: 12px;
   font-weight: 750;
   text-decoration: none;
@@ -739,7 +739,7 @@ tbody tr:hover,
   flex-direction: column;
   gap: 18px;
   border-left: 1px solid var(--line);
-  background: #fbfcfb;
+  background: #f7efe3;
   padding: 12px 8px;
 }
 
@@ -749,7 +749,7 @@ tbody tr:hover,
   gap: 8px;
   border: 1px solid #f2d2cb;
   border-radius: 9px;
-  background: #fff7f5;
+  background: #fff1ea;
   color: var(--red);
   padding: 10px;
 }
@@ -772,12 +772,12 @@ tbody tr:hover,
 
 .message {
   border-radius: 9px;
-  background: #f3f6f4;
+  background: #f8efe2;
   padding: 10px 11px;
 }
 
 .message.user {
-  background: #e6f2ec;
+  background: #f0dac2;
 }
 
 .message > span {
@@ -816,15 +816,15 @@ tbody tr:hover,
 .kv-list span {
   overflow-wrap: anywhere;
   border-radius: 6px;
-  background: #ffffff;
-  color: #334039;
+  background: #fff8ed;
+  color: #4b3828;
   font-size: 11px;
   line-height: 1.35;
   padding: 5px 7px;
 }
 
 .kv-list.warning span {
-  background: #fff7e8;
+  background: #fff0dc;
   color: var(--amber);
 }
 
@@ -837,7 +837,7 @@ tbody tr:hover,
 .error-line {
   margin: 14px 18px 0;
   border-left: 3px solid var(--red);
-  background: #fff1ef;
+  background: #fff1ea;
   color: var(--red);
   padding: 9px 10px;
   font-size: 13px;

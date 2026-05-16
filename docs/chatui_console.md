@@ -37,6 +37,8 @@ ChatUI 前端是单页本地工作台，不引入路由层：
   “解释 trace”、“打开 champion”、“比较 run”等快捷指令。
 - 右侧 Agent 面板可收起，负责自然语言意图、结构化 actions、warnings、
   artifacts 和 trace refs 展示。
+- 视觉语言采用 Claude Code 风格的暖米色工作台：纸面背景、深棕文字、陶土色主
+  action、低饱和边框和暗色 trace/code 区域。
 
 Agent 面板只分发受控动作。`mock` 和 `dry_run` actions 可由前端调用现有 API
 执行；`real` mode action 默认拦截为待确认状态，不会隐式触发真实 LLM 调用。
