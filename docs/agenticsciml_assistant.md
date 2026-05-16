@@ -57,6 +57,8 @@ repo-local skill 位于 `.agents/skills/agenticsciml-chatui-operator/SKILL.md`�
 - `selected_benchmark`：当前 benchmark。
 - `mode`：`mock | real | dry_run`。
 - `assistant_mode`：`ask | plan | agent`，默认 `ask`。
+- `reasoning_effort`：可选覆盖值，当前允许 `low | medium | high`。
+- `temperature`：可选覆盖值，范围 `0.0` 到 `2.0`。
 - `workspace_scope`：`repo | account | run | solution`；ChatUI 默认使用
   `account`。
 - `account_id`：可选本地账号 namespace。它只选择 `.agenticsciml/accounts/<id>/`
@@ -66,6 +68,8 @@ repo-local skill 位于 `.agents/skills/agenticsciml-chatui-operator/SKILL.md`�
 输出语义：
 
 - `assistant_mode`：回显本次交互模式。
+- `model_settings`：本次采用的 `reasoning_effort`、`temperature` 和来源
+  `mode_default | request_override`。
 - `reply`：给 ChatUI 展示的简短回答。
 - `actions`：结构化动作建议。
 - `artifacts`：相关 artifact 路径和摘要。
@@ -80,6 +84,12 @@ repo-local skill 位于 `.agents/skills/agenticsciml-chatui-operator/SKILL.md`�
 - `agent` 才允许前端调用安全分发器执行受控 actions；real LLM 仍需显式确认。
 - `agent` 必须带当前 `account_id`，并且不能操作 shared repo workspace 或跨账号
   workspace。
+
+模式默认模型设置：
+
+- `ask`：`reasoning_effort=medium`，`temperature=0.2`。
+- `plan`：`reasoning_effort=high`，`temperature=0.35`。
+- `agent`：`reasoning_effort=high`，`temperature=0.1`。
 
 当前允许 action：
 

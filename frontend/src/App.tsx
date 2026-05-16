@@ -75,6 +75,7 @@ type ArtifactPayload =
 type RunMode = "mock" | "real" | "dry_run";
 type WorkspaceScope = "repo" | "account" | "run" | "solution";
 type AssistantMode = "ask" | "plan" | "agent";
+type ReasoningEffort = "low" | "medium" | "high";
 type PageKey = "chat" | "ide" | "library";
 
 type AccountOption = {
@@ -120,6 +121,11 @@ type SolverAction = {
 
 type SolverResponse = {
   assistant_mode: AssistantMode;
+  model_settings: {
+    reasoning_effort: ReasoningEffort;
+    temperature: number;
+    source: string;
+  };
   reply: string;
   actions: SolverAction[];
   artifacts: Array<Record<string, unknown>>;
@@ -219,6 +225,8 @@ const api = {
     selected_benchmark: string;
     mode: RunMode;
     assistant_mode: AssistantMode;
+    reasoning_effort?: ReasoningEffort;
+    temperature?: number;
     workspace_scope: WorkspaceScope;
     account_id: string;
   }): Promise<SolverResponse> {
@@ -1473,9 +1481,14 @@ function ChatTranscript({ messages }: { messages: AgentMessage[] }) {
 }
 
 function StructuredResponse({ response }: { response: SolverResponse }) {
+  const settings = [
+    `thinking ${response.model_settings.reasoning_effort}`,
+    `temp ${response.model_settings.temperature}`,
+  ];
   return (
     <div className="structured-response">
       <KeyValueList label="mode" values={[response.assistant_mode]} />
+      <KeyValueList label="settings" values={settings} />
       {response.actions.length ? <KeyValueList label="actions" values={response.actions.map((action) => action.type)} /> : null}
       {response.warnings.length ? <KeyValueList label="warnings" values={response.warnings} tone="warning" /> : null}
       {response.artifacts.length ? <KeyValueList label="artifacts" values={response.artifacts.map((artifact) => String(artifact.path ?? "artifact"))} /> : null}

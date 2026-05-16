@@ -10,6 +10,11 @@
 已实现：
 
 - `/api/solver/chat` 新增 `assistant_mode` 输入和输出回显。
+- `/api/solver/chat` 新增 `model_settings` 回显，并允许请求覆盖
+  `reasoning_effort` 和 `temperature`。
+- 三种模式的默认设置分别为：`ask` 使用 `reasoning_effort=medium`、
+  `temperature=0.2`；`plan` 使用 `reasoning_effort=high`、`temperature=0.35`；
+  `agent` 使用 `reasoning_effort=high`、`temperature=0.1`。
 - `ask` 模式现在直接回答身份、能力、项目、benchmark、算法、run、trace、
   artifact 和边界问题；只有动作型请求才提示切换到 `plan` 或 `agent`，且不返回
   可执行 actions。
@@ -20,7 +25,8 @@
   `workspace_scope=account`。
 - ChatUI 首页 composer 和 VS Code Web 右侧 Agent 面板都提供三段切换控件。
 - 删除 ChatUI 首页里“像 ChatGPT 一样输入问题或任务”的文案。
-- repo-local skill 升级到 `version: 0.3.2`，记录三种模式边界和 Ask 普通问答语义。
+- repo-local skill 升级到 `version: 0.3.3`，记录三种模式边界、Ask 普通问答语义
+  和模型设置。
 
 边界：
 

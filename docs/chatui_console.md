@@ -114,6 +114,12 @@ code-server auth、系统用户/容器权限和 secret scanning 提供真实访�
 - `agent`：允许前端按既有安全分发器执行 `start_run`、`resume_run`、
   `open_code_server` 或 `summarize_artifact`。
 
+每种模式都有独立模型设置，并由 `/api/solver/chat` 通过 `model_settings` 回显：
+
+- `ask`：`reasoning_effort=medium`，`temperature=0.2`。
+- `plan`：`reasoning_effort=high`，`temperature=0.35`。
+- `agent`：`reasoning_effort=high`，`temperature=0.1`。
+
 `agent` 模式必须带当前 `account_id`，并且只能操作当前账号创建的 `account`、
 `run` 或 `solution` workspace。它不能打开 shared repo workspace，也不能跨账号
 操作 run、artifact 或 code-server workspace。

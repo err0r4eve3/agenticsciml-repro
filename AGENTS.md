@@ -162,6 +162,10 @@ exit non-zero. Use `smoke-llm --real` before expecting verification to pass.
 - ChatUI assistant mode defaults to `ask`. `ask` answers only, `plan` previews
   structured actions without dispatch, and `agent` is the only mode that may
   execute controlled frontend actions.
+- ChatUI mode model settings must remain explicit and conservative:
+  `ask` uses `reasoning_effort=medium`, `temperature=0.2`; `plan` uses
+  `reasoning_effort=high`, `temperature=0.35`; `agent` uses
+  `reasoning_effort=high`, `temperature=0.1`.
 - `agent` mode must require `account_id` and must not dispatch actions against
   the shared repo workspace; it may operate only current-account `account`,
   `run`, or `solution` workspaces.

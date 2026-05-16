@@ -28,6 +28,7 @@ from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 RunMode = Literal["mock", "real", "dry_run"]
 WorkspaceScope = Literal["repo", "account", "run", "solution"]
 AssistantMode = Literal["ask", "plan", "agent"]
+ReasoningEffort = Literal["low", "medium", "high"]
 DEFAULT_ACCOUNT_ID = "local"
 ACCOUNT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$")
 
@@ -43,6 +44,12 @@ PLANNED_AGENT_CALLS = (
     "debugger",
     "result_analyst",
 )
+
+ASSISTANT_MODE_MODEL_SETTINGS: dict[AssistantMode, dict[str, object]] = {
+    "ask": {"reasoning_effort": "medium", "temperature": 0.2},
+    "plan": {"reasoning_effort": "high", "temperature": 0.35},
+    "agent": {"reasoning_effort": "high", "temperature": 0.1},
+}
 
 
 class RunStartRequest(BaseModel):
@@ -70,6 +77,8 @@ class SolverChatRequest(BaseModel):
     selected_benchmark: str = "function_approx"
     mode: RunMode = "mock"
     assistant_mode: AssistantMode = "ask"
+    reasoning_effort: ReasoningEffort | None = None
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     workspace_scope: WorkspaceScope = "account"
     account_id: str | None = None
     output_dir: str = "runs"
@@ -751,6 +760,7 @@ def _workspace_option(
 
 def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
     text = request.message.lower()
+    model_settings = _assistant_model_settings(request)
     proposed_actions: list[dict[str, object]] = []
     artifacts: list[dict[str, object]] = []
     warnings: list[str] = []
@@ -841,11 +851,22 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
 
     return {
         "assistant_mode": request.assistant_mode,
+        "model_settings": model_settings,
         "reply": reply,
         "actions": actions,
         "artifacts": artifacts,
         "warnings": warnings,
         "trace_refs": trace_refs,
+    }
+
+
+def _assistant_model_settings(request: SolverChatRequest) -> dict[str, object]:
+    defaults = ASSISTANT_MODE_MODEL_SETTINGS[request.assistant_mode]
+    has_override = request.reasoning_effort is not None or request.temperature is not None
+    return {
+        "reasoning_effort": request.reasoning_effort or defaults["reasoning_effort"],
+        "temperature": request.temperature if request.temperature is not None else defaults["temperature"],
+        "source": "request_override" if has_override else "mode_default",
     }
 
 

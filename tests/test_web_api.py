@@ -114,6 +114,11 @@ def test_solver_chat_defaults_to_ask_without_actions(tmp_path: Path) -> None:
     assert identity.status_code == 200
     identity_payload = identity.json()
     assert identity_payload["assistant_mode"] == "ask"
+    assert identity_payload["model_settings"] == {
+        "reasoning_effort": "medium",
+        "temperature": 0.2,
+        "source": "mode_default",
+    }
     assert identity_payload["actions"] == []
     assert identity_payload["warnings"] == []
     assert "AgenticSciML 助手" in identity_payload["reply"]
@@ -152,6 +157,53 @@ def test_solver_chat_defaults_to_ask_without_actions(tmp_path: Path) -> None:
     assert start_payload["assistant_mode"] == "ask"
     assert start_payload["actions"] == []
     assert any("Ask mode" in warning for warning in start_payload["warnings"])
+
+
+def test_solver_chat_mode_model_settings_are_distinct(tmp_path: Path) -> None:
+    client = TestClient(create_app())
+
+    expected = {
+        "ask": {"reasoning_effort": "medium", "temperature": 0.2, "source": "mode_default"},
+        "plan": {"reasoning_effort": "high", "temperature": 0.35, "source": "mode_default"},
+        "agent": {"reasoning_effort": "high", "temperature": 0.1, "source": "mode_default"},
+    }
+    for assistant_mode, settings in expected.items():
+        response = client.post(
+            "/api/solver/chat",
+            json={
+                "message": "跑一个 mock 实验",
+                "selected_benchmark": "function_approx",
+                "mode": "mock",
+                "assistant_mode": assistant_mode,
+                "workspace_scope": "account",
+                "account_id": "alice",
+                "output_dir": str(tmp_path),
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["assistant_mode"] == assistant_mode
+        assert payload["model_settings"] == settings
+
+    override = client.post(
+        "/api/solver/chat",
+        json={
+            "message": "你能做什么",
+            "selected_benchmark": "function_approx",
+            "mode": "mock",
+            "assistant_mode": "ask",
+            "reasoning_effort": "high",
+            "temperature": 0.45,
+            "workspace_scope": "account",
+            "output_dir": str(tmp_path),
+        },
+    )
+    assert override.status_code == 200
+    assert override.json()["model_settings"] == {
+        "reasoning_effort": "high",
+        "temperature": 0.45,
+        "source": "request_override",
+    }
 
 
 def test_solver_chat_plan_and_agent_modes_return_structured_actions(tmp_path: Path) -> None:
