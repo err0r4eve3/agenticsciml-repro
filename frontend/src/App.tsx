@@ -7,6 +7,7 @@ import {
   Database,
   FileText,
   FolderTree,
+  MessageSquare,
   PanelRightClose,
   PanelRightOpen,
   Play,
@@ -71,6 +72,7 @@ type ArtifactPayload =
 
 type RunMode = "mock" | "real" | "dry_run";
 type WorkspaceScope = "repo" | "run" | "solution";
+type PageKey = "chat" | "ide";
 
 type AgentMessage = {
   id: number;
@@ -174,6 +176,7 @@ const api = {
 };
 
 export function App() {
+  const [activePage, setActivePage] = useState<PageKey>("chat");
   const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [selectedBenchmark, setSelectedBenchmark] = useState("function_approx");
@@ -387,6 +390,7 @@ export function App() {
         if (nextScope === "repo" || nextScope === "run" || nextScope === "solution") {
           setWorkspaceScope(nextScope);
         }
+        setActivePage("ide");
       }
       if (action.type === "summarize_artifact") {
         const artifactPath = action.payload?.path;
@@ -409,66 +413,182 @@ export function App() {
 
   return (
     <main className={`workbench ${agentCollapsed ? "agent-is-collapsed" : ""}`}>
-      <section className="chatui-column" aria-label="完整 ChatUI 页面">
-        <TopBar
-          activeRunId={activeRunId}
-          busy={busy}
-          mode={mode}
-          qualityGate={qualityGate}
-          runState={runState}
-          selectedBenchmark={selectedBenchmark}
-          benchmarks={benchmarks}
-          onModeChange={setMode}
-          onRefresh={refreshAll}
-          onRun={() => startRun(mode, false)}
-          onSelectBenchmark={setSelectedBenchmark}
-        />
-        {error ? <div className="error-line">{error}</div> : null}
-        <ChatUIPage
-          activeRun={activeRun}
-          activeRunId={activeRunId}
-          artifactPayload={artifactPayload}
-          busy={busy}
-          events={filteredEvents}
-          filter={traceFilter}
-          mainPrompt={mainPrompt}
-          messages={messages}
-          runs={runs}
-          selected={selected}
-          selectedArtifactPath={selectedArtifactPath}
-          onFilterChange={setTraceFilter}
-          onOpenArtifacts={() => setSelectedArtifactPath("trace_summary.json")}
-          onOpenCode={() => setWorkspaceScope("solution")}
-          onPromptChange={setMainPrompt}
-          onQuickPrompt={(text, options) => submitAgentMessage(text, options)}
-          onRefreshRuns={refreshRuns}
-          onSelectArtifact={setSelectedArtifactPath}
-          onSelectRun={selectRun}
-          onStartMock={() => startRun("mock", false)}
-          onSubmitPrompt={sendMainPrompt}
-        />
-      </section>
-      <section className="vscode-column" aria-label="VS Code Web 与 ChatUI 侧边栏">
-        <CodeView
-          activeRunId={activeRunId}
-          codeServer={codeServer}
-          scope={workspaceScope}
-          onScopeChange={setWorkspaceScope}
-        />
-        <AgentPanel
-          collapsed={agentCollapsed}
-          message={message}
-          messages={messages}
-          mode={mode}
-          pendingRealAction={pendingRealAction}
-          busy={busy}
-          onChangeMessage={setMessage}
-          onSend={sendMessage}
-          onToggle={() => setAgentCollapsed((current) => !current)}
-          onDismissRealAction={() => setPendingRealAction(null)}
-        />
-      </section>
+      <FunctionNav activePage={activePage} onSelectPage={setActivePage} />
+      {activePage === "chat" ? (
+        <section className="chatgpt-page" aria-label="ChatUI 页面">
+          <TopBar
+            activeRunId={activeRunId}
+            busy={busy}
+            mode={mode}
+            qualityGate={qualityGate}
+            runState={runState}
+            selectedBenchmark={selectedBenchmark}
+            benchmarks={benchmarks}
+            onModeChange={setMode}
+            onRefresh={refreshAll}
+            onRun={() => startRun(mode, false)}
+            onSelectBenchmark={setSelectedBenchmark}
+          />
+          {error ? <div className="error-line">{error}</div> : null}
+          <PureChatUI
+            activeRunId={activeRunId}
+            busy={busy}
+            mainPrompt={mainPrompt}
+            messages={messages}
+            selectedBenchmark={selected?.name ?? "function_approx"}
+            onChange={setMainPrompt}
+            onOpenIde={() => setActivePage("ide")}
+            onQuickPrompt={(text, options) => submitAgentMessage(text, options)}
+            onSubmit={sendMainPrompt}
+          />
+        </section>
+      ) : (
+        <section className="ide-page" aria-label="AI IDE 页面">
+          <div className="ide-workspace">
+            <TopBar
+              activeRunId={activeRunId}
+              busy={busy}
+              mode={mode}
+              qualityGate={qualityGate}
+              runState={runState}
+              selectedBenchmark={selectedBenchmark}
+              benchmarks={benchmarks}
+              onModeChange={setMode}
+              onRefresh={refreshAll}
+              onRun={() => startRun(mode, false)}
+              onSelectBenchmark={setSelectedBenchmark}
+            />
+            {error ? <div className="error-line">{error}</div> : null}
+            <CodeView
+              activeRunId={activeRunId}
+              codeServer={codeServer}
+              scope={workspaceScope}
+              onScopeChange={setWorkspaceScope}
+            />
+          </div>
+          <AgentPanel
+            collapsed={agentCollapsed}
+            message={message}
+            messages={messages}
+            mode={mode}
+            pendingRealAction={pendingRealAction}
+            busy={busy}
+            onChangeMessage={setMessage}
+            onSend={sendMessage}
+            onToggle={() => setAgentCollapsed((current) => !current)}
+            onDismissRealAction={() => setPendingRealAction(null)}
+          />
+        </section>
+      )}
     </main>
+  );
+}
+
+function FunctionNav({
+  activePage,
+  onSelectPage
+}: {
+  activePage: PageKey;
+  onSelectPage: (page: PageKey) => void;
+}) {
+  const pages: Array<{ key: PageKey; label: string; icon: ReactNode }> = [
+    { key: "chat", label: "ChatUI", icon: <MessageSquare size={19} /> },
+    { key: "ide", label: "AI IDE", icon: <Code2 size={19} /> }
+  ];
+
+  return (
+    <aside className="function-nav" aria-label="功能导航">
+      <div className="nav-brand" title="AgenticSciML">
+        AS
+      </div>
+      <nav className="nav-pages">
+        {pages.map((page) => (
+          <button
+            aria-label={page.label}
+            className={activePage === page.key ? "nav-page selected" : "nav-page"}
+            key={page.key}
+            onClick={() => onSelectPage(page.key)}
+            title={page.label}
+            type="button"
+          >
+            {page.icon}
+            <span>{page.label}</span>
+          </button>
+        ))}
+      </nav>
+    </aside>
+  );
+}
+
+function PureChatUI({
+  activeRunId,
+  busy,
+  mainPrompt,
+  messages,
+  selectedBenchmark,
+  onChange,
+  onOpenIde,
+  onQuickPrompt,
+  onSubmit
+}: {
+  activeRunId: string | null;
+  busy: boolean;
+  mainPrompt: string;
+  messages: AgentMessage[];
+  selectedBenchmark: string;
+  onChange: (value: string) => void;
+  onOpenIde: () => void;
+  onQuickPrompt: (text: string, options?: { mode?: RunMode; workspaceScope?: WorkspaceScope }) => void;
+  onSubmit: (event: FormEvent) => void;
+}) {
+  return (
+    <section className="pure-chat">
+      <div className="pure-chat-scroll">
+        <div className="pure-chat-thread">
+          <div className="chat-welcome">
+            <div className="command-orb">
+              <Sparkles size={18} />
+            </div>
+            <h2>今天要做哪个实验？</h2>
+            <p>像 ChatGPT 一样输入实验意图；运行、解释、打开 IDE 都会通过受控 action 分发到后端。</p>
+            <div className="prompt-pills">
+              <button type="button" onClick={() => onQuickPrompt(`跑一个 ${selectedBenchmark} mock 实验`, { mode: "mock" })}>
+                跑 mock
+              </button>
+              <button type="button" disabled={!activeRunId} onClick={() => onQuickPrompt("解释这个 trace")}>
+                解释 trace
+              </button>
+              <button
+                type="button"
+                disabled={!activeRunId}
+                onClick={() => onQuickPrompt("打开 champion solution", { workspaceScope: "solution" })}
+              >
+                打开 champion
+              </button>
+              <button type="button" onClick={onOpenIde}>
+                打开 AI IDE
+              </button>
+            </div>
+          </div>
+          <ChatTranscript messages={messages} />
+        </div>
+      </div>
+      <form className="pure-composer" onSubmit={onSubmit}>
+        <input
+          value={mainPrompt}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="给 AgenticSciML 发消息，例如：跑 mock、解释这个 trace、打开 champion"
+        />
+        <div className="composer-tools">
+          <button type="button" title="Artifact context">
+            <Database size={15} />
+          </button>
+          <button className="send-button" disabled={busy} type="submit" title="发送">
+            <Send size={16} />
+          </button>
+        </div>
+      </form>
+    </section>
   );
 }
 

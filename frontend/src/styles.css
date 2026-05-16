@@ -33,7 +33,7 @@
 
 body {
   margin: 0;
-  min-width: 1280px;
+  min-width: 1180px;
   background: var(--bg);
 }
 
@@ -132,43 +132,105 @@ ul {
 
 .workbench {
   display: grid;
-  grid-template-columns: minmax(500px, 0.45fr) minmax(720px, 0.55fr);
+  grid-template-columns: 76px minmax(0, 1fr);
   gap: 0;
   height: 100vh;
   overflow: hidden;
 }
 
 .workbench.agent-is-collapsed {
-  grid-template-columns: minmax(520px, 0.48fr) minmax(640px, 0.52fr);
+  grid-template-columns: 76px minmax(0, 1fr);
 }
 
-.chatui-column,
-.vscode-column {
+.function-nav,
+.chatgpt-page,
+.ide-page,
+.ide-workspace {
   min-width: 0;
   min-height: 0;
 }
 
-.chatui-column {
+.function-nav {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 18px;
+  border-right: 1px solid var(--line);
+  background: #f7efe3;
+  padding: 14px 8px;
+}
+
+.nav-brand {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid #5b3922;
+  border-radius: 10px;
+  background: #2a2018;
+  color: #f7e6cb;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.nav-pages {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+}
+
+.nav-page {
+  display: grid;
+  width: 100%;
+  min-height: 58px;
+  place-items: center;
+  gap: 4px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-muted);
+  padding: 6px 4px;
+}
+
+.nav-page span {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.nav-page.selected {
+  border-color: rgba(183, 106, 42, 0.38);
+  background: #f3dfc7;
+  color: var(--green-strong);
+}
+
+.chatgpt-page {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-right: 1px solid var(--line);
   background:
     radial-gradient(circle at 4% 0%, rgba(191, 121, 59, 0.1), transparent 26%),
     var(--bg);
 }
 
-.vscode-column {
+.ide-page {
   display: grid;
-  grid-template-columns: minmax(380px, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr) 360px;
   gap: 12px;
   overflow: hidden;
   padding: 12px;
   background: #efe4d3;
 }
 
-.agent-is-collapsed .vscode-column {
-  grid-template-columns: minmax(380px, 1fr) 56px;
+.agent-is-collapsed .ide-page {
+  grid-template-columns: minmax(0, 1fr) 56px;
+}
+
+.ide-workspace {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 250, 242, 0.86);
 }
 
 .icon-button {
@@ -238,6 +300,92 @@ ul {
   min-height: 0;
   overflow: auto;
   padding: 18px;
+}
+
+.pure-chat {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.pure-chat-scroll {
+  min-height: 0;
+  overflow: auto;
+}
+
+.pure-chat-thread {
+  display: grid;
+  max-width: 860px;
+  margin: 0 auto;
+  gap: 18px;
+  padding: 58px 22px 28px;
+}
+
+.chat-welcome {
+  display: grid;
+  justify-items: center;
+  gap: 13px;
+  color: var(--ink);
+  text-align: center;
+}
+
+.chat-welcome h2 {
+  font-size: 28px;
+}
+
+.chat-welcome p {
+  max-width: 620px;
+  color: var(--ink-muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.pure-chat .chat-transcript {
+  max-height: none;
+  gap: 14px;
+}
+
+.pure-chat .message {
+  max-width: 780px;
+  border-radius: 14px;
+  box-shadow: none;
+}
+
+.pure-chat .message.assistant {
+  justify-self: start;
+  background: transparent;
+}
+
+.pure-chat .message.user {
+  justify-self: end;
+  max-width: min(620px, 85%);
+  background: #f0dac2;
+}
+
+.pure-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  width: min(860px, calc(100% - 44px));
+  margin: 0 auto 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: #fffaf2;
+  box-shadow: var(--shadow);
+  padding: 9px;
+}
+
+.pure-composer input {
+  min-height: 50px;
+  border: 0;
+  background: transparent;
+  font-size: 14px;
+}
+
+.pure-composer input:focus-visible {
+  outline: 0;
 }
 
 .view-stack {
@@ -661,6 +809,11 @@ tbody tr:hover,
   overflow: hidden;
 }
 
+.ide-workspace .code-workspace {
+  flex: 1;
+  padding: 12px;
+}
+
 .code-block {
   display: grid;
   align-content: start;
@@ -890,19 +1043,34 @@ tbody tr:hover,
 
   .workbench,
   .workbench.agent-is-collapsed {
+    grid-template-rows: auto minmax(0, 1fr);
     grid-template-columns: 1fr;
     height: auto;
     min-height: 100vh;
   }
 
-  .chatui-column,
-  .vscode-column {
+  .function-nav {
+    flex-direction: row;
+    justify-content: space-between;
     border-right: 0;
+    border-bottom: 1px solid var(--line);
   }
 
-  .vscode-column,
-  .agent-is-collapsed .vscode-column {
+  .nav-pages {
+    grid-auto-flow: column;
+    justify-content: end;
+    width: auto;
+  }
+
+  .nav-page {
+    width: 76px;
+  }
+
+  .ide-page,
+  .agent-is-collapsed .ide-page {
     grid-template-columns: 1fr;
+    height: auto;
+    min-height: calc(100vh - 72px);
   }
 
   .topbar {
@@ -926,7 +1094,8 @@ tbody tr:hover,
   .metric-grid,
   .split-grid,
   .artifact-workspace,
-  .main-composer {
+  .main-composer,
+  .pure-composer {
     grid-template-columns: 1fr;
   }
 
