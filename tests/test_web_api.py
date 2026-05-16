@@ -39,8 +39,12 @@ def test_web_algorithms_expose_professional_catalog() -> None:
     assert "deeponet_operator" in algorithms
     assert "kernel_surrogate_regression" in algorithms
     assert "sindy_sparse_discovery" in algorithms
+    assert "paper_sigmoid_moe_gate" in algorithms
+    assert "paper_linear_bias_free_deeponet" in algorithms
+    assert algorithms["paper_sigmoid_moe_gate"]["status"] == "reference_implementation"
+    assert algorithms["paper_sigmoid_moe_gate"]["implementation_path"]
     assert algorithms["pinn_residual_minimizer"]["status"] == "strategy_blueprint"
-    assert len(algorithms) >= 14
+    assert len(algorithms) >= 20
     assert "paper-level" in algorithms["sparse_sensor_reconstructor"]["safety_notes"]
 
 

@@ -17,6 +17,8 @@ available, so this project implements a source-grounded approximation:
   parallel child mutation jobs, evaluation, and analysis
 - benchmark-aware 0-1 knowledge-base retrieval per mutation, with deterministic
   `random_kb` mode for ablation
+- dependency-light reference primitives for the six paper-listed champion
+  strategies, exposed through the algorithm catalog without paper-score claims
 - proposer/critic debate with concise rationale summaries
 - typed Pydantic schemas for code-consumed agent JSON outputs
 - engineer and debugger roles around generated code
@@ -192,3 +194,10 @@ The MVP validates orchestration, persistence, evaluation contracts, and
 deterministic mock behavior first. The benchmark catalog now mixes engineering
 proxies with five faithful-small tasks; none of these are full paper-score
 reproductions.
+
+The algorithm catalog also exposes six `status=reference_implementation`
+entries in `agenticsciml.paper_algorithms` for the paper's champion strategy
+summaries: sigmoid-gated MoE, Poisson decomposition/sampling, staged Burgers
+PINN helpers, linear bias-free DeepONet, reaction-diffusion FNO helpers, and
+cylinder wake bandlimited filtering. These are unit-tested local primitives,
+not paper-scale training pipelines.

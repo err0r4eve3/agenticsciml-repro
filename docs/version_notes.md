@@ -2,6 +2,37 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-17 论文算法 Reference Primitives
+
+新增文档：[论文算法 Reference Primitives](paper_algorithm_primitives.md)。
+
+本次把 AgenticSciML 论文结果区列出的 6 个 champion strategy 落成本地
+dependency-light reference primitives，并通过算法目录暴露。
+
+已实现：
+
+- 新增 `src/agenticsciml/paper_algorithms.py`，覆盖 sigmoid-gated MoE、Poisson
+  particular-plus-residual + corner-biased sampling、Burgers staged PINN schedule
+  / self-adaptive weights / RAR helpers、linear bias-free DeepONet branch、
+  reaction-diffusion derivative-enhanced loss / hard BC-IC / spectral smoothing
+  helpers，以及 cylinder wake U-FNO/CNO-style bandlimited filter。
+- `src/agenticsciml/algorithm_catalog.py` 新增 6 个
+  `status=reference_implementation` 的 paper champion strategy entries，并记录
+  `source_scope` 与 `implementation_path`。
+- 新增 `tests/test_paper_algorithms.py`，验证数学性质、shape、determinism、
+  catalog exposure 和 no-overclaim 边界。
+- Web API 算法目录测试现在检查 reference implementation entries 会正确暴露。
+- repo-local skill `.agents/skills/agenticsciml-chatui-operator/SKILL.md` 记录
+  算法目录现在可包含 reference primitives，但仍不代表 benchmark score 或
+  scientific claim。
+
+边界：
+
+- 这些 primitives 是本地构件和 prompt-seeding aids，不是完整论文训练管线。
+- 不改变 evaluator、benchmark contract、champion selection 或 paper-score
+  reproduction claim。
+- 分数和 scientific claim 仍只能来自 benchmark evaluator 和 run artifacts。
+
 ## 2026-05-17 ChatUI ask/plan/agent 模式
 
 本次把 ChatUI 的交互授权拆成 `ask` / `plan` / `agent` 三种模式，并默认使用

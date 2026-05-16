@@ -14,6 +14,8 @@ class AlgorithmSpec:
     description: str
     claim_boundary: str
     safety_notes: str
+    source_scope: str = "Local strategy catalog entry."
+    implementation_path: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -26,6 +28,8 @@ class AlgorithmSpec:
             "description": self.description,
             "claim_boundary": self.claim_boundary,
             "safety_notes": self.safety_notes,
+            "source_scope": self.source_scope,
+            "implementation_path": self.implementation_path,
         }
 
 
@@ -37,6 +41,84 @@ ALGORITHM_CLAIM_BOUNDARY = (
 
 
 ALGORITHMS: tuple[AlgorithmSpec, ...] = (
+    AlgorithmSpec(
+        algorithm_id="paper_sigmoid_moe_gate",
+        name="Paper Sigmoid-Gated MoE Reference",
+        family="paper_champion_strategy",
+        compatible_benchmark_families=("function_approx",),
+        benchmark_examples=("function_approx_faithful_small",),
+        status="reference_implementation",
+        description="Dependency-light reference primitive for the paper's S1.1 learnable sigmoid-gated two-expert composition.",
+        claim_boundary=ALGORITHM_CLAIM_BOUNDARY,
+        safety_notes="Reference primitive only; it does not provide paper-score reproduction evidence.",
+        source_scope="AgenticSciML arXiv v2 Results/S1.1 champion strategy summary.",
+        implementation_path="agenticsciml.paper_algorithms:sigmoid_moe_prediction",
+    ),
+    AlgorithmSpec(
+        algorithm_id="paper_poisson_decomposition_sampler",
+        name="Paper Poisson Decomposition Reference",
+        family="paper_champion_strategy",
+        compatible_benchmark_families=("poisson",),
+        benchmark_examples=("poisson_lshape_faithful_small",),
+        status="reference_implementation",
+        description="Reference helpers for known-particular plus learned-residual composition and corner-biased collocation sampling.",
+        claim_boundary=ALGORITHM_CLAIM_BOUNDARY,
+        safety_notes="Sampling weights are local deterministic helpers, not evidence of paper-scale L-shaped Poisson reproduction.",
+        source_scope="AgenticSciML arXiv v2 Results/S1.2 champion strategy summary.",
+        implementation_path="agenticsciml.paper_algorithms:particular_plus_residual",
+    ),
+    AlgorithmSpec(
+        algorithm_id="paper_burgers_staged_pinn_schedule",
+        name="Paper Burgers Staged PINN Reference",
+        family="paper_champion_strategy",
+        compatible_benchmark_families=("burgers_pinn",),
+        benchmark_examples=("burgers_pinn_faithful_small",),
+        status="reference_implementation",
+        description="Reference schedule and residual-weight helpers for the paper's staged Burgers PINN mutation pattern.",
+        claim_boundary=ALGORITHM_CLAIM_BOUNDARY,
+        safety_notes="The schedule records phase intent; it is not paper-score evidence without orchestrator run artifacts.",
+        source_scope="AgenticSciML arXiv v2 Results/S1.3 champion strategy summary.",
+        implementation_path="agenticsciml.paper_algorithms:burgers_three_phase_schedule",
+    ),
+    AlgorithmSpec(
+        algorithm_id="paper_linear_bias_free_deeponet",
+        name="Paper Linear Bias-Free DeepONet Reference",
+        family="paper_champion_strategy",
+        compatible_benchmark_families=("operator_learning",),
+        benchmark_examples=("antiderivative_operator_faithful_small",),
+        status="reference_implementation",
+        description="Reference branch/trunk operator primitive whose branch map is linear and bias-free.",
+        claim_boundary=ALGORITHM_CLAIM_BOUNDARY,
+        safety_notes="Linearity is tested locally; paper-score or generalization claims require benchmark evaluation artifacts.",
+        source_scope="AgenticSciML arXiv v2 Results/S1.4 champion strategy summary.",
+        implementation_path="agenticsciml.paper_algorithms:linear_bias_free_deeponet_prediction",
+    ),
+    AlgorithmSpec(
+        algorithm_id="paper_reaction_diffusion_fno_helpers",
+        name="Paper Reaction-Diffusion FNO Helper Reference",
+        family="paper_champion_strategy",
+        compatible_benchmark_families=("reaction_diffusion", "operator_learning"),
+        benchmark_examples=("reaction_diffusion_operator_faithful_small",),
+        status="reference_implementation",
+        description="Reference helpers for derivative-enhanced loss, spectral smoothing, and hard BC/IC enforcement on spatiotemporal grids.",
+        claim_boundary=ALGORITHM_CLAIM_BOUNDARY,
+        safety_notes="FNO-style helpers are not a complete neural operator training stack or paper-score result.",
+        source_scope="AgenticSciML arXiv v2 Results/S1.5 champion strategy summary.",
+        implementation_path="agenticsciml.paper_algorithms:derivative_enhanced_loss",
+    ),
+    AlgorithmSpec(
+        algorithm_id="paper_cylinder_bandlimited_filter",
+        name="Paper Cylinder Bandlimited Decoder Filter Reference",
+        family="paper_champion_strategy",
+        compatible_benchmark_families=("sensor_reconstruction",),
+        benchmark_examples=("cylinder_wake_reconstruction",),
+        status="reference_implementation",
+        description="Reference Gaussian low-pass and bandlimit-preserving activation helpers for U-FNO/CNO-inspired decoder filtering.",
+        claim_boundary=ALGORITHM_CLAIM_BOUNDARY,
+        safety_notes="Filtering primitive only; it is not a complete paper-scale cylinder wake reconstruction model.",
+        source_scope="AgenticSciML arXiv v2 Results/S1.6 champion strategy summary.",
+        implementation_path="agenticsciml.paper_algorithms:bandlimit_preserving_activation",
+    ),
     AlgorithmSpec(
         algorithm_id="baseline_mlp_regressor",
         name="Baseline MLP Regressor",

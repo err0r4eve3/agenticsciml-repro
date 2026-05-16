@@ -1,6 +1,6 @@
 # Paper Notes: AgenticSciML
 
-[返回文档树](index.md) · 相关文档：[多 Agent 设计方法](multi_agent_design.md)、[版本说明](version_notes.md)
+[返回文档树](index.md) · 相关文档：[多 Agent 设计方法](multi_agent_design.md)、[论文算法 Reference Primitives](paper_algorithm_primitives.md)、[版本说明](version_notes.md)
 
 Sources checked:
 
@@ -91,6 +91,16 @@ budget, prompt set, model mix, or reported scores.
 The retriever may return zero or one KB entry per mutation to avoid context
 pollution. The analysis base supplies parent, sibling, and uncle reports so new
 children can build on nearby successes and failures.
+
+## Paper-Listed Algorithm Primitives
+
+The local algorithm layer now includes reference primitives for the six champion
+strategy summaries reported in the paper results section: sigmoid-gated MoE,
+Poisson particular-plus-residual decomposition with corner-biased sampling,
+Burgers staged PINN schedule helpers, linear bias-free DeepONet branch mapping,
+reaction-diffusion FNO-style derivative/constraint helpers, and cylinder
+U-FNO/CNO-style bandlimited decoder filtering. Details and claim boundaries are
+recorded in [论文算法 Reference Primitives](paper_algorithm_primitives.md).
 
 ## MVP Interpretation
 
