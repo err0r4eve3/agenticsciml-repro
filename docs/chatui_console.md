@@ -43,8 +43,9 @@ ChatUI 前端是单页本地工作台，不引入路由层，但用左侧功能�
   页：用户选择一个账号隔离的独立代码目录后进入 AI IDE。编辑态只保留 VS Code Web
   iframe 和右侧可收起 ChatUI 侧边栏，不显示 benchmark、run、quality gate、
   artifact、启动命令或 sidecar 说明块。
-- `算法库` 页承载实验工作台：benchmark、运行模式、run/gate 状态、run
-  dashboard、算法策略目录、run 列表、leaderboard、trace preview 和 artifact 浏览。
+- `算法库` 页承载 Paper Run Lab：benchmark、运行模式、run/gate 状态、S1 论文任务
+  映射、run budget、分层模型配置、selector votes、solution loss/tree、leaderboard、
+  trace preview 和 artifact 浏览。
 - ChatUI 自然语言输入仍调用 `/api/solver/chat`；`open_code_server` action 会切到
   `VS Code Web` 页，`summarize_artifact` action 会切到 `算法库` 页。
 - Agent 侧边栏负责自然语言意图、结构化 actions、warnings、artifacts 和 trace
@@ -54,6 +55,35 @@ ChatUI 前端是单页本地工作台，不引入路由层，但用左侧功能�
 
 Agent 面板只分发受控动作。`mock` 和 `dry_run` actions 可由前端调用现有 API
 执行；`real` mode action 默认拦截为待确认状态，不会隐式触发真实 LLM 调用。
+
+## Paper Run Lab
+
+第三页把原算法库升级为论文对齐实验页，但仍是控制面和证据浏览器，不是新的
+evaluator、selector 或 champion selection 实现。
+
+页面结构：
+
+- `Paper Tasks`：按 `S1.1` 到 `S1.6` 展示本地 benchmark 映射、paper reference
+  primitive、figure label 和 claim boundary。页面只引用论文小标题/标签，不嵌入未授权
+  论文原图。
+- `Run Config`：可设置 `target_solution_count`、`max_iterations`、
+  `parallel_mutations`、`selector_vote_count`、`max_children_per_node` 和 `mode`。
+  `target_solution_count` 是 UI 便捷输入；后端会转换成确定性的
+  `EvolutionConfig.max_iterations + parallel_mutations` 预算，并在预览区显示
+  `root + children`。
+- `Layered model routing`：列出 Data Analyst、Evaluator、Root Engineer、
+  Retriever、Proposer、Critic、Engineer、Debugger、Result Analyst 和 Selector。
+  默认仍使用后端单一 adapter；只有填写 role override 时，后端才按 role 创建模型配置。
+  `reasoning_effort` 先写入配置和 metadata 供 audit/未来路由使用，不强制传给可能不支持
+  该字段的 OpenAI-compatible chat provider。
+- `Evidence`：只读展示 `reports/selector_votes.json`、`tree.json`、
+  `leaderboard.csv`、各 `solutions/solution_*/eval.json` 汇总出的 votes、loss/score、
+  parent/tree summary、method tags 和本地 SVG artifact。
+- `Local figures`：优先列出 `reports/data_overview.svg` 与
+  `solutions/*/prediction_overview.svg`。未来 loss curve artifact 可按同样路径规则接入。
+
+边界文案统一使用 `faithful-small`、`proxy`、`not paper-score evidence`。mock run
+只表示 workflow shape；即使 UI 显示 loss、votes 或 figure，也不能写成论文分数或科学结论。
 
 ## code-server sidecar
 
@@ -90,15 +120,25 @@ code-server auth、系统用户/容器权限和 secret scanning 提供真实访�
 - `GET /api/benchmarks`：读取当前 benchmark catalog。
 - `GET /api/algorithms`：读取算法策略目录。目录项只用于规划和 prompt seed，不
   代表已经通过 evaluator 的实现。
+- `GET /api/paper-tasks`：读取 S1 小标题、本地 benchmark 映射、reference primitive、
+  local figure artifact 约定和 claim boundary。
+- `GET /api/agent-roles`：读取可配置的 agent role 列表和分层模型配置说明。
 - `GET /api/accounts` / `POST /api/accounts`：列出或创建本地账号 namespace；
   仅写入本地目录和非密钥元数据，不提供公网认证。
 - `POST /api/runs`：启动 mock/real/dry-run run；real mode 需要请求体
   `real_confirmed=true`，并且服务端必须设置
-  `AGENTICSCIML_ENABLE_REAL_WEB_RUNS=1`，同时仍需显式凭据和预算边界。
+  `AGENTICSCIML_ENABLE_REAL_WEB_RUNS=1`，同时仍需显式凭据和预算边界。请求体还可包含
+  `target_solution_count`、`max_children_per_node` 和 `agent_models`；后端只把这些转换成
+  `EvolutionConfig` / `AgentConfig`，不改写 evaluator 或 artifact schema。
 - `POST /api/runs/{id}/resume`：以已有 run id 恢复。
 - `GET /api/runs/{id}`：读取 metadata、leaderboard、trace summary 和 artifact index。
 - `GET /api/runs/{id}/events`：SSE 输出 trace events。
 - `GET /api/runs/{id}/artifacts/*`：只读 UTF-8 artifact，拒绝路径逃逸和 symlink 逃逸。
+- `GET /api/runs/{id}/selector-votes`：只读读取
+  `reports/selector_votes.json`，缺失时返回空状态。
+- `GET /api/runs/{id}/solutions`：从 `tree.json`、`leaderboard.csv` 和各
+  solution `eval.json` 汇总 solution status、score/loss、parent、children、method tags 和
+  本地 figure artifact。
 - `POST /api/solver/chat`：内部算法 tool 入口，只返回结构化 actions、warnings、artifact refs 和 trace refs；它不是 MCP server。
 - `GET /api/code-server/url`：生成 code-server workspace 链接，不携带 token。
 - `GET /api/code-server/workspaces`：列出 shared repo 或账号隔离 workspace 目录

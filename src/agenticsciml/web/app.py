@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import os
 import re
 import threading
@@ -19,10 +20,11 @@ from pydantic import BaseModel, Field
 
 from agenticsciml.algorithm_catalog import ALGORITHM_CLAIM_BOUNDARY, list_algorithms
 from agenticsciml.benchmarks import REPO_ROOT, benchmark_for_path, list_benchmarks
-from agenticsciml.config import EvolutionConfig, ExperimentConfig
+from agenticsciml.config import AgentConfig, EvolutionConfig, ExperimentConfig
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
+from agenticsciml.paper_tasks import list_paper_tasks
 
 
 RunMode = Literal["mock", "real", "dry_run"]
@@ -45,11 +47,30 @@ PLANNED_AGENT_CALLS = (
     "result_analyst",
 )
 
+AGENT_ROLES: tuple[dict[str, str], ...] = (
+    {"role": "data_analyst", "label": "Data Analyst", "kind": "analysis"},
+    {"role": "evaluator", "label": "Evaluator", "kind": "contract"},
+    {"role": "root_engineer", "label": "Root Engineer", "kind": "generation"},
+    {"role": "retriever", "label": "Retriever", "kind": "retrieval"},
+    {"role": "proposer", "label": "Proposer", "kind": "planning"},
+    {"role": "critic", "label": "Critic", "kind": "review"},
+    {"role": "engineer", "label": "Engineer", "kind": "patch"},
+    {"role": "debugger", "label": "Debugger", "kind": "repair"},
+    {"role": "result_analyst", "label": "Result Analyst", "kind": "analysis"},
+    {"role": "selector", "label": "Selector", "kind": "selection"},
+)
+
 ASSISTANT_MODE_MODEL_SETTINGS: dict[AssistantMode, dict[str, object]] = {
     "ask": {"reasoning_effort": "medium", "temperature": 0.2},
     "plan": {"reasoning_effort": "high", "temperature": 0.35},
     "agent": {"reasoning_effort": "high", "temperature": 0.1},
 }
+
+
+class AgentModelRequest(BaseModel):
+    model: str = Field(min_length=1, max_length=120)
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    reasoning_effort: ReasoningEffort | None = None
 
 
 class RunStartRequest(BaseModel):
@@ -66,7 +87,10 @@ class RunStartRequest(BaseModel):
     random_kb: bool = False
     random_seed: int = 0
     no_branch_context: bool = False
+    target_solution_count: int | None = Field(default=None, ge=1)
     selector_vote_count: int = Field(default=3, ge=1)
+    max_children_per_node: int = Field(default=10, ge=1)
+    agent_models: dict[str, AgentModelRequest] = Field(default_factory=dict)
     resume: bool = False
     background: bool = False
     real_confirmed: bool = False
@@ -132,6 +156,20 @@ def create_app() -> FastAPI:
             "claim_boundary": ALGORITHM_CLAIM_BOUNDARY,
         }
 
+    @app.get("/api/paper-tasks")
+    def paper_tasks() -> dict[str, object]:
+        return {"tasks": list_paper_tasks()}
+
+    @app.get("/api/agent-roles")
+    def agent_roles() -> dict[str, object]:
+        return {
+            "roles": list(AGENT_ROLES),
+            "reasoning_effort_note": (
+                "reasoning_effort is persisted for audit and future routing; "
+                "OpenAI-compatible chat providers may ignore it."
+            ),
+        }
+
     @app.get("/api/accounts")
     def accounts() -> dict[str, object]:
         return {"accounts": _list_accounts()}
@@ -168,6 +206,7 @@ def create_app() -> FastAPI:
         run_dir = output_dir / run_id
 
         if request.mode == "dry_run":
+            run_budget = _effective_run_budget(request)
             record = RunRecord(
                 run_id=run_id,
                 run_dir=str(run_dir),
@@ -183,6 +222,11 @@ def create_app() -> FastAPI:
                 "status": "dry_run",
                 "run_dir": str(run_dir),
                 "planned_agent_calls": list(PLANNED_AGENT_CALLS),
+                "run_budget": run_budget,
+                "agent_models": {
+                    role: config.to_dict()
+                    for role, config in _agent_configs_from_request(request).items()
+                },
             }
 
         record = RunRecord(
@@ -259,6 +303,24 @@ def create_app() -> FastAPI:
             "content": content,
         }
 
+    @app.get("/api/runs/{run_id}/selector-votes")
+    def selector_votes(
+        run_id: str,
+        account_id: str | None = Query(default=None),
+        output_dir: str = Query(default="runs"),
+    ) -> dict[str, object]:
+        run_dir = _resolve_run_dir(run_id, _resolve_output_dir(output_dir, account_id=account_id))
+        return _selector_votes_payload(run_id, run_dir)
+
+    @app.get("/api/runs/{run_id}/solutions")
+    def run_solutions(
+        run_id: str,
+        account_id: str | None = Query(default=None),
+        output_dir: str = Query(default="runs"),
+    ) -> dict[str, object]:
+        run_dir = _resolve_run_dir(run_id, _resolve_output_dir(output_dir, account_id=account_id))
+        return _solutions_payload(run_id, run_dir)
+
     @app.get("/api/code-server/url")
     def code_server_url(
         scope: WorkspaceScope = Query(default="repo"),
@@ -304,9 +366,11 @@ def _run_orchestrator(
     record: RunRecord,
 ) -> None:
     try:
+        run_budget = _effective_run_budget(request)
         evolution = EvolutionConfig(
-            max_iterations=request.max_iterations,
-            parallel_mutations=request.parallel_mutations,
+            max_iterations=int(run_budget["max_iterations"]),
+            parallel_mutations=int(run_budget["parallel_mutations"]),
+            max_children_per_node=request.max_children_per_node,
             timeout_s=request.timeout_s,
             use_kb=not request.no_kb,
             random_kb=request.random_kb,
@@ -320,6 +384,7 @@ def _run_orchestrator(
             output_dir=output_dir,
             evolution=evolution,
             use_mock=request.mode == "mock",
+            agents=_agent_configs_from_request(request),
             resume=request.resume,
         )
         llm = MockLLMClient() if request.mode == "mock" else OpenAIAdapter()
@@ -335,12 +400,36 @@ def _run_orchestrator(
         _store_record(record)
 
 
+def _effective_run_budget(request: RunStartRequest) -> dict[str, object]:
+    parallel_mutations = request.parallel_mutations
+    max_iterations = request.max_iterations
+    if request.target_solution_count is not None:
+        target_children = max(0, request.target_solution_count - 1)
+        max_iterations = math.ceil(target_children / parallel_mutations) if target_children else 0
+    planned_solution_budget = 1 + (max_iterations * parallel_mutations)
+    return {
+        "target_solution_count": request.target_solution_count,
+        "planned_solution_budget": planned_solution_budget,
+        "max_iterations": max_iterations,
+        "parallel_mutations": parallel_mutations,
+        "selector_vote_count": request.selector_vote_count,
+        "max_children_per_node": request.max_children_per_node,
+    }
+
+
 def _store_record(record: RunRecord) -> None:
     with _RUNS_LOCK:
         _RUNS[_record_key(record.run_dir)] = record
 
 
 def _validate_run_start_request(request: RunStartRequest) -> None:
+    known_roles = {role["role"] for role in AGENT_ROLES}
+    unknown_roles = sorted(set(request.agent_models) - known_roles)
+    if unknown_roles:
+        raise HTTPException(
+            status_code=400,
+            detail="Unknown agent role override(s): " + ", ".join(unknown_roles),
+        )
     if request.mode == "real":
         if not request.real_confirmed:
             raise HTTPException(
@@ -352,6 +441,18 @@ def _validate_run_start_request(request: RunStartRequest) -> None:
                 status_code=403,
                 detail="real mode is disabled for the Web API; set AGENTICSCIML_ENABLE_REAL_WEB_RUNS=1 on the server",
             )
+
+
+def _agent_configs_from_request(request: RunStartRequest) -> dict[str, AgentConfig]:
+    return {
+        role: AgentConfig(
+            role=role,
+            model=agent_model.model.strip(),
+            temperature=agent_model.temperature,
+            reasoning_effort=agent_model.reasoning_effort,
+        )
+        for role, agent_model in request.agent_models.items()
+    }
 
 
 def _record_for(run_dir: Path) -> RunRecord | None:
@@ -559,6 +660,162 @@ def _read_leaderboard(path: Path) -> list[dict[str, str]]:
         return []
     with path.open(newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
+
+
+def _selector_votes_payload(run_id: str, run_dir: Path) -> dict[str, object]:
+    selector_path = run_dir / "reports" / "selector_votes.json"
+    payload = _read_optional_json(selector_path) or {}
+    votes = payload.get("votes")
+    vote_counts = payload.get("vote_counts")
+    selected_parent_ids = payload.get("selected_parent_ids")
+    return {
+        "run_id": run_id,
+        "available": selector_path.exists() and bool(payload),
+        "path": "reports/selector_votes.json",
+        "selected_parent_ids": selected_parent_ids if isinstance(selected_parent_ids, list) else [],
+        "vote_counts": vote_counts if isinstance(vote_counts, dict) else {},
+        "votes": votes if isinstance(votes, list) else [],
+    }
+
+
+def _solutions_payload(run_id: str, run_dir: Path) -> dict[str, object]:
+    tree_payload = _read_optional_json(run_dir / "tree.json") or {}
+    raw_nodes = tree_payload.get("nodes")
+    nodes = raw_nodes if isinstance(raw_nodes, list) else []
+    leaderboard = _read_leaderboard(run_dir / "leaderboard.csv")
+    leaderboard_by_node = {
+        str(row["node_id"]): row
+        for row in leaderboard
+        if isinstance(row, dict) and row.get("node_id")
+    }
+    solutions = [
+        _solution_summary(run_dir, node, leaderboard_by_node)
+        for node in nodes
+        if isinstance(node, dict) and isinstance(node.get("node_id"), str)
+    ]
+    return {
+        "run_id": run_id,
+        "available": bool(nodes),
+        "tree": {
+            "root_id": tree_payload.get("root_id"),
+            "node_count": len(solutions),
+            "schema_version": tree_payload.get("schema_version"),
+        },
+        "solutions": solutions,
+        "leaderboard": leaderboard,
+        "figures": _local_figure_artifacts(run_dir),
+    }
+
+
+def _solution_summary(
+    run_dir: Path,
+    node: dict[str, Any],
+    leaderboard_by_node: dict[str, dict[str, str]],
+) -> dict[str, object]:
+    node_id = str(node["node_id"])
+    workspace = run_dir / "solutions" / node_id
+    eval_payload = _read_optional_json(workspace / "eval.json") or {}
+    score_payload = node.get("score") if isinstance(node.get("score"), dict) else {}
+    leaderboard_row = leaderboard_by_node.get(node_id, {})
+    score_value = _first_float(
+        eval_payload.get("score"),
+        score_payload.get("value"),
+        leaderboard_row.get("score"),
+    )
+    higher_is_better = _first_bool(
+        eval_payload.get("higher_is_better"),
+        score_payload.get("higher_is_better"),
+    )
+    metric = _first_text(
+        eval_payload.get("metric"),
+        score_payload.get("metric"),
+        leaderboard_row.get("metric"),
+    )
+    method_tags = node.get("method_tags")
+    children = node.get("children")
+    return {
+        "node_id": node_id,
+        "parent_id": node.get("parent_id"),
+        "children": children if isinstance(children, list) else [],
+        "status": node.get("status"),
+        "metric": metric,
+        "score": score_value,
+        "loss": score_value if higher_is_better is False else None,
+        "higher_is_better": higher_is_better,
+        "score_delta_from_parent": _first_float(node.get("score_delta_from_parent")),
+        "method_tags": method_tags if isinstance(method_tags, list) else [],
+        "failure_kind": node.get("failure_kind"),
+        "num_debug_attempts": node.get("num_debug_attempts"),
+        "workspace": f"solutions/{node_id}",
+        "artifacts": _solution_artifacts(run_dir, workspace),
+    }
+
+
+def _solution_artifacts(run_dir: Path, workspace: Path) -> list[dict[str, object]]:
+    artifact_names = (
+        "eval.json",
+        "analysis.md",
+        "proposal.md",
+        "branch_context.json",
+        "prediction_overview.svg",
+    )
+    return [
+        _artifact_ref(run_dir, workspace / name)
+        for name in artifact_names
+        if (workspace / name).exists()
+    ]
+
+
+def _local_figure_artifacts(run_dir: Path) -> list[dict[str, object]]:
+    figures: list[dict[str, object]] = []
+    data_overview = run_dir / "reports" / "data_overview.svg"
+    if data_overview.exists():
+        figures.append(_artifact_ref(run_dir, data_overview))
+    solutions_dir = run_dir / "solutions"
+    if solutions_dir.exists():
+        for figure_path in sorted(solutions_dir.glob("solution_*/prediction_overview.svg")):
+            figures.append(_artifact_ref(run_dir, figure_path))
+    return figures
+
+
+def _artifact_ref(run_dir: Path, path: Path) -> dict[str, object]:
+    try:
+        resolved = path.resolve(strict=True)
+        root = run_dir.resolve(strict=True)
+    except OSError:
+        return {"path": str(path), "kind": "missing", "size_bytes": None}
+    if resolved != root and root not in resolved.parents:
+        raise HTTPException(status_code=400, detail="Artifact path escapes the run directory")
+    return {
+        "path": str(resolved.relative_to(root)),
+        "kind": "file" if resolved.is_file() else "directory",
+        "size_bytes": resolved.stat().st_size if resolved.is_file() else None,
+    }
+
+
+def _first_text(*values: object) -> str | None:
+    for value in values:
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _first_bool(*values: object) -> bool | None:
+    for value in values:
+        if isinstance(value, bool):
+            return value
+    return None
+
+
+def _first_float(*values: object) -> float | None:
+    for value in values:
+        if isinstance(value, bool) or value is None:
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 def _artifact_entries(path: Path, run_dir: Path) -> list[dict[str, object]]:

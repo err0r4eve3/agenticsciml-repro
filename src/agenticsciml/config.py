@@ -147,9 +147,15 @@ class AgentConfig:
     role: str
     model: str = "mock"
     temperature: float = 0.0
+    reasoning_effort: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {"role": self.role, "model": self.model, "temperature": self.temperature}
+        return {
+            "role": self.role,
+            "model": self.model,
+            "temperature": self.temperature,
+            "reasoning_effort": self.reasoning_effort,
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AgentConfig":
@@ -157,6 +163,11 @@ class AgentConfig:
             role=str(data["role"]),
             model=str(data.get("model", "mock")),
             temperature=float(data.get("temperature", 0.0)),
+            reasoning_effort=(
+                str(data["reasoning_effort"])
+                if data.get("reasoning_effort") is not None
+                else None
+            ),
         )
 
 

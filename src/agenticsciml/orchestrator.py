@@ -20,7 +20,7 @@ from agenticsciml.agents import (
 )
 from agenticsciml.agents.base import StructuredOutputError
 from agenticsciml.benchmarks import BenchmarkContractFactory, ProblemBundle
-from agenticsciml.config import EvaluationContract, ExperimentConfig
+from agenticsciml.config import AgentConfig, EvaluationContract, ExperimentConfig
 from agenticsciml.evidence import evidence_metadata_for_run
 from agenticsciml.execution.sandbox import prepare_solution_workspace, train_and_evaluate
 from agenticsciml.llm.base import LLMClient
@@ -73,20 +73,89 @@ class AgenticSciMLOrchestrator:
         self.nodes: list[SolutionNode] = []
         self.analysis_by_node: dict[str, AnalysisReport] = {}
         self._analysis_lock = threading.RLock()
+        self._role_llms: dict[str, LLMClient] = {}
 
-        self.data_analyst = DataAnalystAgent(llm, self.storage)
-        self.evaluator = EvaluatorAgent(llm, self.storage)
-        self.root_engineer = RootEngineerAgent(llm, self.storage)
-        self.retriever = RetrieverAgent(llm, self.storage)
-        self.proposer = ProposerAgent(llm, self.storage)
-        self.engineer = EngineerAgent(llm, self.storage)
-        self.debugger = DebuggerAgent(llm, self.storage)
-        self.result_analyst = ResultAnalystAgent(llm, self.storage)
-        self.selector = SelectorAgent(llm, self.storage)
+        self.data_analyst = DataAnalystAgent(
+            self._llm_for_role("data_analyst"),
+            self.storage,
+            default_temperature=self._temperature_for_role("data_analyst"),
+        )
+        self.evaluator = EvaluatorAgent(
+            self._llm_for_role("evaluator"),
+            self.storage,
+            default_temperature=self._temperature_for_role("evaluator"),
+        )
+        self.root_engineer = RootEngineerAgent(
+            self._llm_for_role("root_engineer"),
+            self.storage,
+            default_temperature=self._temperature_for_role("root_engineer"),
+        )
+        self.retriever = RetrieverAgent(
+            self._llm_for_role("retriever"),
+            self.storage,
+            default_temperature=self._temperature_for_role("retriever"),
+        )
+        self.proposer = ProposerAgent(
+            self._llm_for_role("proposer"),
+            self.storage,
+            default_temperature=self._temperature_for_role("proposer"),
+            critic_llm=self._llm_for_role("critic"),
+            critic_temperature=self._temperature_for_role("critic"),
+        )
+        self.engineer = EngineerAgent(
+            self._llm_for_role("engineer"),
+            self.storage,
+            default_temperature=self._temperature_for_role("engineer"),
+        )
+        self.debugger = DebuggerAgent(
+            self._llm_for_role("debugger"),
+            self.storage,
+            default_temperature=self._temperature_for_role("debugger"),
+        )
+        self.result_analyst = ResultAnalystAgent(
+            self._llm_for_role("result_analyst"),
+            self.storage,
+            default_temperature=self._temperature_for_role("result_analyst"),
+        )
+        self.selector = SelectorAgent(
+            self._llm_for_role("selector"),
+            self.storage,
+            default_temperature=self._temperature_for_role("selector"),
+        )
         self.problem_bundle = ProblemBundle.load(config.benchmark_dir)
         self.contract: EvaluationContract | None = None
         self.loaded_checkpoint: dict[str, object] | None = None
         self._next_solution_index: int | None = None
+
+    def _agent_config_for_role(self, role: str) -> AgentConfig | None:
+        return self.config.agents.get(role)
+
+    def _temperature_for_role(self, role: str) -> float:
+        agent_config = self._agent_config_for_role(role)
+        return agent_config.temperature if agent_config else 0.0
+
+    def _llm_for_role(self, role: str) -> LLMClient:
+        if role in self._role_llms:
+            return self._role_llms[role]
+        agent_config = self._agent_config_for_role(role)
+        role_llm = self.llm
+        requested_model = agent_config.model if agent_config else None
+        base_model = getattr(self.llm, "model", None)
+        if (
+            requested_model
+            and requested_model != "mock"
+            and requested_model != base_model
+            and not self.config.use_mock
+            and all(hasattr(self.llm, attr) for attr in ("api_key", "base_url", "timeout_s"))
+        ):
+            role_llm = self.llm.__class__(
+                model=requested_model,
+                api_key=getattr(self.llm, "api_key"),
+                base_url=getattr(self.llm, "base_url"),
+                timeout_s=getattr(self.llm, "timeout_s"),
+            )
+        self._role_llms[role] = role_llm
+        return role_llm
 
     def run(self) -> Path:
         started = time.monotonic()
@@ -973,6 +1042,23 @@ class AgenticSciMLOrchestrator:
             metadata["llm_budget"] = budget.to_dict()
         elif isinstance(budget, dict):
             metadata["llm_budget"] = budget
+        role_models: dict[str, object] = {}
+        for role, agent_config in sorted(self.config.agents.items()):
+            role_llm = self._llm_for_role(role)
+            role_models[role] = {
+                **agent_config.to_dict(),
+                "actual_model": getattr(
+                    role_llm,
+                    "model",
+                    "mock" if self.config.use_mock else agent_config.model,
+                ),
+                "actual_provider": (
+                    getattr(role_llm, "provider", None)
+                    or getattr(role_llm, "provider_name", None)
+                ),
+                "adapter_type": getattr(role_llm, "adapter_type", None),
+            }
+        metadata["agent_models"] = role_models
         return metadata
 
 

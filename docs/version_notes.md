@@ -2,6 +2,45 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-17 Paper Run Lab
+
+本次把第三页“算法库”升级为 AgenticSciML Paper Run Lab，第一页纯 ChatUI 和第二页
+VS Code Web + 侧栏 ChatUI 保持轻量，不展示 benchmark/run 工作台。
+
+已实现：
+
+- 新增 `src/agenticsciml/paper_tasks.py` 和 `GET /api/paper-tasks`，按 `S1.1` 到
+  `S1.6` 返回本地 benchmark、paper reference primitive、figure label、local SVG
+  artifact 约定和 claim boundary。
+- 新增 `GET /api/runs/{id}/selector-votes`，只读读取
+  `reports/selector_votes.json`，缺失时返回空状态。
+- 新增 `GET /api/runs/{id}/solutions`，从 `tree.json`、`leaderboard.csv` 与
+  `solutions/*/eval.json` 汇总 node、parent、status、score/loss、delta、method tags
+  和本地 figure artifact。
+- `POST /api/runs` 新增 `target_solution_count`、`max_children_per_node` 和
+  `agent_models`；`target_solution_count` 会被转换为确定性的
+  `EvolutionConfig.max_iterations + parallel_mutations` 预算。
+- 新增 `GET /api/agent-roles`，前端可为 Data Analyst、Evaluator、Root Engineer、
+  Retriever、Proposer、Critic、Engineer、Debugger、Result Analyst 和 Selector 配置
+  role-level `model`、`temperature` 与审计用 `reasoning_effort`。
+- orchestrator 支持 role-based LLM routing：默认继续使用单一 adapter；只有配置 role
+  override 时才为该 role 选择模型。`config.json` 和 `run_metadata.json` 记录实际
+  `agent_models` map。
+- 第三页新增 Paper Tasks、Run Config、Layered model routing、Selector votes、
+  Solution loss/tree 和 Local figures 区域。
+
+验证：
+
+- `uv run --python 3.11 --extra web --extra dev pytest tests/test_web_api.py -q`
+- `cd frontend && npm run build`
+
+边界：
+
+- Paper Run Lab 只展示本地 evidence 和 paper-section 对齐信息，不复制论文图片本体。
+- `faithful-small` / `proxy` benchmark 和 mock run 仍不是 paper-score evidence。
+- 前端不接管 evaluator、selector、champion selection、solution tree schema 或
+  artifact schema。
+
 ## 2026-05-17 S1.6 Cylinder Wake Faithful-Small Benchmark
 
 本轮按 Pro 复核建议补齐论文 S1.6 的 faithful-small benchmark。Pro 的关键约束是：

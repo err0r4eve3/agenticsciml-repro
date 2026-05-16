@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -48,6 +49,26 @@ def test_web_algorithms_expose_professional_catalog() -> None:
     assert "paper-level" in algorithms["sparse_sensor_reconstructor"]["safety_notes"]
 
 
+def test_paper_tasks_expose_s1_mapping() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/api/paper-tasks")
+
+    assert response.status_code == 200
+    tasks = response.json()["tasks"]
+    assert [task["paper_section"] for task in tasks] == ["S1.1", "S1.2", "S1.3", "S1.4", "S1.5", "S1.6"]
+    by_section = {task["paper_section"]: task for task in tasks}
+    s16 = by_section["S1.6"]
+    assert "Cylinder Wake" in s16["title"]
+    assert any(
+        benchmark["name"] == "cylinder_wake_reconstruction_faithful_small"
+        for benchmark in s16["benchmarks"]
+    )
+    assert s16["algorithms"][0]["id"] == "paper_cylinder_bandlimited_filter"
+    assert "not paper-score evidence" in s16["claim_boundary"]
+    assert "reports/data_overview.svg" in s16["local_artifact_figures"]
+
+
 def test_solver_settings_expose_mode_defaults() -> None:
     client = TestClient(create_app())
 
@@ -63,6 +84,20 @@ def test_solver_settings_expose_mode_defaults() -> None:
         "plan": {"reasoning_effort": "high", "temperature": 0.35},
         "agent": {"reasoning_effort": "high", "temperature": 0.1},
     }
+
+
+def test_agent_roles_expose_layered_model_contract() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/api/agent-roles")
+
+    assert response.status_code == 200
+    payload = response.json()
+    roles = {item["role"]: item for item in payload["roles"]}
+    assert roles["data_analyst"]["label"] == "Data Analyst"
+    assert roles["engineer"]["kind"] == "patch"
+    assert roles["selector"]["label"] == "Selector"
+    assert "reasoning_effort" in payload["reasoning_effort_note"]
 
 
 def test_web_mock_run_writes_required_artifacts(tmp_path: Path) -> None:
@@ -88,6 +123,250 @@ def test_web_mock_run_writes_required_artifacts(tmp_path: Path) -> None:
     assert (run_dir / "trace_summary.json").exists()
     assert payload["metadata"]["run_state"] == "exported"
     assert payload["trace_summary"]["quality_gate"]["passed"] is True
+
+
+def test_web_mock_run_persists_agent_model_overrides(tmp_path: Path) -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/runs",
+        json={
+            "benchmark": "function_approx",
+            "mode": "mock",
+            "target_solution_count": 1,
+            "experiment_id": "role-model-test",
+            "output_dir": str(tmp_path),
+            "agent_models": {
+                "engineer": {
+                    "model": "deepseek-v4-pro",
+                    "temperature": 0.15,
+                    "reasoning_effort": "high",
+                },
+                "selector": {
+                    "model": "gpt-5-mini",
+                    "temperature": 0.05,
+                    "reasoning_effort": "medium",
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    run_dir = tmp_path / "role-model-test"
+    config = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+    metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    assert config["agents"]["engineer"] == {
+        "role": "engineer",
+        "model": "deepseek-v4-pro",
+        "temperature": 0.15,
+        "reasoning_effort": "high",
+    }
+    assert metadata["agent_models"]["engineer"]["model"] == "deepseek-v4-pro"
+    assert metadata["agent_models"]["engineer"]["actual_model"] == "mock"
+
+
+def test_web_run_rejects_unknown_agent_role(tmp_path: Path) -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/runs",
+        json={
+            "benchmark": "function_approx",
+            "mode": "dry_run",
+            "experiment_id": "bad-role",
+            "output_dir": str(tmp_path),
+            "agent_models": {
+                "global_boss": {
+                    "model": "deepseek-v4-pro",
+                    "temperature": 0.2,
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Unknown agent role" in response.json()["detail"]
+
+
+def test_web_run_budget_fields_are_applied(tmp_path: Path) -> None:
+    client = TestClient(create_app())
+
+    dry_run = client.post(
+        "/api/runs",
+        json={
+            "benchmark": "function_approx",
+            "mode": "dry_run",
+            "target_solution_count": 5,
+            "parallel_mutations": 2,
+            "selector_vote_count": 4,
+            "max_children_per_node": 3,
+            "experiment_id": "budget-dry-run",
+            "output_dir": str(tmp_path),
+        },
+    )
+
+    assert dry_run.status_code == 200
+    assert dry_run.json()["run_budget"] == {
+        "target_solution_count": 5,
+        "planned_solution_budget": 5,
+        "max_iterations": 2,
+        "parallel_mutations": 2,
+        "selector_vote_count": 4,
+        "max_children_per_node": 3,
+    }
+
+    mock_run = client.post(
+        "/api/runs",
+        json={
+            "benchmark": "function_approx",
+            "mode": "mock",
+            "target_solution_count": 1,
+            "parallel_mutations": 2,
+            "selector_vote_count": 4,
+            "max_children_per_node": 3,
+            "experiment_id": "budget-mock-run",
+            "output_dir": str(tmp_path),
+        },
+    )
+
+    assert mock_run.status_code == 200
+    config = json.loads((tmp_path / "budget-mock-run" / "config.json").read_text(encoding="utf-8"))
+    assert config["evolution"]["max_iterations"] == 0
+    assert config["evolution"]["parallel_mutations"] == 2
+    assert config["evolution"]["selector_vote_count"] == 4
+    assert config["evolution"]["max_children_per_node"] == 3
+
+
+def test_selector_votes_and_solutions_are_read_only_evidence(tmp_path: Path) -> None:
+    client = TestClient(create_app())
+    run_dir = tmp_path / "paper-run"
+    (run_dir / "reports").mkdir(parents=True)
+    (run_dir / "solutions" / "solution_000").mkdir(parents=True)
+    (run_dir / "trace.jsonl").write_text("", encoding="utf-8")
+    (run_dir / "reports" / "data_overview.svg").write_text("<svg />", encoding="utf-8")
+    (run_dir / "solutions" / "solution_000" / "prediction_overview.svg").write_text("<svg />", encoding="utf-8")
+    (run_dir / "solutions" / "solution_000" / "eval.json").write_text(
+        json.dumps(
+            {
+                "metric": "validation_mse",
+                "score": 0.25,
+                "higher_is_better": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "tree.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "root_id": "solution_000",
+                "nodes": [
+                    {
+                        "node_id": "solution_000",
+                        "parent_id": None,
+                        "children": [],
+                        "status": "evaluated",
+                        "score": {"metric": "validation_mse", "value": 0.3, "higher_is_better": False},
+                        "method_tags": ["baseline"],
+                        "score_delta_from_parent": None,
+                        "num_debug_attempts": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "leaderboard.csv").write_text(
+        "rank,node_id,parent_id,metric,score,status\n1,solution_000,,validation_mse,0.25,evaluated\n",
+        encoding="utf-8",
+    )
+
+    empty_votes = client.get("/api/runs/paper-run/selector-votes", params={"output_dir": str(tmp_path)})
+    assert empty_votes.status_code == 200
+    assert empty_votes.json()["available"] is False
+    assert empty_votes.json()["votes"] == []
+
+    (run_dir / "reports" / "selector_votes.json").write_text(
+        json.dumps(
+            {
+                "selected_parent_ids": ["solution_000"],
+                "vote_counts": {"solution_000": 3},
+                "votes": [{"candidate_id": "solution_000", "rationale": "best loss"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    votes = client.get("/api/runs/paper-run/selector-votes", params={"output_dir": str(tmp_path)})
+    assert votes.status_code == 200
+    assert votes.json()["available"] is True
+    assert votes.json()["vote_counts"] == {"solution_000": 3}
+
+    solutions = client.get("/api/runs/paper-run/solutions", params={"output_dir": str(tmp_path)})
+    assert solutions.status_code == 200
+    payload = solutions.json()
+    assert payload["tree"]["node_count"] == 1
+    assert payload["solutions"][0]["node_id"] == "solution_000"
+    assert payload["solutions"][0]["score"] == 0.25
+    assert payload["solutions"][0]["loss"] == 0.25
+    assert payload["solutions"][0]["method_tags"] == ["baseline"]
+    assert {figure["path"] for figure in payload["figures"]} == {
+        "reports/data_overview.svg",
+        "solutions/solution_000/prediction_overview.svg",
+    }
+
+
+def test_account_scoped_evidence_endpoints_use_account_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENTICSCIML_ACCOUNTS_ROOT", str(tmp_path / "accounts"))
+    client = TestClient(create_app())
+
+    for account_id, score in (("alice", 0.1), ("bob", 0.9)):
+        run_dir = tmp_path / "accounts" / account_id / "runs" / "same-run-id"
+        (run_dir / "reports").mkdir(parents=True)
+        (run_dir / "solutions" / "solution_000").mkdir(parents=True)
+        (run_dir / "trace.jsonl").write_text("", encoding="utf-8")
+        (run_dir / "reports" / "selector_votes.json").write_text(
+            json.dumps(
+                {
+                    "selected_parent_ids": ["solution_000"],
+                    "vote_counts": {"solution_000": 1 if account_id == "alice" else 2},
+                    "votes": [{"candidate_id": "solution_000", "account": account_id}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        (run_dir / "tree.json").write_text(
+            json.dumps(
+                {
+                    "root_id": "solution_000",
+                    "nodes": [
+                        {
+                            "node_id": "solution_000",
+                            "parent_id": None,
+                            "children": [],
+                            "status": "evaluated",
+                            "score": {"metric": "validation_mse", "value": score, "higher_is_better": False},
+                            "method_tags": [account_id],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    alice_votes = client.get("/api/runs/same-run-id/selector-votes", params={"account_id": "alice"})
+    bob_votes = client.get("/api/runs/same-run-id/selector-votes", params={"account_id": "bob"})
+    alice_solutions = client.get("/api/runs/same-run-id/solutions", params={"account_id": "alice"})
+    bob_solutions = client.get("/api/runs/same-run-id/solutions", params={"account_id": "bob"})
+
+    assert alice_votes.status_code == 200
+    assert bob_votes.status_code == 200
+    assert alice_votes.json()["vote_counts"] == {"solution_000": 1}
+    assert bob_votes.json()["vote_counts"] == {"solution_000": 2}
+    assert alice_solutions.json()["solutions"][0]["score"] == 0.1
+    assert bob_solutions.json()["solutions"][0]["score"] == 0.9
 
 
 def test_web_real_run_requires_server_flag_and_confirmation(

@@ -379,13 +379,15 @@ def test_agenticsciml_assistant_governance_is_documented() -> None:
     assert "`/api/solver/chat` is an internal algorithm-tool endpoint, not an OpenAI Apps" in agents
     assert "Prompt Injection Boundary" in agents
 
-    assert "version: 0.3.4" in skill
+    assert "version: 0.4.0" in skill
     assert "not an MCP server" in skill
     assert "account_id" in skill
     assert "assistant_mode" in skill
     assert "reasoning_effort=high" in skill
     assert "GET /api/solver/settings" in skill
     assert "GET /api/algorithms" in skill
+    assert "GET /api/paper-tasks" in skill
+    assert "GET /api/agent-roles" in skill
     assert "Valid Action Categories" in skill
     assert "Real LLM Mode" in skill
     assert "Prompt Injection Handling" in skill

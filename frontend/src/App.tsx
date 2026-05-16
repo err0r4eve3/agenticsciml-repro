@@ -24,9 +24,13 @@ type Benchmark = {
   name: string;
   path: string;
   paper_section: string;
+  paper_task_name?: string;
   family: string;
   metric: string;
+  description?: string;
   fidelity_level: string;
+  paper_gap_notes?: string;
+  claim_boundaries?: string[];
   scientific_claim?: string;
 };
 
@@ -97,6 +101,79 @@ type AlgorithmSpec = {
   description: string;
   claim_boundary: string;
   safety_notes: string;
+  source_scope?: string;
+  implementation_path?: string | null;
+};
+
+type PaperTask = {
+  paper_section: string;
+  title: string;
+  summary: string;
+  benchmarks: Benchmark[];
+  algorithms: AlgorithmSpec[];
+  reference_primitives: string[];
+  figure_labels: string[];
+  local_artifact_figures: string[];
+  claim_boundary: string;
+};
+
+type SelectorVotesPayload = {
+  run_id: string;
+  available: boolean;
+  path: string;
+  selected_parent_ids: string[];
+  vote_counts: Record<string, number>;
+  votes: Array<Record<string, unknown>>;
+};
+
+type SolutionSummary = {
+  node_id: string;
+  parent_id?: string | null;
+  children: string[];
+  status?: string;
+  metric?: string | null;
+  score?: number | null;
+  loss?: number | null;
+  higher_is_better?: boolean | null;
+  score_delta_from_parent?: number | null;
+  method_tags: string[];
+  failure_kind?: string | null;
+  num_debug_attempts?: number | null;
+  workspace: string;
+  artifacts: ArtifactEntry[];
+};
+
+type SolutionsPayload = {
+  run_id: string;
+  available: boolean;
+  tree: {
+    root_id?: string | null;
+    node_count: number;
+    schema_version?: number | null;
+  };
+  solutions: SolutionSummary[];
+  leaderboard: Array<Record<string, string>>;
+  figures: ArtifactEntry[];
+};
+
+type RunConfig = {
+  target_solution_count: number;
+  max_iterations: number;
+  parallel_mutations: number;
+  selector_vote_count: number;
+  max_children_per_node: number;
+};
+
+type AgentRole = {
+  role: string;
+  label: string;
+  kind: string;
+};
+
+type AgentModelConfig = {
+  model: string;
+  temperature: number;
+  reasoning_effort?: ReasoningEffort;
 };
 
 type AgentMessage = {
@@ -191,6 +268,14 @@ const api = {
     const payload = await getJson<{ algorithms: AlgorithmSpec[] }>("/api/algorithms");
     return payload.algorithms;
   },
+  async getPaperTasks(): Promise<PaperTask[]> {
+    const payload = await getJson<{ tasks: PaperTask[] }>("/api/paper-tasks");
+    return payload.tasks;
+  },
+  async getAgentRoles(): Promise<AgentRole[]> {
+    const payload = await getJson<{ roles: AgentRole[] }>("/api/agent-roles");
+    return payload.roles;
+  },
   async getSolverSettings(): Promise<SolverSettings> {
     return getJson<SolverSettings>("/api/solver/settings");
   },
@@ -203,8 +288,12 @@ const api = {
     mode: RunMode;
     account_id: string;
     experiment_id?: string;
+    target_solution_count?: number;
     max_iterations?: number;
     parallel_mutations?: number;
+    selector_vote_count?: number;
+    max_children_per_node?: number;
+    agent_models?: Record<string, AgentModelConfig>;
     background?: boolean;
     real_confirmed?: boolean;
   }): Promise<RunSummary> {
@@ -214,8 +303,12 @@ const api = {
       mode: body.mode,
       account_id: body.account_id,
       experiment_id: id,
+      target_solution_count: body.target_solution_count,
       max_iterations: body.max_iterations ?? 0,
       parallel_mutations: body.parallel_mutations ?? 1,
+      selector_vote_count: body.selector_vote_count ?? 3,
+      max_children_per_node: body.max_children_per_node ?? 10,
+      agent_models: body.agent_models ?? {},
       background: body.background ?? false,
       real_confirmed: body.real_confirmed ?? false
     });
@@ -242,6 +335,16 @@ const api = {
   },
   async getRun(runId: string, accountId: string): Promise<RunSummary> {
     return getJson<RunSummary>(`/api/runs/${encodeURIComponent(runId)}?${accountParams(accountId)}`);
+  },
+  async getSelectorVotes(runId: string, accountId: string): Promise<SelectorVotesPayload> {
+    return getJson<SelectorVotesPayload>(
+      `/api/runs/${encodeURIComponent(runId)}/selector-votes?${accountParams(accountId)}`
+    );
+  },
+  async getSolutions(runId: string, accountId: string): Promise<SolutionsPayload> {
+    return getJson<SolutionsPayload>(
+      `/api/runs/${encodeURIComponent(runId)}/solutions?${accountParams(accountId)}`
+    );
   },
   async getArtifact(runId: string, artifactPath: string, accountId: string): Promise<ArtifactPayload> {
     return getJson<ArtifactPayload>(
@@ -279,10 +382,15 @@ export function App() {
   const [activeAccountId, setActiveAccountId] = useState("local");
   const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
   const [algorithms, setAlgorithms] = useState<AlgorithmSpec[]>([]);
+  const [paperTasks, setPaperTasks] = useState<PaperTask[]>([]);
+  const [agentRoles, setAgentRoles] = useState<AgentRole[]>([]);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [selectedBenchmark, setSelectedBenchmark] = useState("function_approx");
+  const [selectedPaperSection, setSelectedPaperSection] = useState("S1.1");
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [activeRun, setActiveRun] = useState<RunSummary | null>(null);
+  const [selectorVotes, setSelectorVotes] = useState<SelectorVotesPayload | null>(null);
+  const [solutionsPayload, setSolutionsPayload] = useState<SolutionsPayload | null>(null);
   const [events, setEvents] = useState<string[]>([]);
   const [traceFilter, setTraceFilter] = useState("");
   const [selectedArtifactPath, setSelectedArtifactPath] = useState("");
@@ -297,6 +405,14 @@ export function App() {
     }
   ]);
   const [mode, setMode] = useState<RunMode>("mock");
+  const [runConfig, setRunConfig] = useState<RunConfig>({
+    target_solution_count: 3,
+    max_iterations: 2,
+    parallel_mutations: 1,
+    selector_vote_count: 3,
+    max_children_per_node: 10
+  });
+  const [agentModels, setAgentModels] = useState<Record<string, AgentModelConfig>>({});
   const [assistantMode, setAssistantMode] = useState<AssistantMode>("ask");
   const [solverSettings, setSolverSettings] = useState<SolverSettings>(DEFAULT_SOLVER_SETTINGS);
   const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScope>("account");
@@ -327,6 +443,16 @@ export function App() {
       })
       .catch((exc) => setError(String(exc)));
     api.getAlgorithms().then(setAlgorithms).catch((exc) => setError(String(exc)));
+    api.getAgentRoles().then(setAgentRoles).catch((exc) => setError(String(exc)));
+    api
+      .getPaperTasks()
+      .then((items) => {
+        setPaperTasks(items);
+        if (items.length && !items.some((item) => item.paper_section === selectedPaperSection)) {
+          setSelectedPaperSection(items[0].paper_section);
+        }
+      })
+      .catch((exc) => setError(String(exc)));
     api.getSolverSettings().then(setSolverSettings).catch((exc) => setError(String(exc)));
     refreshRuns().catch((exc) => setError(String(exc)));
   }, []);
@@ -334,6 +460,8 @@ export function App() {
   useEffect(() => {
     setActiveRun(null);
     setActiveRunId(null);
+    setSelectorVotes(null);
+    setSolutionsPayload(null);
     setSelectedArtifactPath("");
     setSelectedWorkspaceId(null);
     setWorkspaceScope("account");
@@ -344,6 +472,15 @@ export function App() {
   useEffect(() => {
     if (!activeRunId) return;
     refreshActiveRun(activeRunId).catch((exc) => setError(String(exc)));
+  }, [activeRunId, activeAccountId]);
+
+  useEffect(() => {
+    if (!activeRunId) {
+      setSelectorVotes(null);
+      setSolutionsPayload(null);
+      return;
+    }
+    refreshRunEvidence(activeRunId).catch((exc) => setError(String(exc)));
   }, [activeRunId, activeAccountId]);
 
   useEffect(() => {
@@ -375,6 +512,20 @@ export function App() {
     () => benchmarks.find((benchmark) => benchmark.name === selectedBenchmark),
     [benchmarks, selectedBenchmark]
   );
+  const selectedPaperTask = useMemo(
+    () => paperTasks.find((task) => task.paper_section === selectedPaperSection) ?? paperTasks[0] ?? null,
+    [paperTasks, selectedPaperSection]
+  );
+  const runBudgetPreview = useMemo(() => {
+    const maxIterations =
+      runConfig.target_solution_count > 0
+        ? Math.ceil(Math.max(0, runConfig.target_solution_count - 1) / Math.max(1, runConfig.parallel_mutations))
+        : runConfig.max_iterations;
+    return {
+      max_iterations: maxIterations,
+      planned_solution_budget: 1 + maxIterations * runConfig.parallel_mutations
+    };
+  }, [runConfig]);
   const filteredEvents = useMemo(() => {
     const needle = traceFilter.trim().toLowerCase();
     if (!needle) return events;
@@ -403,10 +554,21 @@ export function App() {
     setRuns((current) => [run, ...current.filter((item) => item.run_id !== run.run_id)]);
   }
 
+  async function refreshRunEvidence(runId = activeRunId) {
+    if (!runId) return;
+    const [votes, solutions] = await Promise.all([
+      api.getSelectorVotes(runId, activeAccountId),
+      api.getSolutions(runId, activeAccountId)
+    ]);
+    setSelectorVotes(votes);
+    setSolutionsPayload(solutions);
+  }
+
   async function refreshAll() {
     setError(null);
     await refreshRuns();
     await refreshActiveRun();
+    await refreshRunEvidence();
     await refreshCodeWorkspaces();
   }
 
@@ -432,14 +594,19 @@ export function App() {
         benchmark: selectedBenchmark,
         mode: nextMode,
         account_id: activeAccountId,
-        max_iterations: 0,
-        parallel_mutations: 1,
+        target_solution_count: runConfig.target_solution_count,
+        max_iterations: runBudgetPreview.max_iterations,
+        parallel_mutations: runConfig.parallel_mutations,
+        selector_vote_count: runConfig.selector_vote_count,
+        max_children_per_node: runConfig.max_children_per_node,
+        agent_models: activeAgentModels(),
         background,
         real_confirmed: realConfirmed
       });
       setActiveRun(run);
       setActiveRunId(run.run_id);
       await refreshRuns();
+      await refreshRunEvidence(run.run_id);
       if (background) {
         window.setTimeout(() => {
           refreshActiveRun(run.run_id).catch((exc) => setError(String(exc)));
@@ -599,6 +766,70 @@ export function App() {
     setSelectedArtifactPath("");
   }
 
+  function selectPaperTask(task: PaperTask) {
+    setSelectedPaperSection(task.paper_section);
+    const preferred =
+      task.benchmarks.find((benchmark) => benchmark.fidelity_level === "faithful-small") ??
+      task.benchmarks[0];
+    if (preferred) {
+      setSelectedBenchmark(preferred.name);
+    }
+  }
+
+  function updateRunConfig(next: Partial<RunConfig>) {
+    setRunConfig((current) => {
+      const merged = { ...current, ...next };
+      const parallelMutations = normalizeInteger(merged.parallel_mutations, current.parallel_mutations, 1);
+      const targetSolutionCount = normalizeInteger(merged.target_solution_count, current.target_solution_count, 1);
+      const maxIterations = Math.max(
+        0,
+        Math.ceil(Math.max(0, targetSolutionCount - 1) / parallelMutations)
+      );
+      return {
+        target_solution_count: targetSolutionCount,
+        max_iterations: maxIterations,
+        parallel_mutations: parallelMutations,
+        selector_vote_count: normalizeInteger(merged.selector_vote_count, current.selector_vote_count, 1),
+        max_children_per_node: normalizeInteger(merged.max_children_per_node, current.max_children_per_node, 1)
+      };
+    });
+  }
+
+  function updateAgentModel(role: string, next: Partial<AgentModelConfig>) {
+    setAgentModels((current) => {
+      const existing = current[role] ?? { model: "", temperature: 0, reasoning_effort: "medium" as const };
+      const merged = { ...existing, ...next };
+      if (!merged.model.trim()) {
+        const rest = { ...current };
+        delete rest[role];
+        return rest;
+      }
+      return {
+        ...current,
+        [role]: {
+          model: merged.model,
+          temperature: Number.isFinite(merged.temperature) ? merged.temperature : existing.temperature,
+          reasoning_effort: merged.reasoning_effort
+        }
+      };
+    });
+  }
+
+  function activeAgentModels() {
+    return Object.fromEntries(
+      Object.entries(agentModels)
+        .filter(([, config]) => config.model.trim())
+        .map(([role, config]) => [
+          role,
+          {
+            model: config.model.trim(),
+            temperature: config.temperature,
+            reasoning_effort: config.reasoning_effort
+          }
+        ])
+    );
+  }
+
   function selectPage(page: PageKey) {
     setActivePage(page);
     if (page === "ide") {
@@ -712,20 +943,34 @@ export function App() {
           <AlgorithmLibraryPage
             activeRun={activeRun}
             activeRunId={activeRunId}
+            agentModels={agentModels}
+            agentRoles={agentRoles}
             algorithms={algorithms}
             artifactPayload={artifactPayload}
             events={filteredEvents}
             filter={traceFilter}
+            mode={mode}
+            paperTasks={paperTasks}
+            runBudgetPreview={runBudgetPreview}
+            runConfig={runConfig}
             runs={runs}
             selected={selected}
             selectedArtifactPath={selectedArtifactPath}
+            selectedPaperTask={selectedPaperTask}
+            selectorVotes={selectorVotes}
+            solutionsPayload={solutionsPayload}
             onFilterChange={setTraceFilter}
+            onModeChange={setMode}
             onOpenArtifacts={() => setSelectedArtifactPath("trace_summary.json")}
             onOpenCode={() => setActivePage("ide")}
             onRefreshRuns={refreshRuns}
+            onRunConfigChange={updateRunConfig}
             onSelectArtifact={setSelectedArtifactPath}
+            onSelectPaperTask={selectPaperTask}
             onSelectRun={selectRun}
+            onStartConfiguredRun={() => startRun(mode, false)}
             onStartMock={() => startRun("mock", false)}
+            onUpdateAgentModel={updateAgentModel}
           />
         </section>
       ) : null}
@@ -990,48 +1235,106 @@ function TopBar({
 function AlgorithmLibraryPage({
   activeRun,
   activeRunId,
+  agentModels,
+  agentRoles,
   algorithms,
   artifactPayload,
   events,
   filter,
+  mode,
+  paperTasks,
+  runBudgetPreview,
+  runConfig,
   runs,
   selected,
   selectedArtifactPath,
+  selectedPaperTask,
+  selectorVotes,
+  solutionsPayload,
   onFilterChange,
+  onModeChange,
   onOpenArtifacts,
   onOpenCode,
   onRefreshRuns,
+  onRunConfigChange,
   onSelectArtifact,
+  onSelectPaperTask,
   onSelectRun,
-  onStartMock
+  onStartConfiguredRun,
+  onStartMock,
+  onUpdateAgentModel
 }: {
   activeRun: RunSummary | null;
   activeRunId: string | null;
+  agentModels: Record<string, AgentModelConfig>;
+  agentRoles: AgentRole[];
   algorithms: AlgorithmSpec[];
   artifactPayload: ArtifactPayload | null;
   events: string[];
   filter: string;
+  mode: RunMode;
+  paperTasks: PaperTask[];
+  runBudgetPreview: { max_iterations: number; planned_solution_budget: number };
+  runConfig: RunConfig;
   runs: RunSummary[];
   selected?: Benchmark;
   selectedArtifactPath: string;
+  selectedPaperTask: PaperTask | null;
+  selectorVotes: SelectorVotesPayload | null;
+  solutionsPayload: SolutionsPayload | null;
   onFilterChange: (value: string) => void;
+  onModeChange: (mode: RunMode) => void;
   onOpenArtifacts: () => void;
   onOpenCode: () => void;
   onRefreshRuns: () => void;
+  onRunConfigChange: (next: Partial<RunConfig>) => void;
   onSelectArtifact: (value: string) => void;
+  onSelectPaperTask: (task: PaperTask) => void;
   onSelectRun: (run: RunSummary) => void;
+  onStartConfiguredRun: () => void;
   onStartMock: () => void;
+  onUpdateAgentModel: (role: string, next: Partial<AgentModelConfig>) => void;
 }) {
+  const scopedAlgorithms = selectedPaperTask?.algorithms.length ? selectedPaperTask.algorithms : algorithms;
   return (
-    <section className="library-content">
-      <section className="library-hero">
+    <section className="library-content paper-lab">
+      <section className="paper-lab-head">
         <div>
-          <p className="eyebrow">Algorithm Library</p>
-          <h2>算法库</h2>
-          <span>集中管理 benchmark、run、leaderboard、trace 和 artifact。ChatUI 与 VS Code Web 页面保持轻量。</span>
+          <p className="eyebrow">Paper Run Lab</p>
+          <h2>论文对齐实验页</h2>
+          <span>S1 任务、faithful-small / proxy benchmark、selector votes、solution loss 和本地 artifact 只读证据。</span>
         </div>
+        <StatusBadge tone="info">not paper-score evidence</StatusBadge>
       </section>
-      <AlgorithmCatalog algorithms={algorithms} />
+      <PaperTaskTabs tasks={paperTasks} selected={selectedPaperTask} onSelect={onSelectPaperTask} />
+      <div className="paper-lab-grid">
+        <PaperTaskDetail task={selectedPaperTask} selectedBenchmark={selected?.name ?? null} />
+        <RunConfigPanel
+          budgetPreview={runBudgetPreview}
+          busy={false}
+          mode={mode}
+          runConfig={runConfig}
+          selectedBenchmark={selected?.name ?? "unknown"}
+          onModeChange={onModeChange}
+          onRunConfigChange={onRunConfigChange}
+          onStartRun={onStartConfiguredRun}
+        />
+      </div>
+      <RoleModelPanel agentModels={agentModels} roles={agentRoles} onUpdate={onUpdateAgentModel} />
+      <EvidencePanel selectorVotes={selectorVotes} solutionsPayload={solutionsPayload} />
+      <DataRegion title="Paper primitive catalog">
+        <div className="algorithm-context">
+          {selectedPaperTask ? (
+            <p>
+              {selectedPaperTask.paper_section} 当前绑定 {selectedPaperTask.algorithms.length} 个 paper reference primitive；
+              score、champion 和科学声明仍只来自 evaluator 与 run artifacts。
+            </p>
+          ) : (
+            <p>尚未加载 S1 task mapping。</p>
+          )}
+        </div>
+        <AlgorithmCatalog algorithms={scopedAlgorithms} embedded />
+      </DataRegion>
       <DashboardView
         activeRun={activeRun}
         events={events}
@@ -1059,29 +1362,414 @@ function AlgorithmLibraryPage({
   );
 }
 
-function AlgorithmCatalog({ algorithms }: { algorithms: AlgorithmSpec[] }) {
-  const visible = algorithms;
+function PaperTaskTabs({
+  onSelect,
+  selected,
+  tasks
+}: {
+  onSelect: (task: PaperTask) => void;
+  selected: PaperTask | null;
+  tasks: PaperTask[];
+}) {
   return (
-    <DataRegion title="Algorithm catalog">
-      <div className="algorithm-grid">
-        {visible.map((algorithm) => (
-          <article className="algorithm-card" key={algorithm.id}>
-            <div>
-              <span>{algorithm.family}</span>
-              <h3>{algorithm.name}</h3>
-            </div>
-            <p>{algorithm.description}</p>
-            <div className="algorithm-meta">
-              <small>{algorithm.status}</small>
-              <small>{algorithm.compatible_benchmark_families.join(" / ")}</small>
-            </div>
-            <strong>{algorithm.safety_notes}</strong>
-          </article>
-        ))}
-        {visible.length === 0 ? <p className="muted">算法目录暂未加载。</p> : null}
+    <div className="paper-task-tabs" aria-label="Paper S1 tasks">
+      {tasks.map((task) => (
+        <button
+          className={selected?.paper_section === task.paper_section ? "selected" : ""}
+          key={task.paper_section}
+          type="button"
+          onClick={() => onSelect(task)}
+        >
+          <span>{task.paper_section}</span>
+          <strong>{task.title}</strong>
+        </button>
+      ))}
+      {tasks.length === 0 ? <span className="muted">S1 task mapping 尚未加载。</span> : null}
+    </div>
+  );
+}
+
+function PaperTaskDetail({
+  selectedBenchmark,
+  task
+}: {
+  selectedBenchmark: string | null;
+  task: PaperTask | null;
+}) {
+  if (!task) {
+    return (
+      <DataRegion title="Paper Tasks">
+        <p className="muted">等待 /api/paper-tasks。</p>
+      </DataRegion>
+    );
+  }
+  return (
+    <DataRegion title={`${task.paper_section} / ${task.title}`}>
+      <div className="paper-task-detail">
+        <p>{task.summary}</p>
+        <div className="paper-task-columns">
+          <div>
+            <strong>Benchmarks</strong>
+            {task.benchmarks.map((benchmark) => (
+              <div
+                className={benchmark.name === selectedBenchmark ? "paper-benchmark-row selected" : "paper-benchmark-row"}
+                key={benchmark.name}
+              >
+                <span>{benchmark.name}</span>
+                <small>{benchmark.fidelity_level} · {benchmark.metric}</small>
+              </div>
+            ))}
+          </div>
+          <div>
+            <strong>Reference primitives</strong>
+            {task.reference_primitives.map((primitive) => (
+              <span className="primitive-chip" key={primitive}>{primitive}</span>
+            ))}
+          </div>
+        </div>
+        <div className="claim-boundary">
+          <AlertTriangle size={15} />
+          <span>{task.claim_boundary}</span>
+        </div>
       </div>
     </DataRegion>
   );
+}
+
+function RunConfigPanel({
+  budgetPreview,
+  mode,
+  runConfig,
+  selectedBenchmark,
+  onModeChange,
+  onRunConfigChange,
+  onStartRun
+}: {
+  budgetPreview: { max_iterations: number; planned_solution_budget: number };
+  busy: boolean;
+  mode: RunMode;
+  runConfig: RunConfig;
+  selectedBenchmark: string;
+  onModeChange: (mode: RunMode) => void;
+  onRunConfigChange: (next: Partial<RunConfig>) => void;
+  onStartRun: () => void;
+}) {
+  return (
+    <DataRegion title="Run Config">
+      <div className="run-config-panel">
+        <div className="run-config-mode">
+          <span>mode</span>
+          <div className="segmented compact" aria-label="Paper run mode">
+            {(["mock", "dry_run", "real"] as const).map((item) => (
+              <button
+                className={mode === item ? "selected" : ""}
+                key={item}
+                type="button"
+                onClick={() => onModeChange(item)}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="config-grid">
+          <NumberField
+            label="target solutions"
+            min={1}
+            value={runConfig.target_solution_count}
+            onChange={(value) => onRunConfigChange({ target_solution_count: value })}
+          />
+          <NumberField
+            label="max iterations"
+            min={0}
+            value={budgetPreview.max_iterations}
+            onChange={(value) => onRunConfigChange({ max_iterations: value, target_solution_count: 1 + value * runConfig.parallel_mutations })}
+          />
+          <NumberField
+            label="parallel mutations"
+            min={1}
+            value={runConfig.parallel_mutations}
+            onChange={(value) => onRunConfigChange({ parallel_mutations: value })}
+          />
+          <NumberField
+            label="selector votes"
+            min={1}
+            value={runConfig.selector_vote_count}
+            onChange={(value) => onRunConfigChange({ selector_vote_count: value })}
+          />
+          <NumberField
+            label="max children/node"
+            min={1}
+            value={runConfig.max_children_per_node}
+            onChange={(value) => onRunConfigChange({ max_children_per_node: value })}
+          />
+        </div>
+        <div className="budget-preview">
+          <div>
+            <span>actual budget</span>
+            <strong>{budgetPreview.planned_solution_budget}</strong>
+          </div>
+          <div>
+            <span>root + children</span>
+            <strong>1 + {budgetPreview.max_iterations * runConfig.parallel_mutations}</strong>
+          </div>
+          <div>
+            <span>benchmark</span>
+            <strong>{selectedBenchmark}</strong>
+          </div>
+        </div>
+        <button className="icon-text-button full-width" type="button" onClick={onStartRun}>
+          <Play size={15} />
+          启动配置 run
+        </button>
+        {mode === "real" ? (
+          <p className="warning-text">real mode 仍需要后端显式开关与二次确认，不会绕过预算或 claim boundary。</p>
+        ) : null}
+      </div>
+    </DataRegion>
+  );
+}
+
+function NumberField({
+  label,
+  min,
+  onChange,
+  value
+}: {
+  label: string;
+  min: number;
+  onChange: (value: number) => void;
+  value: number;
+}) {
+  return (
+    <label className="number-field">
+      <span>{label}</span>
+      <input
+        min={min}
+        type="number"
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
+    </label>
+  );
+}
+
+function RoleModelPanel({
+  agentModels,
+  onUpdate,
+  roles
+}: {
+  agentModels: Record<string, AgentModelConfig>;
+  onUpdate: (role: string, next: Partial<AgentModelConfig>) => void;
+  roles: AgentRole[];
+}) {
+  return (
+    <DataRegion title="Layered model routing">
+      <div className="role-model-panel">
+        <p>
+          默认使用后端单一 adapter；只有填写 role override 时才按层路由。reasoning_effort 先持久化用于 audit，
+          OpenAI-compatible chat provider 可以忽略。
+        </p>
+        <div className="role-model-table">
+          <table>
+            <thead>
+              <tr>
+                <th>role</th>
+                <th>layer</th>
+                <th>model override</th>
+                <th>temp</th>
+                <th>thinking</th>
+              </tr>
+            </thead>
+            <tbody>
+              {roles.map((role) => {
+                const config = agentModels[role.role] ?? { model: "", temperature: 0, reasoning_effort: "medium" as const };
+                return (
+                  <tr key={role.role}>
+                    <td>{role.label}</td>
+                    <td>{role.kind}</td>
+                    <td>
+                      <input
+                        value={config.model}
+                        onChange={(event) => onUpdate(role.role, { model: event.target.value })}
+                        placeholder="default"
+                      />
+                    </td>
+                    <td>
+                      <input
+                        min={0}
+                        max={2}
+                        step={0.05}
+                        type="number"
+                        value={config.temperature}
+                        onChange={(event) => onUpdate(role.role, { temperature: Number(event.target.value) })}
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={config.reasoning_effort ?? "medium"}
+                        onChange={(event) =>
+                          onUpdate(role.role, { reasoning_effort: event.target.value as ReasoningEffort })
+                        }
+                      >
+                        <option value="low">low</option>
+                        <option value="medium">medium</option>
+                        <option value="high">high</option>
+                      </select>
+                    </td>
+                  </tr>
+                );
+              })}
+              {roles.length === 0 ? (
+                <tr>
+                  <td colSpan={5}>等待 /api/agent-roles。</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </DataRegion>
+  );
+}
+
+function EvidencePanel({
+  selectorVotes,
+  solutionsPayload
+}: {
+  selectorVotes: SelectorVotesPayload | null;
+  solutionsPayload: SolutionsPayload | null;
+}) {
+  return (
+    <div className="evidence-grid">
+      <DataRegion title="Selector votes">
+        <SelectorVotesView payload={selectorVotes} />
+      </DataRegion>
+      <DataRegion title="Solution loss / tree">
+        <SolutionsTable payload={solutionsPayload} />
+      </DataRegion>
+      <DataRegion title="Local figures">
+        <FigureArtifactsView figures={solutionsPayload?.figures ?? []} />
+      </DataRegion>
+    </div>
+  );
+}
+
+function SelectorVotesView({ payload }: { payload: SelectorVotesPayload | null }) {
+  if (!payload) return <p className="muted">选择 run 后显示 selector votes。</p>;
+  if (!payload.available) return <p className="muted">该 run 没有 reports/selector_votes.json。</p>;
+  const counts = Object.entries(payload.vote_counts);
+  return (
+    <div className="votes-view">
+      <div className="vote-counts">
+        {counts.map(([nodeId, count]) => (
+          <span key={nodeId}>
+            <strong>{nodeId}</strong>
+            {count}
+          </span>
+        ))}
+      </div>
+      <div className="vote-list">
+        {payload.votes.slice(0, 6).map((vote, index) => (
+          <code key={`${index}-${String(vote.candidate_id ?? vote.node_id ?? "vote")}`}>
+            {String(vote.candidate_id ?? vote.node_id ?? "vote")} · {String(vote.rationale ?? vote.reason ?? "no rationale")}
+          </code>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SolutionsTable({ payload }: { payload: SolutionsPayload | null }) {
+  const rows = payload?.solutions ?? [];
+  return (
+    <div className="table-wrap solution-table">
+      <table>
+        <thead>
+          <tr>
+            <th>node</th>
+            <th>parent</th>
+            <th>status</th>
+            <th>metric</th>
+            <th>loss/score</th>
+            <th>delta</th>
+            <th>tags</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, 12).map((solution) => (
+            <tr key={solution.node_id}>
+              <td>{solution.node_id}</td>
+              <td>{solution.parent_id ?? "root"}</td>
+              <td>{solution.status ?? "unknown"}</td>
+              <td>{solution.metric ?? "metric"}</td>
+              <td>{formatScore(solution.loss ?? solution.score)}</td>
+              <td>{formatScore(solution.score_delta_from_parent)}</td>
+              <td>{solution.method_tags.slice(0, 3).join(", ") || "none"}</td>
+            </tr>
+          ))}
+          {rows.length === 0 ? (
+            <tr>
+              <td colSpan={7}>选择包含 tree.json 的 run 后显示 solution tree summary。</td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function FigureArtifactsView({ figures }: { figures: ArtifactEntry[] }) {
+  if (!figures.length) {
+    return <p className="muted">尚未发现 data_overview.svg 或 prediction_overview.svg。</p>;
+  }
+  return (
+    <div className="figure-list">
+      {figures.slice(0, 8).map((figure) => (
+        <span key={figure.path}>
+          <FileText size={14} />
+          {figure.path}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function formatScore(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "n/a";
+  if (Math.abs(value) >= 1000 || Math.abs(value) < 0.001) return value.toExponential(3);
+  return value.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function normalizeInteger(value: number, fallback: number, min: number) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.floor(value));
+}
+
+function AlgorithmCatalog({ algorithms, embedded = false }: { algorithms: AlgorithmSpec[]; embedded?: boolean }) {
+  const visible = algorithms;
+  const content = (
+    <div className="algorithm-grid">
+      {visible.map((algorithm) => (
+        <article className="algorithm-card" key={algorithm.id}>
+          <div>
+            <span>{algorithm.family}</span>
+            <h3>{algorithm.name}</h3>
+          </div>
+          <p>{algorithm.description}</p>
+          <div className="algorithm-meta">
+            <small>{algorithm.status}</small>
+            <small>{algorithm.compatible_benchmark_families.join(" / ")}</small>
+          </div>
+          {algorithm.implementation_path ? <code>{algorithm.implementation_path}</code> : null}
+          <strong>{algorithm.safety_notes}</strong>
+        </article>
+      ))}
+      {visible.length === 0 ? <p className="muted">算法目录暂未加载。</p> : null}
+    </div>
+  );
+  if (embedded) return content;
+  return <DataRegion title="Algorithm catalog">{content}</DataRegion>;
 }
 
 function DashboardView({

@@ -26,9 +26,10 @@ class InputContractError(RuntimeError):
 class AgentBase:
     role = "agent"
 
-    def __init__(self, llm: LLMClient, storage: ExperimentStorage):
+    def __init__(self, llm: LLMClient, storage: ExperimentStorage, default_temperature: float = 0.0):
         self.llm = llm
         self.storage = storage
+        self.default_temperature = default_temperature
         self.spec: AgentSpec | None = AGENT_SPECS.get(self.role)
 
     def _spec_metadata(self) -> dict[str, Any]:
@@ -83,10 +84,11 @@ class AgentBase:
         self,
         prompt: str,
         system: str | None = None,
-        temperature: float = 0.0,
+        temperature: float | None = None,
     ) -> str:
+        call_temperature = self.default_temperature if temperature is None else temperature
         started = time.monotonic()
-        response = self.llm.complete_text(prompt, system=system, temperature=temperature)
+        response = self.llm.complete_text(prompt, system=system, temperature=call_temperature)
         self.storage.record_trace(
             "generation_span",
             self.role,
@@ -98,7 +100,7 @@ class AgentBase:
                 "prompt_token_estimate": self._estimate_tokens(prompt),
                 "response_token_estimate": self._estimate_tokens(response),
                 "duration_s": time.monotonic() - started,
-                "temperature": temperature,
+                "temperature": call_temperature,
                 **self._llm_call_metadata(),
             },
         )
@@ -110,9 +112,10 @@ class AgentBase:
         schema_name: str,
         required_fields: tuple[str, ...] | None = None,
         system: str | None = None,
-        temperature: float = 0.0,
+        temperature: float | None = None,
         retries: int = 1,
     ) -> dict[str, Any]:
+        call_temperature = self.default_temperature if temperature is None else temperature
         if required_fields is None:
             if self.spec is None:
                 raise StructuredOutputError(
@@ -128,7 +131,7 @@ class AgentBase:
                     current_prompt,
                     schema_name,
                     system=system,
-                    temperature=temperature,
+                    temperature=call_temperature,
                 )
             except Exception as exc:
                 last_error = (
@@ -150,6 +153,7 @@ class AgentBase:
                         "duration_s": time.monotonic() - started,
                         "field_count": 0,
                         "error_type": type(exc).__name__,
+                        "temperature": call_temperature,
                         **self._llm_call_metadata(),
                     },
                 )
@@ -202,6 +206,7 @@ class AgentBase:
                     "response_token_estimate": self._estimate_tokens(response_text),
                     "duration_s": time.monotonic() - started,
                     "field_count": len(data),
+                    "temperature": call_temperature,
                     **self._llm_call_metadata(),
                 },
             )

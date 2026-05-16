@@ -12,6 +12,18 @@ from agenticsciml.state import AgentMessage, Proposal
 class ProposerAgent(AgentBase):
     role = "proposer"
 
+    def __init__(
+        self,
+        llm,
+        storage,
+        default_temperature: float = 0.0,
+        critic_llm=None,
+        critic_temperature: float = 0.0,
+    ):
+        super().__init__(llm, storage, default_temperature=default_temperature)
+        self.critic_llm = critic_llm or llm
+        self.critic_temperature = critic_temperature
+
     def debate(
         self,
         solution_id: str,
@@ -39,7 +51,15 @@ class ProposerAgent(AgentBase):
             "Branch context:\n"
             f"{json.dumps(branch_context or {}, indent=2, sort_keys=True)}"
         )
-        critic = CriticAgent(self.llm, self.storage) if use_critic else None
+        critic = (
+            CriticAgent(
+                self.critic_llm,
+                self.storage,
+                default_temperature=self.critic_temperature,
+            )
+            if use_critic
+            else None
+        )
         proposal_hint = "No proposal yet; critique the diagnostic framing."
         for round_index in range(1, 5):
             if round_index < 3:
