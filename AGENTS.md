@@ -165,7 +165,9 @@ exit non-zero. Use `smoke-llm --real` before expecting verification to pass.
 - ChatUI mode model settings must remain explicit and conservative:
   `ask` uses `reasoning_effort=medium`, `temperature=0.2`; `plan` uses
   `reasoning_effort=high`, `temperature=0.35`; `agent` uses
-  `reasoning_effort=high`, `temperature=0.1`.
+  `reasoning_effort=high`, `temperature=0.1`. Frontends should read these
+  defaults from `GET /api/solver/settings` and show actual per-response values
+  from `/api/solver/chat` `model_settings`.
 - `agent` mode must require `account_id` and must not dispatch actions against
   the shared repo workspace; it may operate only current-account `account`,
   `run`, or `solution` workspaces.

@@ -99,6 +99,8 @@ code-server auth、系统用户/容器权限和 secret scanning 提供真实访�
 - `GET /api/code-server/workspaces`：列出 shared repo 或账号隔离 workspace 目录
   和对应 code-server URL，不携带 token。`account_id` 是可选参数；前端默认传
   当前本地账号。
+- `GET /api/solver/settings`：读取 `ask` / `plan` / `agent` 的默认
+  `reasoning_effort` 和 `temperature`，前端模式切换控件以此显示当前设置。
 
 `GET /api/runs`、`POST /api/runs`、`GET /api/runs/{id}`、
 `GET /api/runs/{id}/events`、artifact API、code-server API 和
@@ -114,7 +116,8 @@ code-server auth、系统用户/容器权限和 secret scanning 提供真实访�
 - `agent`：允许前端按既有安全分发器执行 `start_run`、`resume_run`、
   `open_code_server` 或 `summarize_artifact`。
 
-每种模式都有独立模型设置，并由 `/api/solver/chat` 通过 `model_settings` 回显：
+每种模式都有独立模型设置。`GET /api/solver/settings` 提供默认值，
+`/api/solver/chat` 通过 `model_settings` 回显本次实际采用值：
 
 - `ask`：`reasoning_effort=medium`，`temperature=0.2`。
 - `plan`：`reasoning_effort=high`，`temperature=0.35`。

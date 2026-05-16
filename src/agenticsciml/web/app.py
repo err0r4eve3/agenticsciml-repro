@@ -277,6 +277,10 @@ def create_app() -> FastAPI:
     ) -> dict[str, object]:
         return {"workspaces": _code_server_workspaces(account_id=account_id, run_id=run_id, output_dir=output_dir)}
 
+    @app.get("/api/solver/settings")
+    def solver_settings() -> dict[str, object]:
+        return _solver_settings_payload()
+
     @app.post("/api/solver/chat")
     def solver_chat(request: SolverChatRequest) -> dict[str, object]:
         return _solver_chat_response(request)
@@ -857,6 +861,18 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
         "artifacts": artifacts,
         "warnings": warnings,
         "trace_refs": trace_refs,
+    }
+
+
+def _solver_settings_payload() -> dict[str, object]:
+    return {
+        "default_assistant_mode": "ask",
+        "reasoning_efforts": ["low", "medium", "high"],
+        "temperature_range": [0.0, 2.0],
+        "assistant_modes": {
+            mode: dict(settings)
+            for mode, settings in ASSISTANT_MODE_MODEL_SETTINGS.items()
+        },
     }
 
 

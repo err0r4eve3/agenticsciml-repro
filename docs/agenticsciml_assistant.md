@@ -49,6 +49,7 @@ repo-local skill 位于 `.agents/skills/agenticsciml-chatui-operator/SKILL.md`�
 ## Internal Algorithm Tool
 
 当前 `/api/solver/chat` 是内部 algorithm-tool endpoint，不是 MCP server。
+`GET /api/solver/settings` 是 ChatUI 读取模式默认模型设置的只读 endpoint。
 
 输入语义：
 
@@ -90,6 +91,9 @@ repo-local skill 位于 `.agents/skills/agenticsciml-chatui-operator/SKILL.md`�
 - `ask`：`reasoning_effort=medium`，`temperature=0.2`。
 - `plan`：`reasoning_effort=high`，`temperature=0.35`。
 - `agent`：`reasoning_effort=high`，`temperature=0.1`。
+
+前端应优先从 `GET /api/solver/settings` 读取这些默认值，再在每次
+`/api/solver/chat` 响应中展示 `model_settings` 的实际值。
 
 当前允许 action：
 

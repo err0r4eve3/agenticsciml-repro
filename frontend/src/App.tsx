@@ -106,6 +106,19 @@ type AgentMessage = {
   response?: SolverResponse;
 };
 
+type ModeModelSettings = {
+  reasoning_effort: ReasoningEffort;
+  temperature: number;
+  source?: string;
+};
+
+type SolverSettings = {
+  default_assistant_mode: AssistantMode;
+  reasoning_efforts: ReasoningEffort[];
+  temperature_range: [number, number];
+  assistant_modes: Record<AssistantMode, ModeModelSettings>;
+};
+
 type SolverAction = {
   type: string;
   payload?: {
@@ -121,11 +134,7 @@ type SolverAction = {
 
 type SolverResponse = {
   assistant_mode: AssistantMode;
-  model_settings: {
-    reasoning_effort: ReasoningEffort;
-    temperature: number;
-    source: string;
-  };
+  model_settings: ModeModelSettings & { source: string };
   reply: string;
   actions: SolverAction[];
   artifacts: Array<Record<string, unknown>>;
@@ -151,6 +160,17 @@ type CodeWorkspaceOption = CodeServerPayload & {
   status: string;
 };
 
+const DEFAULT_SOLVER_SETTINGS: SolverSettings = {
+  default_assistant_mode: "ask",
+  reasoning_efforts: ["low", "medium", "high"],
+  temperature_range: [0, 2],
+  assistant_modes: {
+    ask: { reasoning_effort: "medium", temperature: 0.2 },
+    plan: { reasoning_effort: "high", temperature: 0.35 },
+    agent: { reasoning_effort: "high", temperature: 0.1 }
+  }
+};
+
 const api = {
   async getAccounts(): Promise<AccountOption[]> {
     const payload = await getJson<{ accounts: AccountOption[] }>("/api/accounts");
@@ -170,6 +190,9 @@ const api = {
   async getAlgorithms(): Promise<AlgorithmSpec[]> {
     const payload = await getJson<{ algorithms: AlgorithmSpec[] }>("/api/algorithms");
     return payload.algorithms;
+  },
+  async getSolverSettings(): Promise<SolverSettings> {
+    return getJson<SolverSettings>("/api/solver/settings");
   },
   async getRuns(accountId: string): Promise<RunSummary[]> {
     const payload = await getJson<{ runs: RunSummary[] }>(`/api/runs?${accountParams(accountId)}`);
@@ -266,6 +289,7 @@ export function App() {
   ]);
   const [mode, setMode] = useState<RunMode>("mock");
   const [assistantMode, setAssistantMode] = useState<AssistantMode>("ask");
+  const [solverSettings, setSolverSettings] = useState<SolverSettings>(DEFAULT_SOLVER_SETTINGS);
   const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScope>("account");
   const [codeWorkspaces, setCodeWorkspaces] = useState<CodeWorkspaceOption[]>([]);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
@@ -294,6 +318,7 @@ export function App() {
       })
       .catch((exc) => setError(String(exc)));
     api.getAlgorithms().then(setAlgorithms).catch((exc) => setError(String(exc)));
+    api.getSolverSettings().then(setSolverSettings).catch((exc) => setError(String(exc)));
     refreshRuns().catch((exc) => setError(String(exc)));
   }, []);
 
@@ -587,6 +612,7 @@ export function App() {
           {error ? <div className="error-line">{error}</div> : null}
           <PureChatUI
             assistantMode={assistantMode}
+            modeSettings={solverSettings.assistant_modes[assistantMode]}
             busy={busy}
             mainPrompt={mainPrompt}
             messages={messages}
@@ -606,6 +632,7 @@ export function App() {
               <CodeView codeServer={selectedWorkspace} />
               <AgentPanel
                 assistantMode={assistantMode}
+                modeSettings={solverSettings.assistant_modes[assistantMode]}
                 collapsed={agentCollapsed}
                 message={message}
                 messages={messages}
@@ -620,7 +647,7 @@ export function App() {
             </>
           ) : (
             <WorkspaceSelector
-            activeRunId={activeRunId}
+              activeRunId={activeRunId}
               accountId={activeAccountId}
               busy={busy}
               error={error}
@@ -747,6 +774,7 @@ function PageHeader({ subtitle, title }: { subtitle: string; title: string }) {
 
 function PureChatUI({
   assistantMode,
+  modeSettings,
   busy,
   mainPrompt,
   messages,
@@ -758,6 +786,7 @@ function PureChatUI({
   onSubmit
 }: {
   assistantMode: AssistantMode;
+  modeSettings: ModeModelSettings;
   busy: boolean;
   mainPrompt: string;
   messages: AgentMessage[];
@@ -803,7 +832,7 @@ function PureChatUI({
           placeholder="给 AgenticSciML 发消息"
         />
         <div className="composer-tools">
-          <AssistantModeSwitch mode={assistantMode} onChange={onAssistantModeChange} />
+          <AssistantModeSwitch mode={assistantMode} settings={modeSettings} onChange={onAssistantModeChange} />
           <button type="button" title="Artifact context">
             <Database size={15} />
           </button>
@@ -819,24 +848,33 @@ function PureChatUI({
 function AssistantModeSwitch({
   mode,
   onChange,
+  settings,
   compact = false
 }: {
   mode: AssistantMode;
   onChange: (mode: AssistantMode) => void;
+  settings?: ModeModelSettings;
   compact?: boolean;
 }) {
   return (
-    <div className={`assistant-mode ${compact ? "compact" : ""}`} aria-label="Assistant mode">
-      {(["ask", "plan", "agent"] as const).map((item) => (
-        <button
-          key={item}
-          className={mode === item ? "selected" : ""}
-          type="button"
-          onClick={() => onChange(item)}
-        >
-          {item}
-        </button>
-      ))}
+    <div className={`assistant-mode-wrap ${compact ? "compact" : ""}`}>
+      <div className={`assistant-mode ${compact ? "compact" : ""}`} aria-label="Assistant mode">
+        {(["ask", "plan", "agent"] as const).map((item) => (
+          <button
+            key={item}
+            className={mode === item ? "selected" : ""}
+            type="button"
+            onClick={() => onChange(item)}
+          >
+            {item}
+          </button>
+        ))}
+      </div>
+      {settings ? (
+        <span className="mode-setting" title={`reasoning_effort=${settings.reasoning_effort}; temperature=${settings.temperature}`}>
+          think {settings.reasoning_effort} · temp {settings.temperature}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -1386,6 +1424,7 @@ function WorkspaceSelector({
 
 function AgentPanel({
   assistantMode,
+  modeSettings,
   busy,
   collapsed,
   message,
@@ -1398,6 +1437,7 @@ function AgentPanel({
   onToggle
 }: {
   assistantMode: AssistantMode;
+  modeSettings: ModeModelSettings;
   busy: boolean;
   collapsed: boolean;
   message: string;
@@ -1430,7 +1470,7 @@ function AgentPanel({
           <PanelRightClose size={18} />
         </button>
       </header>
-      <AssistantModeSwitch compact mode={assistantMode} onChange={onAssistantModeChange} />
+      <AssistantModeSwitch compact mode={assistantMode} settings={modeSettings} onChange={onAssistantModeChange} />
       {pendingRealAction ? (
         <div className="pending-action">
           <AlertTriangle size={16} />

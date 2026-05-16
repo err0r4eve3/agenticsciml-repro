@@ -792,6 +792,18 @@ ul {
   color: var(--green-strong);
 }
 
+.assistant-mode-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.assistant-mode-wrap.compact {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
 .assistant-mode {
   display: grid;
   grid-template-columns: repeat(3, minmax(46px, 1fr));
@@ -821,6 +833,17 @@ ul {
   background: #fff8ed;
   box-shadow: 0 1px 4px rgba(64, 43, 24, 0.08);
   color: var(--green-strong);
+}
+
+.mode-setting {
+  white-space: nowrap;
+  color: var(--ink-muted);
+  font-size: 10px;
+  font-weight: 680;
+}
+
+.assistant-mode-wrap.compact .mode-setting {
+  text-align: center;
 }
 
 .icon-text-button {

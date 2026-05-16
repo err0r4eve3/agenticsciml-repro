@@ -44,6 +44,23 @@ def test_web_algorithms_expose_professional_catalog() -> None:
     assert "paper-level" in algorithms["sparse_sensor_reconstructor"]["safety_notes"]
 
 
+def test_solver_settings_expose_mode_defaults() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/api/solver/settings")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["default_assistant_mode"] == "ask"
+    assert payload["reasoning_efforts"] == ["low", "medium", "high"]
+    assert payload["temperature_range"] == [0.0, 2.0]
+    assert payload["assistant_modes"] == {
+        "ask": {"reasoning_effort": "medium", "temperature": 0.2},
+        "plan": {"reasoning_effort": "high", "temperature": 0.35},
+        "agent": {"reasoning_effort": "high", "temperature": 0.1},
+    }
+
+
 def test_web_mock_run_writes_required_artifacts(tmp_path: Path) -> None:
     client = TestClient(create_app())
 
