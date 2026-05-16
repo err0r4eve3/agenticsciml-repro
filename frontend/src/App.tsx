@@ -1,4 +1,22 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  Bot,
+  ChevronRight,
+  Code2,
+  Database,
+  FileText,
+  FolderTree,
+  LayoutDashboard,
+  ListTree,
+  PanelRightClose,
+  PanelRightOpen,
+  Play,
+  RefreshCw,
+  Send,
+  ShieldCheck,
+  TerminalSquare
+} from "lucide-react";
 
 type Benchmark = {
   name: string;
@@ -29,60 +47,135 @@ type RunSummary = {
     };
   };
   leaderboard: Array<Record<string, string>>;
-  artifacts: Array<{ path: string; kind: string; size_bytes?: number | null }>;
+  artifacts: ArtifactEntry[];
   error?: string;
 };
 
-type ChatMessage = {
+type ArtifactEntry = {
+  path: string;
+  kind: string;
+  size_bytes?: number | null;
+};
+
+type ArtifactPayload =
+  | {
+      path: string;
+      kind: "directory";
+      entries: ArtifactEntry[];
+    }
+  | {
+      path: string;
+      kind: "file";
+      size_bytes: number;
+      content: string;
+    };
+
+type RunMode = "mock" | "real" | "dry_run";
+type WorkspaceScope = "repo" | "run" | "solution";
+type ViewKey = "dashboard" | "runs" | "artifacts" | "code";
+
+type AgentMessage = {
   id: number;
   role: "user" | "assistant";
   text: string;
+  response?: SolverResponse;
+};
+
+type SolverAction = {
+  type: string;
+  payload?: {
+    benchmark?: string;
+    mode?: RunMode;
+    background?: boolean;
+    scope?: WorkspaceScope;
+    [key: string]: unknown;
+  };
+  run_id?: string;
 };
 
 type SolverResponse = {
   reply: string;
-  actions: Array<{ type: string; payload?: unknown; run_id?: string }>;
+  actions: SolverAction[];
   artifacts: Array<Record<string, unknown>>;
   warnings: string[];
   trace_refs: Array<Record<string, unknown>>;
 };
 
 type CodeServerPayload = {
+  scope: WorkspaceScope;
   workspace: string;
   url: string;
   warnings: string[];
   command_hint: string;
 };
 
+const views: Array<{ key: ViewKey; label: string; icon: ReactNode }> = [
+  { key: "dashboard", label: "Dashboard", icon: <LayoutDashboard size={18} /> },
+  { key: "runs", label: "Runs", icon: <ListTree size={18} /> },
+  { key: "artifacts", label: "Artifacts / Trace", icon: <FolderTree size={18} /> },
+  { key: "code", label: "Code", icon: <Code2 size={18} /> }
+];
+
 const api = {
   async getBenchmarks(): Promise<Benchmark[]> {
     const payload = await getJson<{ benchmarks: Benchmark[] }>("/api/benchmarks");
     return payload.benchmarks;
   },
-  async startMockRun(benchmark: string): Promise<RunSummary> {
-    const id = `web-${new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14)}`;
-    return postJson<RunSummary>("/api/runs", {
-      benchmark,
-      mode: "mock",
+  async getRuns(): Promise<RunSummary[]> {
+    const payload = await getJson<{ runs: RunSummary[] }>("/api/runs");
+    return payload.runs;
+  },
+  async startRun(body: {
+    benchmark: string;
+    mode: RunMode;
+    experiment_id?: string;
+    max_iterations?: number;
+    parallel_mutations?: number;
+    background?: boolean;
+  }): Promise<RunSummary> {
+    const id = body.experiment_id ?? `web-${new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14)}`;
+    await postJson<unknown>("/api/runs", {
+      benchmark: body.benchmark,
+      mode: body.mode,
       experiment_id: id,
-      max_iterations: 0,
-      parallel_mutations: 1,
-      background: false
+      max_iterations: body.max_iterations ?? 0,
+      parallel_mutations: body.parallel_mutations ?? 1,
+      background: body.background ?? false
     });
+    return api.getRun(id);
+  },
+  async resumeRun(runId: string, benchmark: string, mode: RunMode): Promise<RunSummary> {
+    await postJson<unknown>(`/api/runs/${encodeURIComponent(runId)}/resume`, {
+      benchmark,
+      mode,
+      experiment_id: runId,
+      max_iterations: 1,
+      parallel_mutations: 1,
+      background: true
+    });
+    return api.getRun(runId);
   },
   async getRun(runId: string): Promise<RunSummary> {
     return getJson<RunSummary>(`/api/runs/${encodeURIComponent(runId)}`);
+  },
+  async getArtifact(runId: string, artifactPath: string): Promise<ArtifactPayload> {
+    return getJson<ArtifactPayload>(
+      `/api/runs/${encodeURIComponent(runId)}/artifacts/${artifactPath
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}`
+    );
   },
   async askSolver(body: {
     message: string;
     active_run_id: string | null;
     selected_benchmark: string;
-    mode: "mock" | "real" | "dry_run";
-    workspace_scope: "repo" | "run" | "solution";
+    mode: RunMode;
+    workspace_scope: WorkspaceScope;
   }): Promise<SolverResponse> {
     return postJson<SolverResponse>("/api/solver/chat", body);
   },
-  async getCodeServer(scope: "repo" | "run" | "solution", runId: string | null): Promise<CodeServerPayload> {
+  async getCodeServer(scope: WorkspaceScope, runId: string | null): Promise<CodeServerPayload> {
     const params = new URLSearchParams({ scope });
     if (runId) params.set("run_id", runId);
     return getJson<CodeServerPayload>(`/api/code-server/url?${params.toString()}`);
@@ -90,22 +183,29 @@ const api = {
 };
 
 export function App() {
+  const [activeView, setActiveView] = useState<ViewKey>("dashboard");
   const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
+  const [runs, setRuns] = useState<RunSummary[]>([]);
   const [selectedBenchmark, setSelectedBenchmark] = useState("function_approx");
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [activeRun, setActiveRun] = useState<RunSummary | null>(null);
   const [events, setEvents] = useState<string[]>([]);
+  const [traceFilter, setTraceFilter] = useState("");
+  const [selectedArtifactPath, setSelectedArtifactPath] = useState("");
+  const [artifactPayload, setArtifactPayload] = useState<ArtifactPayload | null>(null);
   const [message, setMessage] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([
+  const [messages, setMessages] = useState<AgentMessage[]>([
     {
       id: 1,
       role: "assistant",
-      text: "选择 benchmark 后可启动 mock run、查看 trace summary，并打开 code-server 工作区。"
+      text: "选择 benchmark 后可启动 mock run、解释 trace、浏览 artifact，并打开 code-server 工作区。"
     }
   ]);
-  const [mode, setMode] = useState<"mock" | "real" | "dry_run">("mock");
-  const [workspaceScope, setWorkspaceScope] = useState<"repo" | "run" | "solution">("repo");
+  const [mode, setMode] = useState<RunMode>("mock");
+  const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScope>("repo");
   const [codeServer, setCodeServer] = useState<CodeServerPayload | null>(null);
+  const [agentCollapsed, setAgentCollapsed] = useState(false);
+  const [pendingRealAction, setPendingRealAction] = useState<SolverAction | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -119,18 +219,20 @@ export function App() {
         }
       })
       .catch((exc) => setError(String(exc)));
+    refreshRuns().catch((exc) => setError(String(exc)));
   }, []);
 
   useEffect(() => {
     if (!activeRunId) return;
-    api.getRun(activeRunId).then(setActiveRun).catch((exc) => setError(String(exc)));
+    refreshActiveRun(activeRunId).catch((exc) => setError(String(exc)));
   }, [activeRunId]);
 
   useEffect(() => {
     if (!activeRunId) return;
+    setEvents([]);
     const source = new EventSource(`/api/runs/${encodeURIComponent(activeRunId)}/events?follow=false`);
     source.addEventListener("trace", (event) => {
-      setEvents((current) => [event.data, ...current].slice(0, 40));
+      setEvents((current) => [event.data, ...current].slice(0, 80));
     });
     source.addEventListener("end", () => source.close());
     source.onerror = () => source.close();
@@ -144,22 +246,71 @@ export function App() {
       .catch(() => setCodeServer(null));
   }, [workspaceScope, activeRunId]);
 
+  useEffect(() => {
+    if (!activeRunId || !selectedArtifactPath) {
+      setArtifactPayload(null);
+      return;
+    }
+    api
+      .getArtifact(activeRunId, selectedArtifactPath)
+      .then(setArtifactPayload)
+      .catch((exc) => setError(String(exc)));
+  }, [activeRunId, selectedArtifactPath]);
+
   const selected = useMemo(
     () => benchmarks.find((benchmark) => benchmark.name === selectedBenchmark),
     [benchmarks, selectedBenchmark]
   );
+  const filteredEvents = useMemo(() => {
+    const needle = traceFilter.trim().toLowerCase();
+    if (!needle) return events;
+    return events.filter((event) => event.toLowerCase().includes(needle));
+  }, [events, traceFilter]);
+  const runState = activeRun?.metadata?.run_state ?? activeRun?.status ?? "idle";
+  const qualityGate = activeRun?.trace_summary?.quality_gate?.passed;
 
-  async function startMockRun() {
+  async function refreshRuns() {
+    const payload = await api.getRuns();
+    setRuns(payload);
+  }
+
+  async function refreshActiveRun(runId = activeRunId) {
+    if (!runId) return;
+    const run = await api.getRun(runId);
+    setActiveRun(run);
+    setRuns((current) => [run, ...current.filter((item) => item.run_id !== run.run_id)]);
+  }
+
+  async function refreshAll() {
+    setError(null);
+    await refreshRuns();
+    await refreshActiveRun();
+  }
+
+  async function startRun(nextMode: RunMode = mode, background = false) {
+    if (nextMode === "real") {
+      setPendingRealAction({
+        type: "start_run",
+        payload: { benchmark: selectedBenchmark, mode: "real", background }
+      });
+      setAgentCollapsed(false);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      const run = await api.startMockRun(selectedBenchmark);
+      const run = await api.startRun({
+        benchmark: selectedBenchmark,
+        mode: nextMode,
+        max_iterations: 0,
+        parallel_mutations: 1,
+        background
+      });
       setActiveRun(run);
       setActiveRunId(run.run_id);
-      setMessages((current) => [
-        ...current,
-        { id: Date.now(), role: "assistant", text: `mock run 完成：${run.run_id}` }
-      ]);
+      setActiveView("dashboard");
+      await refreshRuns();
+      addAssistantMessage(`${nextMode} run 已登记：${run.run_id}`);
     } catch (exc) {
       setError(String(exc));
     } finally {
@@ -173,6 +324,8 @@ export function App() {
     const userMessage = message.trim();
     setMessage("");
     setMessages((current) => [...current, { id: Date.now(), role: "user", text: userMessage }]);
+    setBusy(true);
+    setError(null);
     try {
       const response = await api.askSolver({
         message: userMessage,
@@ -186,165 +339,590 @@ export function App() {
         {
           id: Date.now() + 1,
           role: "assistant",
-          text: formatSolverResponse(response)
+          text: response.reply,
+          response
         }
       ]);
+      await dispatchSolverActions(response.actions);
     } catch (exc) {
       setError(String(exc));
+    } finally {
+      setBusy(false);
     }
   }
 
+  async function dispatchSolverActions(actions: SolverAction[]) {
+    for (const action of actions) {
+      if (action.type === "start_run") {
+        const actionMode = action.payload?.mode ?? mode;
+        if (actionMode === "real") {
+          setPendingRealAction(action);
+          continue;
+        }
+        await startRun(actionMode, Boolean(action.payload?.background));
+      }
+      if (action.type === "resume_run" && action.run_id) {
+        if (mode === "real") {
+          setPendingRealAction(action);
+          continue;
+        }
+        const run = await api.resumeRun(action.run_id, selectedBenchmark, mode);
+        setActiveRun(run);
+        setActiveRunId(run.run_id);
+        await refreshRuns();
+      }
+      if (action.type === "open_code_server") {
+        setActiveView("code");
+      }
+      if (action.type === "summarize_artifact") {
+        setActiveView("artifacts");
+      }
+    }
+  }
+
+  function addAssistantMessage(text: string) {
+    setMessages((current) => [...current, { id: Date.now(), role: "assistant", text }]);
+  }
+
+  function selectRun(run: RunSummary) {
+    setActiveRun(run);
+    setActiveRunId(run.run_id);
+    setSelectedArtifactPath("");
+    setActiveView("dashboard");
+  }
+
   return (
-    <main className="workspace">
-      <section className="chat-shell" aria-label="ChatUI 控制台">
-        <div className="brand-row">
-          <div>
-            <h1>AgenticSciML</h1>
-            <p>ChatUI 实验操作台</p>
-          </div>
-          <span className="status-dot">local</span>
+    <main className={`workbench ${agentCollapsed ? "agent-is-collapsed" : ""}`}>
+      <aside className="rail" aria-label="主导航">
+        <div className="rail-logo" title="AgenticSciML">
+          AS
         </div>
-        <div className="field-stack">
-          <label>
-            Benchmark
-            <select value={selectedBenchmark} onChange={(event) => setSelectedBenchmark(event.target.value)}>
-              {benchmarks.map((benchmark) => (
-                <option key={benchmark.name} value={benchmark.name}>
-                  {benchmark.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="segmented" aria-label="运行模式">
-            {(["mock", "dry_run", "real"] as const).map((item) => (
-              <button
-                key={item}
-                className={mode === item ? "selected" : ""}
-                type="button"
-                onClick={() => setMode(item)}
-              >
-                {item}
-              </button>
+        <nav className="rail-nav">
+          {views.map((view) => (
+            <button
+              aria-label={view.label}
+              className={activeView === view.key ? "rail-button selected" : "rail-button"}
+              key={view.key}
+              onClick={() => setActiveView(view.key)}
+              title={view.label}
+              type="button"
+            >
+              {view.icon}
+            </button>
+          ))}
+        </nav>
+      </aside>
+
+      <section className="shell">
+        <TopBar
+          activeRunId={activeRunId}
+          busy={busy}
+          mode={mode}
+          qualityGate={qualityGate}
+          runState={runState}
+          selectedBenchmark={selectedBenchmark}
+          benchmarks={benchmarks}
+          onModeChange={setMode}
+          onRefresh={refreshAll}
+          onRun={() => startRun(mode, false)}
+          onSelectBenchmark={setSelectedBenchmark}
+        />
+        {error ? <div className="error-line">{error}</div> : null}
+        <section className="main-region">
+          {activeView === "dashboard" ? (
+            <DashboardView
+              activeRun={activeRun}
+              events={events}
+              onOpenArtifacts={() => setActiveView("artifacts")}
+              onOpenCode={() => setActiveView("code")}
+              selected={selected}
+            />
+          ) : null}
+          {activeView === "runs" ? (
+            <RunsView
+              activeRunId={activeRunId}
+              runs={runs}
+              onRefresh={refreshRuns}
+              onSelectRun={selectRun}
+              onStartMock={() => startRun("mock", false)}
+            />
+          ) : null}
+          {activeView === "artifacts" ? (
+            <ArtifactsView
+              activeRun={activeRun}
+              artifactPayload={artifactPayload}
+              events={filteredEvents}
+              filter={traceFilter}
+              selectedArtifactPath={selectedArtifactPath}
+              onFilterChange={setTraceFilter}
+              onSelectArtifact={setSelectedArtifactPath}
+            />
+          ) : null}
+          {activeView === "code" ? (
+            <CodeView
+              activeRunId={activeRunId}
+              codeServer={codeServer}
+              scope={workspaceScope}
+              onScopeChange={setWorkspaceScope}
+            />
+          ) : null}
+        </section>
+      </section>
+
+      <AgentPanel
+        collapsed={agentCollapsed}
+        message={message}
+        messages={messages}
+        mode={mode}
+        pendingRealAction={pendingRealAction}
+        busy={busy}
+        onChangeMessage={setMessage}
+        onSend={sendMessage}
+        onToggle={() => setAgentCollapsed((current) => !current)}
+        onDismissRealAction={() => setPendingRealAction(null)}
+      />
+    </main>
+  );
+}
+
+function TopBar({
+  activeRunId,
+  benchmarks,
+  busy,
+  mode,
+  qualityGate,
+  runState,
+  selectedBenchmark,
+  onModeChange,
+  onRefresh,
+  onRun,
+  onSelectBenchmark
+}: {
+  activeRunId: string | null;
+  benchmarks: Benchmark[];
+  busy: boolean;
+  mode: RunMode;
+  qualityGate: boolean | undefined;
+  runState: string;
+  selectedBenchmark: string;
+  onModeChange: (mode: RunMode) => void;
+  onRefresh: () => void;
+  onRun: () => void;
+  onSelectBenchmark: (benchmark: string) => void;
+}) {
+  return (
+    <header className="topbar">
+      <div className="topbar-title">
+        <h1>AgenticSciML</h1>
+        <span>本地实验工作台</span>
+      </div>
+      <div className="topbar-controls">
+        <label className="compact-field">
+          <span>Benchmark</span>
+          <select value={selectedBenchmark} onChange={(event) => onSelectBenchmark(event.target.value)}>
+            {benchmarks.map((benchmark) => (
+              <option key={benchmark.name} value={benchmark.name}>
+                {benchmark.name}
+              </option>
             ))}
-          </div>
-          <button className="primary-action" type="button" disabled={busy} onClick={startMockRun}>
-            {busy ? "running..." : "Run mock root"}
-          </button>
-        </div>
-        <div className="messages">
-          {messages.map((item) => (
-            <article className={`message ${item.role}`} key={item.id}>
-              <span>{item.role}</span>
-              <p>{item.text}</p>
-            </article>
+          </select>
+        </label>
+        <div className="segmented" aria-label="运行模式">
+          {(["mock", "dry_run", "real"] as const).map((item) => (
+            <button
+              key={item}
+              className={mode === item ? "selected" : ""}
+              type="button"
+              onClick={() => onModeChange(item)}
+            >
+              {item}
+            </button>
           ))}
         </div>
-        <form className="composer" onSubmit={sendMessage}>
-          <input
-            value={message}
-            onChange={(event) => setMessage(event.target.value)}
-            placeholder="例如：解释 trace / 打开 champion / 跑 mock"
-          />
-          <button type="submit">Send</button>
-        </form>
-      </section>
+        <StatusBadge tone={qualityGate ? "good" : qualityGate === false ? "bad" : "neutral"}>
+          gate {qualityGate === undefined ? "pending" : qualityGate ? "pass" : "fail"}
+        </StatusBadge>
+        <StatusBadge tone={runState === "idle" ? "neutral" : "info"}>{runState}</StatusBadge>
+        <button className="icon-text-button" disabled={busy} type="button" onClick={onRun}>
+          <Play size={15} />
+          Run
+        </button>
+        <button className="icon-button" type="button" onClick={onRefresh} title="刷新">
+          <RefreshCw size={16} />
+        </button>
+      </div>
+      <div className="active-run">
+        <span>active run</span>
+        <strong>{activeRunId ?? "none"}</strong>
+      </div>
+    </header>
+  );
+}
 
-      <section className="dashboard" aria-label="实验状态">
-        <header className="dashboard-header">
-          <div>
-            <p className="eyebrow">Run dashboard</p>
-            <h2>{activeRunId ?? "No active run"}</h2>
-          </div>
-          <button type="button" disabled={!activeRunId} onClick={() => activeRunId && api.getRun(activeRunId).then(setActiveRun)}>
+function DashboardView({
+  activeRun,
+  events,
+  onOpenArtifacts,
+  onOpenCode,
+  selected
+}: {
+  activeRun: RunSummary | null;
+  events: string[];
+  onOpenArtifacts: () => void;
+  onOpenCode: () => void;
+  selected?: Benchmark;
+}) {
+  const metadata = activeRun?.metadata;
+  const qualityGate = activeRun?.trace_summary?.quality_gate?.passed;
+  return (
+    <div className="view-stack">
+      <section className="section-head">
+        <div>
+          <p className="eyebrow">Run dashboard</p>
+          <h2>{activeRun?.run_id ?? "尚未选择 run"}</h2>
+        </div>
+        <div className="section-actions">
+          <button type="button" onClick={onOpenArtifacts}>
+            <FolderTree size={15} />
+            Artifacts
+          </button>
+          <button type="button" onClick={onOpenCode}>
+            <Code2 size={15} />
+            Code
+          </button>
+        </div>
+      </section>
+      <div className="metric-grid">
+        <Metric label="status" value={activeRun?.status ?? "idle"} />
+        <Metric label="run_state" value={metadata?.run_state ?? "pending"} />
+        <Metric label="benchmark" value={selected?.name ?? "unknown"} />
+        <Metric label="fidelity" value={selected?.fidelity_level ?? "unknown"} />
+        <Metric label="scientific_claim" value={metadata?.scientific_claim ?? selected?.scientific_claim ?? "unknown"} />
+        <Metric label="quality_gate" value={String(qualityGate ?? "pending")} />
+        <Metric label="champion" value={metadata?.champion_node_id ?? "none"} />
+        <Metric label="solutions" value={String(metadata?.solution_count ?? 0)} />
+      </div>
+      <div className="split-grid">
+        <DataRegion title="Leaderboard">
+          <Leaderboard rows={activeRun?.leaderboard ?? []} />
+        </DataRegion>
+        <DataRegion title="Trace preview">
+          <TraceList events={events.slice(0, 8)} emptyText="尚无 trace event。" />
+        </DataRegion>
+      </div>
+      <DataRegion title="Artifacts">
+        <ArtifactChips artifacts={(activeRun?.artifacts ?? []).slice(0, 18)} />
+      </DataRegion>
+    </div>
+  );
+}
+
+function RunsView({
+  activeRunId,
+  runs,
+  onRefresh,
+  onSelectRun,
+  onStartMock
+}: {
+  activeRunId: string | null;
+  runs: RunSummary[];
+  onRefresh: () => void;
+  onSelectRun: (run: RunSummary) => void;
+  onStartMock: () => void;
+}) {
+  return (
+    <div className="view-stack">
+      <section className="section-head">
+        <div>
+          <p className="eyebrow">Run catalog</p>
+          <h2>实验运行记录</h2>
+        </div>
+        <div className="section-actions">
+          <button type="button" onClick={onRefresh}>
+            <RefreshCw size={15} />
             Refresh
           </button>
-        </header>
-        {error ? <div className="error-line">{error}</div> : null}
-        <div className="metric-grid">
-          <Metric label="status" value={activeRun?.status ?? "idle"} />
-          <Metric label="benchmark" value={selected?.name ?? selectedBenchmark} />
-          <Metric label="fidelity" value={selected?.fidelity_level ?? "unknown"} />
-          <Metric
-            label="quality gate"
-            value={String(activeRun?.trace_summary?.quality_gate?.passed ?? "pending")}
-          />
+          <button type="button" onClick={onStartMock}>
+            <Play size={15} />
+            Mock
+          </button>
         </div>
-        <section className="data-region">
-          <h3>Leaderboard</h3>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>rank</th>
-                  <th>node</th>
-                  <th>metric</th>
-                  <th>score</th>
-                  <th>status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(activeRun?.leaderboard ?? []).slice(0, 6).map((row) => (
-                  <tr key={`${row.rank}-${row.node_id}`}>
-                    <td>{row.rank}</td>
-                    <td>{row.node_id}</td>
-                    <td>{row.metric}</td>
-                    <td>{row.score}</td>
-                    <td>{row.status}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-        <section className="data-region">
-          <h3>Artifacts</h3>
-          <div className="artifact-list">
-            {(activeRun?.artifacts ?? []).slice(0, 12).map((artifact) => (
-              <span key={artifact.path}>{artifact.path}</span>
-            ))}
-          </div>
-        </section>
-        <section className="data-region">
-          <h3>Trace events</h3>
-          <div className="event-log">
-            {events.length === 0 ? <p>No events loaded.</p> : null}
-            {events.map((event, index) => (
-              <code key={`${index}-${event.slice(0, 12)}`}>{event}</code>
-            ))}
-          </div>
-        </section>
       </section>
+      <DataRegion title="Runs">
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>run</th>
+                <th>status</th>
+                <th>run_state</th>
+                <th>champion</th>
+                <th>solutions</th>
+                <th>gate</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((run) => (
+                <tr
+                  className={run.run_id === activeRunId ? "selected-row" : ""}
+                  key={run.run_id}
+                  onClick={() => onSelectRun(run)}
+                >
+                  <td>{run.run_id}</td>
+                  <td>{run.status}</td>
+                  <td>{run.metadata?.run_state ?? "unknown"}</td>
+                  <td>{run.metadata?.champion_node_id ?? "none"}</td>
+                  <td>{run.metadata?.solution_count ?? 0}</td>
+                  <td>{String(run.trace_summary?.quality_gate?.passed ?? "pending")}</td>
+                </tr>
+              ))}
+              {runs.length === 0 ? (
+                <tr>
+                  <td colSpan={6}>没有发现 run。可以先启动一个 mock run。</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </DataRegion>
+    </div>
+  );
+}
 
-      <section className="code-panel" aria-label="code-server sidecar">
-        <header>
+function ArtifactsView({
+  activeRun,
+  artifactPayload,
+  events,
+  filter,
+  selectedArtifactPath,
+  onFilterChange,
+  onSelectArtifact
+}: {
+  activeRun: RunSummary | null;
+  artifactPayload: ArtifactPayload | null;
+  events: string[];
+  filter: string;
+  selectedArtifactPath: string;
+  onFilterChange: (value: string) => void;
+  onSelectArtifact: (value: string) => void;
+}) {
+  return (
+    <div className="artifact-workspace">
+      <section className="artifact-browser">
+        <div className="section-head compact">
           <div>
-            <p className="eyebrow">VS Code Web</p>
-            <h2>code-server</h2>
+            <p className="eyebrow">Artifacts</p>
+            <h2>{activeRun?.run_id ?? "未选择 run"}</h2>
           </div>
-          <select value={workspaceScope} onChange={(event) => setWorkspaceScope(event.target.value as typeof workspaceScope)}>
+        </div>
+        <div className="artifact-list-vertical">
+          {(activeRun?.artifacts ?? []).map((artifact) => (
+            <button
+              className={selectedArtifactPath === artifact.path ? "artifact-row selected" : "artifact-row"}
+              key={artifact.path}
+              type="button"
+              onClick={() => onSelectArtifact(artifact.path)}
+            >
+              {artifact.kind === "directory" ? <FolderTree size={14} /> : <FileText size={14} />}
+              <span>{artifact.path}</span>
+              <small>{artifact.kind}</small>
+            </button>
+          ))}
+          {!activeRun ? <p className="muted">先在 Runs 或 Dashboard 中选择一个 run。</p> : null}
+        </div>
+      </section>
+      <section className="artifact-detail">
+        <DataRegion title="Artifact preview">
+          <ArtifactPreview payload={artifactPayload} />
+        </DataRegion>
+        <DataRegion title="Trace events">
+          <div className="filter-line">
+            <input
+              value={filter}
+              onChange={(event) => onFilterChange(event.target.value)}
+              placeholder="按 event name / node id / 文本过滤"
+            />
+          </div>
+          <TraceList events={events} emptyText="没有匹配的 trace event。" />
+        </DataRegion>
+      </section>
+    </div>
+  );
+}
+
+function CodeView({
+  activeRunId,
+  codeServer,
+  scope,
+  onScopeChange
+}: {
+  activeRunId: string | null;
+  codeServer: CodeServerPayload | null;
+  scope: WorkspaceScope;
+  onScopeChange: (scope: WorkspaceScope) => void;
+}) {
+  return (
+    <div className="view-stack">
+      <section className="section-head">
+        <div>
+          <p className="eyebrow">VS Code Web</p>
+          <h2>code-server sidecar</h2>
+        </div>
+        <label className="compact-field">
+          <span>Workspace</span>
+          <select value={scope} onChange={(event) => onScopeChange(event.target.value as WorkspaceScope)}>
             <option value="repo">repo</option>
             <option value="run">run</option>
             <option value="solution">solution</option>
           </select>
-        </header>
-        {codeServer ? (
-          <>
-            <div className="workspace-path">{codeServer.workspace}</div>
-            <a className="code-link" href={codeServer.url} target="_blank" rel="noreferrer">
-              Open VS Code Web
-            </a>
-            <pre>{codeServer.command_hint}</pre>
-            <ul>
-              {codeServer.warnings.map((warning) => (
-                <li key={warning}>{warning}</li>
-              ))}
-            </ul>
-          </>
-        ) : (
-          <p className="muted">选择 active run 后可打开 run 或 solution workspace。</p>
-        )}
+        </label>
       </section>
-    </main>
+      <div className="code-grid">
+        <section className="code-block">
+          <TerminalSquare size={20} />
+          <h3>Workspace</h3>
+          <div className="workspace-path">{codeServer?.workspace ?? "选择 active run 后可打开 run 或 solution workspace。"}</div>
+          <a
+            aria-disabled={!codeServer}
+            className={codeServer ? "code-link" : "code-link disabled"}
+            href={codeServer?.url ?? "#"}
+            rel="noreferrer"
+            target="_blank"
+          >
+            Open VS Code Web
+            <ChevronRight size={15} />
+          </a>
+        </section>
+        <section className="code-block">
+          <ShieldCheck size={20} />
+          <h3>Sidecar boundary</h3>
+          <pre>{codeServer?.command_hint ?? "PASSWORD=<local-token> code-server --bind-addr 127.0.0.1:8080 <workspace>"}</pre>
+          <ul>
+            {(codeServer?.warnings ?? [
+              "code-server 必须单独启动在 127.0.0.1。",
+              "ChatUI 不携带 token，也不自动绕过鉴权。"
+            ]).map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+            {!activeRunId && scope !== "repo" ? <li>run / solution scope 需要先选择 active run。</li> : null}
+          </ul>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function AgentPanel({
+  busy,
+  collapsed,
+  message,
+  messages,
+  mode,
+  pendingRealAction,
+  onChangeMessage,
+  onDismissRealAction,
+  onSend,
+  onToggle
+}: {
+  busy: boolean;
+  collapsed: boolean;
+  message: string;
+  messages: AgentMessage[];
+  mode: RunMode;
+  pendingRealAction: SolverAction | null;
+  onChangeMessage: (value: string) => void;
+  onDismissRealAction: () => void;
+  onSend: (event: FormEvent) => void;
+  onToggle: () => void;
+}) {
+  if (collapsed) {
+    return (
+      <aside className="agent-collapsed">
+        <button aria-label="展开 Agent 面板" className="icon-button" type="button" onClick={onToggle}>
+          <PanelRightOpen size={18} />
+        </button>
+        <Bot size={20} />
+      </aside>
+    );
+  }
+  return (
+    <aside className="agent-panel" aria-label="Agent 面板">
+      <header className="agent-header">
+        <div>
+          <p className="eyebrow">Agent</p>
+          <h2>实验操作员</h2>
+        </div>
+        <button aria-label="收起 Agent 面板" className="icon-button" type="button" onClick={onToggle}>
+          <PanelRightClose size={18} />
+        </button>
+      </header>
+      <div className="agent-mode">
+        <StatusBadge tone={mode === "real" ? "bad" : mode === "dry_run" ? "info" : "good"}>{mode}</StatusBadge>
+        <span>受控 action 分发</span>
+      </div>
+      {pendingRealAction ? (
+        <div className="pending-action">
+          <AlertTriangle size={16} />
+          <div>
+            <strong>Real mode action 已拦截</strong>
+            <p>真实 LLM 运行需要显式凭据、预算和 claim boundary 检查。当前不会自动执行。</p>
+            <button type="button" onClick={onDismissRealAction}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
+      <div className="messages">
+        {messages.map((item) => (
+          <article className={`message ${item.role}`} key={item.id}>
+            <span>{item.role}</span>
+            <p>{item.text}</p>
+            {item.response ? <StructuredResponse response={item.response} /> : null}
+          </article>
+        ))}
+      </div>
+      <form className="composer" onSubmit={onSend}>
+        <input
+          value={message}
+          onChange={(event) => onChangeMessage(event.target.value)}
+          placeholder="例如：跑 mock / 解释 trace / 打开 champion"
+        />
+        <button aria-label="发送" disabled={busy} type="submit">
+          <Send size={15} />
+        </button>
+      </form>
+    </aside>
+  );
+}
+
+function StructuredResponse({ response }: { response: SolverResponse }) {
+  return (
+    <div className="structured-response">
+      {response.actions.length ? <KeyValueList label="actions" values={response.actions.map((action) => action.type)} /> : null}
+      {response.warnings.length ? <KeyValueList label="warnings" values={response.warnings} tone="warning" /> : null}
+      {response.artifacts.length ? <KeyValueList label="artifacts" values={response.artifacts.map((artifact) => String(artifact.path ?? "artifact"))} /> : null}
+      {response.trace_refs.length ? <KeyValueList label="trace refs" values={response.trace_refs.map((ref) => JSON.stringify(ref))} /> : null}
+    </div>
+  );
+}
+
+function KeyValueList({ label, tone, values }: { label: string; tone?: "warning"; values: string[] }) {
+  return (
+    <div className={`kv-list ${tone ?? ""}`}>
+      <strong>{label}</strong>
+      {values.map((value) => (
+        <span key={value}>{value}</span>
+      ))}
+    </div>
+  );
+}
+
+function DataRegion({ children, title }: { children: ReactNode; title: string }) {
+  return (
+    <section className="data-region">
+      <h3>{title}</h3>
+      {children}
+    </section>
   );
 }
 
@@ -352,9 +930,103 @@ function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="metric">
       <span>{label}</span>
-      <strong>{value}</strong>
+      <strong title={value}>{value}</strong>
     </div>
   );
+}
+
+function StatusBadge({ children, tone }: { children: ReactNode; tone: "neutral" | "good" | "bad" | "info" }) {
+  return <span className={`status-badge ${tone}`}>{children}</span>;
+}
+
+function Leaderboard({ rows }: { rows: Array<Record<string, string>> }) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>rank</th>
+            <th>node</th>
+            <th>metric</th>
+            <th>score</th>
+            <th>status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, 8).map((row) => (
+            <tr key={`${row.rank}-${row.node_id}`}>
+              <td>{row.rank}</td>
+              <td>{row.node_id}</td>
+              <td>{row.metric}</td>
+              <td>{row.score}</td>
+              <td>{row.status}</td>
+            </tr>
+          ))}
+          {rows.length === 0 ? (
+            <tr>
+              <td colSpan={5}>尚无 leaderboard。</td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ArtifactChips({ artifacts }: { artifacts: ArtifactEntry[] }) {
+  if (!artifacts.length) return <p className="muted">尚无 artifact。</p>;
+  return (
+    <div className="artifact-chips">
+      {artifacts.map((artifact) => (
+        <span key={artifact.path}>{artifact.path}</span>
+      ))}
+    </div>
+  );
+}
+
+function ArtifactPreview({ payload }: { payload: ArtifactPayload | null }) {
+  if (!payload) return <p className="muted">选择左侧 artifact 后预览。</p>;
+  if (payload.kind === "directory") {
+    return (
+      <div className="directory-preview">
+        {payload.entries.map((entry) => (
+          <div key={entry.path}>
+            <span>{entry.kind}</span>
+            <strong>{entry.path}</strong>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return <pre className="artifact-content">{payload.content}</pre>;
+}
+
+function TraceList({ emptyText, events }: { emptyText: string; events: string[] }) {
+  if (!events.length) return <p className="muted">{emptyText}</p>;
+  return (
+    <div className="event-log">
+      {events.map((event, index) => {
+        const summary = traceSummary(event);
+        return (
+          <code key={`${index}-${event.slice(0, 24)}`}>
+            <span>{summary}</span>
+            {event}
+          </code>
+        );
+      })}
+    </div>
+  );
+}
+
+function traceSummary(event: string) {
+  try {
+    const parsed = JSON.parse(event) as Record<string, unknown>;
+    const name = parsed.name ?? parsed.event_name ?? parsed.event_type ?? "trace";
+    const seq = parsed.event_seq ?? parsed.seq;
+    return seq === undefined ? String(name) : `${String(name)} #${String(seq)}`;
+  } catch {
+    return "trace";
+  }
 }
 
 async function getJson<T>(url: string): Promise<T> {
@@ -371,12 +1043,4 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   });
   if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
   return response.json() as Promise<T>;
-}
-
-function formatSolverResponse(response: SolverResponse) {
-  const lines = [response.reply];
-  if (response.actions.length) lines.push(`actions: ${response.actions.map((action) => action.type).join(", ")}`);
-  if (response.warnings.length) lines.push(`warnings: ${response.warnings.join(" / ")}`);
-  if (response.artifacts.length) lines.push(`artifacts: ${response.artifacts.length}`);
-  return lines.join("\n");
 }

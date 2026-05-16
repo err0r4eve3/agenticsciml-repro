@@ -13,8 +13,10 @@
   read-only artifact browsing、code-server URL 生成和 `/api/solver/chat` 算法 tool。
 - `/api/solver/chat` 只做意图解析和结构化 action 返回，不接管 Python
   orchestrator 的状态机、evaluator、solution tree 或 champion selection。
-- React/Vite ChatUI 前端提供左侧对话控制、中间 run dashboard 和右侧
-  code-server sidecar 入口。
+- React/Vite ChatUI 前端提供本地工作台 shell：顶部全局栏、左侧图标导航、
+  中间 run/artifact/code 任务工作区和右侧可收起 Agent 面板。
+- Agent 面板会展示 `/api/solver/chat` 返回的结构化 actions、warnings、
+  artifact refs 和 trace refs；`real` mode action 默认拦截为显式确认状态。
 - repo-local skill `.agents/skills/agenticsciml-chatui-operator/SKILL.md` 记录
   ChatUI 操作顺序、artifact 检查顺序、code-server 安全边界和禁止事项。
 

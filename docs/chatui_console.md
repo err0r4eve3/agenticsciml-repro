@@ -25,6 +25,20 @@ PYTHONPATH=src uv run --python 3.11 --extra web python -m agenticsciml.cli web -
 打开 Vite 输出的本地地址。生产预览可先 `npm run build`，然后让 FastAPI 挂载
 `frontend/dist`。
 
+## 工作台布局
+
+ChatUI 前端是单页本地工作台，不引入路由层：
+
+- 顶栏显示项目名、当前 active run、benchmark、运行模式、quality gate 和刷新入口。
+- 左侧图标导航在 `Dashboard`、`Runs`、`Artifacts / Trace` 和 `Code` 之间切换。
+- 中间主工作区展示 run 状态卡、leaderboard、trace preview、artifact 浏览和
+  code-server 工作区入口。
+- 右侧 Agent 面板可收起，负责自然语言意图、结构化 actions、warnings、
+  artifacts 和 trace refs 展示。
+
+Agent 面板只分发受控动作。`mock` 和 `dry_run` actions 可由前端调用现有 API
+执行；`real` mode action 默认拦截为待确认状态，不会隐式触发真实 LLM 调用。
+
 ## code-server sidecar
 
 code-server 不由 ChatUI 自动启动。先用本地 token/password 和 loopback 绑定启动：
@@ -36,6 +50,10 @@ PASSWORD=<local-token> code-server --bind-addr 127.0.0.1:8080 /path/to/workspace
 默认 API 生成 `http://127.0.0.1:8080/?folder=<workspace>` 链接。可用
 `AGENTICSCIML_CODE_SERVER_URL` 覆盖 base URL，但第一版不支持公网、多用户鉴权
 或代理层权限模型。
+
+`Code` 视图只显示 `repo`、`run` 或 `solution` workspace 路径、启动命令和新标签页
+打开链接。ChatUI 不携带 code-server token，不自动启动 sidecar，也不通过 iframe
+绕过鉴权。
 
 ## API 边界
 
