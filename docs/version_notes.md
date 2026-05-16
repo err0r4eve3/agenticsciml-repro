@@ -15,6 +15,8 @@
   orchestrator 的状态机、evaluator、solution tree 或 champion selection。
 - React/Vite ChatUI 前端提供本地工作台 shell：顶部全局栏、左侧图标导航、
   中间 run/artifact/code 任务工作区和右侧可收起 Agent 面板。
+- Dashboard 顶部新增主 ChatUI 入口，用于对话式启动 mock、解释 trace、
+  打开 champion workspace 或发起 run 比较请求。
 - Agent 面板会展示 `/api/solver/chat` 返回的结构化 actions、warnings、
   artifact refs 和 trace refs；`real` mode action 默认拦截为显式确认状态。
 - repo-local skill `.agents/skills/agenticsciml-chatui-operator/SKILL.md` 记录

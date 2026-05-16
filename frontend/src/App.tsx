@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Send,
   ShieldCheck,
+  Sparkles,
   TerminalSquare
 } from "lucide-react";
 
@@ -194,6 +195,7 @@ export function App() {
   const [selectedArtifactPath, setSelectedArtifactPath] = useState("");
   const [artifactPayload, setArtifactPayload] = useState<ArtifactPayload | null>(null);
   const [message, setMessage] = useState("");
+  const [mainPrompt, setMainPrompt] = useState("");
   const [messages, setMessages] = useState<AgentMessage[]>([
     {
       id: 1,
@@ -310,6 +312,11 @@ export function App() {
       setActiveRunId(run.run_id);
       setActiveView("dashboard");
       await refreshRuns();
+      if (background) {
+        window.setTimeout(() => {
+          refreshActiveRun(run.run_id).catch((exc) => setError(String(exc)));
+        }, 1200);
+      }
       addAssistantMessage(`${nextMode} run 已登记：${run.run_id}`);
     } catch (exc) {
       setError(String(exc));
@@ -318,21 +325,20 @@ export function App() {
     }
   }
 
-  async function sendMessage(event: FormEvent) {
-    event.preventDefault();
-    if (!message.trim()) return;
-    const userMessage = message.trim();
-    setMessage("");
+  async function submitAgentMessage(rawMessage: string, overrides: { mode?: RunMode; workspaceScope?: WorkspaceScope } = {}) {
+    if (!rawMessage.trim()) return;
+    const userMessage = rawMessage.trim();
     setMessages((current) => [...current, { id: Date.now(), role: "user", text: userMessage }]);
     setBusy(true);
     setError(null);
     try {
+      const requestWorkspaceScope = overrides.workspaceScope ?? workspaceScope;
       const response = await api.askSolver({
         message: userMessage,
         active_run_id: activeRunId,
         selected_benchmark: selectedBenchmark,
-        mode,
-        workspace_scope: workspaceScope
+        mode: overrides.mode ?? mode,
+        workspace_scope: requestWorkspaceScope
       });
       setMessages((current) => [
         ...current,
@@ -343,12 +349,29 @@ export function App() {
           response
         }
       ]);
+      if (requestWorkspaceScope !== workspaceScope) setWorkspaceScope(requestWorkspaceScope);
       await dispatchSolverActions(response.actions);
     } catch (exc) {
       setError(String(exc));
     } finally {
       setBusy(false);
     }
+  }
+
+  async function sendMessage(event: FormEvent) {
+    event.preventDefault();
+    if (!message.trim()) return;
+    const userMessage = message;
+    setMessage("");
+    await submitAgentMessage(userMessage);
+  }
+
+  async function sendMainPrompt(event: FormEvent) {
+    event.preventDefault();
+    if (!mainPrompt.trim()) return;
+    const userMessage = mainPrompt;
+    setMainPrompt("");
+    await submitAgentMessage(userMessage);
   }
 
   async function dispatchSolverActions(actions: SolverAction[]) {
@@ -372,6 +395,10 @@ export function App() {
         await refreshRuns();
       }
       if (action.type === "open_code_server") {
+        const nextScope = action.payload?.scope;
+        if (nextScope === "repo" || nextScope === "run" || nextScope === "solution") {
+          setWorkspaceScope(nextScope);
+        }
         setActiveView("code");
       }
       if (action.type === "summarize_artifact") {
@@ -432,9 +459,14 @@ export function App() {
           {activeView === "dashboard" ? (
             <DashboardView
               activeRun={activeRun}
+              busy={busy}
               events={events}
+              mainPrompt={mainPrompt}
               onOpenArtifacts={() => setActiveView("artifacts")}
               onOpenCode={() => setActiveView("code")}
+              onPromptChange={setMainPrompt}
+              onQuickPrompt={(text, options) => submitAgentMessage(text, options)}
+              onSubmitPrompt={sendMainPrompt}
               selected={selected}
             />
           ) : null}
@@ -561,21 +593,40 @@ function TopBar({
 
 function DashboardView({
   activeRun,
+  busy,
   events,
+  mainPrompt,
   onOpenArtifacts,
   onOpenCode,
+  onPromptChange,
+  onQuickPrompt,
+  onSubmitPrompt,
   selected
 }: {
   activeRun: RunSummary | null;
+  busy: boolean;
   events: string[];
+  mainPrompt: string;
   onOpenArtifacts: () => void;
   onOpenCode: () => void;
+  onPromptChange: (value: string) => void;
+  onQuickPrompt: (text: string, options?: { mode?: RunMode; workspaceScope?: WorkspaceScope }) => void;
+  onSubmitPrompt: (event: FormEvent) => void;
   selected?: Benchmark;
 }) {
   const metadata = activeRun?.metadata;
   const qualityGate = activeRun?.trace_summary?.quality_gate?.passed;
   return (
     <div className="view-stack">
+      <CommandCenter
+        activeRunId={activeRun?.run_id ?? null}
+        busy={busy}
+        mainPrompt={mainPrompt}
+        onChange={onPromptChange}
+        onQuickPrompt={onQuickPrompt}
+        onSubmit={onSubmitPrompt}
+        selectedBenchmark={selected?.name ?? "function_approx"}
+      />
       <section className="section-head">
         <div>
           <p className="eyebrow">Run dashboard</p>
@@ -614,6 +665,77 @@ function DashboardView({
         <ArtifactChips artifacts={(activeRun?.artifacts ?? []).slice(0, 18)} />
       </DataRegion>
     </div>
+  );
+}
+
+function CommandCenter({
+  activeRunId,
+  busy,
+  mainPrompt,
+  onChange,
+  onQuickPrompt,
+  onSubmit,
+  selectedBenchmark
+}: {
+  activeRunId: string | null;
+  busy: boolean;
+  mainPrompt: string;
+  onChange: (value: string) => void;
+  onQuickPrompt: (text: string, options?: { mode?: RunMode; workspaceScope?: WorkspaceScope }) => void;
+  onSubmit: (event: FormEvent) => void;
+  selectedBenchmark: string;
+}) {
+  return (
+    <section className="command-center" aria-label="ChatUI 实验入口">
+      <div className="command-copy">
+        <div className="command-orb">
+          <Sparkles size={18} />
+        </div>
+        <div>
+          <p className="eyebrow">ChatUI</p>
+          <h2>欢迎来到 AgenticSciML</h2>
+          <span>用自然语言启动实验、解释 trace、浏览 evidence，并打开 solution workspace。</span>
+        </div>
+      </div>
+      <form className="main-composer" onSubmit={onSubmit}>
+        <input
+          value={mainPrompt}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="请输入你的实验意图，例如：跑 mock、解释这个 trace、打开 champion"
+        />
+        <div className="composer-tools">
+          <button type="button" title="Artifact context">
+            <Database size={15} />
+          </button>
+          <select aria-label="Agent">
+            <option>Agent</option>
+            <option>Trace Analyst</option>
+            <option>Run Operator</option>
+          </select>
+          <button className="send-button" disabled={busy} type="submit" title="发送">
+            <Send size={16} />
+          </button>
+        </div>
+      </form>
+      <div className="prompt-pills">
+        <button type="button" onClick={() => onQuickPrompt(`跑一个 ${selectedBenchmark} mock 实验`, { mode: "mock" })}>
+          跑 mock
+        </button>
+        <button type="button" disabled={!activeRunId} onClick={() => onQuickPrompt("解释这个 trace")}>
+          解释 trace
+        </button>
+        <button
+          type="button"
+          disabled={!activeRunId}
+          onClick={() => onQuickPrompt("打开 champion solution", { workspaceScope: "solution" })}
+        >
+          打开 champion
+        </button>
+        <button type="button" onClick={() => onQuickPrompt("比较两个 run")}>
+          比较 run
+        </button>
+      </div>
+    </section>
   );
 }
 

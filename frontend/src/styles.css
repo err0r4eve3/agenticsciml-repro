@@ -254,6 +254,111 @@ ul {
   gap: 14px;
 }
 
+.command-center {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 18% 10%, rgba(15, 122, 90, 0.11), transparent 32%),
+    linear-gradient(180deg, #ffffff 0%, #f8faf8 100%);
+  box-shadow: var(--shadow);
+  padding: 18px;
+}
+
+.command-copy {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.command-copy h2 {
+  font-size: 22px;
+}
+
+.command-copy span {
+  display: block;
+  margin-top: 5px;
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.command-orb {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(15, 122, 90, 0.22);
+  border-radius: 12px;
+  background: #e8f4ee;
+  color: var(--green-strong);
+}
+
+.main-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 8px;
+}
+
+.main-composer input {
+  min-height: 46px;
+  border: 0;
+  font-size: 14px;
+}
+
+.main-composer input:focus-visible {
+  outline: 0;
+}
+
+.composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.composer-tools button,
+.composer-tools select {
+  min-height: 38px;
+}
+
+.composer-tools select {
+  width: 112px;
+  border-radius: 999px;
+}
+
+.send-button {
+  width: 40px;
+  border-color: var(--green);
+  background: var(--green);
+  color: #ffffff;
+}
+
+.prompt-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.prompt-pills button {
+  min-height: 30px;
+  border-radius: 999px;
+  background: #fbfcfb;
+  color: #334039;
+  padding: 0 12px;
+}
+
+.prompt-pills button:hover:not(:disabled) {
+  border-color: rgba(15, 122, 90, 0.35);
+  background: #e7f3ed;
+  color: var(--green-strong);
+}
+
 .section-head {
   display: flex;
   align-items: flex-start;
@@ -775,7 +880,12 @@ tbody tr:hover,
   .metric-grid,
   .split-grid,
   .artifact-workspace,
-  .code-grid {
+  .code-grid,
+  .main-composer {
     grid-template-columns: 1fr;
+  }
+
+  .composer-tools {
+    justify-content: flex-end;
   }
 }

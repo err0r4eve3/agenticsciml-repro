@@ -33,6 +33,8 @@ ChatUI 前端是单页本地工作台，不引入路由层：
 - 左侧图标导航在 `Dashboard`、`Runs`、`Artifacts / Trace` 和 `Code` 之间切换。
 - 中间主工作区展示 run 状态卡、leaderboard、trace preview、artifact 浏览和
   code-server 工作区入口。
+- `Dashboard` 顶部提供主 ChatUI 入口，可直接输入实验意图或点击“跑 mock”、
+  “解释 trace”、“打开 champion”、“比较 run”等快捷指令。
 - 右侧 Agent 面板可收起，负责自然语言意图、结构化 actions、warnings、
   artifacts 和 trace refs 展示。
 
