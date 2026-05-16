@@ -1,0 +1,8 @@
+[
+  {
+    "id": "shred_style_sensor_history",
+    "title": "SHRED-style Sensor History Decoder",
+    "file": "shred_style_sensor_history.md",
+    "description": "Use lagged sparse sensor histories with a shallow decoder or low-rank basis while keeping claims below SHRED-ROM reproduction."
+  }
+]

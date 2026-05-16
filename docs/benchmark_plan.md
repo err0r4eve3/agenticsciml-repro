@@ -58,6 +58,7 @@
 | `reaction_diffusion_operator` | `S1.5` | `proxy` | `examples/reaction_diffusion_operator` | `relative_l2` | 多输入 reaction-diffusion operator proxy |
 | `reaction_diffusion_operator_faithful_small` | `S1.5` | `faithful-small` | `examples/reaction_diffusion_operator_faithful_small` | `relative_l2` | 多输入函数到 40x50 时空响应的 reaction-diffusion operator learning |
 | `cylinder_wake_reconstruction` | `S1.6` | `proxy` | `examples/cylinder_wake_reconstruction` | `relative_l2` | 稀疏传感器到 2D 涡量场重建 proxy |
+| `cylinder_wake_reconstruction_faithful_small` | `S1.6` | `faithful-small` | `examples/cylinder_wake_reconstruction_faithful_small` | `relative_l2` | SHRED-style lagged sparse sensor-history reconstruction on 24x24 synthetic cylinder-wake-like fields |
 
 `poisson_lshape_faithful_small` is residual-scored but still prediction-only:
 the trusted evaluator asks generated code for function values at solution,
@@ -79,6 +80,13 @@ operator task to diffusion/source/initial-condition channels over a 50-point
 grid and a flattened 40x50 spatiotemporal response. The official score remains
 mean per-sample relative L2; early/late-time and gradient diagnostics are
 reported as secondary evidence only.
+
+`cylinder_wake_reconstruction_faithful_small` upgrades the sparse reconstruction
+task to a SHRED-style lagged sensor-history interface: five time steps of eight
+fixed sparse sensors plus current time are mapped to a flattened 24x24 synthetic
+cylinder-wake-like vorticity field. It is grounded by SHRED-ROM / PySHRED
+architecture patterns and public code, but it does not run their original code,
+use their datasets, train an LSTM, or claim their scores.
 
 `burgers_pinn` now has a source-grounded local KB seeded from Raissi,
 Perdikaris, and Karniadakis's PINNs paper plus the public `maziarraissi/PINNs`
@@ -148,13 +156,13 @@ traversal、`.evaluator` / `private_eval` 字符串引用仍会被 static guardr
 
 1. 每个 benchmark 先跑 `--max-iterations 0`，只验证 root baseline。
 2. 每个 benchmark 跑 `--max-iterations 1 --parallel-mutations 1`，验证 proposal/critic/engineer/debugger 链路。
-3. 对 `function_approx`、`function_approx_faithful_small`、`poisson_lshape`、`poisson_lshape_faithful_small`、`burgers_pinn`、`burgers_pinn_faithful_small`、`antiderivative_operator_faithful_small`、`reaction_diffusion_operator_faithful_small` 跑
+3. 对 `function_approx`、`function_approx_faithful_small`、`poisson_lshape`、`poisson_lshape_faithful_small`、`burgers_pinn`、`burgers_pinn_faithful_small`、`antiderivative_operator_faithful_small`、`reaction_diffusion_operator_faithful_small`、`cylinder_wake_reconstruction_faithful_small` 跑
    `root_only` / `no_kb` / `kb` / `random_kb` / `no_critic` / `no_debugger`
    ablation。
 4. 对 KB ablation 同时比较 `use_kb=False`、lexical KB 和 deterministic
    `random_kb`，并用 `ablation_summary.csv` 的 median/IQR 判断稳定性。
 5. 对 operator benchmarks 增加 multi-seed 重复。
-6. 最后再跑 `cylinder_wake_reconstruction`，因为输出维度更高，debug 成本更大。
+6. 最后再跑 `cylinder_wake_reconstruction` 和 `cylinder_wake_reconstruction_faithful_small`，因为输出维度更高，debug 成本更大。
 
 示例：
 

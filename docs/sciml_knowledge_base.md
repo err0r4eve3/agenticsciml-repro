@@ -48,7 +48,10 @@
 - `antiderivative_operator` / `reaction_diffusion_operator`：选择 DeepONet 或 Fourier Neural Operator 公开实现，提炼 operator learning 的 basis、branch/trunk、spectral 和 rollout 稳定性提示。
 - `reaction_diffusion_operator_faithful_small`：记录多输入函数通道融合、time-major 输出解码、单一 relative-L2 score 与诊断指标的边界。
 - `poisson_lshape_faithful_small`：选择 corner-singularity / adaptive residual sampling 相关 PINN 文献，补充 L-shaped domain 的奇异性处理。
-- `cylinder_wake_reconstruction`：选择 sparse-sensor reconstruction 或 autoencoder/POD 文献，补充传感器布局、latent decoder 和正则化提示。
+- `cylinder_wake_reconstruction` / `cylinder_wake_reconstruction_faithful_small`：
+  已补 SHRED-ROM / PySHRED 启发的 sparse temporal sensor history、shallow
+  decoder、POD/low-rank basis 边界提示。当前 faithful-small 版本使用确定性
+  synthetic cylinder-wake-like fields，不运行原始 SHRED-ROM 代码或数据。
 
 后续新增 KB 时，应同步更新 `docs/index.md`、`docs/benchmark_plan.md`，并给
 `tests/test_retrieval.py` 增加最小加载测试。

@@ -419,6 +419,20 @@ BENCHMARKS: dict[str, BenchmarkSpec] = {
         requires_gpu=False,
         paper_gap_notes=_PROXY_GAP,
     ),
+    "cylinder_wake_reconstruction_faithful_small": BenchmarkSpec(
+        name="cylinder_wake_reconstruction_faithful_small",
+        path=EXAMPLES_DIR / "cylinder_wake_reconstruction_faithful_small",
+        paper_section="S1.6",
+        paper_task_name="Sparse-sensor 2D cylinder wake reconstruction",
+        family="inverse reconstruction",
+        metric="relative_l2",
+        description="Faithful-small SHRED-style lagged sparse-sensor reconstruction of synthetic cylinder-wake-like vorticity fields.",
+        fidelity_level="faithful-small",
+        expected_runtime_s=45,
+        requires_torch=False,
+        requires_gpu=False,
+        paper_gap_notes=_FAITHFUL_SMALL_GAP,
+    ),
 }
 
 

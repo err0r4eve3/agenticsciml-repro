@@ -15,7 +15,7 @@
 - [Git 与 Markdown 分层记录方法论](git_markdown_methodology.md)：把论文依据、SDK 边界、Git 时间轴、Markdown 文档树和 run artifacts 统一为可追溯记录协议。
 - [OpenAI Agents SDK 升级复盘](openai_agents_sdk_upgrade_review.md)：基于 2026 年官方 SDK 文档的已对齐项、差距和版本路线。
 - [AgenticSciML Assistant 规范](agenticsciml_assistant.md)：项目 AI 助手定位、repo-local skill 边界、内部 algorithm tool 和未来 MCP/tool 合约。
-- [Benchmark 与实验设计](benchmark_plan.md)：6 类论文任务家族、本地代理、五项 faithful-small 升级、验证矩阵和真实 LLM 实验顺序。
+- [Benchmark 与实验设计](benchmark_plan.md)：6 类论文任务家族、本地代理、六项 faithful-small 升级、验证矩阵和真实 LLM 实验顺序。
 - [论文算法 Reference Primitives](paper_algorithm_primitives.md)：论文结果区列出的 6 个 champion strategy 的本地 NumPy reference primitives 和 claim 边界。
 - [Benchmark Fidelity Levels](fidelity_levels.md)：`proxy`、`faithful-small`、`paper-like` 的准入标准和 claim 边界。
 - [SciML 论文与代码知识库](sciml_knowledge_base.md)：为 `burgers_pinn` 选取 PINNs 论文和公开代码，并记录本地 KB 写入规则。

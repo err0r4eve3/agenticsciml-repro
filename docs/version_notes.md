@@ -2,6 +2,34 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-17 S1.6 Cylinder Wake Faithful-Small Benchmark
+
+本轮按 Pro 复核建议补齐论文 S1.6 的 faithful-small benchmark。Pro 的关键约束是：
+可以做 SHRED-style sparse temporal sensor reconstruction，但不能写成复现
+SHRED-ROM / PySHRED / Nature Communications 结果；如果没有真正实现 LSTM，就必须
+写成 lagged sensor-history encoder + shallow decoder benchmark。
+
+已实现：
+
+- 新增 `examples/cylinder_wake_reconstruction_faithful_small`，使用确定性
+  synthetic cylinder-wake-like vorticity generator。
+- 输入为五个时间步的八个固定 sparse sensor readings 加当前 normalized time，
+  输出为 flattened `24 x 24` vorticity field。
+- evaluator 使用 mean per-sample relative L2 作为官方分数，mean/max absolute
+  error 只作为 diagnostics。
+- KB 新增 SHRED-ROM / PySHRED source-grounded note，记录 temporal sensor
+  history、shallow decoder、POD/low-rank basis 的启发和边界。
+- benchmark catalog 新增
+  `cylinder_wake_reconstruction_faithful_small`，并更新相关算法目录示例。
+- 测试新增 S1.6 faithful-small 的 shape/window/no-future-leakage/evaluator
+  断言。
+
+边界：
+
+- 这是 low-budget faithful-small benchmark，不是 `paper-like`。
+- 不运行 SHRED-ROM 原始代码，不使用原始数据，不训练 LSTM/RNN，不声明论文分数。
+- 分数和 scientific claim 仍只来自本仓库 evaluator 与 run artifacts。
+
 ## 2026-05-17 Web API 边界加固
 
 本次收紧 ChatUI / VS Code Web 远端部署前最关键的控制面边界：
@@ -367,7 +395,7 @@ backend、human review pause/resume 和 MCP/hosted tools sidecar。
 - closed node schema：solution node 与 score payload 默认拒绝 unknown fields；`from_dict()`、resume/load 和 trace summary 会对 schema drift fail closed。`tree.json` 和 `trace_summary.json` 写入也使用 `allow_nan=False`。
 - solution tree schema version：`tree.json` 和 `checkpoint.json` 顶层写入 `schema_version=solution_tree.v1`；resume/load 和 trace summary 会拒绝缺失或 unsupported schema version，后续迁移必须显式版本化。
 - artifact path semantics：resume/load 与 trace summary 都会校验 node `workspace` 位于当前 run 的 `solutions/` 下且 basename 匹配 `node_id`，并要求 `proposal_path` / `analysis_path` 位于 node workspace 内且存在，防止 checkpoint/tree 指向外部 artifact。
-- benchmark catalog：6 类论文任务家族都有本地 deterministic engineering proxy，包括 `function_approx`、`poisson_lshape`、`burgers_pinn`、`antiderivative_operator`、`reaction_diffusion_operator`、`cylinder_wake_reconstruction`；另有 `function_approx_faithful_small`、`poisson_lshape_faithful_small`、`burgers_pinn_faithful_small`、`antiderivative_operator_faithful_small` 和 `reaction_diffusion_operator_faithful_small` 作为 faithful-small 升级。每个 catalog entry 记录 `fidelity_level`、expected runtime、dependency flags 和 paper-gap notes。
+- benchmark catalog：6 类论文任务家族都有本地 deterministic engineering proxy，包括 `function_approx`、`poisson_lshape`、`burgers_pinn`、`antiderivative_operator`、`reaction_diffusion_operator`、`cylinder_wake_reconstruction`；另有 `function_approx_faithful_small`、`poisson_lshape_faithful_small`、`burgers_pinn_faithful_small`、`antiderivative_operator_faithful_small`、`reaction_diffusion_operator_faithful_small` 和 `cylinder_wake_reconstruction_faithful_small` 作为 faithful-small 升级。每个 catalog entry 记录 `fidelity_level`、expected runtime、dependency flags 和 paper-gap notes。
 - benchmark metadata validation：`BenchmarkSpec` 构造时校验 `fidelity_level`、expected runtime、dependency flags、paper task name 和 proxy paper-gap notes。
 - fidelity levels document：`docs/fidelity_levels.md` 定义 `proxy`、`faithful-small`、`paper-like` 的准入标准和 claim rules。
 - evaluation contract：`solution.py` 定义 `MODEL`，支持 validate/train/predict，predict 写 `predictions.npz`，`evaluate.py` 输出 `eval.json`。

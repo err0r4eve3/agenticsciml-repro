@@ -28,6 +28,7 @@ EXPECTED_BENCHMARKS = {
     "reaction_diffusion_operator",
     "reaction_diffusion_operator_faithful_small",
     "cylinder_wake_reconstruction",
+    "cylinder_wake_reconstruction_faithful_small",
 }
 
 
@@ -288,6 +289,52 @@ def test_reaction_diffusion_operator_faithful_small_has_multi_input_spacetime_sh
     )
     assert "50" in prompt_text
     assert "paper-score" in prompt_text
+
+
+def test_cylinder_wake_reconstruction_faithful_small_has_sensor_history_shape_and_no_future_window(
+    tmp_path: Path,
+) -> None:
+    spec = BENCHMARKS["cylinder_wake_reconstruction_faithful_small"]
+    module = _load_generate_module(spec.path / "generate_data.py")
+    module.generate(seed=0, output_dir=tmp_path)
+
+    train = np.load(tmp_path / "train_data.npz")
+    val = np.load(tmp_path / "val_data.npz")
+
+    assert train["x_train"].shape == (272, 41)
+    assert train["u_train"].shape == (272, 576)
+    assert train["sensor_points"].shape == (8, 2)
+    assert train["window_size"].reshape(-1)[0] == 5
+    assert train["sensor_count"].reshape(-1)[0] == 8
+    assert train["n_x"].reshape(-1)[0] == 24
+    assert train["n_y"].reshape(-1)[0] == 24
+    assert val["x_val"].shape == (136, 41)
+    assert val["u_val"].shape == (136, 576)
+
+    simple_sensors = np.arange(6 * 8, dtype=float).reshape(6, 8)
+    simple_times = np.linspace(0.0, 1.0, 6)
+    features = module.build_lagged_sensor_features(simple_sensors, simple_times, window_size=5)
+    assert features.shape == (2, 41)
+    np.testing.assert_allclose(features[0, :40], simple_sensors[:5].reshape(-1))
+    np.testing.assert_allclose(features[1, :40], simple_sensors[1:6].reshape(-1))
+    assert features[0, -1] == simple_times[4]
+    assert features[1, -1] == simple_times[5]
+
+    prompt_text = "\n".join(
+        (spec.path / filename).read_text(encoding="utf-8")
+        for filename in ["Problem.md", "Requirements.md", "Evaluation.md", "guidelines.md"]
+    )
+    assert "SHRED-style" in prompt_text
+    assert "paper-score" in prompt_text
+
+
+def test_cylinder_wake_faithful_small_evaluator_mean_per_sample_relative_l2() -> None:
+    spec = BENCHMARKS["cylinder_wake_reconstruction_faithful_small"]
+    module = _load_generate_module(spec.path / "evaluate.py")
+    target = np.array([[3.0, 4.0, 0.0], [1.0, 2.0, 2.0]])
+
+    assert module._mean_per_sample_relative_l2(target, target) == 0.0
+    assert np.isclose(module._mean_per_sample_relative_l2(np.zeros_like(target), target), 1.0)
 
 
 def test_all_benchmarks_have_required_artifacts() -> None:

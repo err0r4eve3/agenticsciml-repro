@@ -1,0 +1,5 @@
+experiment_id: cylinder-wake-reconstruction-faithful-small-real
+benchmark_dir: examples/cylinder_wake_reconstruction_faithful_small
+max_iterations: 1
+parallel_mutations: 2
+timeout_s: 90
