@@ -98,7 +98,7 @@ def test_web_artifacts_reject_path_escape(tmp_path: Path) -> None:
         assert symlink_escape.status_code == 400
 
 
-def test_solver_chat_returns_structured_actions_and_warnings(tmp_path: Path) -> None:
+def test_solver_chat_defaults_to_ask_without_actions(tmp_path: Path) -> None:
     client = TestClient(create_app())
 
     start = client.post(
@@ -113,8 +113,51 @@ def test_solver_chat_returns_structured_actions_and_warnings(tmp_path: Path) -> 
     )
     assert start.status_code == 200
     start_payload = start.json()
+    assert start_payload["assistant_mode"] == "ask"
+    assert start_payload["actions"] == []
+    assert any("Ask mode" in warning for warning in start_payload["warnings"])
+
+
+def test_solver_chat_plan_and_agent_modes_return_structured_actions(tmp_path: Path) -> None:
+    client = TestClient(create_app())
+
+    plan = client.post(
+        "/api/solver/chat",
+        json={
+            "message": "跑一个 mock 实验",
+            "selected_benchmark": "function_approx",
+            "mode": "mock",
+            "assistant_mode": "plan",
+            "workspace_scope": "repo",
+            "output_dir": str(tmp_path),
+        },
+    )
+    assert plan.status_code == 200
+    plan_payload = plan.json()
+    assert plan_payload["assistant_mode"] == "plan"
+    assert plan_payload["actions"][0]["type"] == "start_run"
+    assert any("Plan mode" in warning for warning in plan_payload["warnings"])
+
+    start = client.post(
+        "/api/solver/chat",
+        json={
+            "message": "跑一个 mock 实验",
+            "selected_benchmark": "function_approx",
+            "mode": "mock",
+            "assistant_mode": "agent",
+            "workspace_scope": "repo",
+            "output_dir": str(tmp_path),
+        },
+    )
+    assert start.status_code == 200
+    start_payload = start.json()
+    assert start_payload["assistant_mode"] == "agent"
     assert start_payload["actions"][0]["type"] == "start_run"
     assert start_payload["actions"][0]["payload"]["background"] is True
+
+
+def test_solver_chat_returns_real_mode_warnings(tmp_path: Path) -> None:
+    client = TestClient(create_app())
 
     real_dry = client.post(
         "/api/solver/chat",
@@ -122,6 +165,7 @@ def test_solver_chat_returns_structured_actions_and_warnings(tmp_path: Path) -> 
             "message": "解释 trace",
             "selected_benchmark": "function_approx",
             "mode": "real",
+            "assistant_mode": "ask",
             "workspace_scope": "repo",
             "output_dir": str(tmp_path),
         },

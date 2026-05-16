@@ -159,6 +159,9 @@ exit non-zero. Use `smoke-llm --real` before expecting verification to pass.
 - The internal endpoint may parse intent and return structured `reply`,
   `actions`, `artifacts`, `warnings`, and `trace_refs`. It must not own global
   workflow state.
+- ChatUI assistant mode defaults to `ask`. `ask` answers only, `plan` previews
+  structured actions without dispatch, and `agent` is the only mode that may
+  execute controlled frontend actions.
 - `account_id` is a local workspace namespace for separating code directories
   and run roots. It is not authentication, authorization, or a multi-tenant
   security boundary.

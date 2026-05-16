@@ -27,6 +27,7 @@ from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 
 RunMode = Literal["mock", "real", "dry_run"]
 WorkspaceScope = Literal["repo", "account", "run", "solution"]
+AssistantMode = Literal["ask", "plan", "agent"]
 DEFAULT_ACCOUNT_ID = "local"
 ACCOUNT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$")
 
@@ -68,6 +69,7 @@ class SolverChatRequest(BaseModel):
     active_run_id: str | None = None
     selected_benchmark: str = "function_approx"
     mode: RunMode = "mock"
+    assistant_mode: AssistantMode = "ask"
     workspace_scope: WorkspaceScope = "repo"
     account_id: str | None = None
     output_dir: str = "runs"
@@ -749,7 +751,7 @@ def _workspace_option(
 
 def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
     text = request.message.lower()
-    actions: list[dict[str, object]] = []
+    proposed_actions: list[dict[str, object]] = []
     artifacts: list[dict[str, object]] = []
     warnings: list[str] = []
     trace_refs: list[dict[str, object]] = []
@@ -758,7 +760,7 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
         warnings.append("Real LLM mode requires explicit credentials and keeps existing budget/claim boundaries.")
 
     if any(token in text for token in ("跑", "run", "start", "mock", "实验")):
-        actions.append(
+        proposed_actions.append(
             {
                 "type": "start_run",
                 "payload": {
@@ -770,10 +772,10 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
             }
         )
     if any(token in text for token in ("resume", "恢复", "继续")) and request.active_run_id:
-        actions.append({"type": "resume_run", "run_id": request.active_run_id})
+        proposed_actions.append({"type": "resume_run", "run_id": request.active_run_id})
     if any(token in text for token in ("code", "vscode", "代码", "打开", "champion", "solution")):
         try:
-            actions.append(
+            proposed_actions.append(
                 {
                     "type": "open_code_server",
                     "payload": _code_server_payload(
@@ -811,11 +813,21 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
     if "compare" in text or "比较" in text:
         warnings.append("Run comparison needs two explicit run ids; this MVP returns a prompt to choose the second run.")
 
-    if not actions and not artifacts and not trace_refs:
-        actions.append({"type": "summarize_artifact", "payload": {"benchmark": request.selected_benchmark}})
+    if not proposed_actions and not artifacts and not trace_refs and request.assistant_mode != "ask":
+        proposed_actions.append({"type": "summarize_artifact", "payload": {"benchmark": request.selected_benchmark}})
+
+    if request.assistant_mode == "ask":
+        actions: list[dict[str, object]] = []
+        if proposed_actions:
+            warnings.append("Ask mode does not return executable actions. Switch to plan to preview actions or agent to run them.")
+    else:
+        actions = proposed_actions
+        if request.assistant_mode == "plan" and actions:
+            warnings.append("Plan mode returns proposed actions only. The frontend must not dispatch them automatically.")
 
     return {
-        "reply": _solver_reply(actions, artifacts, warnings, trace_refs),
+        "assistant_mode": request.assistant_mode,
+        "reply": _solver_reply(request.assistant_mode, actions, artifacts, warnings, trace_refs),
         "actions": actions,
         "artifacts": artifacts,
         "warnings": warnings,
@@ -840,13 +852,21 @@ def _important_artifacts(run_dir: Path) -> list[dict[str, object]]:
 
 
 def _solver_reply(
+    assistant_mode: AssistantMode,
     actions: list[dict[str, object]],
     artifacts: list[dict[str, object]],
     warnings: list[str],
     trace_refs: list[dict[str, object]],
 ) -> str:
+    if assistant_mode == "ask":
+        if trace_refs:
+            gate = trace_refs[0].get("quality_gate")
+            return f"Ask 模式：已读取 trace summary。quality_gate={gate}，相关 artifacts={len(artifacts)}。"
+        return "Ask 模式：我只回答和解释，不执行动作。需要预览步骤请切到 Plan，需要自动执行受控动作请切到 Agent。"
+    if assistant_mode == "plan" and actions:
+        return "Plan 模式：已生成建议动作，但不会自动执行。确认后可切到 Agent 执行。"
     if actions and actions[0].get("type") == "start_run":
-        return "已准备启动实验；ChatUI 应调用 start_run action，并继续监听 run events。"
+        return "Agent 模式：已准备启动实验；ChatUI 应调用 start_run action，并继续监听 run events。"
     if trace_refs:
         gate = trace_refs[0].get("quality_gate")
         return f"已读取 trace summary。quality_gate={gate}，相关 artifacts={len(artifacts)}。"

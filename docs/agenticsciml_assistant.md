@@ -56,6 +56,7 @@ repo-local skill 位于 `.agents/skills/agenticsciml-chatui-operator/SKILL.md`�
 - `active_run_id`：当前 run，可为空。
 - `selected_benchmark`：当前 benchmark。
 - `mode`：`mock | real | dry_run`。
+- `assistant_mode`：`ask | plan | agent`，默认 `ask`。
 - `workspace_scope`：`repo | account | run | solution`。
 - `account_id`：可选本地账号 namespace。它只选择 `.agenticsciml/accounts/<id>/`
   下的工作区和 runs 目录，不代表登录态或权限边界。
@@ -63,11 +64,18 @@ repo-local skill 位于 `.agents/skills/agenticsciml-chatui-operator/SKILL.md`�
 
 输出语义：
 
+- `assistant_mode`：回显本次交互模式。
 - `reply`：给 ChatUI 展示的简短回答。
 - `actions`：结构化动作建议。
 - `artifacts`：相关 artifact 路径和摘要。
 - `warnings`：真实 LLM、claim boundary、鉴权、验证或上下文风险。
 - `trace_refs`：相关 run/trace/quality gate 引用。
+
+交互模式边界：
+
+- `ask` 只回答和解释，不返回可执行 actions。
+- `plan` 可以返回结构化 actions，但前端必须只展示，不自动分发。
+- `agent` 才允许前端调用安全分发器执行受控 actions；real LLM 仍需显式确认。
 
 当前允许 action：
 

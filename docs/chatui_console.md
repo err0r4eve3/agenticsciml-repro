@@ -36,6 +36,9 @@ ChatUI 前端是单页本地工作台，不引入路由层，但用左侧功能�
 - `ChatUI` 页是纯对话界面，接近 ChatGPT 网页版：顶部只做页面标识，中间是
   对话流，底部是主输入框；不显示 benchmark、run、quality gate、trace 或
   artifact 工作台。
+- ChatUI 和右侧 Agent 面板都有 `ask` / `plan` / `agent` 三种交互模式，默认
+  `ask`。`ask` 只解释不返回可执行动作；`plan` 返回结构化建议动作但前端不自动
+  分发；`agent` 才会自动执行受控 action。
 - `VS Code` 页先显示工作空间选择列表，风格参考 UnitaryLab 的 workspace
   页：用户选择一个账号隔离的独立代码目录后进入 AI IDE。编辑态只保留 VS Code Web
   iframe 和右侧可收起 ChatUI 侧边栏，不显示 benchmark、run、quality gate、
@@ -102,6 +105,13 @@ code-server auth、系统用户/容器权限和 secret scanning 提供真实访�
 `/api/solver/chat` 都接受可选 `account_id`。未传时沿用旧的 shared `runs/`；
 传入时默认使用 `.agenticsciml/accounts/<account_id>/runs/`，从而让不同本地账号
 拥有独立 run/code 目录。
+
+`/api/solver/chat` 还接受 `assistant_mode`：
+
+- `ask`：默认值，只回答和解释，不返回可执行 actions。
+- `plan`：返回建议 actions 和 warnings，但前端必须只展示，不自动执行。
+- `agent`：允许前端按既有安全分发器执行 `start_run`、`resume_run`、
+  `open_code_server` 或 `summarize_artifact`。
 
 未来如果接入 OpenAI Apps SDK / MCP，应新增 thin wrapper，保留 `/api/solver/chat`
 作为内部 endpoint。wrapper 需要列出 tools、声明 JSON Schema input/output、

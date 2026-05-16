@@ -74,6 +74,7 @@ type ArtifactPayload =
 
 type RunMode = "mock" | "real" | "dry_run";
 type WorkspaceScope = "repo" | "account" | "run" | "solution";
+type AssistantMode = "ask" | "plan" | "agent";
 type PageKey = "chat" | "ide" | "library";
 
 type AccountOption = {
@@ -118,6 +119,7 @@ type SolverAction = {
 };
 
 type SolverResponse = {
+  assistant_mode: AssistantMode;
   reply: string;
   actions: SolverAction[];
   artifacts: Array<Record<string, unknown>>;
@@ -216,6 +218,7 @@ const api = {
     active_run_id: string | null;
     selected_benchmark: string;
     mode: RunMode;
+    assistant_mode: AssistantMode;
     workspace_scope: WorkspaceScope;
     account_id: string;
   }): Promise<SolverResponse> {
@@ -254,6 +257,7 @@ export function App() {
     }
   ]);
   const [mode, setMode] = useState<RunMode>("mock");
+  const [assistantMode, setAssistantMode] = useState<AssistantMode>("ask");
   const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScope>("repo");
   const [codeWorkspaces, setCodeWorkspaces] = useState<CodeWorkspaceOption[]>([]);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
@@ -405,7 +409,10 @@ export function App() {
     }
   }
 
-  async function submitAgentMessage(rawMessage: string, overrides: { mode?: RunMode; workspaceScope?: WorkspaceScope } = {}) {
+  async function submitAgentMessage(
+    rawMessage: string,
+    overrides: { mode?: RunMode; assistantMode?: AssistantMode; workspaceScope?: WorkspaceScope } = {}
+  ) {
     if (!rawMessage.trim()) return;
     const userMessage = rawMessage.trim();
     setMessages((current) => [...current, { id: Date.now(), role: "user", text: userMessage }]);
@@ -413,11 +420,13 @@ export function App() {
     setError(null);
     try {
       const requestWorkspaceScope = overrides.workspaceScope ?? workspaceScope;
+      const requestAssistantMode = overrides.assistantMode ?? assistantMode;
       const response = await api.askSolver({
         message: userMessage,
         active_run_id: activeRunId,
         selected_benchmark: selectedBenchmark,
         mode: overrides.mode ?? mode,
+        assistant_mode: requestAssistantMode,
         workspace_scope: requestWorkspaceScope,
         account_id: activeAccountId
       });
@@ -431,7 +440,10 @@ export function App() {
         }
       ]);
       if (requestWorkspaceScope !== workspaceScope) setWorkspaceScope(requestWorkspaceScope);
-      await dispatchSolverActions(response.actions);
+      if (overrides.assistantMode && overrides.assistantMode !== assistantMode) setAssistantMode(overrides.assistantMode);
+      if (requestAssistantMode === "agent") {
+        await dispatchSolverActions(response.actions);
+      }
     } catch (exc) {
       setError(String(exc));
     } finally {
@@ -548,9 +560,11 @@ export function App() {
           <PageHeader title="AgenticSciML" subtitle="ChatUI" />
           {error ? <div className="error-line">{error}</div> : null}
           <PureChatUI
+            assistantMode={assistantMode}
             busy={busy}
             mainPrompt={mainPrompt}
             messages={messages}
+            onAssistantModeChange={setAssistantMode}
             onChange={setMainPrompt}
             onOpenIde={() => selectPage("ide")}
             onOpenLibrary={() => setActivePage("library")}
@@ -565,11 +579,13 @@ export function App() {
             <>
               <CodeView codeServer={selectedWorkspace} />
               <AgentPanel
+                assistantMode={assistantMode}
                 collapsed={agentCollapsed}
                 message={message}
                 messages={messages}
                 pendingRealAction={pendingRealAction}
                 busy={busy}
+                onAssistantModeChange={setAssistantMode}
                 onChangeMessage={setMessage}
                 onSend={sendMessage}
                 onToggle={() => setAgentCollapsed((current) => !current)}
@@ -704,22 +720,26 @@ function PageHeader({ subtitle, title }: { subtitle: string; title: string }) {
 }
 
 function PureChatUI({
+  assistantMode,
   busy,
   mainPrompt,
   messages,
+  onAssistantModeChange,
   onChange,
   onOpenIde,
   onOpenLibrary,
   onQuickPrompt,
   onSubmit
 }: {
+  assistantMode: AssistantMode;
   busy: boolean;
   mainPrompt: string;
   messages: AgentMessage[];
+  onAssistantModeChange: (mode: AssistantMode) => void;
   onChange: (value: string) => void;
   onOpenIde: () => void;
   onOpenLibrary: () => void;
-  onQuickPrompt: (text: string, options?: { mode?: RunMode; workspaceScope?: WorkspaceScope }) => void;
+  onQuickPrompt: (text: string, options?: { mode?: RunMode; assistantMode?: AssistantMode; workspaceScope?: WorkspaceScope }) => void;
   onSubmit: (event: FormEvent) => void;
 }) {
   return (
@@ -736,7 +756,7 @@ function PureChatUI({
               <button type="button" onClick={() => onQuickPrompt("介绍一下这个项目当前能做什么")}>
                 介绍项目
               </button>
-              <button type="button" onClick={() => onQuickPrompt("帮我规划下一步")}>
+              <button type="button" onClick={() => onQuickPrompt("帮我规划下一步", { assistantMode: "plan" })}>
                 规划任务
               </button>
               <button type="button" onClick={onOpenLibrary}>
@@ -757,6 +777,7 @@ function PureChatUI({
           placeholder="给 AgenticSciML 发消息"
         />
         <div className="composer-tools">
+          <AssistantModeSwitch mode={assistantMode} onChange={onAssistantModeChange} />
           <button type="button" title="Artifact context">
             <Database size={15} />
           </button>
@@ -766,6 +787,31 @@ function PureChatUI({
         </div>
       </form>
     </section>
+  );
+}
+
+function AssistantModeSwitch({
+  mode,
+  onChange,
+  compact = false
+}: {
+  mode: AssistantMode;
+  onChange: (mode: AssistantMode) => void;
+  compact?: boolean;
+}) {
+  return (
+    <div className={`assistant-mode ${compact ? "compact" : ""}`} aria-label="Assistant mode">
+      {(["ask", "plan", "agent"] as const).map((item) => (
+        <button
+          key={item}
+          className={mode === item ? "selected" : ""}
+          type="button"
+          onClick={() => onChange(item)}
+        >
+          {item}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -1000,18 +1046,22 @@ function DashboardView({
 
 function CommandCenter({
   activeRunId,
+  assistantMode,
   busy,
   mainPrompt,
+  onAssistantModeChange,
   onChange,
   onQuickPrompt,
   onSubmit,
   selectedBenchmark
 }: {
   activeRunId: string | null;
+  assistantMode: AssistantMode;
   busy: boolean;
   mainPrompt: string;
+  onAssistantModeChange: (mode: AssistantMode) => void;
   onChange: (value: string) => void;
-  onQuickPrompt: (text: string, options?: { mode?: RunMode; workspaceScope?: WorkspaceScope }) => void;
+  onQuickPrompt: (text: string, options?: { mode?: RunMode; assistantMode?: AssistantMode; workspaceScope?: WorkspaceScope }) => void;
   onSubmit: (event: FormEvent) => void;
   selectedBenchmark: string;
 }) {
@@ -1037,18 +1087,17 @@ function CommandCenter({
           <button type="button" title="Artifact context">
             <Database size={15} />
           </button>
-          <select aria-label="Agent">
-            <option>Agent</option>
-            <option>Trace Analyst</option>
-            <option>Run Operator</option>
-          </select>
+          <AssistantModeSwitch compact mode={assistantMode} onChange={onAssistantModeChange} />
           <button className="send-button" disabled={busy} type="submit" title="发送">
             <Send size={16} />
           </button>
         </div>
       </form>
       <div className="prompt-pills">
-        <button type="button" onClick={() => onQuickPrompt(`跑一个 ${selectedBenchmark} mock 实验`, { mode: "mock" })}>
+        <button
+          type="button"
+          onClick={() => onQuickPrompt(`跑一个 ${selectedBenchmark} mock 实验`, { mode: "mock", assistantMode: "agent" })}
+        >
           跑 mock
         </button>
         <button type="button" disabled={!activeRunId} onClick={() => onQuickPrompt("解释这个 trace")}>
@@ -1310,21 +1359,25 @@ function WorkspaceSelector({
 }
 
 function AgentPanel({
+  assistantMode,
   busy,
   collapsed,
   message,
   messages,
   pendingRealAction,
+  onAssistantModeChange,
   onChangeMessage,
   onDismissRealAction,
   onSend,
   onToggle
 }: {
+  assistantMode: AssistantMode;
   busy: boolean;
   collapsed: boolean;
   message: string;
   messages: AgentMessage[];
   pendingRealAction: SolverAction | null;
+  onAssistantModeChange: (mode: AssistantMode) => void;
   onChangeMessage: (value: string) => void;
   onDismissRealAction: () => void;
   onSend: (event: FormEvent) => void;
@@ -1351,6 +1404,7 @@ function AgentPanel({
           <PanelRightClose size={18} />
         </button>
       </header>
+      <AssistantModeSwitch compact mode={assistantMode} onChange={onAssistantModeChange} />
       {pendingRealAction ? (
         <div className="pending-action">
           <AlertTriangle size={16} />
@@ -1403,6 +1457,7 @@ function ChatTranscript({ messages }: { messages: AgentMessage[] }) {
 function StructuredResponse({ response }: { response: SolverResponse }) {
   return (
     <div className="structured-response">
+      <KeyValueList label="mode" values={[response.assistant_mode]} />
       {response.actions.length ? <KeyValueList label="actions" values={response.actions.map((action) => action.type)} /> : null}
       {response.warnings.length ? <KeyValueList label="warnings" values={response.warnings} tone="warning" /> : null}
       {response.artifacts.length ? <KeyValueList label="artifacts" values={response.artifacts.map((artifact) => String(artifact.path ?? "artifact"))} /> : null}

@@ -712,6 +712,10 @@ ul {
   min-height: 38px;
 }
 
+.composer-tools .assistant-mode button {
+  min-height: 28px;
+}
+
 .composer-tools select {
   width: 112px;
   border-radius: 999px;
@@ -783,6 +787,37 @@ ul {
 
 .segmented .selected {
   border-color: #fff8ed;
+  background: #fff8ed;
+  box-shadow: 0 1px 4px rgba(64, 43, 24, 0.08);
+  color: var(--green-strong);
+}
+
+.assistant-mode {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(46px, 1fr));
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f5eadb;
+  padding: 3px;
+}
+
+.assistant-mode.compact {
+  grid-template-columns: repeat(3, minmax(42px, 1fr));
+}
+
+.assistant-mode button {
+  min-height: 28px;
+  border-color: transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.assistant-mode .selected {
   background: #fff8ed;
   box-shadow: 0 1px 4px rgba(64, 43, 24, 0.08);
   color: var(--green-strong);

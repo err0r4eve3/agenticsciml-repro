@@ -2,6 +2,27 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-17 ChatUI ask/plan/agent 模式
+
+本次把 ChatUI 的交互授权拆成 `ask` / `plan` / `agent` 三种模式，并默认使用
+`ask`。
+
+已实现：
+
+- `/api/solver/chat` 新增 `assistant_mode` 输入和输出回显。
+- `ask` 模式只回答和解释，不返回可执行 actions。
+- `plan` 模式返回结构化建议 actions，但前端不会自动分发。
+- `agent` 模式才调用既有安全分发器执行 `start_run`、`resume_run`、
+  `open_code_server` 或 `summarize_artifact`。
+- ChatUI 首页 composer 和 VS Code Web 右侧 Agent 面板都提供三段切换控件。
+- repo-local skill 升级到 `version: 0.3.1`，记录三种模式边界。
+
+边界：
+
+- `agent` 模式仍不能绕过 real LLM 显式确认、evaluator、selector、champion
+  selection 或 artifact schema。
+- `plan` 模式只展示动作计划，不代表用户已经授权执行。
+
 ## 2026-05-17 账号隔离工作空间与算法目录
 
 本次继续迭代 ChatUI / VS Code Web / 算法库三页结构，新增本地账号 namespace 和
@@ -24,7 +45,7 @@
   进入编辑态后仍只保留 VS Code Web iframe 和右侧 ChatUI。
 - `算法库` 页新增算法策略卡片，同时继续承载 benchmark/run/trace/artifact 工作台。
 - repo-local skill `.agents/skills/agenticsciml-chatui-operator/SKILL.md` 升级到
-  `version: 0.3.0`，记录本地账号 namespace、算法目录和 code-server workspace
+  `version: 0.3.1`，记录本地账号 namespace、算法目录和 code-server workspace
   边界。
 
 边界：
