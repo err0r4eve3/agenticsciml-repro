@@ -121,3 +121,30 @@ def test_code_server_url_uses_loopback_without_token(tmp_path: Path) -> None:
     assert payload["url"].startswith("http://127.0.0.1:8080/")
     assert "PASSWORD=" not in payload["url"]
     assert payload["workspace"].endswith("New project 11")
+
+
+def test_code_server_workspaces_list_independent_directories(tmp_path: Path) -> None:
+    client = TestClient(create_app())
+    run_dir = tmp_path / "web-test"
+    (run_dir / "champion").mkdir(parents=True)
+    (run_dir / "solutions" / "solution_000").mkdir(parents=True)
+    (run_dir / "run_metadata.json").write_text(
+        '{"run_state": "exported", "champion_node_id": "solution_000"}',
+        encoding="utf-8",
+    )
+
+    response = client.get(
+        "/api/code-server/workspaces",
+        params={"run_id": "web-test", "output_dir": str(tmp_path)},
+    )
+
+    assert response.status_code == 200
+    workspaces = {item["id"]: item for item in response.json()["workspaces"]}
+    assert workspaces["repo"]["workspace"].endswith("New project 11")
+    assert workspaces["run:web-test"]["workspace"] == str(run_dir.resolve())
+    assert workspaces["champion:web-test"]["workspace"] == str((run_dir / "champion").resolve())
+    assert workspaces["solution:web-test:solution_000"]["workspace"] == str(
+        (run_dir / "solutions" / "solution_000").resolve()
+    )
+    for item in workspaces.values():
+        assert "PASSWORD=" not in item["url"]

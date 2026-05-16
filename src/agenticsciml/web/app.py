@@ -216,6 +216,13 @@ def create_app() -> FastAPI:
     ) -> dict[str, object]:
         return _code_server_payload(scope, run_id=run_id, solution_id=solution_id, output_dir=output_dir)
 
+    @app.get("/api/code-server/workspaces")
+    def code_server_workspaces(
+        run_id: str | None = Query(default=None),
+        output_dir: str = Query(default="runs"),
+    ) -> dict[str, object]:
+        return {"workspaces": _code_server_workspaces(run_id=run_id, output_dir=output_dir)}
+
     @app.post("/api/solver/chat")
     def solver_chat(request: SolverChatRequest) -> dict[str, object]:
         return _solver_chat_response(request)
@@ -441,6 +448,8 @@ def _code_server_payload(
     base_url = os.environ.get("AGENTICSCIML_CODE_SERVER_URL", "http://127.0.0.1:8080").rstrip("/")
     return {
         "scope": scope,
+        "run_id": run_id,
+        "solution_id": solution_id,
         "workspace": str(workspace),
         "url": f"{base_url}/?folder={quote(str(workspace))}",
         "configured": bool(base_url),
@@ -473,6 +482,100 @@ def _workspace_for_scope(
     if not workspace.exists():
         raise HTTPException(status_code=404, detail=f"Workspace not found: {workspace}")
     return workspace.resolve(strict=True)
+
+
+def _code_server_workspaces(*, run_id: str | None, output_dir: str) -> list[dict[str, object]]:
+    workspaces = [
+        _workspace_option(
+            "repo",
+            label="Repository",
+            scope="repo",
+            run_id=None,
+            solution_id=None,
+            workspace=REPO_ROOT.resolve(),
+            status="ready",
+        )
+    ]
+    base = _resolve_output_dir(output_dir)
+    run_dirs: list[Path] = []
+    if run_id:
+        run_dirs = [_resolve_run_dir(run_id, base)]
+    elif base.exists():
+        run_dirs = [child.resolve() for child in sorted(base.iterdir(), reverse=True) if child.is_dir()]
+
+    for run_dir in run_dirs:
+        current_run_id = run_dir.name
+        metadata = _read_optional_json(run_dir / "run_metadata.json") or {}
+        workspaces.append(
+            _workspace_option(
+                f"run:{current_run_id}",
+                label=current_run_id,
+                scope="run",
+                run_id=current_run_id,
+                solution_id=None,
+                workspace=run_dir,
+                status=str(metadata.get("run_state") or _infer_run_status(run_dir, metadata)),
+            )
+        )
+        champion_dir = run_dir / "champion"
+        if champion_dir.exists():
+            workspaces.append(
+                _workspace_option(
+                    f"champion:{current_run_id}",
+                    label=f"{current_run_id} / champion",
+                    scope="solution",
+                    run_id=current_run_id,
+                    solution_id="champion",
+                    workspace=champion_dir.resolve(),
+                    status=str(metadata.get("champion_node_id") or "champion"),
+                )
+            )
+        solutions_dir = run_dir / "solutions"
+        if solutions_dir.exists():
+            for solution_dir in sorted(solutions_dir.iterdir()):
+                if not solution_dir.is_dir() or not solution_dir.name.startswith("solution_"):
+                    continue
+                workspaces.append(
+                    _workspace_option(
+                        f"solution:{current_run_id}:{solution_dir.name}",
+                        label=f"{current_run_id} / {solution_dir.name}",
+                        scope="solution",
+                        run_id=current_run_id,
+                        solution_id=solution_dir.name,
+                        workspace=solution_dir.resolve(),
+                        status="solution",
+                    )
+                )
+    return workspaces
+
+
+def _workspace_option(
+    workspace_id: str,
+    *,
+    label: str,
+    scope: WorkspaceScope,
+    run_id: str | None,
+    solution_id: str | None,
+    workspace: Path,
+    status: str,
+) -> dict[str, object]:
+    base_url = os.environ.get("AGENTICSCIML_CODE_SERVER_URL", "http://127.0.0.1:8080").rstrip("/")
+    return {
+        "id": workspace_id,
+        "label": label,
+        "scope": scope,
+        "run_id": run_id,
+        "solution_id": solution_id,
+        "workspace": str(workspace),
+        "status": status,
+        "url": f"{base_url}/?folder={quote(str(workspace))}",
+        "configured": bool(base_url),
+        "warnings": [
+            "Start code-server on 127.0.0.1 with password/token auth before opening this URL.",
+            "Do not expose this sidecar publicly or pass host secrets into its environment.",
+        ],
+        "command_hint": f"PASSWORD=<local-token> code-server --bind-addr 127.0.0.1:8080 {workspace}",
+    }
 
 
 def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:

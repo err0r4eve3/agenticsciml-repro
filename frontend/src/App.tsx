@@ -14,7 +14,6 @@ import {
   Play,
   RefreshCw,
   Send,
-  ShieldCheck,
   Sparkles,
   TerminalSquare
 } from "lucide-react";
@@ -104,10 +103,18 @@ type SolverResponse = {
 
 type CodeServerPayload = {
   scope: WorkspaceScope;
+  run_id?: string | null;
+  solution_id?: string | null;
   workspace: string;
   url: string;
   warnings: string[];
   command_hint: string;
+};
+
+type CodeWorkspaceOption = CodeServerPayload & {
+  id: string;
+  label: string;
+  status: string;
 };
 
 const api = {
@@ -169,10 +176,11 @@ const api = {
   }): Promise<SolverResponse> {
     return postJson<SolverResponse>("/api/solver/chat", body);
   },
-  async getCodeServer(scope: WorkspaceScope, runId: string | null): Promise<CodeServerPayload> {
-    const params = new URLSearchParams({ scope });
+  async getCodeWorkspaces(runId: string | null): Promise<CodeWorkspaceOption[]> {
+    const params = new URLSearchParams();
     if (runId) params.set("run_id", runId);
-    return getJson<CodeServerPayload>(`/api/code-server/url?${params.toString()}`);
+    const payload = await getJson<{ workspaces: CodeWorkspaceOption[] }>(`/api/code-server/workspaces?${params.toString()}`);
+    return payload.workspaces;
   }
 };
 
@@ -198,7 +206,8 @@ export function App() {
   ]);
   const [mode, setMode] = useState<RunMode>("mock");
   const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScope>("repo");
-  const [codeServer, setCodeServer] = useState<CodeServerPayload | null>(null);
+  const [codeWorkspaces, setCodeWorkspaces] = useState<CodeWorkspaceOption[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
   const [agentCollapsed, setAgentCollapsed] = useState(false);
   const [pendingRealAction, setPendingRealAction] = useState<SolverAction | null>(null);
   const [busy, setBusy] = useState(false);
@@ -235,13 +244,6 @@ export function App() {
   }, [activeRunId]);
 
   useEffect(() => {
-    api
-      .getCodeServer(workspaceScope, activeRunId)
-      .then(setCodeServer)
-      .catch(() => setCodeServer(null));
-  }, [workspaceScope, activeRunId]);
-
-  useEffect(() => {
     if (!activeRunId || !selectedArtifactPath) {
       setArtifactPayload(null);
       return;
@@ -263,6 +265,14 @@ export function App() {
   }, [events, traceFilter]);
   const runState = activeRun?.metadata?.run_state ?? activeRun?.status ?? "idle";
   const qualityGate = activeRun?.trace_summary?.quality_gate?.passed;
+  const selectedWorkspace = useMemo(
+    () => codeWorkspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? null,
+    [codeWorkspaces, selectedWorkspaceId]
+  );
+
+  useEffect(() => {
+    refreshCodeWorkspaces().catch((exc) => setError(String(exc)));
+  }, [activeRunId, runs.length]);
 
   async function refreshRuns() {
     const payload = await api.getRuns();
@@ -280,6 +290,13 @@ export function App() {
     setError(null);
     await refreshRuns();
     await refreshActiveRun();
+    await refreshCodeWorkspaces();
+  }
+
+  async function refreshCodeWorkspaces() {
+    const workspaces = await api.getCodeWorkspaces(activeRunId);
+    setCodeWorkspaces(workspaces);
+    setSelectedWorkspaceId((current) => (current && workspaces.some((workspace) => workspace.id === current) ? current : null));
   }
 
   async function startRun(nextMode: RunMode = mode, background = false) {
@@ -392,6 +409,7 @@ export function App() {
           setWorkspaceScope(nextScope);
         }
         setActivePage("ide");
+        setSelectedWorkspaceId(null);
       }
       if (action.type === "summarize_artifact") {
         const artifactPath = action.payload?.path;
@@ -413,9 +431,23 @@ export function App() {
     setSelectedArtifactPath("");
   }
 
+  function selectPage(page: PageKey) {
+    setActivePage(page);
+    if (page === "ide") {
+      setSelectedWorkspaceId(null);
+      refreshCodeWorkspaces().catch((exc) => setError(String(exc)));
+    }
+  }
+
+  function openWorkspace(workspace: CodeWorkspaceOption) {
+    setWorkspaceScope(workspace.scope);
+    if (workspace.run_id) setActiveRunId(workspace.run_id);
+    setSelectedWorkspaceId(workspace.id);
+  }
+
   return (
     <main className={`workbench ${agentCollapsed ? "agent-is-collapsed" : ""}`}>
-      <FunctionNav activePage={activePage} onSelectPage={setActivePage} />
+      <FunctionNav activePage={activePage} onSelectPage={selectPage} />
       {activePage === "chat" ? (
         <section className="chatgpt-page" aria-label="ChatUI 页面">
           <PageHeader title="AgenticSciML" subtitle="ChatUI" />
@@ -425,7 +457,7 @@ export function App() {
             mainPrompt={mainPrompt}
             messages={messages}
             onChange={setMainPrompt}
-            onOpenIde={() => setActivePage("ide")}
+            onOpenIde={() => selectPage("ide")}
             onOpenLibrary={() => setActivePage("library")}
             onQuickPrompt={(text, options) => submitAgentMessage(text, options)}
             onSubmit={sendMainPrompt}
@@ -433,29 +465,32 @@ export function App() {
         </section>
       ) : null}
       {activePage === "ide" ? (
-        <section className="ide-page" aria-label="AI IDE 页面">
-          <div className="ide-workspace">
-            <PageHeader title="VS Code Web" subtitle="code-server sidecar" />
-            {error ? <div className="error-line">{error}</div> : null}
-            <CodeView
+        <section className={selectedWorkspace ? "ide-page workspace-open" : "ide-page workspace-select"} aria-label="AI IDE 页面">
+          {selectedWorkspace ? (
+            <>
+              <CodeView codeServer={selectedWorkspace} />
+              <AgentPanel
+                collapsed={agentCollapsed}
+                message={message}
+                messages={messages}
+                pendingRealAction={pendingRealAction}
+                busy={busy}
+                onChangeMessage={setMessage}
+                onSend={sendMessage}
+                onToggle={() => setAgentCollapsed((current) => !current)}
+                onDismissRealAction={() => setPendingRealAction(null)}
+              />
+            </>
+          ) : (
+            <WorkspaceSelector
               activeRunId={activeRunId}
-              codeServer={codeServer}
-              scope={workspaceScope}
-              onScopeChange={setWorkspaceScope}
+              busy={busy}
+              error={error}
+              workspaces={codeWorkspaces}
+              onOpenWorkspace={openWorkspace}
+              onRefresh={refreshCodeWorkspaces}
             />
-          </div>
-          <AgentPanel
-            collapsed={agentCollapsed}
-            message={message}
-            messages={messages}
-            mode={mode}
-            pendingRealAction={pendingRealAction}
-            busy={busy}
-            onChangeMessage={setMessage}
-            onSend={sendMessage}
-            onToggle={() => setAgentCollapsed((current) => !current)}
-            onDismissRealAction={() => setPendingRealAction(null)}
-          />
+          )}
         </section>
       ) : null}
       {activePage === "library" ? (
@@ -1017,76 +1052,93 @@ function ArtifactsView({
 }
 
 function CodeView({
-  activeRunId,
-  codeServer,
-  scope,
-  onScopeChange
+  codeServer
 }: {
-  activeRunId: string | null;
   codeServer: CodeServerPayload | null;
-  scope: WorkspaceScope;
-  onScopeChange: (scope: WorkspaceScope) => void;
 }) {
   return (
-    <div className="code-workspace">
-      <section className="section-head">
+    <section className="vscode-frame ide-vscode-frame">
+      {codeServer ? (
+        <iframe className="vscode-iframe" src={codeServer.url} title="VS Code Web" />
+      ) : (
+        <div className="vscode-empty">
+          <TerminalSquare size={22} />
+          <p>请选择工作空间。</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function WorkspaceSelector({
+  activeRunId,
+  busy,
+  error,
+  workspaces,
+  onOpenWorkspace,
+  onRefresh
+}: {
+  activeRunId: string | null;
+  busy: boolean;
+  error: string | null;
+  workspaces: CodeWorkspaceOption[];
+  onOpenWorkspace: (workspace: CodeWorkspaceOption) => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <section className="workspace-selector" aria-label="工作空间选择">
+      <header className="workspace-selector-head">
         <div>
-          <p className="eyebrow">VS Code Web</p>
-          <h2>code-server sidecar</h2>
+          <h1>工作空间</h1>
+          <span>{activeRunId ? `active run: ${activeRunId}` : "选择一个独立代码目录进入 AI IDE"}</span>
         </div>
-        <label className="compact-field">
-          <span>Workspace</span>
-          <select value={scope} onChange={(event) => onScopeChange(event.target.value as WorkspaceScope)}>
-            <option value="repo">repo</option>
-            <option value="run">run</option>
-            <option value="solution">solution</option>
-          </select>
-        </label>
-      </section>
-      <section className="vscode-frame">
-        {codeServer ? (
-          <iframe className="vscode-iframe" src={codeServer.url} title="VS Code Web" />
-        ) : (
-          <div className="vscode-empty">
-            <TerminalSquare size={22} />
-            <p>选择 active run 后可打开 run 或 solution workspace。</p>
-          </div>
-        )}
-      </section>
-      <section className="code-block">
-        <div className="code-block-head">
-          <TerminalSquare size={18} />
-          <h3>Workspace</h3>
-        </div>
-        <div className="workspace-path">{codeServer?.workspace ?? "选择 active run 后可打开 run 或 solution workspace。"}</div>
-        <a
-          aria-disabled={!codeServer}
-          className={codeServer ? "code-link" : "code-link disabled"}
-          href={codeServer?.url ?? "#"}
-          rel="noreferrer"
-          target="_blank"
-        >
-          Open VS Code Web
-          <ChevronRight size={15} />
-        </a>
-      </section>
-      <section className="code-block compact">
-        <div className="code-block-head">
-          <ShieldCheck size={18} />
-          <h3>Sidecar boundary</h3>
-        </div>
-        <pre>{codeServer?.command_hint ?? "PASSWORD=<local-token> code-server --bind-addr 127.0.0.1:8080 <workspace>"}</pre>
-        <ul>
-          {(codeServer?.warnings ?? [
-            "code-server 必须单独启动在 127.0.0.1。",
-            "ChatUI 不携带 token，也不自动绕过鉴权。"
-          ]).map((warning) => (
-            <li key={warning}>{warning}</li>
-          ))}
-          {!activeRunId && scope !== "repo" ? <li>run / solution scope 需要先选择 active run。</li> : null}
-        </ul>
-      </section>
-    </div>
+        <button className="icon-text-button" disabled={busy} type="button" onClick={onRefresh}>
+          <RefreshCw size={15} />
+          刷新
+        </button>
+      </header>
+      {error ? <div className="error-line inline">{error}</div> : null}
+      <div className="workspace-table">
+        <table>
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>类型</th>
+              <th>代码目录</th>
+              <th>状态</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {workspaces.map((workspace) => (
+              <tr key={workspace.id} onClick={() => onOpenWorkspace(workspace)}>
+                <td>{workspace.label}</td>
+                <td>{workspace.scope}</td>
+                <td>{workspace.workspace}</td>
+                <td>{workspace.status}</td>
+                <td>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onOpenWorkspace(workspace);
+                    }}
+                  >
+                    打开
+                    <ChevronRight size={15} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {workspaces.length === 0 ? (
+              <tr>
+                <td colSpan={5}>暂无可用工作空间。</td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -1095,7 +1147,6 @@ function AgentPanel({
   collapsed,
   message,
   messages,
-  mode,
   pendingRealAction,
   onChangeMessage,
   onDismissRealAction,
@@ -1106,7 +1157,6 @@ function AgentPanel({
   collapsed: boolean;
   message: string;
   messages: AgentMessage[];
-  mode: RunMode;
   pendingRealAction: SolverAction | null;
   onChangeMessage: (value: string) => void;
   onDismissRealAction: () => void;
@@ -1127,23 +1177,19 @@ function AgentPanel({
     <aside className="agent-panel" aria-label="Agent 面板">
       <header className="agent-header">
         <div>
-          <p className="eyebrow">Agent</p>
-          <h2>实验操作员</h2>
+          <p className="eyebrow">AI</p>
+          <h2>随时发问</h2>
         </div>
         <button aria-label="收起 Agent 面板" className="icon-button" type="button" onClick={onToggle}>
           <PanelRightClose size={18} />
         </button>
       </header>
-      <div className="agent-mode">
-        <StatusBadge tone={mode === "real" ? "bad" : mode === "dry_run" ? "info" : "good"}>{mode}</StatusBadge>
-        <span>受控 action 分发</span>
-      </div>
       {pendingRealAction ? (
         <div className="pending-action">
           <AlertTriangle size={16} />
           <div>
             <strong>Real mode action 已拦截</strong>
-            <p>真实 LLM 运行需要显式凭据、预算和 claim boundary 检查。当前不会自动执行。</p>
+            <p>真实模型动作需要显式凭据、预算和边界检查。当前不会自动执行。</p>
             <button type="button" onClick={onDismissRealAction}>
               Dismiss
             </button>
@@ -1163,7 +1209,7 @@ function AgentPanel({
         <input
           value={message}
           onChange={(event) => onChangeMessage(event.target.value)}
-          placeholder="例如：跑 mock / 解释 trace / 打开 champion"
+          placeholder="请输入你的问题"
         />
         <button aria-label="发送" disabled={busy} type="submit">
           <Send size={15} />

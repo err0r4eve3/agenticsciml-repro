@@ -29,12 +29,14 @@ PYTHONPATH=src uv run --python 3.11 --extra web python -m agenticsciml.cli web -
 
 ChatUI 前端是单页本地工作台，不引入路由层，但用左侧功能栏做页内切换：
 
-- 左侧功能栏选择 `ChatUI` 或 `AI IDE`。
+- 左侧功能栏选择 `ChatUI`、`VS Code` 或 `算法库`。
 - `ChatUI` 页是纯对话界面，接近 ChatGPT 网页版：顶部只做页面标识，中间是
   对话流，底部是主输入框；不显示 benchmark、run、quality gate、trace 或
   artifact 工作台。
-- `VS Code Web` 页采用 AI IDE 布局：左侧为 VS Code Web / code-server
-  workspace，右侧为可收起 ChatUI Agent 侧边栏；不显示实验工作台控件。
+- `VS Code` 页先显示工作空间选择列表，风格参考 UnitaryLab 的 workspace
+  页：用户选择一个独立代码目录后进入 AI IDE。编辑态只保留 VS Code Web
+  iframe 和右侧可收起 ChatUI 侧边栏，不显示 benchmark、run、quality gate、
+  artifact、启动命令或 sidecar 说明块。
 - `算法库` 页承载实验工作台：benchmark、运行模式、run/gate 状态、run
   dashboard、run 列表、leaderboard、trace preview 和 artifact 浏览。
 - ChatUI 自然语言输入仍调用 `/api/solver/chat`；`open_code_server` action 会切到
@@ -63,9 +65,10 @@ workspace、最小权限和 secret scanning。即使公网部署，ChatUI 也不
 password、API key、cookie、真实 `HOME`、浏览器 profile 或私有数据集路径放进 URL
 或消息体。
 
-`VS Code Web` 页显示 `repo`、`run` 或 `solution` workspace 路径、启动命令、VS
-Code Web iframe 和新标签页打开链接。ChatUI 不携带 code-server token，不自动
-启动 sidecar，iframe 也必须经过 code-server 自身鉴权。
+`VS Code` 页通过 `GET /api/code-server/workspaces` 列出可打开的独立代码目录：
+repo 根目录、run 目录、champion 目录和各 `solutions/solution_*` 目录。选择后
+iframe 使用对应 `?folder=<workspace>` 打开该目录。ChatUI 不携带 code-server
+token，不自动启动 sidecar，iframe 也必须经过 code-server 自身鉴权。
 
 ## API 边界
 
@@ -77,6 +80,8 @@ Code Web iframe 和新标签页打开链接。ChatUI 不携带 code-server token
 - `GET /api/runs/{id}/artifacts/*`：只读 UTF-8 artifact，拒绝路径逃逸和 symlink 逃逸。
 - `POST /api/solver/chat`：内部算法 tool 入口，只返回结构化 actions、warnings、artifact refs 和 trace refs；它不是 MCP server。
 - `GET /api/code-server/url`：生成 code-server workspace 链接，不携带 token。
+- `GET /api/code-server/workspaces`：列出 repo/run/champion/solution workspace
+  目录和对应 code-server URL，不携带 token。
 
 未来如果接入 OpenAI Apps SDK / MCP，应新增 thin wrapper，保留 `/api/solver/chat`
 作为内部 endpoint。wrapper 需要列出 tools、声明 JSON Schema input/output、

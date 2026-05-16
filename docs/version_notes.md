@@ -28,6 +28,14 @@
 - Pro 输出只作为外部建议；最终规则以仓库源码、测试、官方文档和本次 checked-in
   文档为准。
 
+同日后续 UI 调整：
+
+- `VS Code` 页改为工作空间选择入口，参考 UnitaryLab workspace 页的信息结构。
+- 新增 `GET /api/code-server/workspaces`，列出 repo、run、champion 和
+  `solutions/solution_*` 的独立代码目录及对应 code-server URL。
+- 选择 workspace 后，AI IDE 编辑态只显示 VS Code Web iframe 和右侧 ChatUI
+  侧边栏，不再显示实验工作台、workspace 说明块、启动命令或 sidecar 边界卡。
+
 ## 2026-05-16 ChatUI 实验操作台
 
 新增本地优先 Web 控制面：[ChatUI 实验操作台](chatui_console.md)。
