@@ -85,6 +85,10 @@ repo-local skill 位于 `.agents/skills/agenticsciml-chatui-operator/SKILL.md`�
 - `agent` 才允许前端调用安全分发器执行受控 actions；real LLM 仍需显式确认。
 - `agent` 必须带当前 `account_id`，并且不能操作 shared repo workspace 或跨账号
   workspace。
+- account-scoped run/action 请求必须使用账号目录和 benchmark catalog 名称；不得通过
+  `output_dir`、`benchmark_dir` 或 path-like benchmark 指向账号 namespace 外部。
+- Web API 真实模型运行需要双重确认：请求体 `real_confirmed=true`，且服务端环境变量
+  `AGENTICSCIML_ENABLE_REAL_WEB_RUNS=1` 已开启。
 
 模式默认模型设置：
 
@@ -135,7 +139,7 @@ MCP wrapper 必须具备：
 | `agenticsciml.get_run_status` | 读取 run metadata、status、gate、artifact index | true | false | false | none |
 | `agenticsciml.summarize_artifact` | 总结已有 artifact，不修改文件 | true | false | false | none |
 | `agenticsciml.validate_claim` | 检查一句 claim 是否被证据支持 | true | false | false | none |
-| `agenticsciml.start_run` | 通过 orchestrator 启动受控 run | false | false | false | mock: none/low；real: explicit |
+| `agenticsciml.start_run` | 通过 orchestrator 启动受控 run | false | false | false | mock: none/low；real: explicit + server flag |
 | `agenticsciml.resume_run` | 从有效 checkpoint 恢复 run | false | false | false | failed/real: explicit |
 | `agenticsciml.open_code_server` | 返回受控 workspace 打开指令，不返回凭据 | false | false | true | explicit |
 

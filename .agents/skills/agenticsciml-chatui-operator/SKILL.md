@@ -35,6 +35,9 @@ artifacts remain the source of truth.
 - `agent` mode requires `account_id` and must operate only inside the current
   account's `account`, `run`, or `solution` workspaces. It must not open or
   mutate the shared repo workspace.
+- Account-scoped Web actions must stay in the account namespace. Do not pass
+  custom `output_dir`, `benchmark_dir`, or path-like benchmark values for those
+  actions.
 - `account_id` is a local workspace namespace, not authentication or a
   multi-tenant security boundary.
 - `GET /api/algorithms` exposes planning strategies, prompt seeds, and some
@@ -108,6 +111,8 @@ The assistant must not:
 Real LLM mode is opt-in only. Before enabling it, verify:
 
 - explicit mode selection;
+- `real_confirmed=true` is present on the Web API run/resume request;
+- the server has `AGENTICSCIML_ENABLE_REAL_WEB_RUNS=1`;
 - required environment variables are present without printing values;
 - cost/rate-limit policy is configured;
 - traces and artifacts are written under the run directory;
@@ -151,6 +156,10 @@ When artifacts are absent or inconsistent, say so directly.
 
 code-server may be opened only as a sidecar editor for the approved current
 account workspace or solution workspace.
+
+Shared repo workspace links are disabled by default in the Web API. Only local
+development sessions that explicitly set `AGENTICSCIML_ALLOW_REPO_WORKSPACE=1`
+may expose the repository root through code-server URL/workspace endpoints.
 
 When `account_id` is present, prefer account-owned directories under
 `.agenticsciml/accounts/<account_id>/` over the shared repo root. This keeps

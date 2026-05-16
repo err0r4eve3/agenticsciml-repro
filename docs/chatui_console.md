@@ -64,7 +64,9 @@ PASSWORD=<local-token> code-server --bind-addr 127.0.0.1:8080 /path/to/workspace
 ```
 
 默认 API 生成 `http://127.0.0.1:8080/?folder=<workspace>` 链接。可用
-`AGENTICSCIML_CODE_SERVER_URL` 覆盖 base URL。
+`AGENTICSCIML_CODE_SERVER_URL` 覆盖 base URL。shared repo workspace 默认不通过
+Web API 暴露；本地开发需要打开仓库根目录时，必须显式设置
+`AGENTICSCIML_ALLOW_REPO_WORKSPACE=1`。
 
 公网部署只能作为显式配置的 hardened sidecar：必须有 TLS、password auth、受限
 workspace、最小权限和 secret scanning。即使公网部署，ChatUI 也不得把 token、
@@ -72,10 +74,11 @@ password、API key、cookie、真实 `HOME`、浏览器 profile 或私有数据�
 或消息体。
 
 `VS Code` 页通过 `GET /api/code-server/workspaces` 列出可打开的独立代码目录。
-未传 `account_id` 时保留旧兼容行为：列出 repo 根目录、run 目录、champion 目录和
-各 `solutions/solution_*` 目录。传入 `account_id` 时只列出该账号 namespace 下的
-`workspace/`、`runs/<run_id>/` 和 `runs/<run_id>/solutions/solution_*` 目录；
-不混入 shared repo 根目录。选择后 iframe 使用对应 `?folder=<workspace>` 打开该
+未传 `account_id` 时只列出 shared run 目录、champion 目录和各
+`solutions/solution_*` 目录；只有 `AGENTICSCIML_ALLOW_REPO_WORKSPACE=1` 时才会额外
+列出 repo 根目录。传入 `account_id` 时只列出该账号 namespace 下的 `workspace/`、
+`runs/<run_id>/` 和 `runs/<run_id>/solutions/solution_*` 目录；不混入 shared repo
+根目录。选择后 iframe 使用对应 `?folder=<workspace>` 打开该
 目录。ChatUI 不携带 code-server token，不自动启动 sidecar，iframe 也必须经过
 code-server 自身鉴权。
 
@@ -89,7 +92,9 @@ code-server auth、系统用户/容器权限和 secret scanning 提供真实访�
   代表已经通过 evaluator 的实现。
 - `GET /api/accounts` / `POST /api/accounts`：列出或创建本地账号 namespace；
   仅写入本地目录和非密钥元数据，不提供公网认证。
-- `POST /api/runs`：启动 mock/real/dry-run run；real mode 仍需显式凭据和预算边界。
+- `POST /api/runs`：启动 mock/real/dry-run run；real mode 需要请求体
+  `real_confirmed=true`，并且服务端必须设置
+  `AGENTICSCIML_ENABLE_REAL_WEB_RUNS=1`，同时仍需显式凭据和预算边界。
 - `POST /api/runs/{id}/resume`：以已有 run id 恢复。
 - `GET /api/runs/{id}`：读取 metadata、leaderboard、trace summary 和 artifact index。
 - `GET /api/runs/{id}/events`：SSE 输出 trace events。
@@ -104,9 +109,9 @@ code-server auth、系统用户/容器权限和 secret scanning 提供真实访�
 
 `GET /api/runs`、`POST /api/runs`、`GET /api/runs/{id}`、
 `GET /api/runs/{id}/events`、artifact API、code-server API 和
-`/api/solver/chat` 都接受可选 `account_id`。未传时沿用旧的 shared `runs/`；
-传入时默认使用 `.agenticsciml/accounts/<account_id>/runs/`，从而让不同本地账号
-拥有独立 run/code 目录。
+`/api/solver/chat` 都接受可选 `account_id`。未传时沿用 shared `runs/`；传入时强制
+使用 `.agenticsciml/accounts/<account_id>/runs/`，并拒绝自定义 `output_dir`、
+`benchmark_dir` 或 path-like benchmark，从而让不同本地账号拥有独立 run/code 目录。
 
 `/api/solver/chat` 还接受 `assistant_mode`：
 

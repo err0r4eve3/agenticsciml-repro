@@ -2,6 +2,25 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-17 Web API 边界加固
+
+本次收紧 ChatUI / VS Code Web 远端部署前最关键的控制面边界：
+
+- `POST /api/runs` 的 real mode 现在需要请求体 `real_confirmed=true`，且服务端必须设置
+  `AGENTICSCIML_ENABLE_REAL_WEB_RUNS=1`。
+- account-scoped Web 请求强制使用 `.agenticsciml/accounts/<account_id>/runs/`，并拒绝
+  自定义 `output_dir`、`benchmark_dir` 或 path-like benchmark。
+- shared repo code-server workspace 默认禁用；本地开发要显式设置
+  `AGENTICSCIML_ALLOW_REPO_WORKSPACE=1`。
+- 前端 real action 面板新增显式确认按钮，确认后才会向后端发送
+  `real_confirmed=true`。
+
+边界：
+
+- 账号 namespace 仍不是认证/授权系统；公开部署仍需要反向代理、code-server auth、系统
+  用户/容器隔离和 secret 管理。
+- 这些改动不改变 orchestrator、evaluator、selector、champion selection 或 artifact schema。
+
 ## 2026-05-17 论文算法 Reference Primitives
 
 新增文档：[论文算法 Reference Primitives](paper_algorithm_primitives.md)。

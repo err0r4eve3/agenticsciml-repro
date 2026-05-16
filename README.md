@@ -81,6 +81,15 @@ auth before opening the VS Code Web link:
 PASSWORD=<local-token> code-server --bind-addr 127.0.0.1:8080 /path/to/workspace
 ```
 
+The Web API hardens deployment-facing defaults:
+
+- account-scoped requests are forced into `.agenticsciml/accounts/<account_id>/`
+  and must use benchmark catalog names;
+- shared repo code-server workspace links require
+  `AGENTICSCIML_ALLOW_REPO_WORKSPACE=1`;
+- real Web runs require both request-level `real_confirmed=true` and server-side
+  `AGENTICSCIML_ENABLE_REAL_WEB_RUNS=1`.
+
 Run a mock ablation suite:
 
 ```bash

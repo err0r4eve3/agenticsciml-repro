@@ -69,6 +69,7 @@ class RunStartRequest(BaseModel):
     selector_vote_count: int = Field(default=3, ge=1)
     resume: bool = False
     background: bool = False
+    real_confirmed: bool = False
 
 
 class SolverChatRequest(BaseModel):
@@ -154,9 +155,14 @@ def create_app() -> FastAPI:
 
     @app.post("/api/runs")
     def start_run(request: RunStartRequest) -> dict[str, object]:
+        _validate_run_start_request(request)
         run_id = request.experiment_id or _default_experiment_id(request.mode)
         output_dir = _resolve_output_dir(request.output_dir, account_id=request.account_id)
-        benchmark_dir = _resolve_benchmark_dir(request.benchmark, request.benchmark_dir)
+        benchmark_dir = _resolve_benchmark_dir(
+            request.benchmark,
+            request.benchmark_dir,
+            account_id=request.account_id,
+        )
         benchmark_spec = benchmark_for_path(benchmark_dir)
         benchmark_name = benchmark_spec.name if benchmark_spec else benchmark_dir.name
         run_dir = output_dir / run_id
@@ -334,6 +340,20 @@ def _store_record(record: RunRecord) -> None:
         _RUNS[_record_key(record.run_dir)] = record
 
 
+def _validate_run_start_request(request: RunStartRequest) -> None:
+    if request.mode == "real":
+        if not request.real_confirmed:
+            raise HTTPException(
+                status_code=400,
+                detail="real mode requires real_confirmed=true on the run request",
+            )
+        if not _real_web_runs_enabled():
+            raise HTTPException(
+                status_code=403,
+                detail="real mode is disabled for the Web API; set AGENTICSCIML_ENABLE_REAL_WEB_RUNS=1 on the server",
+            )
+
+
 def _record_for(run_dir: Path) -> RunRecord | None:
     with _RUNS_LOCK:
         return _RUNS.get(_record_key(run_dir))
@@ -378,6 +398,11 @@ def _infer_run_status(run_dir: Path, metadata: dict[str, Any] | None) -> str:
 def _resolve_output_dir(value: str, *, account_id: str | None = None) -> Path:
     if account_id and value == "runs":
         return _account_runs_dir(account_id)
+    if account_id:
+        raise HTTPException(
+            status_code=400,
+            detail="account-scoped Web requests must use the account runs directory",
+        )
     path = Path(value).expanduser()
     if not path.is_absolute():
         path = REPO_ROOT / path
@@ -391,7 +416,22 @@ def _resolve_run_dir(run_id: str, output_dir: Path) -> Path:
     return run_dir.resolve()
 
 
-def _resolve_benchmark_dir(benchmark: str, benchmark_dir: str | None) -> Path:
+def _resolve_benchmark_dir(
+    benchmark: str,
+    benchmark_dir: str | None,
+    *,
+    account_id: str | None = None,
+) -> Path:
+    if account_id and benchmark_dir:
+        raise HTTPException(
+            status_code=400,
+            detail="account-scoped Web requests must use benchmark catalog names, not benchmark_dir paths",
+        )
+    if account_id and _is_path_like_benchmark(benchmark):
+        raise HTTPException(
+            status_code=400,
+            detail="account-scoped Web requests must use benchmark catalog names, not local paths",
+        )
     if benchmark_dir:
         path = Path(benchmark_dir).expanduser()
         if not path.is_absolute():
@@ -406,6 +446,19 @@ def _resolve_benchmark_dir(benchmark: str, benchmark_dir: str | None) -> Path:
         if spec.name == benchmark:
             return spec.path.resolve()
     raise HTTPException(status_code=404, detail=f"Unknown benchmark: {benchmark}")
+
+
+def _is_path_like_benchmark(value: str) -> bool:
+    candidate = Path(value).expanduser()
+    return candidate.is_absolute() or "/" in value or "\\" in value or value in {".", ".."}
+
+
+def _real_web_runs_enabled() -> bool:
+    return os.environ.get("AGENTICSCIML_ENABLE_REAL_WEB_RUNS") == "1"
+
+
+def _repo_workspace_enabled() -> bool:
+    return os.environ.get("AGENTICSCIML_ALLOW_REPO_WORKSPACE") == "1"
 
 
 def _resolve_account_id(value: str | None) -> str:
@@ -623,6 +676,11 @@ def _workspace_for_scope(
     if scope == "account":
         return _account_workspace_dir(account_id)
     if scope == "repo":
+        if not _repo_workspace_enabled():
+            raise HTTPException(
+                status_code=403,
+                detail="shared repo workspace is disabled for the Web API; set AGENTICSCIML_ALLOW_REPO_WORKSPACE=1 for local development",
+            )
         return REPO_ROOT.resolve()
     if not run_id:
         raise HTTPException(status_code=400, detail="run_id is required for run or solution workspace scope")
@@ -662,18 +720,20 @@ def _code_server_workspaces(
         ]
     else:
         resolved_account_id = None
-        workspaces = [
-            _workspace_option(
-                "repo",
-                label="Repository",
-                scope="repo",
-                account_id=None,
-                run_id=None,
-                solution_id=None,
-                workspace=REPO_ROOT.resolve(),
-                status="ready",
+        workspaces = []
+        if _repo_workspace_enabled():
+            workspaces.append(
+                _workspace_option(
+                    "repo",
+                    label="Repository",
+                    scope="repo",
+                    account_id=None,
+                    run_id=None,
+                    solution_id=None,
+                    workspace=REPO_ROOT.resolve(),
+                    status="ready",
+                )
             )
-        ]
     base = _resolve_output_dir(output_dir, account_id=resolved_account_id)
     run_dirs: list[Path] = []
     if run_id:

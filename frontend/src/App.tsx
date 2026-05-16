@@ -206,6 +206,7 @@ const api = {
     max_iterations?: number;
     parallel_mutations?: number;
     background?: boolean;
+    real_confirmed?: boolean;
   }): Promise<RunSummary> {
     const id = body.experiment_id ?? `web-${new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14)}`;
     await postJson<unknown>("/api/runs", {
@@ -215,11 +216,18 @@ const api = {
       experiment_id: id,
       max_iterations: body.max_iterations ?? 0,
       parallel_mutations: body.parallel_mutations ?? 1,
-      background: body.background ?? false
+      background: body.background ?? false,
+      real_confirmed: body.real_confirmed ?? false
     });
     return api.getRun(id, body.account_id);
   },
-  async resumeRun(runId: string, benchmark: string, mode: RunMode, accountId: string): Promise<RunSummary> {
+  async resumeRun(
+    runId: string,
+    benchmark: string,
+    mode: RunMode,
+    accountId: string,
+    realConfirmed = false
+  ): Promise<RunSummary> {
     await postJson<unknown>(`/api/runs/${encodeURIComponent(runId)}/resume`, {
       benchmark,
       mode,
@@ -227,7 +235,8 @@ const api = {
       experiment_id: runId,
       max_iterations: 1,
       parallel_mutations: 1,
-      background: true
+      background: true,
+      real_confirmed: realConfirmed
     });
     return api.getRun(runId, accountId);
   },
@@ -407,8 +416,8 @@ export function App() {
     setSelectedWorkspaceId((current) => (current && workspaces.some((workspace) => workspace.id === current) ? current : null));
   }
 
-  async function startRun(nextMode: RunMode = mode, background = false) {
-    if (nextMode === "real") {
+  async function startRun(nextMode: RunMode = mode, background = false, realConfirmed = false) {
+    if (nextMode === "real" && !realConfirmed) {
       setPendingRealAction({
         type: "start_run",
         payload: { benchmark: selectedBenchmark, mode: "real", background }
@@ -425,7 +434,8 @@ export function App() {
         account_id: activeAccountId,
         max_iterations: 0,
         parallel_mutations: 1,
-        background
+        background,
+        real_confirmed: realConfirmed
       });
       setActiveRun(run);
       setActiveRunId(run.run_id);
@@ -547,6 +557,29 @@ export function App() {
     }
   }
 
+  async function confirmRealAction() {
+    const action = pendingRealAction;
+    if (!action) return;
+    setPendingRealAction(null);
+    if (action.type === "start_run") {
+      await startRun("real", Boolean(action.payload?.background), true);
+    }
+    if (action.type === "resume_run" && action.run_id) {
+      setBusy(true);
+      setError(null);
+      try {
+        const run = await api.resumeRun(action.run_id, selectedBenchmark, "real", activeAccountId, true);
+        setActiveRun(run);
+        setActiveRunId(run.run_id);
+        await refreshRuns();
+      } catch (exc) {
+        setError(String(exc));
+      } finally {
+        setBusy(false);
+      }
+    }
+  }
+
   function actionBelongsToActiveAccount(action: SolverAction) {
     const actionAccountId = action.payload?.account_id;
     if (typeof actionAccountId === "string" && actionAccountId !== activeAccountId) {
@@ -640,6 +673,7 @@ export function App() {
                 busy={busy}
                 onAssistantModeChange={setAssistantMode}
                 onChangeMessage={setMessage}
+                onConfirmRealAction={confirmRealAction}
                 onSend={sendMessage}
                 onToggle={() => setAgentCollapsed((current) => !current)}
                 onDismissRealAction={() => setPendingRealAction(null)}
@@ -1432,6 +1466,7 @@ function AgentPanel({
   pendingRealAction,
   onAssistantModeChange,
   onChangeMessage,
+  onConfirmRealAction,
   onDismissRealAction,
   onSend,
   onToggle
@@ -1445,6 +1480,7 @@ function AgentPanel({
   pendingRealAction: SolverAction | null;
   onAssistantModeChange: (mode: AssistantMode) => void;
   onChangeMessage: (value: string) => void;
+  onConfirmRealAction: () => void;
   onDismissRealAction: () => void;
   onSend: (event: FormEvent) => void;
   onToggle: () => void;
@@ -1477,6 +1513,9 @@ function AgentPanel({
           <div>
             <strong>Real mode action 已拦截</strong>
             <p>真实模型动作需要显式凭据、预算和边界检查。当前不会自动执行。</p>
+            <button type="button" onClick={onConfirmRealAction}>
+              显式确认执行
+            </button>
             <button type="button" onClick={onDismissRealAction}>
               Dismiss
             </button>

@@ -90,6 +90,100 @@ def test_web_mock_run_writes_required_artifacts(tmp_path: Path) -> None:
     assert payload["trace_summary"]["quality_gate"]["passed"] is True
 
 
+def test_web_real_run_requires_server_flag_and_confirmation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENTICSCIML_ACCOUNTS_ROOT", str(tmp_path / "accounts"))
+    monkeypatch.delenv("AGENTICSCIML_ENABLE_REAL_WEB_RUNS", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    client = TestClient(create_app())
+
+    disabled = client.post(
+        "/api/runs",
+        json={
+            "benchmark": "function_approx",
+            "mode": "real",
+            "account_id": "alice",
+            "experiment_id": "real-web-test",
+            "real_confirmed": True,
+        },
+    )
+    assert disabled.status_code == 403
+    assert "disabled" in disabled.json()["detail"]
+
+    monkeypatch.setenv("AGENTICSCIML_ENABLE_REAL_WEB_RUNS", "1")
+    unconfirmed = client.post(
+        "/api/runs",
+        json={
+            "benchmark": "function_approx",
+            "mode": "real",
+            "account_id": "alice",
+            "experiment_id": "real-web-test",
+        },
+    )
+    assert unconfirmed.status_code == 400
+    assert "real_confirmed" in unconfirmed.json()["detail"]
+
+    missing_key = client.post(
+        "/api/runs",
+        json={
+            "benchmark": "function_approx",
+            "mode": "real",
+            "account_id": "alice",
+            "experiment_id": "real-web-missing-key",
+            "real_confirmed": True,
+        },
+    )
+    assert missing_key.status_code == 200
+    missing_key_payload = missing_key.json()
+    assert missing_key_payload["status"] == "failed"
+    assert "OPENAI_API_KEY" in missing_key_payload["record"]["error"]
+
+
+def test_account_scoped_runs_reject_path_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTICSCIML_ACCOUNTS_ROOT", str(tmp_path / "accounts"))
+    client = TestClient(create_app())
+
+    output_override = client.post(
+        "/api/runs",
+        json={
+            "benchmark": "function_approx",
+            "mode": "dry_run",
+            "account_id": "alice",
+            "experiment_id": "path-override",
+            "output_dir": str(tmp_path),
+        },
+    )
+    assert output_override.status_code == 400
+    assert "account runs directory" in output_override.json()["detail"]
+
+    benchmark_dir_override = client.post(
+        "/api/runs",
+        json={
+            "benchmark": "function_approx",
+            "benchmark_dir": "examples/function_approx",
+            "mode": "dry_run",
+            "account_id": "alice",
+            "experiment_id": "benchmark-dir-override",
+        },
+    )
+    assert benchmark_dir_override.status_code == 400
+    assert "benchmark_dir" in benchmark_dir_override.json()["detail"]
+
+    benchmark_path = client.post(
+        "/api/runs",
+        json={
+            "benchmark": "examples/function_approx",
+            "mode": "dry_run",
+            "account_id": "alice",
+            "experiment_id": "benchmark-path",
+        },
+    )
+    assert benchmark_path.status_code == 400
+    assert "catalog names" in benchmark_path.json()["detail"]
+
+
 def test_web_artifacts_reject_path_escape(tmp_path: Path) -> None:
     client = TestClient(create_app())
     run_dir = tmp_path / "web-test"
@@ -330,7 +424,19 @@ def test_solver_chat_returns_real_mode_warnings(tmp_path: Path) -> None:
     assert any("Select an active run" in warning for warning in warnings)
 
 
-def test_code_server_url_uses_loopback_without_token(tmp_path: Path) -> None:
+def test_code_server_url_rejects_repo_workspace_by_default() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/api/code-server/url", params={"scope": "repo"})
+
+    assert response.status_code == 403
+    assert "shared repo workspace is disabled" in response.json()["detail"]
+
+
+def test_code_server_url_uses_loopback_without_token_when_repo_workspace_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENTICSCIML_ALLOW_REPO_WORKSPACE", "1")
     client = TestClient(create_app())
 
     response = client.get("/api/code-server/url", params={"scope": "repo"})
@@ -342,7 +448,11 @@ def test_code_server_url_uses_loopback_without_token(tmp_path: Path) -> None:
     assert payload["workspace"].endswith("New project 11")
 
 
-def test_code_server_workspaces_list_independent_directories(tmp_path: Path) -> None:
+def test_code_server_workspaces_list_independent_directories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENTICSCIML_ALLOW_REPO_WORKSPACE", "1")
     client = TestClient(create_app())
     run_dir = tmp_path / "web-test"
     (run_dir / "champion").mkdir(parents=True)
