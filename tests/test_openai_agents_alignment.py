@@ -365,3 +365,31 @@ def test_agents_md_requires_openai_agents_sdk_alignment() -> None:
     assert "structured outputs" in text
     assert "guardrails" in text
     assert "tracing" in text
+
+
+def test_agenticsciml_assistant_governance_is_documented() -> None:
+    agents = Path("AGENTS.md").read_text(encoding="utf-8")
+    skill = Path(".agents/skills/agenticsciml-chatui-operator/SKILL.md").read_text(encoding="utf-8")
+    contract = Path("docs/agenticsciml_assistant.md").read_text(encoding="utf-8")
+    index = Path("docs/index.md").read_text(encoding="utf-8")
+
+    assert "AgenticSciML Assistant Boundaries" in agents
+    assert "Scientific Claim Policy" in agents
+    assert "ChatUI And Tool Policy" in agents
+    assert "`/api/solver/chat` is an internal algorithm-tool endpoint, not an OpenAI Apps" in agents
+    assert "Prompt Injection Boundary" in agents
+
+    assert "version: 0.2.0" in skill
+    assert "not an MCP server" in skill
+    assert "Valid Action Categories" in skill
+    assert "Real LLM Mode" in skill
+    assert "Prompt Injection Handling" in skill
+
+    assert "Future MCP Wrapper Contract" in contract
+    assert "readOnlyHint" in contract
+    assert "destructiveHint" in contract
+    assert "openWorldHint" in contract
+    assert "agenticsciml.validate_claim" in contract
+    assert "Do not make ChatUI a free-form group chat controller" in contract
+
+    assert "agenticsciml_assistant.md" in index

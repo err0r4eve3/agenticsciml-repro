@@ -2,6 +2,32 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-17 AgenticSciML Assistant 规范
+
+新增文档：[AgenticSciML Assistant 规范](agenticsciml_assistant.md)。
+
+本次是一次性 Pro 复审辅助后的治理和 tool-contract 文档更新，未修改运行时代码。已
+落地：
+
+- `AGENTS.md` 新增 AgenticSciML Assistant 行为边界、scientific claim policy、
+  ChatUI/tool policy、code-server sidecar policy 和 prompt-injection boundary。
+- repo-local skill `.agents/skills/agenticsciml-chatui-operator/SKILL.md` 升级到
+  `version: 0.2.0`，明确 `/api/solver/chat` 是 internal algorithm-tool endpoint，
+  不是 MCP server。
+- 新增未来 MCP wrapper 合约草案：tool listing、JSON Schema input/output、
+  structured content、`readOnlyHint` / `destructiveHint` / `openWorldHint`、
+  approval policy 和 non-goals。
+- 更新 ChatUI 文档，记录 hardened public code-server sidecar 条件和
+  `/api/solver/chat` / future MCP wrapper 的边界。
+
+边界：
+
+- 当前仍不发布 OpenAI App/MCP server。
+- 不把 evaluator、selector、champion selection、artifact schema 或 score rewrite
+  暴露为 tool。
+- Pro 输出只作为外部建议；最终规则以仓库源码、测试、官方文档和本次 checked-in
+  文档为准。
+
 ## 2026-05-16 ChatUI 实验操作台
 
 新增本地优先 Web 控制面：[ChatUI 实验操作台](chatui_console.md)。

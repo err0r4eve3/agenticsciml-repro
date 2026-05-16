@@ -1,6 +1,6 @@
 # ChatUI 实验操作台
 
-[返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[多 Agent 设计方法](multi_agent_design.md)、[版本说明](version_notes.md)
+[返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[多 Agent 设计方法](multi_agent_design.md)、[AgenticSciML Assistant 规范](agenticsciml_assistant.md)、[版本说明](version_notes.md)
 
 本地 ChatUI 控制台是现有 Python orchestrator 的外层操作面，不替代
 `AgenticSciMLOrchestrator`、evaluation contract、solution tree、checkpoint/resume
@@ -56,8 +56,12 @@ PASSWORD=<local-token> code-server --bind-addr 127.0.0.1:8080 /path/to/workspace
 ```
 
 默认 API 生成 `http://127.0.0.1:8080/?folder=<workspace>` 链接。可用
-`AGENTICSCIML_CODE_SERVER_URL` 覆盖 base URL，但第一版不支持公网、多用户鉴权
-或代理层权限模型。
+`AGENTICSCIML_CODE_SERVER_URL` 覆盖 base URL。
+
+公网部署只能作为显式配置的 hardened sidecar：必须有 TLS、password auth、受限
+workspace、最小权限和 secret scanning。即使公网部署，ChatUI 也不得把 token、
+password、API key、cookie、真实 `HOME`、浏览器 profile 或私有数据集路径放进 URL
+或消息体。
 
 `VS Code Web` 页显示 `repo`、`run` 或 `solution` workspace 路径、启动命令、VS
 Code Web iframe 和新标签页打开链接。ChatUI 不携带 code-server token，不自动
@@ -71,8 +75,13 @@ Code Web iframe 和新标签页打开链接。ChatUI 不携带 code-server token
 - `GET /api/runs/{id}`：读取 metadata、leaderboard、trace summary 和 artifact index。
 - `GET /api/runs/{id}/events`：SSE 输出 trace events。
 - `GET /api/runs/{id}/artifacts/*`：只读 UTF-8 artifact，拒绝路径逃逸和 symlink 逃逸。
-- `POST /api/solver/chat`：算法 tool 入口，只返回结构化 actions、warnings、artifact refs 和 trace refs。
+- `POST /api/solver/chat`：内部算法 tool 入口，只返回结构化 actions、warnings、artifact refs 和 trace refs；它不是 MCP server。
 - `GET /api/code-server/url`：生成 code-server workspace 链接，不携带 token。
+
+未来如果接入 OpenAI Apps SDK / MCP，应新增 thin wrapper，保留 `/api/solver/chat`
+作为内部 endpoint。wrapper 需要列出 tools、声明 JSON Schema input/output、
+返回 structured content，并为每个 tool 标注 `readOnlyHint`、`destructiveHint`
+和 `openWorldHint`。详细合约见 [AgenticSciML Assistant 规范](agenticsciml_assistant.md)。
 
 ## Skill 工作流
 
