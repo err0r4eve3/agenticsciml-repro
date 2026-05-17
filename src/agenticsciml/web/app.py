@@ -25,6 +25,7 @@ from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 from agenticsciml.paper_tasks import list_paper_tasks
+from agenticsciml.readiness import build_readiness_report
 
 
 RunMode = Literal["mock", "real", "dry_run"]
@@ -93,6 +94,8 @@ class RunStartRequest(BaseModel):
     max_children_per_node: int = Field(default=10, ge=1)
     agent_models: dict[str, AgentModelRequest] = Field(default_factory=dict)
     selected_algorithm_ids: list[str] = Field(default_factory=list)
+    manual_strategy_locks: list[dict[str, Any]] = Field(default_factory=list)
+    branch_context: dict[str, Any] = Field(default_factory=dict)
     problem_intake: dict[str, Any] = Field(default_factory=dict)
     planner_snapshot: dict[str, Any] = Field(default_factory=dict)
     resume: bool = False
@@ -112,6 +115,24 @@ class ProblemIntakeRequest(BaseModel):
     max_children_per_node: int = Field(default=10, ge=1, le=200)
     selected_algorithm_ids: list[str] = Field(default_factory=list)
     agent_models: dict[str, AgentModelRequest] = Field(default_factory=dict)
+
+
+class RunReadinessRequest(BaseModel):
+    benchmark: str = "function_approx"
+    benchmark_dir: str | None = None
+    mode: RunMode = "mock"
+    account_id: str | None = None
+    target_solution_count: int | None = Field(default=None, ge=1)
+    max_iterations: int = Field(default=1, ge=0)
+    parallel_mutations: int = Field(default=2, ge=1)
+    selector_vote_count: int = Field(default=3, ge=1)
+    max_children_per_node: int = Field(default=10, ge=1)
+    selected_algorithm_ids: list[str] = Field(default_factory=list)
+    manual_strategy_locks: list[dict[str, Any]] = Field(default_factory=list)
+    branch_context: dict[str, Any] = Field(default_factory=dict)
+    problem_intake: dict[str, Any] = Field(default_factory=dict)
+    planner_snapshot: dict[str, Any] = Field(default_factory=dict)
+    real_confirmed: bool = False
 
 
 class SolverChatRequest(BaseModel):
@@ -200,6 +221,15 @@ def create_app() -> FastAPI:
         _validate_algorithm_ids(request.selected_algorithm_ids)
         return _problem_intake_plan_payload(request)
 
+    @app.post("/api/run-readiness/preview")
+    def run_readiness_preview(request: RunReadinessRequest) -> dict[str, object]:
+        benchmark_dir = _resolve_benchmark_dir(
+            request.benchmark,
+            request.benchmark_dir,
+            account_id=request.account_id,
+        )
+        return _readiness_report_for_request(request, benchmark_dir)
+
     @app.get("/api/accounts")
     def accounts() -> dict[str, object]:
         return {"accounts": _list_accounts()}
@@ -234,6 +264,7 @@ def create_app() -> FastAPI:
         benchmark_spec = benchmark_for_path(benchmark_dir)
         benchmark_name = benchmark_spec.name if benchmark_spec else benchmark_dir.name
         run_dir = output_dir / run_id
+        readiness_report = _readiness_report_for_request(request, benchmark_dir)
 
         if request.mode == "dry_run":
             run_budget = _effective_run_budget(request)
@@ -258,6 +289,7 @@ def create_app() -> FastAPI:
                     for role, config in _agent_configs_from_request(request).items()
                 },
                 "selected_algorithm_ids": _normalized_algorithm_ids(request.selected_algorithm_ids),
+                "readiness_report": readiness_report,
             }
 
         record = RunRecord(
@@ -273,13 +305,13 @@ def create_app() -> FastAPI:
         if request.background:
             thread = threading.Thread(
                 target=_run_orchestrator,
-                args=(request, run_id, benchmark_dir, output_dir, record),
+                args=(request, run_id, benchmark_dir, output_dir, record, readiness_report),
                 daemon=True,
             )
             thread.start()
             return {"run_id": run_id, "status": "running", "run_dir": str(run_dir)}
 
-        _run_orchestrator(request, run_id, benchmark_dir, output_dir, record)
+        _run_orchestrator(request, run_id, benchmark_dir, output_dir, record, readiness_report)
         return _describe_run(run_id, output_dir)
 
     @app.post("/api/runs/{run_id}/resume")
@@ -395,6 +427,7 @@ def _run_orchestrator(
     benchmark_dir: Path,
     output_dir: Path,
     record: RunRecord,
+    readiness_report: dict[str, object],
 ) -> None:
     try:
         run_budget = _effective_run_budget(request)
@@ -419,6 +452,7 @@ def _run_orchestrator(
             strategy_seed_ids=_normalized_algorithm_ids(request.selected_algorithm_ids),
             problem_intake=_normalized_mapping(request.problem_intake),
             planner_snapshot=_normalized_mapping(request.planner_snapshot),
+            readiness_report=dict(readiness_report),
             resume=request.resume,
         )
         llm = MockLLMClient() if request.mode == "mock" else OpenAIAdapter()
@@ -434,7 +468,7 @@ def _run_orchestrator(
         _store_record(record)
 
 
-def _effective_run_budget(request: RunStartRequest) -> dict[str, object]:
+def _effective_run_budget(request: RunStartRequest | RunReadinessRequest) -> dict[str, object]:
     parallel_mutations = request.parallel_mutations
     max_iterations = request.max_iterations
     if request.target_solution_count is not None:
@@ -449,6 +483,28 @@ def _effective_run_budget(request: RunStartRequest) -> dict[str, object]:
         "selector_vote_count": request.selector_vote_count,
         "max_children_per_node": request.max_children_per_node,
     }
+
+
+def _readiness_report_for_request(
+    request: RunStartRequest | RunReadinessRequest,
+    benchmark_dir: Path,
+) -> dict[str, object]:
+    benchmark_spec = benchmark_for_path(benchmark_dir)
+    if benchmark_spec is None:
+        raise HTTPException(status_code=404, detail=f"Unknown benchmark: {benchmark_dir}")
+    return build_readiness_report(
+        benchmark=benchmark_spec,
+        algorithms=list(list_algorithms()),
+        selected_algorithm_ids=_normalized_algorithm_ids(request.selected_algorithm_ids),
+        mode=request.mode,
+        run_budget=_effective_run_budget(request),
+        problem_intake=_normalized_mapping(request.problem_intake),
+        planner_snapshot=_normalized_mapping(request.planner_snapshot),
+        manual_strategy_locks=list(request.manual_strategy_locks),
+        branch_context=_normalized_mapping(request.branch_context),
+        real_confirmed=request.real_confirmed,
+        real_mode_enabled=_real_web_runs_enabled(),
+    )
 
 
 def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, object]:

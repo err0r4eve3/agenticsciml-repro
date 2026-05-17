@@ -423,6 +423,7 @@ class ExperimentConfig:
     strategy_seed_ids: list[str] = field(default_factory=list)
     problem_intake: dict[str, Any] = field(default_factory=dict)
     planner_snapshot: dict[str, Any] = field(default_factory=dict)
+    readiness_report: dict[str, Any] = field(default_factory=dict)
     auto_approve_evaluation: bool = True
     resume: bool = False
 
@@ -437,6 +438,7 @@ class ExperimentConfig:
             "strategy_seed_ids": list(self.strategy_seed_ids),
             "problem_intake": dict(self.problem_intake),
             "planner_snapshot": dict(self.planner_snapshot),
+            "readiness_report": dict(self.readiness_report),
             "auto_approve_evaluation": self.auto_approve_evaluation,
             "resume": self.resume,
         }
@@ -462,6 +464,11 @@ class ExperimentConfig:
             planner_snapshot=(
                 dict(data["planner_snapshot"])
                 if isinstance(data.get("planner_snapshot"), dict)
+                else {}
+            ),
+            readiness_report=(
+                dict(data["readiness_report"])
+                if isinstance(data.get("readiness_report"), dict)
                 else {}
             ),
             auto_approve_evaluation=bool(data.get("auto_approve_evaluation", True)),

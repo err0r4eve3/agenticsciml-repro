@@ -154,6 +154,85 @@ def test_problem_intake_rejects_unknown_algorithm() -> None:
     assert "Unknown algorithm id" in response.json()["detail"]
 
 
+def test_run_readiness_preview_audits_proxy_claims_and_strategy_seeds() -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/run-readiness/preview",
+        json={
+            "benchmark": "function_approx",
+            "mode": "mock",
+            "target_solution_count": 5,
+            "parallel_mutations": 2,
+            "selected_algorithm_ids": ["piecewise_local_basis"],
+            "manual_strategy_locks": [
+                {
+                    "lock_id": "lock_piecewise",
+                    "kind": "mathematical_intuition",
+                    "text": "Preserve local basis structure for discontinuities.",
+                    "scope": "all_branches",
+                }
+            ],
+            "branch_context": {"expected_inherited_lock_ids": ["lock_piecewise"]},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["readiness_version"] == "run_readiness.v1"
+    assert payload["status"] == "ready_with_warnings"
+    assert payload["launch_allowed"] is True
+    assert payload["run_budget"]["max_iterations"] == 2
+    assert payload["run_budget"]["planned_solution_budget"] == 5
+    check_ids = {check["check_id"] for check in payload["checks"]}
+    assert "claim-boundary.proxy-warning" in check_ids
+    assert "algorithm-selection.catalog-seeds" in check_ids
+    assert payload["algorithm_seed_preview"][0]["algorithm_id"] == "piecewise_local_basis"
+    assert payload["algorithm_seed_preview"][0]["catalog_role"] == "strategy_seed"
+    assert payload["algorithm_seed_preview"][0]["is_evaluated_implementation"] is False
+    assert payload["strategy_lock_preview"][0]["lock_id"] == "lock_piecewise"
+    assert "planning/readiness_report.json" in payload["artifact_capture_requirements"]
+    serialized = json.dumps(payload)
+    assert "chain_of_thought" not in serialized
+    assert "private_reasoning" not in serialized
+
+
+def test_run_readiness_preview_blocks_unknown_algorithm_and_real_without_gates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AGENTICSCIML_ENABLE_REAL_WEB_RUNS", raising=False)
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/run-readiness/preview",
+        json={
+            "benchmark": "function_approx",
+            "mode": "real",
+            "selected_algorithm_ids": ["not-a-real-algorithm"],
+            "real_confirmed": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "blocked"
+    assert payload["launch_allowed"] is False
+    failed_blockers = {
+        check["check_id"]
+        for check in payload["checks"]
+        if check["severity"] == "blocker" and not check["passed"]
+    }
+    assert failed_blockers == {
+        "algorithm-selection.unknown",
+        "real-mode.requires-confirmation",
+        "real-mode.server-disabled",
+    }
+    assert payload["real_mode_gates"]["blocked_reasons"] == [
+        "real-mode.requires-confirmation",
+        "real-mode.server-disabled",
+    ]
+
+
 def test_web_mock_run_writes_required_artifacts(tmp_path: Path) -> None:
     client = TestClient(create_app())
 
@@ -177,6 +256,42 @@ def test_web_mock_run_writes_required_artifacts(tmp_path: Path) -> None:
     assert (run_dir / "trace_summary.json").exists()
     assert payload["metadata"]["run_state"] == "exported"
     assert payload["trace_summary"]["quality_gate"]["passed"] is True
+
+
+def test_web_mock_run_persists_readiness_report(tmp_path: Path) -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/runs",
+        json={
+            "benchmark": "function_approx",
+            "mode": "mock",
+            "target_solution_count": 1,
+            "experiment_id": "readiness-run",
+            "output_dir": str(tmp_path),
+            "selected_algorithm_ids": ["piecewise_local_basis"],
+            "manual_strategy_locks": [
+                {
+                    "lock_id": "lock_piecewise",
+                    "kind": "constraint",
+                    "text": "Keep the piecewise local basis intent visible.",
+                    "scope": "all_branches",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    run_dir = tmp_path / "readiness-run"
+    readiness = json.loads((run_dir / "planning" / "readiness_report.json").read_text(encoding="utf-8"))
+    metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    config = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+    assert readiness["readiness_version"] == "run_readiness.v1"
+    assert readiness["selected_algorithm_ids"] == ["piecewise_local_basis"]
+    assert readiness["manual_strategy_locks"][0]["lock_id"] == "lock_piecewise"
+    assert config["readiness_report"]["readiness_id"] == readiness["readiness_id"]
+    assert metadata["readiness_summary"]["readiness_id"] == readiness["readiness_id"]
+    assert metadata["readiness_summary"]["status"] == "ready_with_warnings"
 
 
 def test_web_mock_run_persists_agent_model_overrides(tmp_path: Path) -> None:

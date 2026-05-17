@@ -75,7 +75,9 @@ evaluator、selector 或 champion selection 实现。
   `parallel_mutations`、`selector_vote_count`、`max_children_per_node` 和 `mode`。
   `target_solution_count` 是 UI 便捷输入；后端会转换成确定性的
   `EvolutionConfig.max_iterations + parallel_mutations` 预算，并在预览区显示
-  `root + children`。
+  `root + children`。同一区域可手动刷新 `Run Readiness`，在启动前查看
+  claim-boundary warning、strategy seed 状态、real-mode blocker 和 artifact capture
+  要求。
 - `Layered model routing`：列出 Data Analyst、Evaluator、Root Engineer、
   Retriever、Proposer、Critic、Engineer、Debugger、Result Analyst 和 Selector。
   默认仍使用后端单一 adapter；只有填写 role override 时，后端才按 role 创建模型配置。
@@ -150,15 +152,21 @@ Web API 暴露；本地开发需要打开仓库根目录时，必须显式设置
 - `POST /api/problem-intake/plan`：从完整问题描述生成本地 benchmark 推荐、
   algorithm rankings、selected strategy seeds、run budget、`problem_intake`、
   `planner_snapshot` 和可展示的 start_run action。
+- `POST /api/run-readiness/preview`：启动前生成确定性 pre-run audit。它只检查本地
+  benchmark fidelity、claim boundary、selected strategy seeds、人工 strategy locks、
+  branch inheritance expectations、run budget、real-mode gates 和 artifact capture
+  约束；不调用 LLM、不联网、不执行 generated code，也不生成 evaluator。
 - `GET /api/accounts` / `POST /api/accounts`：列出或创建本地账号 namespace；
   仅写入本地目录和非密钥元数据，不提供公网认证。
 - `POST /api/runs`：启动 mock/real/dry-run run；real mode 需要请求体
   `real_confirmed=true`，并且服务端必须设置
   `AGENTICSCIML_ENABLE_REAL_WEB_RUNS=1`，同时仍需显式凭据和预算边界。请求体还可包含
   `target_solution_count`、`max_children_per_node`、`selected_algorithm_ids`、
-  `problem_intake`、`planner_snapshot` 和 `agent_models`；后端只把这些转换成
+  `manual_strategy_locks`、`branch_context`、`problem_intake`、`planner_snapshot` 和
+  `agent_models`；后端只把这些转换成
   `EvolutionConfig` / `AgentConfig` / 非权威 problem context / strategy seed
-  context，不改写 evaluator 或 artifact schema。
+  context，不改写 evaluator 或 artifact schema。非 dry-run 启动会把 readiness report
+  写入 `planning/readiness_report.json` 并在 `run_metadata.json` 中记录 summary。
 - `POST /api/runs/{id}/resume`：以已有 run id 恢复；未显式覆盖时会先读取既有
   `config.json` 并保留 benchmark、`strategy_seed_ids`、`agent_models`、
   `problem_intake` 和 `planner_snapshot`。

@@ -176,6 +176,38 @@ type RunConfig = {
   max_children_per_node: number;
 };
 
+type ReadinessCheck = {
+  check_id: string;
+  category: string;
+  severity: "blocker" | "warning" | "info";
+  passed: boolean;
+  message: string;
+};
+
+type ReadinessReport = {
+  readiness_id: string;
+  status: "ready" | "ready_with_warnings" | "blocked";
+  launch_allowed: boolean;
+  summary: {
+    blocker_count: number;
+    warning_count: number;
+    info_count: number;
+    check_count: number;
+  };
+  checks: ReadinessCheck[];
+  benchmark_fidelity_preview: Array<{
+    benchmark: string;
+    fidelity_level: string;
+    disallowed_claims: string[];
+  }>;
+  algorithm_seed_preview: Array<{
+    algorithm_id: string;
+    catalog_role: string;
+    is_evaluated_implementation: boolean;
+  }>;
+  claim_boundary: string;
+};
+
 type AgentRole = {
   role: string;
   label: string;
@@ -326,6 +358,22 @@ const api = {
     agent_models: Record<string, AgentModelConfig>;
   }): Promise<ProblemRunPlan> {
     return postJson<ProblemRunPlan>("/api/problem-intake/plan", body);
+  },
+  async previewReadiness(body: {
+    benchmark: string;
+    mode: RunMode;
+    account_id: string;
+    target_solution_count: number;
+    max_iterations: number;
+    parallel_mutations: number;
+    selector_vote_count: number;
+    max_children_per_node: number;
+    selected_algorithm_ids: string[];
+    problem_intake?: Record<string, unknown>;
+    planner_snapshot?: Record<string, unknown>;
+    real_confirmed?: boolean;
+  }): Promise<ReadinessReport> {
+    return postJson<ReadinessReport>("/api/run-readiness/preview", body);
   },
   async getSolverSettings(): Promise<SolverSettings> {
     return getJson<SolverSettings>("/api/solver/settings");
@@ -483,6 +531,7 @@ export function App() {
     data_description: ""
   });
   const [problemPlan, setProblemPlan] = useState<ProblemRunPlan | null>(null);
+  const [readinessReport, setReadinessReport] = useState<ReadinessReport | null>(null);
   const [assistantMode, setAssistantMode] = useState<AssistantMode>("ask");
   const [solverSettings, setSolverSettings] = useState<SolverSettings>(DEFAULT_SOLVER_SETTINGS);
   const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScope>("account");
@@ -747,6 +796,32 @@ export function App() {
     }
   }
 
+  async function previewRunReadiness(realConfirmed = false) {
+    setBusy(true);
+    setError(null);
+    try {
+      const report = await api.previewReadiness({
+        benchmark: selectedBenchmark,
+        mode,
+        account_id: activeAccountId,
+        target_solution_count: runConfig.target_solution_count,
+        max_iterations: runBudgetPreview.max_iterations,
+        parallel_mutations: runConfig.parallel_mutations,
+        selector_vote_count: runConfig.selector_vote_count,
+        max_children_per_node: runConfig.max_children_per_node,
+        selected_algorithm_ids: selectedAlgorithmIds,
+        problem_intake: problemPlan?.recommended_benchmark.name === selectedBenchmark ? problemPlan.problem_intake : {},
+        planner_snapshot: problemPlan?.recommended_benchmark.name === selectedBenchmark ? problemPlan.planner_snapshot : {},
+        real_confirmed: realConfirmed
+      });
+      setReadinessReport(report);
+    } catch (exc) {
+      setError(String(exc));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submitAgentMessage(
     rawMessage: string,
     overrides: { mode?: RunMode; assistantMode?: AssistantMode; workspaceScope?: WorkspaceScope } = {}
@@ -960,10 +1035,12 @@ export function App() {
       task.benchmarks[0];
     if (preferred) {
       setSelectedBenchmark(preferred.name);
+      setReadinessReport(null);
     }
   }
 
   function updateRunConfig(next: Partial<RunConfig>) {
+    setReadinessReport(null);
     setRunConfig((current) => {
       const merged = { ...current, ...next };
       const parallelMutations = normalizeInteger(merged.parallel_mutations, current.parallel_mutations, 1);
@@ -1018,6 +1095,7 @@ export function App() {
   }
 
   function toggleAlgorithm(algorithmId: string) {
+    setReadinessReport(null);
     setSelectedAlgorithmIds((current) =>
       current.includes(algorithmId)
         ? current.filter((item) => item !== algorithmId)
@@ -1026,6 +1104,7 @@ export function App() {
   }
 
   function updateProblemIntake(next: Partial<ProblemIntakeState>) {
+    setReadinessReport(null);
     setProblemIntake((current) => ({ ...current, ...next }));
   }
 
@@ -1044,6 +1123,7 @@ export function App() {
         agent_models: activeAgentModels()
       });
       setProblemPlan(plan);
+      setReadinessReport(null);
       setSelectedBenchmark(plan.recommended_benchmark.name);
       setSelectedAlgorithmIds(plan.selected_algorithm_ids);
       setRunConfig((current) => ({
@@ -1224,6 +1304,7 @@ export function App() {
             paperTasks={paperTasks}
             problemIntake={problemIntake}
             problemPlan={problemPlan}
+            readinessReport={readinessReport}
             runBudgetPreview={runBudgetPreview}
             runConfig={runConfig}
             runs={runs}
@@ -1238,6 +1319,7 @@ export function App() {
             onOpenArtifacts={() => setSelectedArtifactPath("trace_summary.json")}
             onOpenCode={() => setActivePage("ide")}
             onPlanProblemRun={planProblemRun}
+            onPreviewReadiness={() => previewRunReadiness(false)}
             onRefreshRuns={refreshRuns}
             onRunConfigChange={updateRunConfig}
             onSelectArtifact={setSelectedArtifactPath}
@@ -1525,6 +1607,7 @@ function AlgorithmLibraryPage({
   paperTasks,
   problemIntake,
   problemPlan,
+  readinessReport,
   runBudgetPreview,
   runConfig,
   runs,
@@ -1539,6 +1622,7 @@ function AlgorithmLibraryPage({
   onOpenArtifacts,
   onOpenCode,
   onPlanProblemRun,
+  onPreviewReadiness,
   onRefreshRuns,
   onRunConfigChange,
   onSelectArtifact,
@@ -1562,6 +1646,7 @@ function AlgorithmLibraryPage({
   paperTasks: PaperTask[];
   problemIntake: ProblemIntakeState;
   problemPlan: ProblemRunPlan | null;
+  readinessReport: ReadinessReport | null;
   runBudgetPreview: { max_iterations: number; planned_solution_budget: number };
   runConfig: RunConfig;
   runs: RunSummary[];
@@ -1576,6 +1661,7 @@ function AlgorithmLibraryPage({
   onOpenArtifacts: () => void;
   onOpenCode: () => void;
   onPlanProblemRun: () => void;
+  onPreviewReadiness: () => void;
   onRefreshRuns: () => void;
   onRunConfigChange: (next: Partial<RunConfig>) => void;
   onSelectArtifact: (value: string) => void;
@@ -1615,9 +1701,11 @@ function AlgorithmLibraryPage({
           budgetPreview={runBudgetPreview}
           busy={false}
           mode={mode}
+          readinessReport={readinessReport}
           runConfig={runConfig}
           selectedBenchmark={selected?.name ?? "unknown"}
           onModeChange={onModeChange}
+          onPreviewReadiness={onPreviewReadiness}
           onRunConfigChange={onRunConfigChange}
           onStartRun={onStartConfiguredRun}
         />
@@ -1824,19 +1912,24 @@ function PaperTaskDetail({
 
 function RunConfigPanel({
   budgetPreview,
+  busy,
   mode,
+  readinessReport,
   runConfig,
   selectedBenchmark,
   onModeChange,
+  onPreviewReadiness,
   onRunConfigChange,
   onStartRun
 }: {
   budgetPreview: { max_iterations: number; planned_solution_budget: number };
   busy: boolean;
   mode: RunMode;
+  readinessReport: ReadinessReport | null;
   runConfig: RunConfig;
   selectedBenchmark: string;
   onModeChange: (mode: RunMode) => void;
+  onPreviewReadiness: () => void;
   onRunConfigChange: (next: Partial<RunConfig>) => void;
   onStartRun: () => void;
 }) {
@@ -1908,11 +2001,43 @@ function RunConfigPanel({
           <Play size={15} />
           启动配置 run
         </button>
+        <button className="icon-text-button full-width secondary" disabled={busy} type="button" onClick={onPreviewReadiness}>
+          <AlertTriangle size={15} />
+          检查 run readiness
+        </button>
+        {readinessReport ? <RunReadinessSummary report={readinessReport} /> : null}
         {mode === "real" ? (
           <p className="warning-text">real mode 仍需要后端显式开关与二次确认，不会绕过预算或 claim boundary。</p>
         ) : null}
       </div>
     </DataRegion>
+  );
+}
+
+function RunReadinessSummary({ report }: { report: ReadinessReport }) {
+  const visibleChecks = report.checks
+    .filter((check) => check.severity !== "info" || !check.passed)
+    .slice(0, 5);
+  return (
+    <div className={`readiness-summary ${report.status}`}>
+      <div className="readiness-title">
+        <strong>{report.status}</strong>
+        <span>
+          {report.summary.blocker_count} blockers / {report.summary.warning_count} warnings
+        </span>
+      </div>
+      <div className="readiness-meta">
+        <span>{report.benchmark_fidelity_preview[0]?.fidelity_level ?? "unknown"} fidelity</span>
+        <span>{report.algorithm_seed_preview.length} strategy seeds</span>
+      </div>
+      {visibleChecks.map((check) => (
+        <div className={`readiness-check ${check.severity}`} key={check.check_id}>
+          <span>{check.severity}</span>
+          <p>{check.message}</p>
+        </div>
+      ))}
+      <small>{report.claim_boundary}</small>
+    </div>
   );
 }
 

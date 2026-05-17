@@ -2,6 +2,43 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-17 Run Readiness / Strategy Audit
+
+本次根据 NotebookLM 现有研究和一次性 Pro 复核，把下一轮迭代落在启动前的
+Inspector-style pre-run audit，而不是继续增加 benchmark 或自动生成 evaluator。
+
+已实现：
+
+- 新增纯确定性 `agenticsciml.readiness` 检查层：输入 benchmark catalog、
+  algorithm catalog、selected algorithm ids、manual strategy locks、branch context、
+  run budget 和 real-mode gate，输出 `run_readiness.v1` 报告。
+- 新增 `POST /api/run-readiness/preview`。该端点不调用 LLM、不联网、不执行代码，
+  只返回 `ready` / `ready_with_warnings` / `blocked`、checks、benchmark fidelity
+  preview、algorithm seed preview、strategy lock preview、real-mode gates 和 artifact
+  capture requirements。
+- `POST /api/runs` 现在会为非 dry-run 生成并持久化
+  `planning/readiness_report.json`；`config.json` 保存完整 readiness report，
+  `run_metadata.json` 保存 `readiness_summary`。
+- 前端 Paper Run Lab 的 `Run Config` 区域新增 `检查 run readiness` 操作，展示
+  blocker/warning、benchmark fidelity、strategy seed 数量和 pre-run audit 边界。
+- readiness 把 algorithm catalog 条目继续标注为 `strategy_seed`，不会把它们提升为
+  已评估实现；proxy / faithful-small claim boundary 仍必须由 run artifacts 和
+  evaluator 结果支撑。
+- real mode 缺少二次确认或服务端开关时，readiness preview 会返回 blocker；实际
+  run 启动仍沿用既有 fail-closed Web API gate。
+
+验证：
+
+- `tests/test_web_api.py` 覆盖 readiness preview、unknown algorithm / real-mode blocker、
+  mock run 持久化 readiness report 和无 hidden chain-of-thought 字段。
+- 前端类型和打包用 `npm run build` 验证。
+
+边界：
+
+- readiness 是启动前一致性审计，不是科学验证、不是 evaluator 合成、不是论文分数复现。
+- manual strategy locks 是用户假设/约束，不是事实；当前只记录并检查继承期望。
+- 后续可在 run evidence/report endpoint 中复用同一套 claim-boundary 语言。
+
 ## 2026-05-17 ChatUI workflow live smoke
 
 本次新增可重复运行的 Web 控制面 smoke，用于在本地或部署环境中检查 ChatUI 依赖的

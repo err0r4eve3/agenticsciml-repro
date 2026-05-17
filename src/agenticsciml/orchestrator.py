@@ -26,6 +26,7 @@ from agenticsciml.evidence import evidence_metadata_for_run
 from agenticsciml.execution.sandbox import prepare_solution_workspace, train_and_evaluate
 from agenticsciml.llm.base import LLMClient
 from agenticsciml.patching import PatchApplicationError
+from agenticsciml.readiness import readiness_summary
 from agenticsciml.retrieval.kb_store import KnowledgeBase
 from agenticsciml.retrieval.query_builder import RetrievalQueryBuilder
 from agenticsciml.reporting import (
@@ -382,7 +383,11 @@ class AgenticSciMLOrchestrator:
         return path.read_text(encoding="utf-8") if path.exists() else ""
 
     def _write_planning_artifacts(self) -> None:
-        if not self.config.problem_intake and not self.config.planner_snapshot:
+        if (
+            not self.config.problem_intake
+            and not self.config.planner_snapshot
+            and not self.config.readiness_report
+        ):
             return
         self.storage.save_json(
             "planning/problem_intake.json",
@@ -392,11 +397,16 @@ class AgenticSciMLOrchestrator:
                 "planner_snapshot": dict(self.config.planner_snapshot),
             },
         )
+        if self.config.readiness_report:
+            self.storage.save_json("planning/readiness_report.json", dict(self.config.readiness_report))
 
     def _planning_metadata(self) -> dict[str, object]:
         return {
             "problem_intake": dict(self.config.problem_intake),
             "planner_snapshot": dict(self.config.planner_snapshot),
+            "readiness_summary": readiness_summary(self.config.readiness_report)
+            if self.config.readiness_report
+            else {},
         }
 
     def _planning_trace_metadata(self) -> dict[str, object]:
