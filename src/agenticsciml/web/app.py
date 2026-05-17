@@ -1370,11 +1370,12 @@ def _code_server_payload(
         "workspace": str(workspace),
         "url": f"{base_url}/?folder={quote(str(workspace))}",
         "configured": bool(base_url),
+        "auth_mode": "upstream_account",
         "warnings": [
-            "Start code-server on 127.0.0.1 with password/token auth before opening this URL.",
-            "Do not expose this sidecar publicly or pass host secrets into its environment.",
+            "Run code-server with --auth none only behind the ChatUI account/auth gateway or loopback-only access.",
+            "Do not expose this sidecar directly or pass host secrets into its environment.",
         ],
-        "command_hint": f"PASSWORD=<local-token> code-server --bind-addr 127.0.0.1:8080 {workspace}",
+        "command_hint": f"code-server --auth none --bind-addr 127.0.0.1:8080 {workspace}",
     }
 
 
@@ -1527,11 +1528,12 @@ def _workspace_option(
         "isolation": "account" if account_id else "shared",
         "url": f"{base_url}/?folder={quote(str(workspace))}",
         "configured": bool(base_url),
+        "auth_mode": "upstream_account",
         "warnings": [
-            "Start code-server on 127.0.0.1 with password/token auth before opening this URL.",
-            "Do not expose this sidecar publicly or pass host secrets into its environment.",
+            "Run code-server with --auth none only behind the ChatUI account/auth gateway or loopback-only access.",
+            "Do not expose this sidecar directly or pass host secrets into its environment.",
         ],
-        "command_hint": f"PASSWORD=<local-token> code-server --bind-addr 127.0.0.1:8080 {workspace}",
+        "command_hint": f"code-server --auth none --bind-addr 127.0.0.1:8080 {workspace}",
     }
 
 

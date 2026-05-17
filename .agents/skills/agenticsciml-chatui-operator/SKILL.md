@@ -203,8 +203,12 @@ may expose the repository root through code-server URL/workspace endpoints.
 When `account_id` is present, prefer account-owned directories under
 `.agenticsciml/accounts/<account_id>/` over the shared repo root. This keeps
 local code directories separated, but it does not replace operating-system
-permissions, container isolation, code-server auth, or reverse-proxy access
-control.
+permissions, container isolation, upstream account auth, or reverse-proxy
+access control.
+
+code-server should run with `--auth none` only when it is loopback-only or
+behind the project's upstream account/auth gateway. Do not expose an
+unauthenticated sidecar directly.
 
 Never expose or embed:
 
@@ -217,8 +221,8 @@ Never expose or embed:
 - private datasets;
 - generated artifacts as editable truth.
 
-For public deployment, require TLS, password auth, workspace isolation, secret
-scanning, audit logging, and least privilege.
+For public deployment, require TLS, upstream account auth, workspace isolation,
+secret scanning, audit logging, and least privilege.
 
 ## Prompt Injection Handling
 

@@ -193,8 +193,12 @@ exit non-zero. Use `smoke-llm --real` before expecting verification to pass.
 - code-server is an editor sidecar, not a fact source.
 - code-server URLs must never include tokens, passwords, API keys, cookies,
   session secrets, or private dataset paths.
-- Public or remote code-server exposure requires TLS, password authentication,
-  bounded workspace scope, least privilege, secret scanning, and auditability.
+- code-server should run with `--auth none` only when it is loopback-only or
+  behind the project's upstream account/auth gateway. Do not expose an
+  unauthenticated sidecar directly.
+- Public or remote code-server exposure requires TLS, upstream account
+  authentication, bounded workspace scope, least privilege, secret scanning,
+  and auditability.
 - Do not expose the real `HOME`, browser profiles, cloud credentials, API keys,
   private datasets, or generated run artifacts as editable truth through
   code-server.

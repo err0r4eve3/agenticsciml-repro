@@ -108,10 +108,11 @@ payload 中的 benchmark、run budget、`selected_algorithm_ids`、`problem_inta
 
 ## code-server sidecar
 
-code-server 不由 ChatUI 自动启动。先用本地 token/password 和 loopback 绑定启动：
+code-server 不由 ChatUI 自动启动。默认取消 code-server 自身 password，由 ChatUI /
+反向代理的账号鉴权保护入口；sidecar 本身只绑定 loopback 或受限内网地址：
 
 ```bash
-PASSWORD=<local-token> code-server --bind-addr 127.0.0.1:8080 /path/to/workspace
+code-server --auth none --bind-addr 127.0.0.1:8080 /path/to/workspace
 ```
 
 默认 API 生成 `http://127.0.0.1:8080/?folder=<workspace>` 链接。可用
@@ -119,10 +120,11 @@ PASSWORD=<local-token> code-server --bind-addr 127.0.0.1:8080 /path/to/workspace
 Web API 暴露；本地开发需要打开仓库根目录时，必须显式设置
 `AGENTICSCIML_ALLOW_REPO_WORKSPACE=1`。
 
-公网部署只能作为显式配置的 hardened sidecar：必须有 TLS、password auth、受限
-workspace、最小权限和 secret scanning。即使公网部署，ChatUI 也不得把 token、
-password、API key、cookie、真实 `HOME`、浏览器 profile 或私有数据集路径放进 URL
-或消息体。
+公网部署只能作为显式配置的 hardened sidecar：必须有 TLS、上游账号鉴权
+（例如 ChatUI session、Cloudflare Access 或 nginx auth_request）、受限 workspace、
+最小权限和 secret scanning。不要把 `--auth none` 的 code-server 直接暴露到公网。
+即使公网部署，ChatUI 也不得把 token、password、API key、cookie、真实 `HOME`、
+浏览器 profile 或私有数据集路径放进 URL 或消息体。
 
 `VS Code` 页通过 `GET /api/code-server/workspaces` 列出可打开的独立代码目录。
 未传 `account_id` 时只列出 shared run 目录、champion 目录和各
@@ -130,11 +132,11 @@ password、API key、cookie、真实 `HOME`、浏览器 profile 或私有数据�
 列出 repo 根目录。传入 `account_id` 时只列出该账号 namespace 下的 `workspace/`、
 `runs/<run_id>/` 和 `runs/<run_id>/solutions/solution_*` 目录；不混入 shared repo
 根目录。选择后 iframe 使用对应 `?folder=<workspace>` 打开该
-目录。ChatUI 不携带 code-server token，不自动启动 sidecar，iframe 也必须经过
-code-server 自身鉴权。
+目录。ChatUI 不携带 code-server token，不自动启动 sidecar，iframe 入口必须先经过
+整体账号鉴权。
 
-账号隔离是本地目录隔离，不是多用户认证或权限边界。公开部署时还必须由反向代理、
-code-server auth、系统用户/容器权限和 secret scanning 提供真实访问控制。
+账号隔离是本地目录隔离，不是多用户认证或权限边界。公开部署时还必须由反向代理/
+账号 session、系统用户/容器权限和 secret scanning 提供真实访问控制。
 
 ## API 边界
 

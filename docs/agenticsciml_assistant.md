@@ -224,7 +224,8 @@ Artifacts:
 code-server:
 
 - No token/password in URL.
-- Public exposure requires TLS, password auth, bounded workspace, least privilege, and secret scanning.
+- Run code-server with `--auth none` only behind ChatUI / reverse-proxy account auth or loopback-only access.
+- Public exposure requires TLS, upstream account auth, bounded workspace, least privilege, and secret scanning.
 - Generated artifacts are opened for inspection, not treated as editable truth.
 
 Prompt injection:

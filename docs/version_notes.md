@@ -125,7 +125,7 @@ SHRED-ROM / PySHRED / Nature Communications 结果；如果没有真正实现 LS
 
 边界：
 
-- 账号 namespace 仍不是认证/授权系统；公开部署仍需要反向代理、code-server auth、系统
+- 账号 namespace 仍不是认证/授权系统；公开部署仍需要反向代理/账号 session、系统
   用户/容器隔离和 secret 管理。
 - 这些改动不改变 orchestrator、evaluator、selector、champion selection 或 artifact schema。
 
@@ -288,8 +288,21 @@ dependency-light reference primitives，并通过算法目录暴露。
 边界：
 
 - 第一版只面向本地 loopback，不是公网 SaaS。
-- code-server 由用户单独启动，必须使用本机 auth；ChatUI 只生成 workspace 链接。
+- code-server 由用户单独启动，默认使用 `--auth none`，但只能置于 loopback 或上游账号
+  鉴权之后；ChatUI 只生成 workspace 链接。
 - mock run 仍只支持 workflow-shape evidence，不支持科学复现结论。
+
+## 2026-05-17 code-server 上游账号鉴权边界
+
+code-server sidecar 的建议启动方式从本机 password 改为：
+
+```bash
+code-server --auth none --bind-addr 127.0.0.1:8080 <workspace>
+```
+
+API 返回的 `command_hint` 不再包含 `PASSWORD=`，并新增 `auth_mode=upstream_account`
+标识。公开部署时必须由 ChatUI session、Cloudflare Access、nginx `auth_request` 或等价
+账号鉴权保护 code-server 入口；不得把 `--auth none` 的 sidecar 直接暴露到公网。
 
 ## 2026-05-14 OpenAI Agents SDK 升级复盘
 

@@ -253,6 +253,7 @@ type CodeServerPayload = {
   solution_id?: string | null;
   workspace: string;
   url: string;
+  auth_mode?: string;
   warnings: string[];
   command_hint: string;
   isolation?: string;

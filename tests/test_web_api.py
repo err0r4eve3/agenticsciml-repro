@@ -1000,6 +1000,9 @@ def test_code_server_url_uses_loopback_without_token_when_repo_workspace_enabled
     payload = response.json()
     assert payload["url"].startswith("http://127.0.0.1:8080/")
     assert "PASSWORD=" not in payload["url"]
+    assert "PASSWORD=" not in payload["command_hint"]
+    assert "--auth none" in payload["command_hint"]
+    assert payload["auth_mode"] == "upstream_account"
     assert payload["workspace"].endswith("New project 11")
 
 
@@ -1032,6 +1035,9 @@ def test_code_server_workspaces_list_independent_directories(
     )
     for item in workspaces.values():
         assert "PASSWORD=" not in item["url"]
+        assert "PASSWORD=" not in item["command_hint"]
+        assert "--auth none" in item["command_hint"]
+        assert item["auth_mode"] == "upstream_account"
 
 
 def test_account_workspaces_are_isolated_local_namespaces(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
