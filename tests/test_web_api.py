@@ -47,6 +47,16 @@ def test_web_algorithms_expose_professional_catalog() -> None:
     assert algorithms["pinn_residual_minimizer"]["status"] == "strategy_blueprint"
     assert len(algorithms) >= 20
     assert "paper-level" in algorithms["sparse_sensor_reconstructor"]["safety_notes"]
+    for algorithm in algorithms.values():
+        assert algorithm["description"]
+        assert algorithm["description_zh"]
+        assert algorithm["features"]
+        assert algorithm["features_zh"]
+        assert algorithm["problem_fit"]
+        assert algorithm["problem_fit_zh"]
+        assert algorithm["safety_notes_zh"]
+        assert len(algorithm["features"]) == len(algorithm["features_zh"])
+        assert len(algorithm["problem_fit"]) == len(algorithm["problem_fit_zh"])
 
 
 def test_paper_tasks_expose_s1_mapping() -> None:

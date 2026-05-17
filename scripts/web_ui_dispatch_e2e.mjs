@@ -70,6 +70,12 @@ try {
   await page.locator("[data-testid='nav-library']").click();
   await expectVisible(page, "[data-testid='page-library']", "Library page did not render");
   await expectVisibleText(page, "[data-testid='page-library']", "实验工作台", "Library page should contain workbench copy");
+  await expectVisibleText(page, "[data-testid='page-library']", "对应问题", "Library algorithm catalog did not render Chinese problem-fit text");
+  await page.locator("[data-testid='algorithm-language-en']").click();
+  await expectVisibleText(page, "[data-testid='page-library']", "Features", "Library algorithm catalog did not switch to English features");
+  await expectVisibleText(page, "[data-testid='page-library']", "Problem fit", "Library algorithm catalog did not switch to English problem fit");
+  await page.locator("[data-testid='algorithm-language-zh']").click();
+  await expectVisibleText(page, "[data-testid='page-library']", "特点", "Library algorithm catalog did not switch back to Chinese features");
 
   console.log(
     JSON.stringify(
@@ -86,6 +92,8 @@ try {
           "ide_agent_panel_collapse",
           "ide_sidebar_chatui_ask",
           "library_workbench_boundary",
+          "algorithm_catalog_language_switch",
+          "algorithm_catalog_problem_fit",
         ],
         code_server_websocket_url: codeServerWebsocketUrl,
         observed_websocket_count: websocketEvents.length,

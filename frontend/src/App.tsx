@@ -112,11 +112,19 @@ type AlgorithmSpec = {
   benchmark_examples: string[];
   status: string;
   description: string;
+  description_zh: string;
+  features: string[];
+  features_zh: string[];
+  problem_fit: string[];
+  problem_fit_zh: string[];
   claim_boundary: string;
   safety_notes: string;
+  safety_notes_zh: string;
   source_scope?: string;
   implementation_path?: string | null;
 };
+
+type LibraryLanguage = "zh" | "en";
 
 type PaperTask = {
   paper_section: string;
@@ -507,6 +515,7 @@ export function App() {
   const [activeAccountId, setActiveAccountId] = useState("local");
   const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
   const [algorithms, setAlgorithms] = useState<AlgorithmSpec[]>([]);
+  const [libraryLanguage, setLibraryLanguage] = useState<LibraryLanguage>("zh");
   const [paperTasks, setPaperTasks] = useState<PaperTask[]>([]);
   const [agentRoles, setAgentRoles] = useState<AgentRole[]>([]);
   const [runs, setRuns] = useState<RunSummary[]>([]);
@@ -1353,6 +1362,7 @@ export function App() {
             artifactPayload={artifactPayload}
             events={filteredEvents}
             filter={traceFilter}
+            language={libraryLanguage}
             mode={mode}
             paperTasks={paperTasks}
             problemIntake={problemIntake}
@@ -1370,6 +1380,7 @@ export function App() {
             strategyLocks={strategyLocks}
             onAddStrategyLock={addStrategyLock}
             onFilterChange={setTraceFilter}
+            onLanguageChange={setLibraryLanguage}
             onModeChange={setMode}
             onOpenArtifacts={() => setSelectedArtifactPath("trace_summary.json")}
             onOpenCode={() => setActivePage("ide")}
@@ -1660,6 +1671,7 @@ function AlgorithmLibraryPage({
   artifactPayload,
   events,
   filter,
+  language,
   mode,
   paperTasks,
   problemIntake,
@@ -1677,6 +1689,7 @@ function AlgorithmLibraryPage({
   strategyLocks,
   onAddStrategyLock,
   onFilterChange,
+  onLanguageChange,
   onModeChange,
   onOpenArtifacts,
   onOpenCode,
@@ -1703,6 +1716,7 @@ function AlgorithmLibraryPage({
   artifactPayload: ArtifactPayload | null;
   events: string[];
   filter: string;
+  language: LibraryLanguage;
   mode: RunMode;
   paperTasks: PaperTask[];
   problemIntake: ProblemIntakeState;
@@ -1720,6 +1734,7 @@ function AlgorithmLibraryPage({
   strategyLocks: StrategyLock[];
   onAddStrategyLock: () => void;
   onFilterChange: (value: string) => void;
+  onLanguageChange: (language: LibraryLanguage) => void;
   onModeChange: (mode: RunMode) => void;
   onOpenArtifacts: () => void;
   onOpenCode: () => void;
@@ -1785,6 +1800,30 @@ function AlgorithmLibraryPage({
       <RoleModelPanel agentModels={agentModels} roles={agentRoles} onUpdate={onUpdateAgentModel} />
       <EvidencePanel selectorVotes={selectorVotes} solutionsPayload={solutionsPayload} />
       <DataRegion title="Paper primitive catalog">
+        <div className="catalog-toolbar" aria-label="算法库语言切换">
+          <div>
+            <span>{language === "zh" ? "算法说明" : "Algorithm notes"}</span>
+            <strong>{language === "zh" ? "特点 / 对应问题" : "Features / Problem fit"}</strong>
+          </div>
+          <div className="language-toggle" role="group" aria-label="Algorithm catalog language">
+            <button
+              className={language === "zh" ? "selected" : ""}
+              data-testid="algorithm-language-zh"
+              type="button"
+              onClick={() => onLanguageChange("zh")}
+            >
+              中文
+            </button>
+            <button
+              className={language === "en" ? "selected" : ""}
+              data-testid="algorithm-language-en"
+              type="button"
+              onClick={() => onLanguageChange("en")}
+            >
+              EN
+            </button>
+          </div>
+        </div>
         <div className="algorithm-context">
           {selectedPaperTask ? (
             <p>
@@ -1798,6 +1837,7 @@ function AlgorithmLibraryPage({
         <AlgorithmCatalog
           algorithms={scopedAlgorithms}
           embedded
+          language={language}
           selectedIds={selectedAlgorithmIds}
           onToggle={onToggleAlgorithm}
         />
@@ -2444,42 +2484,71 @@ function normalizeInteger(value: number, fallback: number, min: number) {
 function AlgorithmCatalog({
   algorithms,
   embedded = false,
+  language = "zh",
   onToggle,
   selectedIds = []
 }: {
   algorithms: AlgorithmSpec[];
   embedded?: boolean;
+  language?: LibraryLanguage;
   onToggle?: (algorithmId: string) => void;
   selectedIds?: string[];
 }) {
   const visible = algorithms;
+  const isChinese = language === "zh";
+  const featureLabel = isChinese ? "特点" : "Features";
+  const problemLabel = isChinese ? "对应问题" : "Problem fit";
+  const emptyLabel = isChinese ? "算法目录暂未加载。" : "Algorithm catalog is not loaded.";
   const content = (
     <div className="algorithm-grid">
-      {visible.map((algorithm) => (
-        <article className={selectedIds.includes(algorithm.id) ? "algorithm-card selected" : "algorithm-card"} key={algorithm.id}>
-          <div>
-            <span>{algorithm.family}</span>
-            <h3>{algorithm.name}</h3>
-          </div>
-          <p>{algorithm.description}</p>
-          <div className="algorithm-meta">
-            <small>{algorithm.status}</small>
-            <small>{algorithm.compatible_benchmark_families.join(" / ")}</small>
-          </div>
-          {algorithm.implementation_path ? <code>{algorithm.implementation_path}</code> : null}
-          <strong>{algorithm.safety_notes}</strong>
-          {onToggle ? (
-            <button type="button" onClick={() => onToggle(algorithm.id)}>
-              {selectedIds.includes(algorithm.id) ? "已选" : "选择"}
-            </button>
-          ) : null}
-        </article>
-      ))}
-      {visible.length === 0 ? <p className="muted">算法目录暂未加载。</p> : null}
+      {visible.map((algorithm) => {
+        const selected = selectedIds.includes(algorithm.id);
+        const description = isChinese ? algorithm.description_zh : algorithm.description;
+        const features = isChinese ? algorithm.features_zh : algorithm.features;
+        const problemFit = isChinese ? algorithm.problem_fit_zh : algorithm.problem_fit;
+        const safetyNotes = isChinese ? algorithm.safety_notes_zh : algorithm.safety_notes;
+        return (
+          <article className={selected ? "algorithm-card selected" : "algorithm-card"} key={algorithm.id}>
+            <div>
+              <span>{algorithm.family}</span>
+              <h3>{algorithm.name}</h3>
+            </div>
+            <p>{description}</p>
+            <div className="algorithm-detail-block">
+              <span>{featureLabel}</span>
+              <ul>
+                {features.map((feature) => (
+                  <li key={feature}>{feature}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="algorithm-detail-block">
+              <span>{problemLabel}</span>
+              <ul>
+                {problemFit.map((problem) => (
+                  <li key={problem}>{problem}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="algorithm-meta">
+              <small>{algorithm.status}</small>
+              <small>{algorithm.compatible_benchmark_families.join(" / ")}</small>
+            </div>
+            {algorithm.implementation_path ? <code>{algorithm.implementation_path}</code> : null}
+            <strong>{safetyNotes}</strong>
+            {onToggle ? (
+              <button type="button" onClick={() => onToggle(algorithm.id)}>
+                {selected ? (isChinese ? "已选" : "Selected") : isChinese ? "选择" : "Select"}
+              </button>
+            ) : null}
+          </article>
+        );
+      })}
+      {visible.length === 0 ? <p className="muted">{emptyLabel}</p> : null}
     </div>
   );
   if (embedded) return content;
-  return <DataRegion title="Algorithm catalog">{content}</DataRegion>;
+  return <DataRegion title={isChinese ? "算法目录" : "Algorithm catalog"}>{content}</DataRegion>;
 }
 
 function DashboardView({

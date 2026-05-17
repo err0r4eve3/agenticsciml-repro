@@ -2,6 +2,24 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-17 算法库双语说明
+
+本次增强第三页算法库的信息密度和中英双语兼容。
+
+已实现：
+
+- `/api/algorithms` 的每个算法条目新增中文说明、English / 中文 `features`、
+  English / 中文 `problem_fit` 和中文边界提醒。
+- 前端算法库新增 `中文` / `EN` 切换；每张算法卡片都明确展示“特点”和“对应问题”，
+  同时保留 family、status、compatible benchmark families、implementation path 和
+  选择按钮。
+- 浏览器 E2E 脚本新增算法库语言切换检查，避免未来 UI 回退成单语纯描述。
+
+边界：
+
+- 双语目录仍只是人工选择和 Problem Intake 的 strategy seed，不是已评估实现。
+- 分数、champion 和 scientific claim 仍只能来自 evaluator、trace 和 run artifacts。
+
 ## 2026-05-17 Run Readiness / Strategy Audit
 
 本次根据 NotebookLM 现有研究和一次性 Pro 复核，把下一轮迭代落在启动前的

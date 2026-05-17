@@ -148,7 +148,9 @@ Web API 暴露；本地开发需要打开仓库根目录时，必须显式设置
 
 - `GET /api/benchmarks`：读取当前 benchmark catalog。
 - `GET /api/algorithms`：读取算法策略目录。目录项只用于规划和 prompt seed，不
-  代表已经通过 evaluator 的实现。
+  代表已经通过 evaluator 的实现。目录项同时暴露 English / 中文说明、`features`
+  / `features_zh`、`problem_fit` / `problem_fit_zh` 和中文边界提醒，前端第三页可
+  在 `中文` / `EN` 间切换。
 - `GET /api/paper-tasks`：读取 S1 小标题、本地 benchmark 映射、reference primitive、
   local figure artifact 约定和 claim boundary。
 - `GET /api/agent-roles`：读取可配置的 agent role 列表和分层模型配置说明。

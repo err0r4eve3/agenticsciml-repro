@@ -1059,9 +1059,58 @@ ul {
   color: white;
 }
 
+.catalog-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.catalog-toolbar span {
+  display: block;
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.catalog-toolbar strong {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.language-toggle {
+  display: inline-flex;
+  gap: 4px;
+  border: 1px solid rgba(203, 183, 154, 0.78);
+  border-radius: 8px;
+  background: #f5ead8;
+  padding: 3px;
+}
+
+.language-toggle button {
+  min-width: 54px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 740;
+  padding: 6px 10px;
+}
+
+.language-toggle button.selected {
+  background: #fffaf2;
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(80, 65, 45, 0.12);
+}
+
 .algorithm-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -1070,7 +1119,7 @@ ul {
   align-content: start;
   gap: 10px;
   min-width: 0;
-  min-height: 190px;
+  min-height: 286px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff7eb;
@@ -1099,6 +1148,32 @@ ul {
   color: var(--ink-muted);
   font-size: 12px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.algorithm-detail-block {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.algorithm-detail-block span {
+  margin-bottom: 0;
+  color: #69533c;
+}
+
+.algorithm-detail-block ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 16px;
+}
+
+.algorithm-detail-block li {
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.35;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
