@@ -9,7 +9,7 @@ import threading
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Query
@@ -33,6 +33,7 @@ AssistantMode = Literal["ask", "plan", "agent"]
 ReasoningEffort = Literal["low", "medium", "high"]
 DEFAULT_ACCOUNT_ID = "local"
 ACCOUNT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$")
+PLANNER_VERSION = "problem_intake_keyword_planner.v1"
 
 PLANNED_AGENT_CALLS = (
     "data_analyst",
@@ -92,6 +93,8 @@ class RunStartRequest(BaseModel):
     max_children_per_node: int = Field(default=10, ge=1)
     agent_models: dict[str, AgentModelRequest] = Field(default_factory=dict)
     selected_algorithm_ids: list[str] = Field(default_factory=list)
+    problem_intake: dict[str, Any] = Field(default_factory=dict)
+    planner_snapshot: dict[str, Any] = Field(default_factory=dict)
     resume: bool = False
     background: bool = False
     real_confirmed: bool = False
@@ -275,7 +278,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/runs/{run_id}/resume")
     def resume_run(run_id: str, request: RunStartRequest) -> dict[str, object]:
-        resume_request = request.model_copy(update={"experiment_id": run_id, "resume": True})
+        resume_request = _merge_resume_request(run_id, request)
         return start_run(resume_request)
 
     @app.get("/api/runs/{run_id}")
@@ -408,6 +411,8 @@ def _run_orchestrator(
             use_mock=request.mode == "mock",
             agents=_agent_configs_from_request(request),
             strategy_seed_ids=_normalized_algorithm_ids(request.selected_algorithm_ids),
+            problem_intake=_normalized_mapping(request.problem_intake),
+            planner_snapshot=_normalized_mapping(request.planner_snapshot),
             resume=request.resume,
         )
         llm = MockLLMClient() if request.mode == "mock" else OpenAIAdapter()
@@ -472,8 +477,19 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
     ]
     if request.mode == "real":
         warnings.append("Real mode still requires Web API real_confirmed=true and server-side real-mode enablement.")
+    problem_intake = _problem_intake_snapshot(request)
+    planner_snapshot = _planner_snapshot(
+        request,
+        recommended=recommended,
+        benchmark_candidates=benchmark_candidates,
+        algorithm_rankings=algorithm_rankings,
+        selected_algorithm_ids=selected_algorithm_ids,
+        run_budget={**run_budget, "mode": request.mode},
+    )
     return {
         "problem_summary": _compact_summary(request.problem_statement),
+        "problem_intake": problem_intake,
+        "planner_snapshot": planner_snapshot,
         "recommended_benchmark": recommended,
         "benchmark_candidates": benchmark_candidates[:6],
         "algorithm_rankings": algorithm_rankings[:8],
@@ -498,6 +514,8 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
                     "selector_vote_count": request.selector_vote_count,
                     "max_children_per_node": request.max_children_per_node,
                     "selected_algorithm_ids": selected_algorithm_ids,
+                    "problem_intake": problem_intake,
+                    "planner_snapshot": planner_snapshot,
                     "agent_models": {
                         role: config.to_dict()
                         for role, config in _agent_configs_from_problem_request(request).items()
@@ -512,6 +530,69 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
             "Only completed run artifacts, evaluator scores, trace summaries, and tests support local claims."
         ),
     }
+
+
+def _problem_intake_snapshot(request: ProblemIntakeRequest) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "problem_statement": request.problem_statement,
+        "requirements": request.requirements,
+        "evaluation_criteria": request.evaluation_criteria,
+        "data_description": request.data_description,
+        "problem_summary": _compact_summary(request.problem_statement),
+    }
+
+
+def _planner_snapshot(
+    request: ProblemIntakeRequest,
+    *,
+    recommended: dict[str, object],
+    benchmark_candidates: list[dict[str, object]],
+    algorithm_rankings: list[dict[str, object]],
+    selected_algorithm_ids: list[str],
+    run_budget: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "planner_version": PLANNER_VERSION,
+        "recommended_benchmark": recommended,
+        "benchmark_candidates": benchmark_candidates[:6],
+        "algorithm_rankings": algorithm_rankings[:12],
+        "manual_selected_algorithm_ids": _normalized_algorithm_ids(request.selected_algorithm_ids),
+        "selected_algorithm_ids": list(selected_algorithm_ids),
+        "selected_seed_snapshot": _algorithm_seed_snapshot(selected_algorithm_ids),
+        "run_config": dict(run_budget),
+        "claim_boundary": (
+            "Problem-intake planning is a controlled mapping to local benchmark and strategy seed catalogs. "
+            "It is not evaluator synthesis and is not scientific evidence."
+        ),
+    }
+
+
+def _algorithm_seed_snapshot(algorithm_ids: list[str]) -> list[dict[str, object]]:
+    algorithms_by_id = {algorithm.algorithm_id: algorithm for algorithm in list_algorithms()}
+    snapshots: list[dict[str, object]] = []
+    for algorithm_id in _normalized_algorithm_ids(algorithm_ids):
+        algorithm = algorithms_by_id.get(algorithm_id)
+        if algorithm is None:
+            continue
+        payload = algorithm.to_dict()
+        snapshots.append(
+            {
+                "id": payload["id"],
+                "name": payload["name"],
+                "family": payload["family"],
+                "status": payload["status"],
+                "compatible_benchmark_families": payload["compatible_benchmark_families"],
+                "benchmark_examples": payload["benchmark_examples"],
+                "description": payload["description"],
+                "claim_boundary": payload["claim_boundary"],
+                "safety_notes": payload["safety_notes"],
+                "source_scope": payload.get("source_scope"),
+                "implementation_path": payload.get("implementation_path"),
+            }
+        )
+    return snapshots
 
 
 def _agent_configs_from_problem_request(request: ProblemIntakeRequest) -> dict[str, AgentConfig]:
@@ -754,6 +835,64 @@ def _agent_configs_from_request(request: RunStartRequest) -> dict[str, AgentConf
         )
         for role, agent_model in request.agent_models.items()
     }
+
+
+def _merge_resume_request(run_id: str, request: RunStartRequest) -> RunStartRequest:
+    output_dir = _resolve_output_dir(request.output_dir, account_id=request.account_id)
+    run_dir = _resolve_run_dir(run_id, output_dir)
+    existing_config = _read_existing_experiment_config(run_dir)
+    updates: dict[str, Any] = {"experiment_id": run_id, "resume": True}
+    explicitly_set = set(request.model_fields_set)
+
+    if existing_config is not None:
+        if "benchmark" not in explicitly_set and "benchmark_dir" not in explicitly_set:
+            if existing_config.benchmark_dir is not None:
+                benchmark_spec = benchmark_for_path(existing_config.benchmark_dir)
+                if benchmark_spec is not None:
+                    updates["benchmark"] = benchmark_spec.name
+                    updates["benchmark_dir"] = None
+                elif request.account_id is None:
+                    updates["benchmark_dir"] = str(existing_config.benchmark_dir)
+        if "selected_algorithm_ids" not in explicitly_set:
+            updates["selected_algorithm_ids"] = list(existing_config.strategy_seed_ids)
+        if "agent_models" not in explicitly_set:
+            updates["agent_models"] = _agent_requests_from_configs(existing_config.agents)
+        if "problem_intake" not in explicitly_set:
+            updates["problem_intake"] = dict(existing_config.problem_intake)
+        if "planner_snapshot" not in explicitly_set:
+            updates["planner_snapshot"] = dict(existing_config.planner_snapshot)
+
+    return request.model_copy(update=updates)
+
+
+def _read_existing_experiment_config(run_dir: Path) -> ExperimentConfig | None:
+    payload = _read_optional_json(run_dir / "config.json")
+    if not payload:
+        return None
+    try:
+        return ExperimentConfig.from_dict(payload)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _agent_requests_from_configs(agents: dict[str, AgentConfig]) -> dict[str, AgentModelRequest]:
+    requests: dict[str, AgentModelRequest] = {}
+    for role, config in agents.items():
+        reasoning_effort = (
+            cast(ReasoningEffort, config.reasoning_effort)
+            if config.reasoning_effort in {"low", "medium", "high"}
+            else None
+        )
+        requests[role] = AgentModelRequest(
+            model=config.model,
+            temperature=config.temperature,
+            reasoning_effort=reasoning_effort,
+        )
+    return requests
+
+
+def _normalized_mapping(value: dict[str, Any] | None) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _record_for(run_dir: Path) -> RunRecord | None:

@@ -421,6 +421,8 @@ class ExperimentConfig:
     use_mock: bool = True
     agents: dict[str, AgentConfig] = field(default_factory=dict)
     strategy_seed_ids: list[str] = field(default_factory=list)
+    problem_intake: dict[str, Any] = field(default_factory=dict)
+    planner_snapshot: dict[str, Any] = field(default_factory=dict)
     auto_approve_evaluation: bool = True
     resume: bool = False
 
@@ -433,6 +435,8 @@ class ExperimentConfig:
             "use_mock": self.use_mock,
             "agents": {role: cfg.to_dict() for role, cfg in self.agents.items()},
             "strategy_seed_ids": list(self.strategy_seed_ids),
+            "problem_intake": dict(self.problem_intake),
+            "planner_snapshot": dict(self.planner_snapshot),
             "auto_approve_evaluation": self.auto_approve_evaluation,
             "resume": self.resume,
         }
@@ -450,6 +454,16 @@ class ExperimentConfig:
                 for role, agent_data in data.get("agents", {}).items()
             },
             strategy_seed_ids=[str(item) for item in data.get("strategy_seed_ids", [])],
+            problem_intake=(
+                dict(data["problem_intake"])
+                if isinstance(data.get("problem_intake"), dict)
+                else {}
+            ),
+            planner_snapshot=(
+                dict(data["planner_snapshot"])
+                if isinstance(data.get("planner_snapshot"), dict)
+                else {}
+            ),
             auto_approve_evaluation=bool(data.get("auto_approve_evaluation", True)),
             resume=bool(data.get("resume", False)),
         )

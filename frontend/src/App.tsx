@@ -185,6 +185,8 @@ type ProblemIntakeState = {
 
 type ProblemRunPlan = {
   problem_summary: string;
+  problem_intake: Record<string, unknown>;
+  planner_snapshot: Record<string, unknown>;
   recommended_benchmark: Benchmark;
   benchmark_candidates: Array<{ benchmark: Benchmark; score: number; rationale: string }>;
   algorithm_rankings: Array<{
@@ -331,6 +333,8 @@ const api = {
     max_children_per_node?: number;
     agent_models?: Record<string, AgentModelConfig>;
     selected_algorithm_ids?: string[];
+    problem_intake?: Record<string, unknown>;
+    planner_snapshot?: Record<string, unknown>;
     background?: boolean;
     real_confirmed?: boolean;
   }): Promise<RunSummary> {
@@ -347,6 +351,8 @@ const api = {
       max_children_per_node: body.max_children_per_node ?? 10,
       agent_models: body.agent_models ?? {},
       selected_algorithm_ids: body.selected_algorithm_ids ?? [],
+      problem_intake: body.problem_intake ?? {},
+      planner_snapshot: body.planner_snapshot ?? {},
       background: body.background ?? false,
       real_confirmed: body.real_confirmed ?? false
     });
@@ -360,7 +366,6 @@ const api = {
     realConfirmed = false
   ): Promise<RunSummary> {
     await postJson<unknown>(`/api/runs/${encodeURIComponent(runId)}/resume`, {
-      benchmark,
       mode,
       account_id: accountId,
       experiment_id: runId,
@@ -647,6 +652,8 @@ export function App() {
         max_children_per_node: runConfig.max_children_per_node,
         agent_models: activeAgentModels(),
         selected_algorithm_ids: selectedAlgorithmIds,
+        problem_intake: problemPlan?.recommended_benchmark.name === selectedBenchmark ? problemPlan.problem_intake : {},
+        planner_snapshot: problemPlan?.recommended_benchmark.name === selectedBenchmark ? problemPlan.planner_snapshot : {},
         background,
         real_confirmed: realConfirmed
       });

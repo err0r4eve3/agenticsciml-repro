@@ -16,15 +16,25 @@ agent 控制面自动评选 benchmark、算法 seed 和 run budget；人工算�
   action。
 - 前端 Paper Run Lab 新增 `Problem Intake` 表单，支持自动评选 benchmark 与解法 seed。
 - 算法库卡片支持人工选择；已选 algorithm ids 会进入 `POST /api/runs`。
-- `ExperimentConfig` 新增 `strategy_seed_ids`，并写入 `config.json`。
-- `run_metadata.json` 记录 `strategy_seed_ids` 和数量。
+- `ExperimentConfig` 新增 `strategy_seed_ids`、`problem_intake` 和
+  `planner_snapshot`，并写入 `config.json`。
+- `run_metadata.json` 记录 `strategy_seed_ids`、数量、完整 problem intake 和 planner
+  snapshot；run 目录同时写入 `planning/problem_intake.json` 作为可审计规划工件。
 - Root Engineer、Proposer 和 Engineer prompt 新增 strategy seed context，使人工或
   planner 选出的算法真正参与候选解法构思。
+- Root Engineer、Proposer 和 Engineer prompt 同时接收 problem-intake context，但固定
+  标注为非权威上下文：只能指导生成策略，不能覆盖 `ProblemBundle`、
+  `EvaluationContract`、guidelines、sandbox rules 或 evaluator contract。
+- Web resume 会在未显式覆盖时读取既有 `config.json`，保留 benchmark、
+  `strategy_seed_ids`、`agent_models`、`problem_intake` 和 `planner_snapshot`，避免
+  前端的轻量 resume payload 清空原 run 的策略种子和审计上下文。
 
 边界：
 
 - planner 只在当前本地 catalog 中做受控映射，不创建新 evaluator、不改写 benchmark
   contract，也不宣称选中算法已经有效。
+- problem intake 不是 evaluator 合成机制；当前只能作为生成类 agent 的非权威上下文，
+  具体评分仍完全来自既有 benchmark contract。
 - 真正的全流程仍由 Python orchestrator 生成 root、选择 parent、展开 solution tree、
   执行 evaluator、写 trace/leaderboard/champion。
 

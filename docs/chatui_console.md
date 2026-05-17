@@ -94,6 +94,12 @@ evaluator、selector 或 champion selection 实现。
 并作为 strategy seed context 注入 Root Engineer、Proposer 和 Engineer prompt。它们
 只影响候选解法构思，不替代 evaluator 或真实分数。
 
+Problem Intake 的完整输入会作为非权威 run context 一起传入 `POST /api/runs`：
+后端写入 `config.json`、`run_metadata.json` 和 `planning/problem_intake.json`，
+并用固定边界文案注入 Root Engineer、Proposer 和 Engineer prompt。该上下文只能
+指导生成策略；`ProblemBundle`、`EvaluationContract`、benchmark guidelines、sandbox
+规则和 evaluator contract 仍是评分与安全边界的上位事实来源。
+
 ## code-server sidecar
 
 code-server 不由 ChatUI 自动启动。先用本地 token/password 和 loopback 绑定启动：
@@ -133,16 +139,20 @@ code-server auth、系统用户/容器权限和 secret scanning 提供真实访�
   local figure artifact 约定和 claim boundary。
 - `GET /api/agent-roles`：读取可配置的 agent role 列表和分层模型配置说明。
 - `POST /api/problem-intake/plan`：从完整问题描述生成本地 benchmark 推荐、
-  algorithm rankings、selected strategy seeds、run budget 和可展示的 start_run action。
+  algorithm rankings、selected strategy seeds、run budget、`problem_intake`、
+  `planner_snapshot` 和可展示的 start_run action。
 - `GET /api/accounts` / `POST /api/accounts`：列出或创建本地账号 namespace；
   仅写入本地目录和非密钥元数据，不提供公网认证。
 - `POST /api/runs`：启动 mock/real/dry-run run；real mode 需要请求体
   `real_confirmed=true`，并且服务端必须设置
   `AGENTICSCIML_ENABLE_REAL_WEB_RUNS=1`，同时仍需显式凭据和预算边界。请求体还可包含
-  `target_solution_count`、`max_children_per_node`、`selected_algorithm_ids` 和
-  `agent_models`；后端只把这些转换成 `EvolutionConfig` / `AgentConfig` /
-  strategy seed context，不改写 evaluator 或 artifact schema。
-- `POST /api/runs/{id}/resume`：以已有 run id 恢复。
+  `target_solution_count`、`max_children_per_node`、`selected_algorithm_ids`、
+  `problem_intake`、`planner_snapshot` 和 `agent_models`；后端只把这些转换成
+  `EvolutionConfig` / `AgentConfig` / 非权威 problem context / strategy seed
+  context，不改写 evaluator 或 artifact schema。
+- `POST /api/runs/{id}/resume`：以已有 run id 恢复；未显式覆盖时会先读取既有
+  `config.json` 并保留 benchmark、`strategy_seed_ids`、`agent_models`、
+  `problem_intake` 和 `planner_snapshot`。
 - `GET /api/runs/{id}`：读取 metadata、leaderboard、trace summary 和 artifact index。
 - `GET /api/runs/{id}/events`：SSE 输出 trace events。
 - `GET /api/runs/{id}/artifacts/*`：只读 UTF-8 artifact，拒绝路径逃逸和 symlink 逃逸。

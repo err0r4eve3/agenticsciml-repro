@@ -24,6 +24,7 @@ class EngineerAgent(AgentBase):
         guidelines: str,
         parent_analysis: AnalysisReport | None,
         branch_context: dict[str, Any] | None = None,
+        problem_intake_context: str | None = None,
         strategy_seed_context: str | None = None,
     ) -> str:
         parent_digest = solution_digest(parent_code)
@@ -37,6 +38,7 @@ class EngineerAgent(AgentBase):
                 "guidelines": guidelines,
                 "parent_analysis": parent_analysis,
                 "branch_context": branch_context,
+                "problem_intake_context": problem_intake_context,
                 "strategy_seed_context": strategy_seed_context,
                 "parent_digest": parent_digest,
             }
@@ -59,6 +61,8 @@ class EngineerAgent(AgentBase):
             f"{parent_analysis.summary if parent_analysis else 'No parent analysis available.'}\n\n"
             "## Branch Context\n\n"
             f"{json.dumps(branch_context or {}, indent=2, sort_keys=True)}\n\n"
+            "## User Problem Intake Context (Non-Contract)\n\n"
+            f"{problem_intake_context or 'No user problem-intake context provided.'}\n\n"
             "## Human/Planner Selected Strategy Seeds\n\n"
             f"{strategy_seed_context or 'No strategy seeds selected.'}\n\n"
             "## Forbidden Actions\n\n"

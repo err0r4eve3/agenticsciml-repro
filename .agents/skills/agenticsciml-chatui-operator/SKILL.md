@@ -94,6 +94,9 @@ The assistant may:
   summaries, and local SVG evidence without editing run artifacts;
 - accept a complete problem description and use the controlled problem-intake
   planner to recommend a benchmark, algorithm seeds, and run budget;
+- preserve the resulting `problem_intake` and `planner_snapshot` as
+  non-authoritative run context under `config.json`, `run_metadata.json`, and
+  `planning/problem_intake.json`;
 - let users manually select algorithm strategy seeds before launching a run;
 - set run budget parameters through the controlled `POST /api/runs` path,
   including target solution count, parallel mutations, selector vote count, and
@@ -101,7 +104,9 @@ The assistant may:
 - configure role-level model and temperature overrides when the user explicitly
   chooses them, while preserving real-mode confirmation and budget boundaries;
 - start a run through the controlled orchestrator path;
-- resume a run only when checkpoint and contract state allow it;
+- resume a run only when checkpoint and contract state allow it, preserving
+  existing strategy seeds, role model overrides, problem intake, and planner
+  snapshot unless the user explicitly overrides them;
 - summarize run artifacts without altering them;
 - open code-server for an approved current-account workspace scope when
   deployment policy allows it;

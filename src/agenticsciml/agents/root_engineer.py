@@ -18,6 +18,7 @@ class RootEngineerAgent(AgentBase):
         contract: EvaluationContract,
         guidelines: str,
         data_report: str | None = None,
+        problem_intake_context: str | None = None,
         strategy_seed_context: str | None = None,
     ) -> str:
         self.require_inputs(
@@ -27,12 +28,15 @@ class RootEngineerAgent(AgentBase):
                 "contract": contract,
                 "guidelines": guidelines,
                 "data_report": data_report,
+                "problem_intake_context": problem_intake_context,
                 "strategy_seed_context": strategy_seed_context,
             }
         )
         prompt = (
             "Generate the root single-agent baseline solution.py. "
             "Do not use KB or multi-agent debate. Return JSON with proposal and code.\n\n"
+            "## User Problem Intake Context (Non-Contract)\n\n"
+            f"{problem_intake_context or 'No user problem-intake context provided.'}\n\n"
             "## ProblemBundle Summary\n\n"
             f"{problem_bundle.summary()}\n\n"
             "## Problem.md\n\n"

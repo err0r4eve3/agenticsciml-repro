@@ -32,6 +32,7 @@ class ProposerAgent(AgentBase):
         related_reports: list[str],
         use_critic: bool = True,
         branch_context: dict[str, Any] | None = None,
+        problem_intake_context: str | None = None,
         strategy_seed_context: str | None = None,
     ) -> Proposal:
         self.require_inputs(
@@ -41,6 +42,7 @@ class ProposerAgent(AgentBase):
                 "kb_entry": kb_entry,
                 "related_reports": related_reports,
                 "branch_context": branch_context,
+                "problem_intake_context": problem_intake_context,
                 "strategy_seed_context": strategy_seed_context,
             }
         )
@@ -52,6 +54,8 @@ class ProposerAgent(AgentBase):
             f"Related reports:\n{chr(10).join(related_reports) if related_reports else 'none'}\n\n"
             "Branch context:\n"
             f"{json.dumps(branch_context or {}, indent=2, sort_keys=True)}\n\n"
+            "User problem-intake context (non-contract):\n"
+            f"{problem_intake_context or 'none'}\n\n"
             "Strategy seeds:\n"
             f"{strategy_seed_context or 'none'}"
         )

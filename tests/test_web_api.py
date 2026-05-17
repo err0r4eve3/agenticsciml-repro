@@ -123,11 +123,16 @@ def test_problem_intake_plans_benchmark_and_strategy_seeds() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["recommended_benchmark"]["name"] == "cylinder_wake_reconstruction_faithful_small"
+    assert payload["problem_intake"]["problem_statement"].startswith("Reconstruct two-dimensional")
+    assert payload["planner_snapshot"]["planner_version"] == "problem_intake_keyword_planner.v1"
+    assert payload["planner_snapshot"]["selected_seed_snapshot"][0]["id"] == "paper_cylinder_bandlimited_filter"
     assert payload["run_config"]["max_iterations"] == 2
     assert payload["run_config"]["planned_solution_budget"] == 7
     assert "paper_cylinder_bandlimited_filter" in payload["selected_algorithm_ids"]
     assert payload["actions"][0]["payload"]["benchmark"] == "cylinder_wake_reconstruction_faithful_small"
     assert payload["actions"][0]["payload"]["selected_algorithm_ids"] == payload["selected_algorithm_ids"]
+    assert payload["actions"][0]["payload"]["problem_intake"] == payload["problem_intake"]
+    assert payload["actions"][0]["payload"]["planner_snapshot"] == payload["planner_snapshot"]
     assert any(
         item["algorithm"]["id"] == "paper_cylinder_bandlimited_filter" and item["selected"]
         for item in payload["algorithm_rankings"]
@@ -215,6 +220,132 @@ def test_web_mock_run_persists_agent_model_overrides(tmp_path: Path) -> None:
     assert metadata["agent_models"]["engineer"]["actual_model"] == "mock"
     assert config["strategy_seed_ids"] == ["fourier_feature_mlp", "piecewise_local_basis"]
     assert metadata["strategy_seed_ids"] == ["fourier_feature_mlp", "piecewise_local_basis"]
+
+
+def test_web_mock_run_persists_problem_intake_and_prompt_context(tmp_path: Path) -> None:
+    client = TestClient(create_app())
+    plan = client.post(
+        "/api/problem-intake/plan",
+        json={
+            "problem_statement": (
+                "Solve a discontinuous function approximation problem with a local evaluator. "
+                "Prefer compact basis functions and preserve the private validation boundary."
+            ),
+            "requirements": "No validation leakage; keep generated solution deterministic.",
+            "evaluation_criteria": "validation_mse from evaluator-owned labels.",
+            "data_description": "Training samples from a discontinuous scalar function.",
+            "selected_algorithm_ids": ["piecewise_local_basis"],
+            "target_solution_count": 1,
+        },
+    )
+    assert plan.status_code == 200
+    action_payload = plan.json()["actions"][0]["payload"]
+    response = client.post(
+        "/api/runs",
+        json={
+            **action_payload,
+            "mode": "mock",
+            "experiment_id": "problem-context-run",
+            "output_dir": str(tmp_path),
+            "target_solution_count": 1,
+            "background": False,
+        },
+    )
+
+    assert response.status_code == 200
+    run_dir = tmp_path / "problem-context-run"
+    config = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+    metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    planning = json.loads((run_dir / "planning" / "problem_intake.json").read_text(encoding="utf-8"))
+    transcript = json.loads(
+        (run_dir / "solutions" / "solution_000" / "transcripts" / "root_engineer.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    trace_text = (run_dir / "trace.jsonl").read_text(encoding="utf-8")
+
+    assert config["problem_intake"]["problem_statement"].startswith("Solve a discontinuous")
+    assert metadata["problem_intake"] == config["problem_intake"]
+    assert planning["planner_snapshot"]["planner_version"] == "problem_intake_keyword_planner.v1"
+    assert "piecewise_local_basis" in metadata["planner_snapshot"]["selected_algorithm_ids"]
+    assert "problem_intake_summary" in trace_text
+    prompt = transcript[0]["prompt"]
+    assert "User Problem Intake Context (Non-Contract)" in prompt
+    assert "non-authoritative run context" in prompt
+    assert "Solve a discontinuous function approximation problem" in prompt
+    assert "non-authoritative strategy seeds" in prompt
+
+
+def test_web_resume_preserves_seed_models_and_problem_context(tmp_path: Path) -> None:
+    client = TestClient(create_app())
+    problem_intake = {
+        "schema_version": 1,
+        "problem_statement": "Solve a discontinuous function approximation problem with compact local bases.",
+        "problem_summary": "discontinuous compact local bases",
+    }
+    planner_snapshot = {
+        "schema_version": 1,
+        "planner_version": "problem_intake_keyword_planner.v1",
+        "selected_algorithm_ids": ["piecewise_local_basis"],
+        "selected_seed_snapshot": [
+            {
+                "id": "piecewise_local_basis",
+                "name": "Piecewise Local Basis",
+                "family": "classical_ml",
+                "status": "strategy_blueprint",
+                "compatible_benchmark_families": ["function_approximation"],
+                "benchmark_examples": ["function_approx"],
+                "description": "Local basis seed.",
+                "claim_boundary": "planning seed only",
+                "safety_notes": "not evidence",
+                "source_scope": "catalog",
+                "implementation_path": None,
+            }
+        ],
+    }
+    first = client.post(
+        "/api/runs",
+        json={
+            "benchmark": "function_approx",
+            "mode": "mock",
+            "target_solution_count": 1,
+            "experiment_id": "resume-preserve",
+            "output_dir": str(tmp_path),
+            "agent_models": {
+                "engineer": {
+                    "model": "deepseek-v4-pro",
+                    "temperature": 0.15,
+                    "reasoning_effort": "high",
+                }
+            },
+            "selected_algorithm_ids": ["piecewise_local_basis"],
+            "problem_intake": problem_intake,
+            "planner_snapshot": planner_snapshot,
+        },
+    )
+    assert first.status_code == 200
+
+    resumed = client.post(
+        "/api/runs/resume-preserve/resume",
+        json={
+            "mode": "mock",
+            "experiment_id": "resume-preserve",
+            "output_dir": str(tmp_path),
+            "max_iterations": 1,
+            "parallel_mutations": 1,
+        },
+    )
+
+    assert resumed.status_code == 200
+    run_dir = tmp_path / "resume-preserve"
+    config = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+    metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    assert config["strategy_seed_ids"] == ["piecewise_local_basis"]
+    assert config["agents"]["engineer"]["model"] == "deepseek-v4-pro"
+    assert config["problem_intake"] == problem_intake
+    assert config["planner_snapshot"]["selected_algorithm_ids"] == ["piecewise_local_basis"]
+    assert metadata["strategy_seed_ids"] == ["piecewise_local_basis"]
+    assert metadata["problem_intake"] == problem_intake
 
 
 def test_web_run_rejects_unknown_agent_role(tmp_path: Path) -> None:
