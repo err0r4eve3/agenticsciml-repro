@@ -1162,13 +1162,18 @@ export function App() {
 
   function startAgentPanelResize(event: ReactPointerEvent<HTMLButtonElement>) {
     event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
     const startX = event.clientX;
     const startWidth = agentPanelWidth;
+    const resizeHandle = event.currentTarget;
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
       setBoundedAgentPanelWidth(startWidth + startX - moveEvent.clientX);
     };
     const stopResize = () => {
+      if (resizeHandle.hasPointerCapture(event.pointerId)) {
+        resizeHandle.releasePointerCapture(event.pointerId);
+      }
       document.body.classList.remove("resizing-agent-panel");
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", stopResize);
