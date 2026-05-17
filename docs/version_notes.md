@@ -38,6 +38,8 @@
   `proxy_set_header X-Forwarded-Host $http_host`，否则 code-server origin guard 会把浏览器
   `Origin: https://host:port` 与上游 `Host: host` 判为不匹配，WebSocket 握手返回
   `403`，前端表现为 `WebSocket close with status code 1006`。
+- 第二页 IDE 的右侧 ChatUI 侧栏支持拖动调整宽度和折叠，侧栏与 VS Code Web 之间改为
+  细弱分隔线；浏览器 E2E 会验证 resize、collapse 和展开路径。
 
 验证：
 

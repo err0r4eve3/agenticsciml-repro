@@ -1,4 +1,12 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  type CSSProperties,
+  type FormEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useState
+} from "react";
 import {
   AlertTriangle,
   Bot,
@@ -81,6 +89,10 @@ type WorkspaceScope = "repo" | "account" | "run" | "solution";
 type AssistantMode = "ask" | "plan" | "agent";
 type ReasoningEffort = "low" | "medium" | "high";
 type PageKey = "chat" | "ide" | "library";
+
+const AGENT_PANEL_MIN_WIDTH = 280;
+const AGENT_PANEL_MAX_WIDTH = 560;
+const AGENT_PANEL_DEFAULT_WIDTH = 360;
 
 type AccountOption = {
   account_id: string;
@@ -477,6 +489,7 @@ export function App() {
   const [codeWorkspaces, setCodeWorkspaces] = useState<CodeWorkspaceOption[]>([]);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
   const [agentCollapsed, setAgentCollapsed] = useState(false);
+  const [agentPanelWidth, setAgentPanelWidth] = useState(AGENT_PANEL_DEFAULT_WIDTH);
   const [pendingRealAction, setPendingRealAction] = useState<SolverAction | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1063,6 +1076,37 @@ export function App() {
     setSelectedWorkspaceId(workspace.id);
   }
 
+  function setBoundedAgentPanelWidth(nextWidth: number) {
+    setAgentPanelWidth(Math.min(AGENT_PANEL_MAX_WIDTH, Math.max(AGENT_PANEL_MIN_WIDTH, Math.round(nextWidth))));
+  }
+
+  function startAgentPanelResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = agentPanelWidth;
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      setBoundedAgentPanelWidth(startWidth + startX - moveEvent.clientX);
+    };
+    const stopResize = () => {
+      document.body.classList.remove("resizing-agent-panel");
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopResize);
+    };
+
+    document.body.classList.add("resizing-agent-panel");
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopResize);
+  }
+
+  function resizeAgentPanelBy(delta: number) {
+    setBoundedAgentPanelWidth(agentPanelWidth + delta);
+  }
+
+  const idePageStyle = selectedWorkspace
+    ? ({ "--agent-panel-width": `${agentPanelWidth}px` } as CSSProperties)
+    : undefined;
+
   async function createLocalAccount() {
     const nextId = `user_${new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 12)}`;
     setBusy(true);
@@ -1113,6 +1157,7 @@ export function App() {
           className={selectedWorkspace ? "ide-page workspace-open" : "ide-page workspace-select"}
           aria-label="AI IDE 页面"
           data-testid="page-ide"
+          style={idePageStyle}
         >
           {selectedWorkspace ? (
             <>
@@ -1131,6 +1176,9 @@ export function App() {
                 onSend={sendMessage}
                 onToggle={() => setAgentCollapsed((current) => !current)}
                 onDismissRealAction={() => setPendingRealAction(null)}
+                onResizeReset={() => setAgentPanelWidth(AGENT_PANEL_DEFAULT_WIDTH)}
+                onResizeStart={startAgentPanelResize}
+                onResizeStep={resizeAgentPanelBy}
               />
             </>
           ) : (
@@ -2546,6 +2594,9 @@ function AgentPanel({
   onChangeMessage,
   onConfirmRealAction,
   onDismissRealAction,
+  onResizeReset,
+  onResizeStart,
+  onResizeStep,
   onSend,
   onToggle
 }: {
@@ -2560,12 +2611,15 @@ function AgentPanel({
   onChangeMessage: (value: string) => void;
   onConfirmRealAction: () => void;
   onDismissRealAction: () => void;
+  onResizeReset: () => void;
+  onResizeStart: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onResizeStep: (delta: number) => void;
   onSend: (event: FormEvent) => void;
   onToggle: () => void;
 }) {
   if (collapsed) {
     return (
-      <aside className="agent-collapsed">
+      <aside className="agent-collapsed" data-testid="ide-agent-collapsed">
         <button aria-label="展开 Agent 面板" className="icon-button" type="button" onClick={onToggle}>
           <PanelRightOpen size={18} />
         </button>
@@ -2574,7 +2628,24 @@ function AgentPanel({
     );
   }
   return (
-    <aside className="agent-panel" aria-label="Agent 面板">
+    <aside className="agent-panel" aria-label="Agent 面板" data-testid="ide-agent-panel">
+      <button
+        aria-label="拖动调整 Agent 面板宽度"
+        className="agent-resize-handle"
+        data-testid="agent-resize-handle"
+        type="button"
+        onDoubleClick={() => onResizeReset()}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            onResizeStep(24);
+          } else if (event.key === "ArrowRight") {
+            event.preventDefault();
+            onResizeStep(-24);
+          }
+        }}
+        onPointerDown={onResizeStart}
+      />
       <header className="agent-header">
         <div>
           <p className="eyebrow">AI</p>

@@ -269,9 +269,9 @@ ul {
 
 .ide-page.workspace-open {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 8px;
-  padding: 8px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, var(--agent-panel-width, 360px));
+  gap: 0;
+  padding: 0;
 }
 
 .ide-page.workspace-select {
@@ -288,7 +288,7 @@ ul {
 }
 
 .agent-is-collapsed .ide-page.workspace-open {
-  grid-template-columns: minmax(0, 1fr) 56px;
+  grid-template-columns: minmax(0, 1fr) 48px;
 }
 
 .ide-workspace {
@@ -1554,7 +1554,8 @@ tbody tr:hover,
 
 .ide-vscode-frame {
   height: 100%;
-  border-radius: 9px;
+  border: 0;
+  border-radius: 0;
   box-shadow: none;
 }
 
@@ -1607,13 +1608,58 @@ tbody tr:hover,
 }
 
 .agent-panel {
+  position: relative;
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: 12px;
   margin: 0;
+  border-left: 1px solid rgba(203, 183, 154, 0.42);
+  background: rgba(255, 250, 242, 0.88);
   overflow: hidden;
-  padding: 14px;
+  padding: 14px 14px 14px 18px;
+  transition: background 160ms ease;
+}
+
+.agent-resize-handle {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  bottom: 0;
+  left: -5px;
+  width: 10px;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: col-resize;
+  padding: 0;
+}
+
+.agent-resize-handle::before {
+  content: "";
+  display: block;
+  width: 1px;
+  height: 52px;
+  margin: auto;
+  border-radius: 999px;
+  background: rgba(138, 90, 43, 0.34);
+  opacity: 0.45;
+  transition:
+    opacity 140ms ease,
+    width 140ms ease;
+}
+
+.agent-resize-handle:hover::before,
+.agent-resize-handle:focus-visible::before {
+  width: 2px;
+  opacity: 0.95;
+}
+
+.resizing-agent-panel,
+.resizing-agent-panel * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 .agent-header {
@@ -1628,9 +1674,8 @@ tbody tr:hover,
   align-items: center;
   flex-direction: column;
   gap: 18px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: #f7efe3;
+  border-left: 1px solid rgba(203, 183, 154, 0.42);
+  background: rgba(255, 250, 242, 0.82);
   padding: 12px 8px;
 }
 
@@ -1808,7 +1853,13 @@ tbody tr:hover,
 
   .agent-panel,
   .agent-collapsed {
+    border-top: 1px solid rgba(203, 183, 154, 0.42);
+    border-left: 0;
     margin: 0;
+  }
+
+  .agent-resize-handle {
+    display: none;
   }
 
   .metric-grid,

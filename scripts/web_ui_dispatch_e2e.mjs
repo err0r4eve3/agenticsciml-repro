@@ -60,6 +60,7 @@ try {
     );
   }
   await expectNotVisibleText(page, "[data-testid='page-ide']", "实验工作台", "IDE page leaked workbench copy");
+  await verifyIdeAgentPanelResizeAndCollapse(page);
 
   await page.locator("[data-testid='page-ide'] [data-testid='assistant-mode-ask']").click();
   await page.locator("[data-testid='ide-agent-input']").fill("你能做什么");
@@ -81,6 +82,8 @@ try {
           "plan_no_dispatch",
           "agent_open_code_server_dispatch",
           ...(options.expectCodeServerWebsocket ? ["code_server_websocket_stable"] : []),
+          "ide_agent_panel_resize",
+          "ide_agent_panel_collapse",
           "ide_sidebar_chatui_ask",
           "library_workbench_boundary",
         ],
@@ -156,6 +159,42 @@ async function assertCodeServerWorkbenchConnected(page, websocketEvents, connect
     throw new Error(`code-server workbench displayed a connection failure: ${bodyText.slice(0, 300)}`);
   }
   return openCodeServerSockets.length;
+}
+
+async function verifyIdeAgentPanelResizeAndCollapse(page) {
+  const panel = page.locator("[data-testid='ide-agent-panel']");
+  const handle = page.locator("[data-testid='agent-resize-handle']");
+  const panelBefore = await requiredBox(panel, "Agent panel did not expose a box before resize");
+  const handleBox = await requiredBox(handle, "Agent panel resize handle did not expose a box");
+
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x - 96, handleBox.y + handleBox.height / 2, { steps: 6 });
+  await page.mouse.up();
+  await page.waitForTimeout(160);
+
+  const panelAfter = await requiredBox(panel, "Agent panel did not expose a box after resize");
+  if (panelAfter.width < panelBefore.width + 48) {
+    throw new Error(`Agent panel resize did not increase width enough: before=${panelBefore.width}, after=${panelAfter.width}`);
+  }
+
+  await page.getByLabel("收起 Agent 面板").click();
+  await expectVisible(page, "[data-testid='ide-agent-collapsed']", "Agent panel did not collapse");
+  const collapsedBox = await requiredBox(page.locator("[data-testid='ide-agent-collapsed']"), "Collapsed Agent rail did not expose a box");
+  if (collapsedBox.width > 72) {
+    throw new Error(`Collapsed Agent rail is too wide: ${collapsedBox.width}`);
+  }
+
+  await page.getByLabel("展开 Agent 面板").click();
+  await expectVisible(page, "[data-testid='ide-agent-panel']", "Agent panel did not expand after collapse");
+}
+
+async function requiredBox(locator, message) {
+  const box = await locator.boundingBox();
+  if (!box) {
+    throw new Error(message);
+  }
+  return box;
 }
 
 function parseArgs(args) {

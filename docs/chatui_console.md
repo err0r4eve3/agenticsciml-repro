@@ -41,8 +41,9 @@ ChatUI 前端是单页本地工作台，不引入路由层，但用左侧功能�
   但前端不自动分发；`agent` 才会自动执行受控 action。
 - `VS Code` 页先显示工作空间选择列表，风格参考 UnitaryLab 的 workspace
   页：用户选择一个账号隔离的独立代码目录后进入 AI IDE。编辑态只保留 VS Code Web
-  iframe 和右侧可收起 ChatUI 侧边栏，不显示 benchmark、run、quality gate、
-  artifact、启动命令或 sidecar 说明块。
+  iframe 和右侧可拖动调整宽度、可收起的 ChatUI 侧边栏，不显示 benchmark、run、
+  quality gate、artifact、启动命令或 sidecar 说明块。VS Code Web 和侧边栏之间只保留
+  弱分隔线，避免形成明显的双栏卡片边框。
 - `算法库` 页承载 Paper Run Lab：benchmark、运行模式、run/gate 状态、S1 论文任务
   映射、run budget、分层模型配置、selector votes、solution loss/tree、leaderboard、
   trace preview 和 artifact 浏览。
@@ -257,7 +258,7 @@ node scripts/web_ui_dispatch_e2e.mjs \
 ```
 
 它验证第一页 ChatUI 的 Ask/Plan/Agent 分发、Agent 自动进入第二页 VS Code Web、
-第二页侧栏 ChatUI、第三页算法库边界，并在开启
+第二页侧栏 ChatUI 的拖动调整和折叠、第三页算法库边界，并在开启
 `--expect-code-server-websocket` 时要求 code-server iframe 通过 `ws://` 或 `wss://`
 建立 WebSocket、稳定保持连接、iframe 内不出现 `WebSocket close with status code
 1006` 或 workbench connection failure。远端 nginx 反代必须保留浏览器请求里的
