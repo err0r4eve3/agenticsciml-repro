@@ -880,6 +880,40 @@ def test_solver_chat_agent_can_plan_benchmark_and_seeded_run(
     assert config["problem_intake"]["problem_statement"].startswith("请用 Agent 模式")
     trace_summary = json.loads((run_dir / "trace_summary.json").read_text(encoding="utf-8"))
     assert trace_summary["quality_gate"]["passed"] is True
+    describe_response = client.get("/api/runs/agent-planned-run", params={"account_id": "alice"})
+    assert describe_response.status_code == 200
+    assert describe_response.json()["metadata"]["champion_node_id"] == metadata["champion"]
+
+
+def test_solver_chat_agent_does_not_open_code_for_solution_loss_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENTICSCIML_ACCOUNTS_ROOT", str(tmp_path / "accounts"))
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/solver/chat",
+        json={
+            "message": (
+                "我想求解 cylinder wake sparse sensor reconstruction benchmark。"
+                "请自主选择合适算法库策略，启动一个 mock run，解法量 3，"
+                "比较 solution loss，并告诉我 champion 和 trace gate。"
+            ),
+            "selected_benchmark": "function_approx",
+            "mode": "mock",
+            "assistant_mode": "agent",
+            "account_id": "alice",
+            "workspace_scope": "account",
+            "target_solution_count": 3,
+            "parallel_mutations": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    actions = response.json()["actions"]
+    assert [action["type"] for action in actions] == ["start_run"]
+    assert actions[0]["payload"]["benchmark"] == "cylinder_wake_reconstruction_faithful_small"
 
 
 def test_solver_chat_agent_rejects_shared_repo_scope(tmp_path: Path) -> None:

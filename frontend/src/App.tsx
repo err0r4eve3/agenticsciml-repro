@@ -613,12 +613,38 @@ export function App() {
 
   async function refreshRunEvidence(runId = activeRunId) {
     if (!runId) return;
+    await refreshRunEvidenceForAccount(runId, activeAccountId);
+  }
+
+  async function refreshRunEvidenceForAccount(runId: string, accountId: string) {
     const [votes, solutions] = await Promise.all([
-      api.getSelectorVotes(runId, activeAccountId),
-      api.getSolutions(runId, activeAccountId)
+      api.getSelectorVotes(runId, accountId),
+      api.getSolutions(runId, accountId)
     ]);
     setSelectorVotes(votes);
     setSolutionsPayload(solutions);
+  }
+
+  function pollBackgroundRun(runId: string, accountId = activeAccountId, attemptsLeft = 8) {
+    window.setTimeout(async () => {
+      try {
+        const run = await api.getRun(runId, accountId);
+        setActiveRun((current) => (!current || current.run_id === runId ? run : current));
+        setRuns((current) => [run, ...current.filter((item) => item.run_id !== run.run_id)]);
+        if (run.status !== "running" || attemptsLeft <= 1) {
+          await refreshRunEvidenceForAccount(runId, accountId);
+          const workspaces = await api.getCodeWorkspaces(runId, accountId);
+          setCodeWorkspaces(workspaces);
+          setSelectedWorkspaceId((current) =>
+            current && workspaces.some((workspace) => workspace.id === current) ? current : null
+          );
+          return;
+        }
+        pollBackgroundRun(runId, accountId, attemptsLeft - 1);
+      } catch (exc) {
+        setError(String(exc));
+      }
+    }, attemptsLeft === 8 ? 1200 : 1000);
   }
 
   async function refreshAll() {
@@ -668,9 +694,7 @@ export function App() {
       await refreshRuns();
       await refreshRunEvidence(run.run_id);
       if (background) {
-        window.setTimeout(() => {
-          refreshActiveRun(run.run_id).catch((exc) => setError(String(exc)));
-        }, 1200);
+        pollBackgroundRun(run.run_id, activeAccountId);
       }
       addAssistantMessage(`${nextMode} run 已登记：${run.run_id}`);
     } catch (exc) {
@@ -866,9 +890,7 @@ export function App() {
       await refreshRuns();
       await refreshRunEvidence(run.run_id);
       if (payload.background) {
-        window.setTimeout(() => {
-          refreshActiveRun(run.run_id).catch((exc) => setError(String(exc)));
-        }, 1200);
+        pollBackgroundRun(run.run_id, activeAccountId);
       }
       addAssistantMessage(`${actionMode} run 已登记：${run.run_id}`);
     } catch (exc) {

@@ -910,13 +910,23 @@ def _record_key(run_dir: str | Path) -> str:
     return str(Path(run_dir).resolve(strict=False))
 
 
+def _normalize_run_metadata(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
+    if metadata is None:
+        return None
+    normalized = dict(metadata)
+    champion = normalized.get("champion_node_id") or normalized.get("champion")
+    if isinstance(champion, str) and champion:
+        normalized["champion_node_id"] = champion
+    return normalized
+
+
 def _describe_run(run_id: str, output_dir: Path) -> dict[str, object]:
     run_dir = output_dir / run_id
     record = _record_for(run_dir)
     if not run_dir.exists() and record is None:
         raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
 
-    metadata = _read_optional_json(run_dir / "run_metadata.json")
+    metadata = _normalize_run_metadata(_read_optional_json(run_dir / "run_metadata.json"))
     trace_summary = _read_optional_json(run_dir / "trace_summary.json")
     status = record.status if record else _infer_run_status(run_dir, metadata)
     payload: dict[str, object] = {
@@ -1446,7 +1456,7 @@ def _code_server_workspaces(
 
     for run_dir in run_dirs:
         current_run_id = run_dir.name
-        metadata = _read_optional_json(run_dir / "run_metadata.json") or {}
+        metadata = _normalize_run_metadata(_read_optional_json(run_dir / "run_metadata.json")) or {}
         workspaces.append(
             _workspace_option(
                 f"run:{current_run_id}",
@@ -1582,7 +1592,7 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
             )
     if any(token in text for token in ("resume", "恢复", "继续")) and request.active_run_id:
         proposed_actions.append({"type": "resume_run", "run_id": request.active_run_id})
-    if agent_scope_allowed and any(token in text for token in ("code", "vscode", "代码", "打开", "champion", "solution")):
+    if agent_scope_allowed and _should_open_code_server_from_chat(request.message):
         try:
             proposed_actions.append(
                 {
@@ -1674,6 +1684,26 @@ def _should_plan_problem_from_chat(message: str) -> bool:
         "approximation",
     )
     return any(token in text for token in intent_tokens)
+
+
+def _should_open_code_server_from_chat(message: str) -> bool:
+    text = message.lower()
+    explicit_code_tokens = (
+        "code-server",
+        "code server",
+        "vscode",
+        "vs code",
+        "workspace",
+        "工作区",
+        "代码工作区",
+        "代码编辑",
+        "编辑代码",
+    )
+    if any(token in text for token in explicit_code_tokens):
+        return True
+    open_tokens = ("打开", "进入", "跳转", "open")
+    target_tokens = ("code", "代码", "workspace", "工作区", "champion", "solution", "解法")
+    return any(token in text for token in open_tokens) and any(token in text for token in target_tokens)
 
 
 def _problem_intake_request_from_chat(request: SolverChatRequest) -> ProblemIntakeRequest:
