@@ -100,6 +100,12 @@ Problem Intake 的完整输入会作为非权威 run context 一起传入 `POST 
 指导生成策略；`ProblemBundle`、`EvaluationContract`、benchmark guidelines、sandbox
 规则和 evaluator contract 仍是评分与安全边界的上位事实来源。
 
+右侧 Agent 面板在 `agent` 模式下也可处理高上下文求解请求：当用户要求自动选择
+benchmark / 解法并启动 mock/dry-run/real run 时，`/api/solver/chat` 会复用
+Problem Intake planner 生成 `start_run` action。前端执行该 action 时必须使用 action
+payload 中的 benchmark、run budget、`selected_algorithm_ids`、`problem_intake` 和
+`planner_snapshot`，不能退回当前 UI 里的陈旧选择。
+
 ## code-server sidecar
 
 code-server 不由 ChatUI 自动启动。先用本地 token/password 和 loopback 绑定启动：
@@ -162,6 +168,8 @@ code-server auth、系统用户/容器权限和 secret scanning 提供真实访�
   solution `eval.json` 汇总 solution status、score/loss、parent、children、method tags 和
   本地 figure artifact。
 - `POST /api/solver/chat`：内部算法 tool 入口，只返回结构化 actions、warnings、artifact refs 和 trace refs；它不是 MCP server。
+  `agent` 模式下的高上下文求解请求会调用同一个受控 problem-intake planner，并返回带
+  planner snapshot 的 `start_run` action。
 - `GET /api/code-server/url`：生成 code-server workspace 链接，不携带 token。
 - `GET /api/code-server/workspaces`：列出 shared repo 或账号隔离 workspace 目录
   和对应 code-server URL，不携带 token。`account_id` 是可选参数；前端默认传

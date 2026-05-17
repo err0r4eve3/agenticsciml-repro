@@ -28,6 +28,11 @@ agent 控制面自动评选 benchmark、算法 seed 和 run budget；人工算�
 - Web resume 会在未显式覆盖时读取既有 `config.json`，保留 benchmark、
   `strategy_seed_ids`、`agent_models`、`problem_intake` 和 `planner_snapshot`，避免
   前端的轻量 resume payload 清空原 run 的策略种子和审计上下文。
+- `/api/solver/chat` 的 `agent` / `plan` 模式现在可以识别高上下文求解请求，复用
+  Problem Intake planner 自动评选 benchmark、algorithm seeds 和 run budget，并返回
+  带 `problem_intake` / `planner_snapshot` 的 `start_run` action。
+- 前端 Agent action dispatcher 现在按 action payload 启动 run，而不是退回当前 UI
+  state，避免 Agent 自动评选出的 benchmark 或 seed 被陈旧选择覆盖。
 
 边界：
 

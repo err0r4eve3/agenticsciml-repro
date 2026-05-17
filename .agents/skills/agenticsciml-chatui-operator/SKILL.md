@@ -94,6 +94,9 @@ The assistant may:
   summaries, and local SVG evidence without editing run artifacts;
 - accept a complete problem description and use the controlled problem-intake
   planner to recommend a benchmark, algorithm seeds, and run budget;
+- in `agent` or `plan` mode, route high-context natural-language solve
+  requests through the same controlled problem-intake planner before returning
+  or dispatching a `start_run` action;
 - preserve the resulting `problem_intake` and `planner_snapshot` as
   non-authoritative run context under `config.json`, `run_metadata.json`, and
   `planning/problem_intake.json`;

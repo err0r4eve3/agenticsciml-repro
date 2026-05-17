@@ -125,6 +125,12 @@ class SolverChatRequest(BaseModel):
     workspace_scope: WorkspaceScope = "account"
     account_id: str | None = None
     output_dir: str = "runs"
+    target_solution_count: int = Field(default=3, ge=1, le=200)
+    parallel_mutations: int = Field(default=1, ge=1, le=32)
+    selector_vote_count: int = Field(default=3, ge=1, le=32)
+    max_children_per_node: int = Field(default=10, ge=1, le=200)
+    selected_algorithm_ids: list[str] = Field(default_factory=list)
+    agent_models: dict[str, AgentModelRequest] = Field(default_factory=dict)
 
 
 class AccountCreateRequest(BaseModel):
@@ -1540,17 +1546,40 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
             warnings.append("Agent mode cannot operate the shared repo workspace; use account, run, or solution scope.")
 
     if any(token in text for token in ("跑", "run", "start", "mock", "实验")):
-        proposed_actions.append(
-            {
-                "type": "start_run",
-                "payload": {
-                    "benchmark": request.selected_benchmark,
-                    "mode": request.mode,
-                    "account_id": resolved_account_id,
-                    "background": True,
-                },
-            }
-        )
+        if request.assistant_mode in {"plan", "agent"} and _should_plan_problem_from_chat(request.message):
+            try:
+                _validate_agent_model_roles(request.agent_models)
+                _validate_algorithm_ids(request.selected_algorithm_ids)
+                plan = _problem_intake_plan_payload(_problem_intake_request_from_chat(request))
+                action = dict(plan["actions"][0])
+                payload = dict(action["payload"])
+                payload["account_id"] = resolved_account_id
+                payload["background"] = True
+                action["payload"] = payload
+                proposed_actions.append(action)
+                artifacts.append(
+                    {
+                        "kind": "problem_intake_plan",
+                        "recommended_benchmark": plan["recommended_benchmark"],
+                        "selected_algorithm_ids": plan["selected_algorithm_ids"],
+                        "run_config": plan["run_config"],
+                    }
+                )
+                warnings.extend(str(warning) for warning in plan["warnings"])
+            except HTTPException as exc:
+                warnings.append(str(exc.detail))
+        else:
+            proposed_actions.append(
+                {
+                    "type": "start_run",
+                    "payload": {
+                        "benchmark": request.selected_benchmark,
+                        "mode": request.mode,
+                        "account_id": resolved_account_id,
+                        "background": True,
+                    },
+                }
+            )
     if any(token in text for token in ("resume", "恢复", "继续")) and request.active_run_id:
         proposed_actions.append({"type": "resume_run", "run_id": request.active_run_id})
     if agent_scope_allowed and any(token in text for token in ("code", "vscode", "代码", "打开", "champion", "solution")):
@@ -1619,6 +1648,48 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
         "warnings": warnings,
         "trace_refs": trace_refs,
     }
+
+
+def _should_plan_problem_from_chat(message: str) -> bool:
+    text = message.lower()
+    if len(message.strip()) < 40:
+        return False
+    intent_tokens = (
+        "自动",
+        "自主",
+        "选择",
+        "评选",
+        "求解",
+        "解法",
+        "算法",
+        "benchmark",
+        "problem",
+        "scientific",
+        "输入",
+        "输出",
+        "数据",
+        "评价",
+        "reconstruct",
+        "predict",
+        "approximation",
+    )
+    return any(token in text for token in intent_tokens)
+
+
+def _problem_intake_request_from_chat(request: SolverChatRequest) -> ProblemIntakeRequest:
+    return ProblemIntakeRequest(
+        problem_statement=request.message,
+        requirements="",
+        evaluation_criteria="",
+        data_description="",
+        mode=request.mode,
+        target_solution_count=request.target_solution_count,
+        parallel_mutations=request.parallel_mutations,
+        selector_vote_count=request.selector_vote_count,
+        max_children_per_node=request.max_children_per_node,
+        selected_algorithm_ids=request.selected_algorithm_ids,
+        agent_models=request.agent_models,
+    )
 
 
 def _solver_settings_payload() -> dict[str, object]:

@@ -407,6 +407,12 @@ const api = {
     temperature?: number;
     workspace_scope: WorkspaceScope;
     account_id: string;
+    target_solution_count: number;
+    parallel_mutations: number;
+    selector_vote_count: number;
+    max_children_per_node: number;
+    selected_algorithm_ids: string[];
+    agent_models: Record<string, AgentModelConfig>;
   }): Promise<SolverResponse> {
     return postJson<SolverResponse>("/api/solver/chat", body);
   },
@@ -693,7 +699,13 @@ export function App() {
         mode: overrides.mode ?? mode,
         assistant_mode: requestAssistantMode,
         workspace_scope: requestWorkspaceScope,
-        account_id: activeAccountId
+        account_id: activeAccountId,
+        target_solution_count: runConfig.target_solution_count,
+        parallel_mutations: runConfig.parallel_mutations,
+        selector_vote_count: runConfig.selector_vote_count,
+        max_children_per_node: runConfig.max_children_per_node,
+        selected_algorithm_ids: selectedAlgorithmIds,
+        agent_models: activeAgentModels()
       });
       setMessages((current) => [
         ...current,
@@ -741,7 +753,7 @@ export function App() {
           setPendingRealAction(action);
           continue;
         }
-        await startRun(actionMode, Boolean(action.payload?.background));
+        await startRunFromAction(action, false);
       }
       if (action.type === "resume_run" && action.run_id) {
         if (!actionBelongsToActiveAccount(action)) continue;
@@ -783,7 +795,7 @@ export function App() {
     if (!action) return;
     setPendingRealAction(null);
     if (action.type === "start_run") {
-      await startRun("real", Boolean(action.payload?.background), true);
+      await startRunFromAction(action, true);
     }
     if (action.type === "resume_run" && action.run_id) {
       setBusy(true);
@@ -808,6 +820,62 @@ export function App() {
       return false;
     }
     return true;
+  }
+
+  async function startRunFromAction(action: SolverAction, realConfirmed: boolean) {
+    const payload = action.payload ?? {};
+    const actionMode = asRunMode(payload.mode, mode);
+    const nextBenchmark = typeof payload.benchmark === "string" ? payload.benchmark : selectedBenchmark;
+    const nextRunConfig: RunConfig = {
+      target_solution_count: payloadNumber(payload, "target_solution_count", runConfig.target_solution_count),
+      max_iterations: payloadNumber(payload, "max_iterations", runConfig.max_iterations),
+      parallel_mutations: payloadNumber(payload, "parallel_mutations", runConfig.parallel_mutations),
+      selector_vote_count: payloadNumber(payload, "selector_vote_count", runConfig.selector_vote_count),
+      max_children_per_node: payloadNumber(payload, "max_children_per_node", runConfig.max_children_per_node)
+    };
+    const nextAlgorithmIds = payloadStringArray(payload, "selected_algorithm_ids", selectedAlgorithmIds);
+    const nextAgentModels = payloadAgentModels(payload.agent_models, activeAgentModels());
+    const nextProblemIntake = payloadRecord(payload.problem_intake, {});
+    const nextPlannerSnapshot = payloadRecord(payload.planner_snapshot, {});
+
+    setBusy(true);
+    setError(null);
+    try {
+      const run = await api.startRun({
+        benchmark: nextBenchmark,
+        mode: actionMode,
+        account_id: activeAccountId,
+        target_solution_count: nextRunConfig.target_solution_count,
+        max_iterations: nextRunConfig.max_iterations,
+        parallel_mutations: nextRunConfig.parallel_mutations,
+        selector_vote_count: nextRunConfig.selector_vote_count,
+        max_children_per_node: nextRunConfig.max_children_per_node,
+        agent_models: nextAgentModels,
+        selected_algorithm_ids: nextAlgorithmIds,
+        problem_intake: nextProblemIntake,
+        planner_snapshot: nextPlannerSnapshot,
+        background: Boolean(payload.background),
+        real_confirmed: realConfirmed
+      });
+      setSelectedBenchmark(nextBenchmark);
+      setRunConfig(nextRunConfig);
+      setSelectedAlgorithmIds(nextAlgorithmIds);
+      setProblemPlan(null);
+      setActiveRun(run);
+      setActiveRunId(run.run_id);
+      await refreshRuns();
+      await refreshRunEvidence(run.run_id);
+      if (payload.background) {
+        window.setTimeout(() => {
+          refreshActiveRun(run.run_id).catch((exc) => setError(String(exc)));
+        }, 1200);
+      }
+      addAssistantMessage(`${actionMode} run 已登记：${run.run_id}`);
+    } catch (exc) {
+      setError(String(exc));
+    } finally {
+      setBusy(false);
+    }
   }
 
   function addAssistantMessage(text: string) {
@@ -1950,6 +2018,43 @@ function formatScore(value: number | null | undefined) {
   if (value === null || value === undefined || Number.isNaN(value)) return "n/a";
   if (Math.abs(value) >= 1000 || Math.abs(value) < 0.001) return value.toExponential(3);
   return value.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function asRunMode(value: unknown, fallback: RunMode): RunMode {
+  return value === "mock" || value === "real" || value === "dry_run" ? value : fallback;
+}
+
+function payloadNumber(payload: SolverAction["payload"], key: string, fallback: number) {
+  const value = payload?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function payloadStringArray(payload: SolverAction["payload"], key: string, fallback: string[]) {
+  const value = payload?.[key];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : fallback;
+}
+
+function payloadRecord(value: unknown, fallback: Record<string, unknown>) {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : fallback;
+}
+
+function payloadAgentModels(value: unknown, fallback: Record<string, AgentModelConfig>) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return fallback;
+  const result: Record<string, AgentModelConfig> = {};
+  for (const [role, rawConfig] of Object.entries(value as Record<string, unknown>)) {
+    if (!rawConfig || typeof rawConfig !== "object" || Array.isArray(rawConfig)) continue;
+    const config = rawConfig as Record<string, unknown>;
+    if (typeof config.model !== "string" || !config.model.trim()) continue;
+    result[role] = {
+      model: config.model,
+      temperature: typeof config.temperature === "number" && Number.isFinite(config.temperature) ? config.temperature : 0,
+      reasoning_effort:
+        config.reasoning_effort === "low" || config.reasoning_effort === "medium" || config.reasoning_effort === "high"
+          ? config.reasoning_effort
+          : undefined
+    };
+  }
+  return Object.keys(result).length ? result : fallback;
 }
 
 function normalizeInteger(value: number, fallback: number, min: number) {

@@ -823,6 +823,65 @@ def test_solver_chat_plan_and_agent_modes_return_structured_actions(tmp_path: Pa
     assert start_payload["actions"][0]["payload"]["background"] is True
 
 
+def test_solver_chat_agent_can_plan_benchmark_and_seeded_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENTICSCIML_ACCOUNTS_ROOT", str(tmp_path / "accounts"))
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/solver/chat",
+        json={
+            "message": (
+                "请用 Agent 模式自主选择 benchmark 和解法求解："
+                "Reconstruct two-dimensional cylinder wake vorticity fields from sparse noisy temporal sensors. "
+                "Use lagged sensor history and preserve smooth band-limited spatial structure. "
+                "运行 mock 实验并保留 trace evidence。"
+            ),
+            "selected_benchmark": "function_approx",
+            "mode": "mock",
+            "assistant_mode": "agent",
+            "account_id": "alice",
+            "workspace_scope": "account",
+            "target_solution_count": 1,
+            "parallel_mutations": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["assistant_mode"] == "agent"
+    action = payload["actions"][0]
+    assert action["type"] == "start_run"
+    action_payload = action["payload"]
+    assert action_payload["benchmark"] == "cylinder_wake_reconstruction_faithful_small"
+    assert action_payload["account_id"] == "alice"
+    assert "paper_cylinder_bandlimited_filter" in action_payload["selected_algorithm_ids"]
+    assert action_payload["problem_intake"]["problem_statement"].startswith("请用 Agent 模式")
+    assert action_payload["planner_snapshot"]["planner_version"] == "problem_intake_keyword_planner.v1"
+    assert payload["artifacts"][0]["kind"] == "problem_intake_plan"
+
+    run_response = client.post(
+        "/api/runs",
+        json={
+            **action_payload,
+            "experiment_id": "agent-planned-run",
+            "background": False,
+        },
+    )
+
+    assert run_response.status_code == 200
+    run_dir = tmp_path / "accounts" / "alice" / "runs" / "agent-planned-run"
+    metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    config = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+    assert metadata["benchmark_name"] == "cylinder_wake_reconstruction_faithful_small"
+    assert "paper_cylinder_bandlimited_filter" in metadata["strategy_seed_ids"]
+    assert config["problem_intake"]["problem_statement"].startswith("请用 Agent 模式")
+    trace_summary = json.loads((run_dir / "trace_summary.json").read_text(encoding="utf-8"))
+    assert trace_summary["quality_gate"]["passed"] is True
+
+
 def test_solver_chat_agent_rejects_shared_repo_scope(tmp_path: Path) -> None:
     client = TestClient(create_app())
 
