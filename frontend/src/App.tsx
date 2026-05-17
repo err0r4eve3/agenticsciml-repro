@@ -661,6 +661,35 @@ export function App() {
     setSelectedWorkspaceId((current) => (current && workspaces.some((workspace) => workspace.id === current) ? current : null));
   }
 
+  async function selectWorkspaceFromCodeServerAction(action: SolverAction) {
+    const payload = action.payload ?? {};
+    const actionRunId = typeof payload.run_id === "string" ? payload.run_id : activeRunId;
+    const workspaces = await api.getCodeWorkspaces(actionRunId, activeAccountId);
+    setCodeWorkspaces(workspaces);
+
+    const targetWorkspace = typeof payload.workspace === "string" ? payload.workspace : null;
+    const targetScope = payload.scope;
+    const targetSolutionId = typeof payload.solution_id === "string" ? payload.solution_id : null;
+    const match =
+      workspaces.find((workspace) => targetWorkspace && workspace.workspace === targetWorkspace) ??
+      workspaces.find((workspace) => {
+        if (targetScope && workspace.scope !== targetScope) return false;
+        if (actionRunId && workspace.run_id !== actionRunId) return false;
+        if (targetSolutionId && workspace.solution_id !== targetSolutionId) return false;
+        return workspace.account_id === activeAccountId;
+      }) ??
+      null;
+
+    if (match) {
+      setWorkspaceScope(match.scope);
+      setSelectedWorkspaceId(match.id);
+      if (match.run_id) setActiveRunId(match.run_id);
+      return;
+    }
+
+    setSelectedWorkspaceId(null);
+  }
+
   async function startRun(nextMode: RunMode = mode, background = false, realConfirmed = false) {
     if (nextMode === "real" && !realConfirmed) {
       setPendingRealAction({
@@ -801,7 +830,7 @@ export function App() {
           setWorkspaceScope(nextScope);
         }
         setActivePage("ide");
-        setSelectedWorkspaceId(null);
+        await selectWorkspaceFromCodeServerAction(action);
       }
       if (action.type === "summarize_artifact") {
         if (!actionBelongsToActiveAccount(action)) continue;
