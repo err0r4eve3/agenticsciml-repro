@@ -209,6 +209,37 @@ Web API 暴露；本地开发需要打开仓库根目录时，必须显式设置
 返回 structured content，并为每个 tool 标注 `readOnlyHint`、`destructiveHint`
 和 `openWorldHint`。详细合约见 [AgenticSciML Assistant 规范](agenticsciml_assistant.md)。
 
+## Live smoke
+
+本地或部署后可以用 `scripts/web_workflow_smoke.py` 做一次控制面自动化 smoke。该脚本
+只通过 HTTP 调用 Web API，并可探测当前 code-server sidecar 是否已经以 loopback
+`--auth none` 方式工作：
+
+```bash
+PYTHONPATH=src uv run --python 3.11 --extra web --extra dev \
+  python scripts/web_workflow_smoke.py \
+  --base-url http://127.0.0.1:8765
+```
+
+默认检查内容包括：
+
+- `/api/solver/settings` 的 `ask` / `plan` / `agent` 默认设置。
+- Ask 模式不会返回 executable actions。
+- Plan 模式只返回 `open_code_server` 建议 action。
+- Agent 模式能从高上下文 cylinder wake 问题自动选择 benchmark、algorithm seed 和
+  mock run budget。
+- `POST /api/runs` 能同步完成账号 namespace 下的 mock run，并产出 passing
+  `trace_summary`、selector votes、solution loss/tree 和 champion workspace。
+- code-server API payload 不携带 password/token，`command_hint` 使用
+  `code-server --auth none --bind-addr 127.0.0.1:8080 ...`。
+
+如果当前没有启动 code-server sidecar，可加 `--skip-code-server-live`，此时只检查 API
+payload，不检查 `http://127.0.0.1:8080` 的真实 HTML 响应。远端部署如果通过
+`AGENTICSCIML_CODE_SERVER_URL` 返回 HTTPS 上游鉴权入口，需要显式加
+`--allow-non-loopback-code-server-url`；默认 smoke 仍拒绝非 loopback code-server
+URL。smoke 产生的 run 仍是 mock workflow shape evidence，不能写成论文分数或科学
+复现结论。
+
 ## Skill 工作流
 
 repo-local skill 位于 `.agents/skills/agenticsciml-chatui-operator/SKILL.md`。

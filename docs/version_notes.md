@@ -2,6 +2,37 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-17 ChatUI workflow live smoke
+
+本次新增可重复运行的 Web 控制面 smoke，用于在本地或部署环境中检查 ChatUI 依赖的
+核心 API contract 与 code-server sidecar 边界。
+
+已实现：
+
+- 新增 `scripts/web_workflow_smoke.py`，只通过 HTTP 调用 live FastAPI，不 import
+  后端内部函数。
+- smoke 覆盖 `ask` / `plan` / `agent` 三种模式：Ask 不返回 actions，Plan 只返回
+  `open_code_server` 建议 action，Agent 可从高上下文 cylinder wake 问题自动选择
+  benchmark、algorithm seed 和 mock run budget。
+- smoke 会同步创建账号 namespace 下的 mock run，并检查 passing `trace_summary`、
+  selector votes、solution loss/tree、champion workspace 和 code-server workspace 列表。
+- code-server 检查确认 API payload 不携带 password/token，命令提示使用
+  `code-server --auth none --bind-addr 127.0.0.1:8080 ...`；默认还会探测 live
+  sidecar HTML 是否仍出现 password login。
+- smoke 默认拒绝非 loopback code-server URL。远端部署如果通过
+  `AGENTICSCIML_CODE_SERVER_URL` 返回 HTTPS 上游鉴权入口，需要显式加
+  `--allow-non-loopback-code-server-url`。
+
+验证：
+
+- `PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python scripts/web_workflow_smoke.py --base-url http://127.0.0.1:8765`
+
+边界：
+
+- 该 smoke 产生的是 mock workflow shape evidence，不是 scientific evidence。
+- 脚本默认假设 FastAPI 和 code-server 已经由部署或本地 session 启动；没有 sidecar
+  时可加 `--skip-code-server-live` 只检查 API payload。
+
 ## 2026-05-17 Problem Intake 与人工算法选择
 
 本次补齐 Paper Run Lab 中更接近论文入口的使用方式：高阶用户先完整描述问题，再由
