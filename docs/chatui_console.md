@@ -228,8 +228,14 @@ PYTHONPATH=src uv run --python 3.11 --extra web --extra dev \
 - Plan 模式只返回 `open_code_server` 建议 action。
 - Agent 模式能从高上下文 cylinder wake 问题自动选择 benchmark、algorithm seed 和
   mock run budget。
+- Agent 模式拒绝 shared repo workspace；real mode 未带 `real_confirmed=true` 时拒绝
+  启动。
 - `POST /api/runs` 能同步完成账号 namespace 下的 mock run，并产出 passing
   `trace_summary`、selector votes、solution loss/tree 和 champion workspace。
+- 第二个账号 namespace 不能读取第一个账号的 run detail、selector votes、solution
+  summaries、run artifact 或 code-server run workspace。当前本地 namespace 不是认证
+  系统，因此 smoke 期望的是 404-style namespace miss；公网部署还必须由上游账号鉴权
+  提供真正 authorization。
 - code-server API payload 不携带 password/token，`command_hint` 使用
   `code-server --auth none --bind-addr 127.0.0.1:8080 ...`。
 

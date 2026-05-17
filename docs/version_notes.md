@@ -14,6 +14,10 @@
 - smoke 覆盖 `ask` / `plan` / `agent` 三种模式：Ask 不返回 actions，Plan 只返回
   `open_code_server` 建议 action，Agent 可从高上下文 cylinder wake 问题自动选择
   benchmark、algorithm seed 和 mock run budget。
+- smoke 增加负向边界检查：Agent 模式拒绝 shared repo workspace；real mode 未带
+  `real_confirmed=true` 时拒绝启动；第二个账号 namespace 不能读取第一个账号的 run
+  detail、selector votes、solution summaries、run artifact 或 code-server run
+  workspace。
 - smoke 会同步创建账号 namespace 下的 mock run，并检查 passing `trace_summary`、
   selector votes、solution loss/tree、champion workspace 和 code-server workspace 列表。
 - code-server 检查确认 API payload 不携带 password/token，命令提示使用
@@ -30,6 +34,8 @@
 边界：
 
 - 该 smoke 产生的是 mock workflow shape evidence，不是 scientific evidence。
+- 本地账号 namespace 仍不是认证/授权系统；cross-account negative checks 只能证明
+  目录解析不会混用账号 run。公网部署仍需上游账号鉴权和反代路径校验。
 - 脚本默认假设 FastAPI 和 code-server 已经由部署或本地 session 启动；没有 sidecar
   时可加 `--skip-code-server-live` 只检查 API payload。
 

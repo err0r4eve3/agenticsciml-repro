@@ -61,6 +61,7 @@ def main() -> int:
 def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
     base_url = args.base_url.rstrip("/")
     account_id = args.account_id
+    other_account_id = make_other_account_id(account_id)
     experiment_id = args.experiment_id or f"web-smoke-{time.strftime('%Y%m%d-%H%M%S')}"
 
     health = request_json(base_url, "GET", "/api/health", timeout_s=args.timeout_s)
@@ -74,10 +75,19 @@ def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
         timeout_s=args.timeout_s,
     )["account"]
     expect(account["account_id"] == account_id, "account create returned the wrong account_id")
+    other_account = request_json(
+        base_url,
+        "POST",
+        "/api/accounts",
+        {"account_id": other_account_id, "display_name": "Codex Smoke Other"},
+        timeout_s=args.timeout_s,
+    )["account"]
+    expect(other_account["account_id"] == other_account_id, "other account create returned the wrong account_id")
 
     settings = request_json(base_url, "GET", "/api/solver/settings", timeout_s=args.timeout_s)
     expect(settings["default_assistant_mode"] == "ask", "default assistant mode must remain ask")
     expect(settings["assistant_modes"]["agent"]["reasoning_effort"] == "high", "agent mode should use high reasoning")
+    negative_checks = run_preflight_negative_checks(base_url, account_id, timeout_s=args.timeout_s)
 
     ask = solver_chat(
         base_url,
@@ -232,21 +242,109 @@ def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
     workspace_ids = {workspace["id"] for workspace in workspaces_after}
     expect(f"run:{experiment_id}" in workspace_ids, "run workspace is missing after smoke run")
     expect(f"champion:{experiment_id}" in workspace_ids, "champion workspace is missing after smoke run")
+    negative_checks.update(
+        run_cross_account_negative_checks(
+            base_url,
+            run_id=experiment_id,
+            other_account_id=other_account_id,
+            timeout_s=args.timeout_s,
+        )
+    )
 
     return {
         "ok": True,
         "base_url": base_url,
         "account_id": account_id,
+        "other_account_id": other_account_id,
         "run_id": experiment_id,
         "benchmark": metadata["benchmark_name"],
         "champion_node_id": metadata["champion_node_id"],
         "solution_count": metadata["solution_count"],
         "selector_vote_available": votes["available"],
+        "negative_checks": negative_checks,
         "code_server": {
             "auth_mode": code_payload["auth_mode"],
             "workspace": code_payload["workspace"],
             "live_checked": not args.skip_code_server_live,
         },
+    }
+
+
+def make_other_account_id(account_id: str) -> str:
+    candidate = f"{account_id}-other"
+    if len(candidate) <= 48:
+        return candidate
+    return "codex-smoke-other"
+
+
+def run_preflight_negative_checks(base_url: str, account_id: str, *, timeout_s: float) -> dict[str, Any]:
+    real_error = expect_http_status(
+        base_url,
+        "POST",
+        "/api/runs",
+        expected_status=400,
+        payload={
+            "benchmark": "function_approx",
+            "mode": "real",
+            "account_id": account_id,
+            "background": False,
+        },
+        timeout_s=timeout_s,
+    )
+    expect("real_confirmed" in str(real_error.get("detail", "")), "real-mode preflight did not fail on real_confirmed")
+
+    repo_scope = solver_chat(
+        base_url,
+        account_id,
+        {
+            "message": "打开共享 repo 代码",
+            "assistant_mode": "agent",
+            "workspace_scope": "repo",
+        },
+        timeout_s=timeout_s,
+    )
+    expect(repo_scope["actions"] == [], "agent mode returned actions for shared repo scope")
+    expect(
+        any("shared repo workspace" in warning for warning in repo_scope["warnings"]),
+        "agent mode did not warn about shared repo workspace",
+    )
+    return {
+        "real_mode_requires_confirmation": True,
+        "agent_repo_scope_blocked": True,
+    }
+
+
+def run_cross_account_negative_checks(
+    base_url: str,
+    *,
+    run_id: str,
+    other_account_id: str,
+    timeout_s: float,
+) -> dict[str, Any]:
+    checks = {
+        "run_detail": (f"/api/runs/{run_id}", None),
+        "selector_votes": (f"/api/runs/{run_id}/selector-votes", None),
+        "solutions": (f"/api/runs/{run_id}/solutions", None),
+        "run_metadata_artifact": (f"/api/runs/{run_id}/artifacts/run_metadata.json", None),
+        "code_server_workspaces": ("/api/code-server/workspaces", {"run_id": run_id}),
+    }
+    statuses: dict[str, int] = {}
+    for name, (path, extra_params) in checks.items():
+        params = {"account_id": other_account_id}
+        if extra_params:
+            params.update(extra_params)
+        expect_http_status(
+            base_url,
+            "GET",
+            path,
+            expected_status=404,
+            params=params,
+            timeout_s=timeout_s,
+        )
+        statuses[name] = 404
+    return {
+        "cross_account_run_denied": True,
+        "cross_account_expected_statuses": statuses,
     }
 
 
@@ -270,6 +368,38 @@ def request_json(
     params: dict[str, Any] | None = None,
     timeout_s: float,
 ) -> dict[str, Any]:
+    status, parsed = request_payload(base_url, method, path, payload, params=params, timeout_s=timeout_s)
+    if status != 200:
+        raise SmokeFailure(f"{method} {path} returned HTTP {status}: {parsed}")
+    if not isinstance(parsed, dict):
+        raise SmokeFailure(f"{method} {path} returned a non-object JSON payload")
+    return parsed
+
+
+def expect_http_status(
+    base_url: str,
+    method: str,
+    path: str,
+    *,
+    expected_status: int,
+    payload: dict[str, Any] | None = None,
+    params: dict[str, Any] | None = None,
+    timeout_s: float,
+) -> dict[str, Any]:
+    status, parsed = request_payload(base_url, method, path, payload, params=params, timeout_s=timeout_s)
+    expect(status == expected_status, f"{method} {path} returned HTTP {status}; expected {expected_status}: {parsed}")
+    return parsed if isinstance(parsed, dict) else {"body": parsed}
+
+
+def request_payload(
+    base_url: str,
+    method: str,
+    path: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    params: dict[str, Any] | None = None,
+    timeout_s: float,
+) -> tuple[int, Any]:
     query = f"?{urlencode(params)}" if params else ""
     url = f"{base_url}{path}{query}"
     data = None
@@ -281,18 +411,19 @@ def request_json(
     try:
         with urlopen(request, timeout=timeout_s) as response:
             body = response.read().decode("utf-8")
+            status = response.status
     except HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise SmokeFailure(f"{method} {path} returned HTTP {exc.code}: {detail}") from exc
+        body = exc.read().decode("utf-8", errors="replace")
+        status = exc.code
     except URLError as exc:
         raise SmokeFailure(f"{method} {path} failed: {exc.reason}") from exc
     try:
         parsed = json.loads(body)
     except json.JSONDecodeError as exc:
-        raise SmokeFailure(f"{method} {path} returned non-JSON body") from exc
-    if not isinstance(parsed, dict):
-        raise SmokeFailure(f"{method} {path} returned a non-object JSON payload")
-    return parsed
+        if status == 200:
+            raise SmokeFailure(f"{method} {path} returned non-JSON body") from exc
+        parsed = body
+    return status, parsed
 
 
 def validate_code_server_payload(payload: dict[str, Any], *, allow_non_loopback_url: bool) -> None:
