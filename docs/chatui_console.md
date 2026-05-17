@@ -243,8 +243,26 @@ PYTHONPATH=src uv run --python 3.11 --extra web --extra dev \
 payload，不检查 `http://127.0.0.1:8080` 的真实 HTML 响应。远端部署如果通过
 `AGENTICSCIML_CODE_SERVER_URL` 返回 HTTPS 上游鉴权入口，需要显式加
 `--allow-non-loopback-code-server-url`；默认 smoke 仍拒绝非 loopback code-server
-URL。smoke 产生的 run 仍是 mock workflow shape evidence，不能写成论文分数或科学
-复现结论。
+URL。远端发布后可用 `--expect-repo-root-contains <release-sha>` 检查 API 是否还在
+旧 release 上运行。
+
+真实浏览器层面的 dispatch 和 WebSocket 路径用 `scripts/web_ui_dispatch_e2e.mjs`
+检查。该脚本使用 `frontend` 的 `playwright-core` dev dependency 和本机 Chrome
+channel，不下载浏览器：
+
+```bash
+node scripts/web_ui_dispatch_e2e.mjs \
+  --base-url http://127.0.0.1:8765 \
+  --expect-code-server-websocket
+```
+
+它验证第一页 ChatUI 的 Ask/Plan/Agent 分发、Agent 自动进入第二页 VS Code Web、
+第二页侧栏 ChatUI、第三页算法库边界，并在开启
+`--expect-code-server-websocket` 时要求 code-server iframe 通过 `ws://` 或 `wss://`
+建立 WebSocket。远端测试时把 `--base-url` 换成
+`https://agenticsciml.error-forever.com`。
+
+smoke 产生的 run 仍是 mock workflow shape evidence，不能写成论文分数或科学复现结论。
 
 ## Skill 工作流
 

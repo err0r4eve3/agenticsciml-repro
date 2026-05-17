@@ -26,10 +26,17 @@
 - smoke 默认拒绝非 loopback code-server URL。远端部署如果通过
   `AGENTICSCIML_CODE_SERVER_URL` 返回 HTTPS 上游鉴权入口，需要显式加
   `--allow-non-loopback-code-server-url`。
+- smoke 支持 `--expect-repo-root-contains <release-sha>`，用于远端发布后检查 Web API
+  是否仍停留在旧 release。
+- 新增 `scripts/web_ui_dispatch_e2e.mjs`，使用 `playwright-core` 和本机 Chrome
+  channel 做真实浏览器 E2E，覆盖第一页 ChatUI Ask/Plan/Agent 分发、Agent 打开第二页
+  VS Code Web、第二页侧栏 ChatUI、第三页算法库边界，以及可选 code-server WebSocket
+  路径检查。
 
 验证：
 
 - `PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python scripts/web_workflow_smoke.py --base-url http://127.0.0.1:8765`
+- `node scripts/web_ui_dispatch_e2e.mjs --base-url http://127.0.0.1:8765 --expect-code-server-websocket`
 
 边界：
 

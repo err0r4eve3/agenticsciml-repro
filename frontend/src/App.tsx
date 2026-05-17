@@ -1090,7 +1090,7 @@ export function App() {
         onSelectPage={selectPage}
       />
       {activePage === "chat" ? (
-        <section className="chatgpt-page" aria-label="ChatUI 页面">
+        <section className="chatgpt-page" aria-label="ChatUI 页面" data-testid="page-chat">
           <PageHeader title="AgenticSciML" subtitle="ChatUI" />
           {error ? <div className="error-line">{error}</div> : null}
           <PureChatUI
@@ -1109,7 +1109,11 @@ export function App() {
         </section>
       ) : null}
       {activePage === "ide" ? (
-        <section className={selectedWorkspace ? "ide-page workspace-open" : "ide-page workspace-select"} aria-label="AI IDE 页面">
+        <section
+          className={selectedWorkspace ? "ide-page workspace-open" : "ide-page workspace-select"}
+          aria-label="AI IDE 页面"
+          data-testid="page-ide"
+        >
           {selectedWorkspace ? (
             <>
               <CodeView codeServer={selectedWorkspace} />
@@ -1144,7 +1148,7 @@ export function App() {
         </section>
       ) : null}
       {activePage === "library" ? (
-        <section className="library-page" aria-label="算法库页面">
+        <section className="library-page" aria-label="算法库页面" data-testid="page-library">
           <TopBar
             activeRunId={activeRunId}
             busy={busy}
@@ -1234,6 +1238,7 @@ function FunctionNav({
           <button
             aria-label={page.label}
             className={activePage === page.key ? "nav-page selected" : "nav-page"}
+            data-testid={`nav-${page.key}`}
             key={page.key}
             onClick={() => onSelectPage(page.key)}
             title={page.label}
@@ -1331,6 +1336,7 @@ function PureChatUI({
       </div>
       <form className="pure-composer" onSubmit={onSubmit}>
         <input
+          data-testid="chat-main-input"
           value={mainPrompt}
           onChange={(event) => onChange(event.target.value)}
           placeholder="给 AgenticSciML 发消息"
@@ -1340,7 +1346,7 @@ function PureChatUI({
           <button type="button" title="Artifact context">
             <Database size={15} />
           </button>
-          <button className="send-button" disabled={busy} type="submit" title="发送">
+          <button className="send-button" data-testid="chat-main-send" disabled={busy} type="submit" title="发送">
             <Send size={16} />
           </button>
         </div>
@@ -1367,6 +1373,7 @@ function AssistantModeSwitch({
           <button
             key={item}
             className={mode === item ? "selected" : ""}
+            data-testid={`assistant-mode-${item}`}
             type="button"
             onClick={() => onChange(item)}
           >
@@ -2428,7 +2435,7 @@ function CodeView({
   return (
     <section className="vscode-frame ide-vscode-frame">
       {codeServer ? (
-        <iframe className="vscode-iframe" src={codeServer.url} title="VS Code Web" />
+        <iframe className="vscode-iframe" data-testid="vscode-iframe" src={codeServer.url} title="VS Code Web" />
       ) : (
         <div className="vscode-empty">
           <TerminalSquare size={22} />
@@ -2495,7 +2502,7 @@ function WorkspaceSelector({
           </thead>
           <tbody>
             {workspaces.map((workspace) => (
-              <tr key={workspace.id} onClick={() => onOpenWorkspace(workspace)}>
+              <tr data-testid={`workspace-row-${workspace.id}`} key={workspace.id} onClick={() => onOpenWorkspace(workspace)}>
                 <td>{workspace.label}</td>
                 <td>{workspace.account_id ?? "shared"}</td>
                 <td>{workspace.scope}</td>
@@ -2604,11 +2611,12 @@ function AgentPanel({
       </div>
       <form className="composer" onSubmit={onSend}>
         <input
+          data-testid="ide-agent-input"
           value={message}
           onChange={(event) => onChangeMessage(event.target.value)}
           placeholder="请输入你的问题"
         />
-        <button aria-label="发送" disabled={busy} type="submit">
+        <button aria-label="发送" data-testid="ide-agent-send" disabled={busy} type="submit">
           <Send size={15} />
         </button>
       </form>
@@ -2618,7 +2626,7 @@ function AgentPanel({
 
 function ChatTranscript({ messages }: { messages: AgentMessage[] }) {
   return (
-    <div className="chat-transcript">
+    <div className="chat-transcript" data-testid="chat-transcript">
       {messages.map((item) => (
         <article className={`message ${item.role}`} key={item.id}>
           <span>{item.role}</span>

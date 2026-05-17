@@ -47,6 +47,11 @@ def main() -> int:
         action="store_true",
         help="allow deployed HTTPS code-server URLs when the payload still declares upstream account auth",
     )
+    parser.add_argument(
+        "--expect-repo-root-contains",
+        default=None,
+        help="fail if /api/health repo_root does not contain this string; useful for remote release drift checks",
+    )
     args = parser.parse_args()
 
     try:
@@ -66,6 +71,11 @@ def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
 
     health = request_json(base_url, "GET", "/api/health", timeout_s=args.timeout_s)
     expect(health.get("ok") is True, "health endpoint did not return ok=true")
+    if args.expect_repo_root_contains:
+        expect(
+            args.expect_repo_root_contains in str(health.get("repo_root", "")),
+            f"health repo_root does not contain expected release marker {args.expect_repo_root_contains!r}",
+        )
 
     account = request_json(
         base_url,
@@ -254,6 +264,7 @@ def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "ok": True,
         "base_url": base_url,
+        "repo_root": health.get("repo_root"),
         "account_id": account_id,
         "other_account_id": other_account_id,
         "run_id": experiment_id,
