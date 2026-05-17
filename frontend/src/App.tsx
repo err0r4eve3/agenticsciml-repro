@@ -25,7 +25,8 @@ import {
   Send,
   Sparkles,
   TerminalSquare,
-  Users
+  Users,
+  X
 } from "lucide-react";
 
 type Benchmark = {
@@ -174,6 +175,14 @@ type RunConfig = {
   parallel_mutations: number;
   selector_vote_count: number;
   max_children_per_node: number;
+};
+
+type StrategyLock = {
+  lock_id: string;
+  kind: "constraint" | "invariant" | "mathematical_intuition" | "modeling_choice" | "assumption";
+  text: string;
+  scope: "all_branches" | "selected_algorithms";
+  required: boolean;
 };
 
 type ReadinessCheck = {
@@ -369,6 +378,8 @@ const api = {
     selector_vote_count: number;
     max_children_per_node: number;
     selected_algorithm_ids: string[];
+    manual_strategy_locks?: StrategyLock[];
+    branch_context?: Record<string, unknown>;
     problem_intake?: Record<string, unknown>;
     planner_snapshot?: Record<string, unknown>;
     real_confirmed?: boolean;
@@ -394,6 +405,8 @@ const api = {
     max_children_per_node?: number;
     agent_models?: Record<string, AgentModelConfig>;
     selected_algorithm_ids?: string[];
+    manual_strategy_locks?: StrategyLock[];
+    branch_context?: Record<string, unknown>;
     problem_intake?: Record<string, unknown>;
     planner_snapshot?: Record<string, unknown>;
     background?: boolean;
@@ -412,6 +425,8 @@ const api = {
       max_children_per_node: body.max_children_per_node ?? 10,
       agent_models: body.agent_models ?? {},
       selected_algorithm_ids: body.selected_algorithm_ids ?? [],
+      manual_strategy_locks: body.manual_strategy_locks ?? [],
+      branch_context: body.branch_context ?? {},
       problem_intake: body.problem_intake ?? {},
       planner_snapshot: body.planner_snapshot ?? {},
       background: body.background ?? false,
@@ -524,6 +539,7 @@ export function App() {
   });
   const [agentModels, setAgentModels] = useState<Record<string, AgentModelConfig>>({});
   const [selectedAlgorithmIds, setSelectedAlgorithmIds] = useState<string[]>([]);
+  const [strategyLocks, setStrategyLocks] = useState<StrategyLock[]>([]);
   const [problemIntake, setProblemIntake] = useState<ProblemIntakeState>({
     problem_statement: "",
     requirements: "",
@@ -776,6 +792,8 @@ export function App() {
         max_children_per_node: runConfig.max_children_per_node,
         agent_models: activeAgentModels(),
         selected_algorithm_ids: selectedAlgorithmIds,
+        manual_strategy_locks: activeStrategyLocks(strategyLocks),
+        branch_context: strategyLockBranchContext(strategyLocks),
         problem_intake: problemPlan?.recommended_benchmark.name === selectedBenchmark ? problemPlan.problem_intake : {},
         planner_snapshot: problemPlan?.recommended_benchmark.name === selectedBenchmark ? problemPlan.planner_snapshot : {},
         background,
@@ -810,6 +828,8 @@ export function App() {
         selector_vote_count: runConfig.selector_vote_count,
         max_children_per_node: runConfig.max_children_per_node,
         selected_algorithm_ids: selectedAlgorithmIds,
+        manual_strategy_locks: activeStrategyLocks(strategyLocks),
+        branch_context: strategyLockBranchContext(strategyLocks),
         problem_intake: problemPlan?.recommended_benchmark.name === selectedBenchmark ? problemPlan.problem_intake : {},
         planner_snapshot: problemPlan?.recommended_benchmark.name === selectedBenchmark ? problemPlan.planner_snapshot : {},
         real_confirmed: realConfirmed
@@ -994,6 +1014,8 @@ export function App() {
         max_children_per_node: nextRunConfig.max_children_per_node,
         agent_models: nextAgentModels,
         selected_algorithm_ids: nextAlgorithmIds,
+        manual_strategy_locks: activeStrategyLocks(strategyLocks),
+        branch_context: strategyLockBranchContext(strategyLocks),
         problem_intake: nextProblemIntake,
         planner_snapshot: nextPlannerSnapshot,
         background: Boolean(payload.background),
@@ -1101,6 +1123,32 @@ export function App() {
         ? current.filter((item) => item !== algorithmId)
         : [...current, algorithmId]
     );
+  }
+
+  function addStrategyLock() {
+    setReadinessReport(null);
+    setStrategyLocks((current) => [
+      ...current,
+      {
+        lock_id: nextStrategyLockId(current),
+        kind: "constraint",
+        text: "",
+        scope: "all_branches",
+        required: true
+      }
+    ]);
+  }
+
+  function updateStrategyLock(lockId: string, next: Partial<StrategyLock>) {
+    setReadinessReport(null);
+    setStrategyLocks((current) =>
+      current.map((lock) => (lock.lock_id === lockId ? { ...lock, ...next } : lock))
+    );
+  }
+
+  function removeStrategyLock(lockId: string) {
+    setReadinessReport(null);
+    setStrategyLocks((current) => current.filter((lock) => lock.lock_id !== lockId));
   }
 
   function updateProblemIntake(next: Partial<ProblemIntakeState>) {
@@ -1319,6 +1367,8 @@ export function App() {
             selectedPaperTask={selectedPaperTask}
             selectorVotes={selectorVotes}
             solutionsPayload={solutionsPayload}
+            strategyLocks={strategyLocks}
+            onAddStrategyLock={addStrategyLock}
             onFilterChange={setTraceFilter}
             onModeChange={setMode}
             onOpenArtifacts={() => setSelectedArtifactPath("trace_summary.json")}
@@ -1326,6 +1376,7 @@ export function App() {
             onPlanProblemRun={planProblemRun}
             onPreviewReadiness={() => previewRunReadiness(false)}
             onRefreshRuns={refreshRuns}
+            onRemoveStrategyLock={removeStrategyLock}
             onRunConfigChange={updateRunConfig}
             onSelectArtifact={setSelectedArtifactPath}
             onSelectPaperTask={selectPaperTask}
@@ -1333,6 +1384,7 @@ export function App() {
             onStartConfiguredRun={() => startRun(mode, false)}
             onStartMock={() => startRun("mock", false)}
             onToggleAlgorithm={toggleAlgorithm}
+            onUpdateStrategyLock={updateStrategyLock}
             onUpdateProblemIntake={updateProblemIntake}
             onUpdateAgentModel={updateAgentModel}
           />
@@ -1622,6 +1674,8 @@ function AlgorithmLibraryPage({
   selectedPaperTask,
   selectorVotes,
   solutionsPayload,
+  strategyLocks,
+  onAddStrategyLock,
   onFilterChange,
   onModeChange,
   onOpenArtifacts,
@@ -1629,6 +1683,7 @@ function AlgorithmLibraryPage({
   onPlanProblemRun,
   onPreviewReadiness,
   onRefreshRuns,
+  onRemoveStrategyLock,
   onRunConfigChange,
   onSelectArtifact,
   onSelectPaperTask,
@@ -1636,6 +1691,7 @@ function AlgorithmLibraryPage({
   onStartConfiguredRun,
   onStartMock,
   onToggleAlgorithm,
+  onUpdateStrategyLock,
   onUpdateProblemIntake,
   onUpdateAgentModel
 }: {
@@ -1661,6 +1717,8 @@ function AlgorithmLibraryPage({
   selectedPaperTask: PaperTask | null;
   selectorVotes: SelectorVotesPayload | null;
   solutionsPayload: SolutionsPayload | null;
+  strategyLocks: StrategyLock[];
+  onAddStrategyLock: () => void;
   onFilterChange: (value: string) => void;
   onModeChange: (mode: RunMode) => void;
   onOpenArtifacts: () => void;
@@ -1668,6 +1726,7 @@ function AlgorithmLibraryPage({
   onPlanProblemRun: () => void;
   onPreviewReadiness: () => void;
   onRefreshRuns: () => void;
+  onRemoveStrategyLock: (lockId: string) => void;
   onRunConfigChange: (next: Partial<RunConfig>) => void;
   onSelectArtifact: (value: string) => void;
   onSelectPaperTask: (task: PaperTask) => void;
@@ -1675,6 +1734,7 @@ function AlgorithmLibraryPage({
   onStartConfiguredRun: () => void;
   onStartMock: () => void;
   onToggleAlgorithm: (algorithmId: string) => void;
+  onUpdateStrategyLock: (lockId: string, next: Partial<StrategyLock>) => void;
   onUpdateProblemIntake: (next: Partial<ProblemIntakeState>) => void;
   onUpdateAgentModel: (role: string, next: Partial<AgentModelConfig>) => void;
 }) {
@@ -1713,6 +1773,12 @@ function AlgorithmLibraryPage({
           onPreviewReadiness={onPreviewReadiness}
           onRunConfigChange={onRunConfigChange}
           onStartRun={onStartConfiguredRun}
+        />
+        <StrategyLocksPanel
+          locks={strategyLocks}
+          onAdd={onAddStrategyLock}
+          onRemove={onRemoveStrategyLock}
+          onUpdate={onUpdateStrategyLock}
         />
       </div>
       <PaperTaskDetail task={selectedPaperTask} selectedBenchmark={selected?.name ?? null} />
@@ -1865,6 +1931,61 @@ function ProblemPlanSummary({ plan }: { plan: ProblemRunPlan }) {
         <small key={warning}>{warning}</small>
       ))}
     </div>
+  );
+}
+
+function StrategyLocksPanel({
+  locks,
+  onAdd,
+  onRemove,
+  onUpdate
+}: {
+  locks: StrategyLock[];
+  onAdd: () => void;
+  onRemove: (lockId: string) => void;
+  onUpdate: (lockId: string, next: Partial<StrategyLock>) => void;
+}) {
+  return (
+    <DataRegion title="Strategy Locks">
+      <div className="strategy-locks">
+        {locks.map((lock) => (
+          <div className="strategy-lock-row" key={lock.lock_id}>
+            <div className="strategy-lock-header">
+              <select
+                value={lock.kind}
+                onChange={(event) => onUpdate(lock.lock_id, { kind: event.target.value as StrategyLock["kind"] })}
+              >
+                <option value="constraint">constraint</option>
+                <option value="invariant">invariant</option>
+                <option value="mathematical_intuition">mathematical intuition</option>
+                <option value="modeling_choice">modeling choice</option>
+                <option value="assumption">assumption</option>
+              </select>
+              <select
+                value={lock.scope}
+                onChange={(event) => onUpdate(lock.lock_id, { scope: event.target.value as StrategyLock["scope"] })}
+              >
+                <option value="all_branches">all branches</option>
+                <option value="selected_algorithms">selected algorithms</option>
+              </select>
+              <button className="icon-button" type="button" onClick={() => onRemove(lock.lock_id)} title="移除 strategy lock">
+                <X size={15} />
+              </button>
+            </div>
+            <textarea
+              value={lock.text}
+              onChange={(event) => onUpdate(lock.lock_id, { text: event.target.value })}
+              placeholder="例如：保持 bias-free linear branch net，所有 sibling branch 都必须继承"
+            />
+          </div>
+        ))}
+        {locks.length === 0 ? <p className="muted">尚未设置人工策略锁。</p> : null}
+        <button className="icon-text-button full-width secondary" type="button" onClick={onAdd}>
+          <Plus size={15} />
+          添加 strategy lock
+        </button>
+      </div>
+    </DataRegion>
   );
 }
 
@@ -2292,6 +2413,27 @@ function payloadAgentModels(value: unknown, fallback: Record<string, AgentModelC
     };
   }
   return Object.keys(result).length ? result : fallback;
+}
+
+function nextStrategyLockId(existing: StrategyLock[]) {
+  const used = new Set(existing.map((lock) => lock.lock_id));
+  for (let index = 1; index <= existing.length + 100; index += 1) {
+    const candidate = `manual_lock_${String(index).padStart(3, "0")}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  return `manual_lock_${Date.now()}`;
+}
+
+function strategyLockBranchContext(locks: StrategyLock[]) {
+  return {
+    expected_inherited_lock_ids: activeStrategyLocks(locks)
+      .filter((lock) => lock.scope === "all_branches" && lock.text.trim())
+      .map((lock) => lock.lock_id)
+  };
+}
+
+function activeStrategyLocks(locks: StrategyLock[]) {
+  return locks.filter((lock) => lock.text.trim());
 }
 
 function normalizeInteger(value: number, fallback: number, min: number) {

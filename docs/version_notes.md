@@ -39,6 +39,27 @@ Inspector-style pre-run audit，而不是继续增加 benchmark 或自动生成 
 - manual strategy locks 是用户假设/约束，不是事实；当前只记录并检查继承期望。
 - 后续可在 run evidence/report endpoint 中复用同一套 claim-boundary 语言。
 
+## 2026-05-17 Manual Strategy Locks UI
+
+本次继续把 readiness 审计往实际工作台推进：前端 Paper Run Lab 新增 `Strategy Locks`
+面板，允许用户把高阶数学直觉或约束作为人工锁定输入。
+
+已实现：
+
+- 前端新增 strategy lock 状态、增删改 UI、kind / scope 选择和非空过滤。
+- `检查 run readiness` 会携带 `manual_strategy_locks` 与
+  `branch_context.expected_inherited_lock_ids`，让 readiness preview 可以显示锁定策略和
+  branch inheritance 期望。
+- `启动配置 run` 和 Agent action 启动路径都会把当前非空 strategy locks 传给后端；
+  后端既有 readiness artifact 会随 run 保存。
+- 文档明确 strategy locks 是用户假设/约束，不是科学事实，也不改变 evaluator。
+
+验证：
+
+- `npm run build`
+- 浏览器 smoke：打开远端/本地 Paper Run Lab，添加 lock 后刷新 readiness，确认
+  `strategy seeds` / warnings 区域正常渲染。
+
 ## 2026-05-17 ChatUI workflow live smoke
 
 本次新增可重复运行的 Web 控制面 smoke，用于在本地或部署环境中检查 ChatUI 依赖的

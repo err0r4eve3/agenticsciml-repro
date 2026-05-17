@@ -520,6 +520,32 @@ ul {
   line-height: 1.45;
 }
 
+.strategy-locks {
+  display: grid;
+  gap: 9px;
+}
+
+.strategy-lock-row {
+  display: grid;
+  gap: 7px;
+  border: 1px solid rgba(93, 111, 159, 0.22);
+  border-radius: 8px;
+  background: #fff7eb;
+  padding: 9px;
+}
+
+.strategy-lock-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 34px;
+  gap: 7px;
+  align-items: center;
+}
+
+.strategy-lock-row textarea {
+  min-height: 70px;
+  resize: vertical;
+}
+
 .paper-task-detail p,
 .algorithm-context p,
 .warning-text {

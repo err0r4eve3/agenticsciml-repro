@@ -78,6 +78,9 @@ evaluator、selector 或 champion selection 实现。
   `root + children`。同一区域可手动刷新 `Run Readiness`，在启动前查看
   claim-boundary warning、strategy seed 状态、real-mode blocker 和 artifact capture
   要求。
+- `Strategy Locks`：记录用户想强制保留的约束、数学直觉、invariant、modeling choice
+  或 assumption。当前前端会把非空 locks 送入 readiness 和 run request；后端只把它们
+  当作用户假设/约束保存和审计，不当作科学事实。
 - `Layered model routing`：列出 Data Analyst、Evaluator、Root Engineer、
   Retriever、Proposer、Critic、Engineer、Debugger、Result Analyst 和 Selector。
   默认仍使用后端单一 adapter；只有填写 role override 时，后端才按 role 创建模型配置。
