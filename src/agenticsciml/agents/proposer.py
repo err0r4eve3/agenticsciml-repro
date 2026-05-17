@@ -32,6 +32,7 @@ class ProposerAgent(AgentBase):
         related_reports: list[str],
         use_critic: bool = True,
         branch_context: dict[str, Any] | None = None,
+        strategy_seed_context: str | None = None,
     ) -> Proposal:
         self.require_inputs(
             {
@@ -40,6 +41,7 @@ class ProposerAgent(AgentBase):
                 "kb_entry": kb_entry,
                 "related_reports": related_reports,
                 "branch_context": branch_context,
+                "strategy_seed_context": strategy_seed_context,
             }
         )
         messages: list[AgentMessage] = []
@@ -49,7 +51,9 @@ class ProposerAgent(AgentBase):
             f"KB entry:\n{kb_entry or 'none'}\n\n"
             f"Related reports:\n{chr(10).join(related_reports) if related_reports else 'none'}\n\n"
             "Branch context:\n"
-            f"{json.dumps(branch_context or {}, indent=2, sort_keys=True)}"
+            f"{json.dumps(branch_context or {}, indent=2, sort_keys=True)}\n\n"
+            "Strategy seeds:\n"
+            f"{strategy_seed_context or 'none'}"
         )
         critic = (
             CriticAgent(

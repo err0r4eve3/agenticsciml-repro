@@ -420,6 +420,7 @@ class ExperimentConfig:
     evolution: EvolutionConfig = field(default_factory=EvolutionConfig)
     use_mock: bool = True
     agents: dict[str, AgentConfig] = field(default_factory=dict)
+    strategy_seed_ids: list[str] = field(default_factory=list)
     auto_approve_evaluation: bool = True
     resume: bool = False
 
@@ -431,6 +432,7 @@ class ExperimentConfig:
             "evolution": self.evolution.to_dict(),
             "use_mock": self.use_mock,
             "agents": {role: cfg.to_dict() for role, cfg in self.agents.items()},
+            "strategy_seed_ids": list(self.strategy_seed_ids),
             "auto_approve_evaluation": self.auto_approve_evaluation,
             "resume": self.resume,
         }
@@ -447,6 +449,7 @@ class ExperimentConfig:
                 role: AgentConfig.from_dict(agent_data)
                 for role, agent_data in data.get("agents", {}).items()
             },
+            strategy_seed_ids=[str(item) for item in data.get("strategy_seed_ids", [])],
             auto_approve_evaluation=bool(data.get("auto_approve_evaluation", True)),
             resume=bool(data.get("resume", False)),
         )

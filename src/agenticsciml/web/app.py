@@ -91,9 +91,24 @@ class RunStartRequest(BaseModel):
     selector_vote_count: int = Field(default=3, ge=1)
     max_children_per_node: int = Field(default=10, ge=1)
     agent_models: dict[str, AgentModelRequest] = Field(default_factory=dict)
+    selected_algorithm_ids: list[str] = Field(default_factory=list)
     resume: bool = False
     background: bool = False
     real_confirmed: bool = False
+
+
+class ProblemIntakeRequest(BaseModel):
+    problem_statement: str = Field(min_length=20, max_length=12000)
+    requirements: str = Field(default="", max_length=12000)
+    evaluation_criteria: str = Field(default="", max_length=8000)
+    data_description: str = Field(default="", max_length=8000)
+    mode: RunMode = "mock"
+    target_solution_count: int = Field(default=5, ge=1, le=200)
+    parallel_mutations: int = Field(default=2, ge=1, le=32)
+    selector_vote_count: int = Field(default=3, ge=1, le=32)
+    max_children_per_node: int = Field(default=10, ge=1, le=200)
+    selected_algorithm_ids: list[str] = Field(default_factory=list)
+    agent_models: dict[str, AgentModelRequest] = Field(default_factory=dict)
 
 
 class SolverChatRequest(BaseModel):
@@ -170,6 +185,12 @@ def create_app() -> FastAPI:
             ),
         }
 
+    @app.post("/api/problem-intake/plan")
+    def problem_intake_plan(request: ProblemIntakeRequest) -> dict[str, object]:
+        _validate_agent_model_roles(request.agent_models)
+        _validate_algorithm_ids(request.selected_algorithm_ids)
+        return _problem_intake_plan_payload(request)
+
     @app.get("/api/accounts")
     def accounts() -> dict[str, object]:
         return {"accounts": _list_accounts()}
@@ -227,6 +248,7 @@ def create_app() -> FastAPI:
                     role: config.to_dict()
                     for role, config in _agent_configs_from_request(request).items()
                 },
+                "selected_algorithm_ids": _normalized_algorithm_ids(request.selected_algorithm_ids),
             }
 
         record = RunRecord(
@@ -385,6 +407,7 @@ def _run_orchestrator(
             evolution=evolution,
             use_mock=request.mode == "mock",
             agents=_agent_configs_from_request(request),
+            strategy_seed_ids=_normalized_algorithm_ids(request.selected_algorithm_ids),
             resume=request.resume,
         )
         llm = MockLLMClient() if request.mode == "mock" else OpenAIAdapter()
@@ -417,19 +440,269 @@ def _effective_run_budget(request: RunStartRequest) -> dict[str, object]:
     }
 
 
+def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, object]:
+    text = _intake_text(request)
+    benchmark_candidates = _rank_benchmarks_for_problem(text)
+    recommended = benchmark_candidates[0]["benchmark"]
+    recommended_name = str(recommended["name"])
+    algorithm_rankings = _rank_algorithms_for_problem(
+        text,
+        recommended_name,
+        request.selected_algorithm_ids,
+    )
+    selected_algorithm_ids = [
+        str(item["algorithm"]["id"])
+        for item in algorithm_rankings
+        if item["selected"]
+    ][:6]
+    max_iterations = math.ceil(
+        max(0, request.target_solution_count - 1) / request.parallel_mutations
+    )
+    run_budget = {
+        "target_solution_count": request.target_solution_count,
+        "planned_solution_budget": 1 + max_iterations * request.parallel_mutations,
+        "max_iterations": max_iterations,
+        "parallel_mutations": request.parallel_mutations,
+        "selector_vote_count": request.selector_vote_count,
+        "max_children_per_node": request.max_children_per_node,
+    }
+    warnings = [
+        "This planner maps the problem to the current local benchmark catalog; it does not create a new evaluator.",
+        "Selected algorithms are strategy seeds for prompts and audit, not proven implementations.",
+    ]
+    if request.mode == "real":
+        warnings.append("Real mode still requires Web API real_confirmed=true and server-side real-mode enablement.")
+    return {
+        "problem_summary": _compact_summary(request.problem_statement),
+        "recommended_benchmark": recommended,
+        "benchmark_candidates": benchmark_candidates[:6],
+        "algorithm_rankings": algorithm_rankings[:8],
+        "selected_algorithm_ids": selected_algorithm_ids,
+        "run_config": {
+            **run_budget,
+            "mode": request.mode,
+        },
+        "agent_models": {
+            role: config.to_dict()
+            for role, config in _agent_configs_from_problem_request(request).items()
+        },
+        "actions": [
+            {
+                "type": "start_run",
+                "payload": {
+                    "benchmark": recommended_name,
+                    "mode": request.mode,
+                    "target_solution_count": request.target_solution_count,
+                    "max_iterations": max_iterations,
+                    "parallel_mutations": request.parallel_mutations,
+                    "selector_vote_count": request.selector_vote_count,
+                    "max_children_per_node": request.max_children_per_node,
+                    "selected_algorithm_ids": selected_algorithm_ids,
+                    "agent_models": {
+                        role: config.to_dict()
+                        for role, config in _agent_configs_from_problem_request(request).items()
+                    },
+                    "background": True,
+                },
+            }
+        ],
+        "warnings": warnings,
+        "claim_boundary": (
+            "Planner recommendations and strategy seeds are not scientific evidence. "
+            "Only completed run artifacts, evaluator scores, trace summaries, and tests support local claims."
+        ),
+    }
+
+
+def _agent_configs_from_problem_request(request: ProblemIntakeRequest) -> dict[str, AgentConfig]:
+    return {
+        role: AgentConfig(
+            role=role,
+            model=agent_model.model.strip(),
+            temperature=agent_model.temperature,
+            reasoning_effort=agent_model.reasoning_effort,
+        )
+        for role, agent_model in request.agent_models.items()
+    }
+
+
+def _intake_text(request: ProblemIntakeRequest) -> str:
+    return " ".join(
+        [
+            request.problem_statement,
+            request.requirements,
+            request.evaluation_criteria,
+            request.data_description,
+        ]
+    ).lower()
+
+
+def _compact_summary(text: str, limit: int = 360) -> str:
+    compact = " ".join(text.split())
+    return compact if len(compact) <= limit else compact[: limit - 1].rstrip() + "…"
+
+
+def _rank_benchmarks_for_problem(text: str) -> list[dict[str, object]]:
+    ranked = []
+    for benchmark in list_benchmarks():
+        score = 0
+        reasons: list[str] = []
+        haystack = " ".join(
+            [
+                benchmark.name,
+                benchmark.paper_section,
+                benchmark.paper_task_name,
+                benchmark.family,
+                benchmark.metric,
+                benchmark.description,
+            ]
+        ).lower()
+        for keyword, weight in _benchmark_keywords(benchmark.name):
+            if keyword in text:
+                score += weight
+                reasons.append(keyword)
+        score += _token_overlap_score(text, haystack, weight=2)
+        if benchmark.fidelity_level == "faithful-small":
+            score += 3
+        ranked.append(
+            {
+                "benchmark": benchmark.to_dict(),
+                "score": score,
+                "rationale": (
+                    "Matched " + ", ".join(sorted(set(reasons))[:6])
+                    if reasons
+                    else "Fallback catalog candidate"
+                ),
+            }
+        )
+    return sorted(ranked, key=lambda item: (-int(item["score"]), str(item["benchmark"]["name"])))
+
+
+def _rank_algorithms_for_problem(
+    text: str,
+    benchmark_name: str,
+    manual_algorithm_ids: list[str],
+) -> list[dict[str, object]]:
+    manual = set(manual_algorithm_ids)
+    ranked = []
+    for algorithm in list_algorithms():
+        payload = algorithm.to_dict()
+        score = 0
+        reasons: list[str] = []
+        if algorithm.algorithm_id in manual:
+            score += 100
+            reasons.append("manual")
+        if benchmark_name in algorithm.benchmark_examples:
+            score += 35
+            reasons.append("benchmark_example")
+        haystack = " ".join(
+            [
+                algorithm.algorithm_id,
+                algorithm.name,
+                algorithm.family,
+                algorithm.description,
+                " ".join(algorithm.compatible_benchmark_families),
+                " ".join(algorithm.benchmark_examples),
+            ]
+        ).lower()
+        overlap = _token_overlap_score(text, haystack, weight=3)
+        if overlap:
+            score += overlap
+            reasons.append("problem_text")
+        selected = algorithm.algorithm_id in manual
+        ranked.append(
+            {
+                "algorithm": payload,
+                "score": score,
+                "selected": selected,
+                "source": "manual" if algorithm.algorithm_id in manual else "auto",
+                "rationale": ", ".join(reasons) if reasons else "Catalog fallback",
+            }
+        )
+    auto_ranked = sorted(ranked, key=lambda item: (-int(item["score"]), str(item["algorithm"]["id"])))
+    selected_count = sum(1 for item in auto_ranked if item["selected"])
+    for item in auto_ranked:
+        if selected_count >= 4:
+            break
+        if item["score"] > 0 and not item["selected"]:
+            item["selected"] = True
+            selected_count += 1
+    return auto_ranked
+
+
+def _benchmark_keywords(benchmark_name: str) -> tuple[tuple[str, int], ...]:
+    if "cylinder" in benchmark_name:
+        return (
+            ("cylinder", 18),
+            ("wake", 18),
+            ("sensor", 14),
+            ("sparse", 10),
+            ("vorticity", 14),
+            ("reconstruction", 12),
+            ("shred", 10),
+        )
+    if "reaction_diffusion" in benchmark_name:
+        return (
+            ("reaction", 16),
+            ("diffusion", 16),
+            ("spatiotemporal", 12),
+            ("source", 8),
+            ("operator", 8),
+            ("fno", 8),
+        )
+    if "antiderivative" in benchmark_name:
+        return (
+            ("antiderivative", 18),
+            ("integral", 14),
+            ("operator", 10),
+            ("deeponet", 8),
+            ("function-to-function", 8),
+        )
+    if "burgers" in benchmark_name:
+        return (
+            ("burgers", 20),
+            ("viscous", 10),
+            ("pinn", 10),
+            ("initial condition", 8),
+            ("boundary condition", 8),
+        )
+    if "poisson" in benchmark_name:
+        return (
+            ("poisson", 20),
+            ("l-shaped", 16),
+            ("laplace", 8),
+            ("boundary", 8),
+            ("pinn", 8),
+            ("residual", 8),
+        )
+    return (
+        ("function", 8),
+        ("approximation", 10),
+        ("discontinuous", 16),
+        ("piecewise", 12),
+        ("oscillatory", 8),
+        ("regression", 8),
+    )
+
+
+def _token_overlap_score(text: str, haystack: str, *, weight: int) -> int:
+    tokens = {
+        token
+        for token in re.findall(r"[a-z0-9_+-]{4,}", text)
+        if token not in {"with", "from", "that", "this", "into", "using", "need", "must"}
+    }
+    haystack_tokens = set(re.findall(r"[a-z0-9_+-]{4,}", haystack))
+    return len(tokens & haystack_tokens) * weight
+
+
 def _store_record(record: RunRecord) -> None:
     with _RUNS_LOCK:
         _RUNS[_record_key(record.run_dir)] = record
 
 
 def _validate_run_start_request(request: RunStartRequest) -> None:
-    known_roles = {role["role"] for role in AGENT_ROLES}
-    unknown_roles = sorted(set(request.agent_models) - known_roles)
-    if unknown_roles:
-        raise HTTPException(
-            status_code=400,
-            detail="Unknown agent role override(s): " + ", ".join(unknown_roles),
-        )
+    _validate_agent_model_roles(request.agent_models)
+    _validate_algorithm_ids(request.selected_algorithm_ids)
     if request.mode == "real":
         if not request.real_confirmed:
             raise HTTPException(
@@ -441,6 +714,34 @@ def _validate_run_start_request(request: RunStartRequest) -> None:
                 status_code=403,
                 detail="real mode is disabled for the Web API; set AGENTICSCIML_ENABLE_REAL_WEB_RUNS=1 on the server",
             )
+
+
+def _validate_agent_model_roles(agent_models: dict[str, AgentModelRequest]) -> None:
+    known_roles = {role["role"] for role in AGENT_ROLES}
+    unknown_roles = sorted(set(agent_models) - known_roles)
+    if unknown_roles:
+        raise HTTPException(
+            status_code=400,
+            detail="Unknown agent role override(s): " + ", ".join(unknown_roles),
+        )
+
+
+def _validate_algorithm_ids(algorithm_ids: list[str]) -> None:
+    known_ids = {algorithm.algorithm_id for algorithm in list_algorithms()}
+    unknown_ids = sorted(set(algorithm_ids) - known_ids)
+    if unknown_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="Unknown algorithm id(s): " + ", ".join(unknown_ids),
+        )
+
+
+def _normalized_algorithm_ids(algorithm_ids: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for algorithm_id in algorithm_ids:
+        if algorithm_id not in normalized:
+            normalized.append(algorithm_id)
+    return normalized
 
 
 def _agent_configs_from_request(request: RunStartRequest) -> dict[str, AgentConfig]:

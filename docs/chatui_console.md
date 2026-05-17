@@ -66,6 +66,10 @@ evaluator、selector 或 champion selection 实现。
 - `Paper Tasks`：按 `S1.1` 到 `S1.6` 展示本地 benchmark 映射、paper reference
   primitive、figure label 和 claim boundary。页面只引用论文小标题/标签，不嵌入未授权
   论文原图。
+- `Problem Intake`：高阶用户可输入完整问题描述、requirements、evaluation 和 data
+  description。`POST /api/problem-intake/plan` 会在当前本地 benchmark catalog 内自动评选
+  benchmark 候选、算法 seed 候选、run budget 和 start_run action；这一步是受控规划层，
+  不会生成新 evaluator 或绕过 contract。
 - `Run Config`：可设置 `target_solution_count`、`max_iterations`、
   `parallel_mutations`、`selector_vote_count`、`max_children_per_node` 和 `mode`。
   `target_solution_count` 是 UI 便捷输入；后端会转换成确定性的
@@ -84,6 +88,11 @@ evaluator、selector 或 champion selection 实现。
 
 边界文案统一使用 `faithful-small`、`proxy`、`not paper-score evidence`。mock run
 只表示 workflow shape；即使 UI 显示 loss、votes 或 figure，也不能写成论文分数或科学结论。
+
+算法库支持人工选择。选中的 algorithm id 会作为 `selected_algorithm_ids` 进入
+`POST /api/runs`，写入 `config.json` 的 `strategy_seed_ids` 和 `run_metadata.json`，
+并作为 strategy seed context 注入 Root Engineer、Proposer 和 Engineer prompt。它们
+只影响候选解法构思，不替代 evaluator 或真实分数。
 
 ## code-server sidecar
 
@@ -123,13 +132,16 @@ code-server auth、系统用户/容器权限和 secret scanning 提供真实访�
 - `GET /api/paper-tasks`：读取 S1 小标题、本地 benchmark 映射、reference primitive、
   local figure artifact 约定和 claim boundary。
 - `GET /api/agent-roles`：读取可配置的 agent role 列表和分层模型配置说明。
+- `POST /api/problem-intake/plan`：从完整问题描述生成本地 benchmark 推荐、
+  algorithm rankings、selected strategy seeds、run budget 和可展示的 start_run action。
 - `GET /api/accounts` / `POST /api/accounts`：列出或创建本地账号 namespace；
   仅写入本地目录和非密钥元数据，不提供公网认证。
 - `POST /api/runs`：启动 mock/real/dry-run run；real mode 需要请求体
   `real_confirmed=true`，并且服务端必须设置
   `AGENTICSCIML_ENABLE_REAL_WEB_RUNS=1`，同时仍需显式凭据和预算边界。请求体还可包含
-  `target_solution_count`、`max_children_per_node` 和 `agent_models`；后端只把这些转换成
-  `EvolutionConfig` / `AgentConfig`，不改写 evaluator 或 artifact schema。
+  `target_solution_count`、`max_children_per_node`、`selected_algorithm_ids` 和
+  `agent_models`；后端只把这些转换成 `EvolutionConfig` / `AgentConfig` /
+  strategy seed context，不改写 evaluator 或 artifact schema。
 - `POST /api/runs/{id}/resume`：以已有 run id 恢复。
 - `GET /api/runs/{id}`：读取 metadata、leaderboard、trace summary 和 artifact index。
 - `GET /api/runs/{id}/events`：SSE 输出 trace events。

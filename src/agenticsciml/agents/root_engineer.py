@@ -18,6 +18,7 @@ class RootEngineerAgent(AgentBase):
         contract: EvaluationContract,
         guidelines: str,
         data_report: str | None = None,
+        strategy_seed_context: str | None = None,
     ) -> str:
         self.require_inputs(
             {
@@ -26,6 +27,7 @@ class RootEngineerAgent(AgentBase):
                 "contract": contract,
                 "guidelines": guidelines,
                 "data_report": data_report,
+                "strategy_seed_context": strategy_seed_context,
             }
         )
         prompt = (
@@ -45,6 +47,8 @@ class RootEngineerAgent(AgentBase):
             f"{guidelines[:2500]}\n\n"
             "## data_analysis.md\n\n"
             f"{data_report or 'No data analysis report available.'}\n\n"
+            "## Human/Planner Selected Strategy Seeds\n\n"
+            f"{strategy_seed_context or 'No strategy seeds selected.'}\n\n"
             "Forbidden actions: do not read validation data, do not modify evaluator files, "
             "do not use network or subprocess calls.\n"
             "Contract reminder: solution.py must define class MODEL and support "

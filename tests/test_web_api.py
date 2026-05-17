@@ -100,6 +100,55 @@ def test_agent_roles_expose_layered_model_contract() -> None:
     assert "reasoning_effort" in payload["reasoning_effort_note"]
 
 
+def test_problem_intake_plans_benchmark_and_strategy_seeds() -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/problem-intake/plan",
+        json={
+            "problem_statement": (
+                "Reconstruct two-dimensional cylinder wake vorticity fields from sparse noisy temporal sensors. "
+                "The model should use lagged sensor history and preserve smooth band-limited spatial structure."
+            ),
+            "requirements": "No future sensor leakage; local deterministic evaluation.",
+            "evaluation_criteria": "Mean relative L2 on private vorticity fields.",
+            "data_description": "Eight sparse sensors over five time steps.",
+            "mode": "mock",
+            "target_solution_count": 7,
+            "parallel_mutations": 3,
+            "selected_algorithm_ids": ["paper_cylinder_bandlimited_filter"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["recommended_benchmark"]["name"] == "cylinder_wake_reconstruction_faithful_small"
+    assert payload["run_config"]["max_iterations"] == 2
+    assert payload["run_config"]["planned_solution_budget"] == 7
+    assert "paper_cylinder_bandlimited_filter" in payload["selected_algorithm_ids"]
+    assert payload["actions"][0]["payload"]["benchmark"] == "cylinder_wake_reconstruction_faithful_small"
+    assert payload["actions"][0]["payload"]["selected_algorithm_ids"] == payload["selected_algorithm_ids"]
+    assert any(
+        item["algorithm"]["id"] == "paper_cylinder_bandlimited_filter" and item["selected"]
+        for item in payload["algorithm_rankings"]
+    )
+
+
+def test_problem_intake_rejects_unknown_algorithm() -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/problem-intake/plan",
+        json={
+            "problem_statement": "Solve a discontinuous function approximation problem with a local evaluator.",
+            "selected_algorithm_ids": ["not-a-real-algorithm"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Unknown algorithm id" in response.json()["detail"]
+
+
 def test_web_mock_run_writes_required_artifacts(tmp_path: Path) -> None:
     client = TestClient(create_app())
 
@@ -148,6 +197,7 @@ def test_web_mock_run_persists_agent_model_overrides(tmp_path: Path) -> None:
                     "reasoning_effort": "medium",
                 },
             },
+            "selected_algorithm_ids": ["fourier_feature_mlp", "piecewise_local_basis"],
         },
     )
 
@@ -163,6 +213,8 @@ def test_web_mock_run_persists_agent_model_overrides(tmp_path: Path) -> None:
     }
     assert metadata["agent_models"]["engineer"]["model"] == "deepseek-v4-pro"
     assert metadata["agent_models"]["engineer"]["actual_model"] == "mock"
+    assert config["strategy_seed_ids"] == ["fourier_feature_mlp", "piecewise_local_basis"]
+    assert metadata["strategy_seed_ids"] == ["fourier_feature_mlp", "piecewise_local_basis"]
 
 
 def test_web_run_rejects_unknown_agent_role(tmp_path: Path) -> None:

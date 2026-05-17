@@ -19,6 +19,7 @@ from agenticsciml.agents import (
     SelectorAgent,
 )
 from agenticsciml.agents.base import StructuredOutputError
+from agenticsciml.algorithm_catalog import list_algorithms
 from agenticsciml.benchmarks import BenchmarkContractFactory, ProblemBundle
 from agenticsciml.config import AgentConfig, EvaluationContract, ExperimentConfig
 from agenticsciml.evidence import evidence_metadata_for_run
@@ -126,6 +127,7 @@ class AgenticSciMLOrchestrator:
         self.contract: EvaluationContract | None = None
         self.loaded_checkpoint: dict[str, object] | None = None
         self._next_solution_index: int | None = None
+        self._strategy_seed_context_cache: str | None = None
 
     def _agent_config_for_role(self, role: str) -> AgentConfig | None:
         return self.config.agents.get(role)
@@ -168,6 +170,7 @@ class AgenticSciMLOrchestrator:
                 "benchmark_dir": str(self.config.benchmark_dir),
                 "max_iterations": self.config.evolution.max_iterations,
                 "branch_context_enabled": self.config.evolution.use_branch_context,
+                "strategy_seed_ids": list(self.config.strategy_seed_ids),
                 **self._evidence_metadata(),
             },
         )
@@ -375,6 +378,24 @@ class AgenticSciMLOrchestrator:
         path = self.config.benchmark_dir / "guidelines.md"
         return path.read_text(encoding="utf-8") if path.exists() else ""
 
+    def _strategy_seed_context(self) -> str:
+        if self._strategy_seed_context_cache is not None:
+            return self._strategy_seed_context_cache
+        if not self.config.strategy_seed_ids:
+            self._strategy_seed_context_cache = ""
+            return self._strategy_seed_context_cache
+        algorithms_by_id = {algorithm.algorithm_id: algorithm for algorithm in list_algorithms()}
+        seeds = [
+            algorithms_by_id[algorithm_id].to_dict()
+            for algorithm_id in self.config.strategy_seed_ids
+            if algorithm_id in algorithms_by_id
+        ]
+        if not seeds:
+            self._strategy_seed_context_cache = ""
+            return self._strategy_seed_context_cache
+        self._strategy_seed_context_cache = json.dumps(seeds, indent=2, sort_keys=True)
+        return self._strategy_seed_context_cache
+
     def _create_root(self, contract: EvaluationContract, data_report: str | None) -> SolutionNode:
         solution_id = self._next_solution_id()
         workspace = self.storage.create_solution_workspace(solution_id)
@@ -385,6 +406,7 @@ class AgenticSciMLOrchestrator:
             contract=contract,
             guidelines=self._guidelines_text(),
             data_report=data_report,
+            strategy_seed_context=self._strategy_seed_context(),
         )
         return self._execute_analyze_node(
             solution_id,
@@ -653,6 +675,7 @@ class AgenticSciMLOrchestrator:
             related_reports=related_reports,
             use_critic=self.config.evolution.use_critic,
             branch_context=branch_context,
+            strategy_seed_context=self._strategy_seed_context(),
         )
         parent_code = self.engineer.read_parent_code(parent_workspace)
         method_tags = self._method_tags(proposal, kb_entry.entry_id if kb_entry else None)
@@ -669,6 +692,7 @@ class AgenticSciMLOrchestrator:
                 guidelines=self._guidelines_text(),
                 parent_analysis=parent_analysis,
                 branch_context=branch_context,
+                strategy_seed_context=self._strategy_seed_context(),
             )
         except (PatchApplicationError, StructuredOutputError) as exc:
             self.storage.save_solution_text(
@@ -967,6 +991,8 @@ class AgenticSciMLOrchestrator:
                 "solution_count": len(self.nodes),
                 "champion": best.node_id,
                 "branch_context_enabled": self.config.evolution.use_branch_context,
+                "strategy_seed_ids": list(self.config.strategy_seed_ids),
+                "strategy_seed_count": len(self.config.strategy_seed_ids),
                 **self._evidence_metadata(),
                 **self._llm_runtime_metadata(),
                 "llm_calls": self._llm_call_summary(),

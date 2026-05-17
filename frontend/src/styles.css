@@ -39,7 +39,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -67,6 +68,7 @@ a[aria-disabled="true"] {
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
+textarea:focus-visible,
 a:focus-visible {
   outline: 3px solid rgba(183, 106, 42, 0.28);
   outline-offset: 2px;
@@ -99,7 +101,8 @@ h3 {
 }
 
 select,
-input {
+input,
+textarea {
   width: 100%;
   min-height: 36px;
   border: 1px solid var(--line);
@@ -108,6 +111,13 @@ input {
   color: var(--ink);
   padding: 0 10px;
   font-size: 12px;
+}
+
+textarea {
+  min-height: 94px;
+  resize: vertical;
+  line-height: 1.45;
+  padding: 9px 10px;
 }
 
 pre {
@@ -445,6 +455,69 @@ ul {
 .paper-task-detail {
   display: grid;
   gap: 12px;
+}
+
+.problem-intake {
+  display: grid;
+  gap: 10px;
+}
+
+.problem-intake label {
+  display: grid;
+  gap: 5px;
+}
+
+.problem-intake label span {
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.problem-intake-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.problem-intake-grid textarea {
+  min-height: 74px;
+}
+
+.problem-plan-summary {
+  display: grid;
+  gap: 7px;
+  border: 1px solid rgba(93, 111, 159, 0.28);
+  border-radius: 8px;
+  background: #f7f3e7;
+  padding: 10px;
+}
+
+.problem-plan-summary div {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+
+.problem-plan-summary span,
+.problem-plan-summary small {
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+
+.problem-plan-summary strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.problem-plan-summary p {
+  color: var(--blue);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .paper-task-detail p,
@@ -912,6 +985,11 @@ ul {
   border-radius: 8px;
   background: #fff7eb;
   padding: 12px;
+}
+
+.algorithm-card.selected {
+  border-color: rgba(93, 111, 159, 0.55);
+  background: #ece8d9;
 }
 
 .algorithm-card > * {

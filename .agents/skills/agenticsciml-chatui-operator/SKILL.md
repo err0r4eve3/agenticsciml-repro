@@ -47,10 +47,18 @@ artifacts remain the source of truth.
   faithful-small/proxy benchmark evidence, run budget controls, selector votes,
   solution loss/tree summaries, local SVG artifacts, and role-level model
   overrides.
+- Paper Run Lab supports `Problem Intake`: a high-context user can describe the
+  scientific problem, requirements, evaluation criteria, and data shape, then
+  ask the controlled planner to recommend a local benchmark, algorithm seeds,
+  and run budget before launching the orchestrator.
+- Human-selected algorithm ids are strategy seeds. They must be persisted in
+  config/metadata and injected into agent prompts only as candidate inspiration;
+  they do not override evaluator scores or become evidence by themselves.
 - `GET /api/paper-tasks`, `GET /api/runs/{id}/selector-votes`,
-  `GET /api/runs/{id}/solutions`, and `GET /api/agent-roles` are read/control
-  surfaces around existing artifacts and config. They must not become a second
-  evaluator, selector, champion picker, or artifact schema owner.
+  `GET /api/runs/{id}/solutions`, `GET /api/agent-roles`, and
+  `POST /api/problem-intake/plan` are read/control surfaces around existing
+  artifacts and config. They must not become a second evaluator, selector,
+  champion picker, or artifact schema owner.
 - Role-level model overrides are optional. Default behavior remains the current
   single LLM adapter; configured role overrides must be persisted for audit and
   treated as routing configuration, not scientific evidence.
@@ -84,6 +92,9 @@ The assistant may:
   with claim boundaries;
 - inspect Paper Run Lab S1 task mappings, selector votes, solution loss/tree
   summaries, and local SVG evidence without editing run artifacts;
+- accept a complete problem description and use the controlled problem-intake
+  planner to recommend a benchmark, algorithm seeds, and run budget;
+- let users manually select algorithm strategy seeds before launching a run;
 - set run budget parameters through the controlled `POST /api/runs` path,
   including target solution count, parallel mutations, selector vote count, and
   max children per node;

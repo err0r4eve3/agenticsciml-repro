@@ -2,6 +2,32 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-17 Problem Intake 与人工算法选择
+
+本次补齐 Paper Run Lab 中更接近论文入口的使用方式：高阶用户先完整描述问题，再由
+agent 控制面自动评选 benchmark、算法 seed 和 run budget；人工算法库仍可手动选择。
+
+已实现：
+
+- 新增 `POST /api/problem-intake/plan`，输入完整问题描述、requirements、
+  evaluation、data description、run budget 和人工选择的 algorithm ids。
+- planner 在当前本地 benchmark catalog 内返回推荐 benchmark、候选 benchmark 排序、
+  algorithm rankings、selected strategy seeds、run config 和可展示的 `start_run`
+  action。
+- 前端 Paper Run Lab 新增 `Problem Intake` 表单，支持自动评选 benchmark 与解法 seed。
+- 算法库卡片支持人工选择；已选 algorithm ids 会进入 `POST /api/runs`。
+- `ExperimentConfig` 新增 `strategy_seed_ids`，并写入 `config.json`。
+- `run_metadata.json` 记录 `strategy_seed_ids` 和数量。
+- Root Engineer、Proposer 和 Engineer prompt 新增 strategy seed context，使人工或
+  planner 选出的算法真正参与候选解法构思。
+
+边界：
+
+- planner 只在当前本地 catalog 中做受控映射，不创建新 evaluator、不改写 benchmark
+  contract，也不宣称选中算法已经有效。
+- 真正的全流程仍由 Python orchestrator 生成 root、选择 parent、展开 solution tree、
+  执行 evaluator、写 trace/leaderboard/champion。
+
 ## 2026-05-17 Paper Run Lab
 
 本次把第三页“算法库”升级为 AgenticSciML Paper Run Lab，第一页纯 ChatUI 和第二页

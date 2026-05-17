@@ -176,6 +176,31 @@ type AgentModelConfig = {
   reasoning_effort?: ReasoningEffort;
 };
 
+type ProblemIntakeState = {
+  problem_statement: string;
+  requirements: string;
+  evaluation_criteria: string;
+  data_description: string;
+};
+
+type ProblemRunPlan = {
+  problem_summary: string;
+  recommended_benchmark: Benchmark;
+  benchmark_candidates: Array<{ benchmark: Benchmark; score: number; rationale: string }>;
+  algorithm_rankings: Array<{
+    algorithm: AlgorithmSpec;
+    score: number;
+    selected: boolean;
+    source: string;
+    rationale: string;
+  }>;
+  selected_algorithm_ids: string[];
+  run_config: RunConfig & { mode: RunMode; planned_solution_budget: number };
+  actions: SolverAction[];
+  warnings: string[];
+  claim_boundary: string;
+};
+
 type AgentMessage = {
   id: number;
   role: "user" | "assistant";
@@ -276,6 +301,17 @@ const api = {
     const payload = await getJson<{ roles: AgentRole[] }>("/api/agent-roles");
     return payload.roles;
   },
+  async planProblem(body: ProblemIntakeState & {
+    mode: RunMode;
+    target_solution_count: number;
+    parallel_mutations: number;
+    selector_vote_count: number;
+    max_children_per_node: number;
+    selected_algorithm_ids: string[];
+    agent_models: Record<string, AgentModelConfig>;
+  }): Promise<ProblemRunPlan> {
+    return postJson<ProblemRunPlan>("/api/problem-intake/plan", body);
+  },
   async getSolverSettings(): Promise<SolverSettings> {
     return getJson<SolverSettings>("/api/solver/settings");
   },
@@ -294,6 +330,7 @@ const api = {
     selector_vote_count?: number;
     max_children_per_node?: number;
     agent_models?: Record<string, AgentModelConfig>;
+    selected_algorithm_ids?: string[];
     background?: boolean;
     real_confirmed?: boolean;
   }): Promise<RunSummary> {
@@ -309,6 +346,7 @@ const api = {
       selector_vote_count: body.selector_vote_count ?? 3,
       max_children_per_node: body.max_children_per_node ?? 10,
       agent_models: body.agent_models ?? {},
+      selected_algorithm_ids: body.selected_algorithm_ids ?? [],
       background: body.background ?? false,
       real_confirmed: body.real_confirmed ?? false
     });
@@ -413,6 +451,14 @@ export function App() {
     max_children_per_node: 10
   });
   const [agentModels, setAgentModels] = useState<Record<string, AgentModelConfig>>({});
+  const [selectedAlgorithmIds, setSelectedAlgorithmIds] = useState<string[]>([]);
+  const [problemIntake, setProblemIntake] = useState<ProblemIntakeState>({
+    problem_statement: "",
+    requirements: "",
+    evaluation_criteria: "",
+    data_description: ""
+  });
+  const [problemPlan, setProblemPlan] = useState<ProblemRunPlan | null>(null);
   const [assistantMode, setAssistantMode] = useState<AssistantMode>("ask");
   const [solverSettings, setSolverSettings] = useState<SolverSettings>(DEFAULT_SOLVER_SETTINGS);
   const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScope>("account");
@@ -600,6 +646,7 @@ export function App() {
         selector_vote_count: runConfig.selector_vote_count,
         max_children_per_node: runConfig.max_children_per_node,
         agent_models: activeAgentModels(),
+        selected_algorithm_ids: selectedAlgorithmIds,
         background,
         real_confirmed: realConfirmed
       });
@@ -830,6 +877,51 @@ export function App() {
     );
   }
 
+  function toggleAlgorithm(algorithmId: string) {
+    setSelectedAlgorithmIds((current) =>
+      current.includes(algorithmId)
+        ? current.filter((item) => item !== algorithmId)
+        : [...current, algorithmId]
+    );
+  }
+
+  function updateProblemIntake(next: Partial<ProblemIntakeState>) {
+    setProblemIntake((current) => ({ ...current, ...next }));
+  }
+
+  async function planProblemRun() {
+    setBusy(true);
+    setError(null);
+    try {
+      const plan = await api.planProblem({
+        ...problemIntake,
+        mode,
+        target_solution_count: runConfig.target_solution_count,
+        parallel_mutations: runConfig.parallel_mutations,
+        selector_vote_count: runConfig.selector_vote_count,
+        max_children_per_node: runConfig.max_children_per_node,
+        selected_algorithm_ids: selectedAlgorithmIds,
+        agent_models: activeAgentModels()
+      });
+      setProblemPlan(plan);
+      setSelectedBenchmark(plan.recommended_benchmark.name);
+      setSelectedAlgorithmIds(plan.selected_algorithm_ids);
+      setRunConfig((current) => ({
+        ...current,
+        target_solution_count: plan.run_config.target_solution_count,
+        max_iterations: plan.run_config.max_iterations,
+        parallel_mutations: plan.run_config.parallel_mutations,
+        selector_vote_count: plan.run_config.selector_vote_count,
+        max_children_per_node: plan.run_config.max_children_per_node
+      }));
+      setMode(plan.run_config.mode);
+    } catch (exc) {
+      setError(String(exc));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function selectPage(page: PageKey) {
     setActivePage(page);
     if (page === "ide") {
@@ -951,10 +1043,13 @@ export function App() {
             filter={traceFilter}
             mode={mode}
             paperTasks={paperTasks}
+            problemIntake={problemIntake}
+            problemPlan={problemPlan}
             runBudgetPreview={runBudgetPreview}
             runConfig={runConfig}
             runs={runs}
             selected={selected}
+            selectedAlgorithmIds={selectedAlgorithmIds}
             selectedArtifactPath={selectedArtifactPath}
             selectedPaperTask={selectedPaperTask}
             selectorVotes={selectorVotes}
@@ -963,6 +1058,7 @@ export function App() {
             onModeChange={setMode}
             onOpenArtifacts={() => setSelectedArtifactPath("trace_summary.json")}
             onOpenCode={() => setActivePage("ide")}
+            onPlanProblemRun={planProblemRun}
             onRefreshRuns={refreshRuns}
             onRunConfigChange={updateRunConfig}
             onSelectArtifact={setSelectedArtifactPath}
@@ -970,6 +1066,8 @@ export function App() {
             onSelectRun={selectRun}
             onStartConfiguredRun={() => startRun(mode, false)}
             onStartMock={() => startRun("mock", false)}
+            onToggleAlgorithm={toggleAlgorithm}
+            onUpdateProblemIntake={updateProblemIntake}
             onUpdateAgentModel={updateAgentModel}
           />
         </section>
@@ -1243,10 +1341,13 @@ function AlgorithmLibraryPage({
   filter,
   mode,
   paperTasks,
+  problemIntake,
+  problemPlan,
   runBudgetPreview,
   runConfig,
   runs,
   selected,
+  selectedAlgorithmIds,
   selectedArtifactPath,
   selectedPaperTask,
   selectorVotes,
@@ -1255,6 +1356,7 @@ function AlgorithmLibraryPage({
   onModeChange,
   onOpenArtifacts,
   onOpenCode,
+  onPlanProblemRun,
   onRefreshRuns,
   onRunConfigChange,
   onSelectArtifact,
@@ -1262,6 +1364,8 @@ function AlgorithmLibraryPage({
   onSelectRun,
   onStartConfiguredRun,
   onStartMock,
+  onToggleAlgorithm,
+  onUpdateProblemIntake,
   onUpdateAgentModel
 }: {
   activeRun: RunSummary | null;
@@ -1274,10 +1378,13 @@ function AlgorithmLibraryPage({
   filter: string;
   mode: RunMode;
   paperTasks: PaperTask[];
+  problemIntake: ProblemIntakeState;
+  problemPlan: ProblemRunPlan | null;
   runBudgetPreview: { max_iterations: number; planned_solution_budget: number };
   runConfig: RunConfig;
   runs: RunSummary[];
   selected?: Benchmark;
+  selectedAlgorithmIds: string[];
   selectedArtifactPath: string;
   selectedPaperTask: PaperTask | null;
   selectorVotes: SelectorVotesPayload | null;
@@ -1286,6 +1393,7 @@ function AlgorithmLibraryPage({
   onModeChange: (mode: RunMode) => void;
   onOpenArtifacts: () => void;
   onOpenCode: () => void;
+  onPlanProblemRun: () => void;
   onRefreshRuns: () => void;
   onRunConfigChange: (next: Partial<RunConfig>) => void;
   onSelectArtifact: (value: string) => void;
@@ -1293,9 +1401,16 @@ function AlgorithmLibraryPage({
   onSelectRun: (run: RunSummary) => void;
   onStartConfiguredRun: () => void;
   onStartMock: () => void;
+  onToggleAlgorithm: (algorithmId: string) => void;
+  onUpdateProblemIntake: (next: Partial<ProblemIntakeState>) => void;
   onUpdateAgentModel: (role: string, next: Partial<AgentModelConfig>) => void;
 }) {
-  const scopedAlgorithms = selectedPaperTask?.algorithms.length ? selectedPaperTask.algorithms : algorithms;
+  const paperAlgorithmIds = new Set((selectedPaperTask?.algorithms ?? []).map((algorithm) => algorithm.id));
+  const scopedAlgorithms = [...algorithms].sort((left, right) => {
+    const leftPinned = paperAlgorithmIds.has(left.id) ? 0 : 1;
+    const rightPinned = paperAlgorithmIds.has(right.id) ? 0 : 1;
+    return leftPinned - rightPinned || left.name.localeCompare(right.name);
+  });
   return (
     <section className="library-content paper-lab">
       <section className="paper-lab-head">
@@ -1308,7 +1423,12 @@ function AlgorithmLibraryPage({
       </section>
       <PaperTaskTabs tasks={paperTasks} selected={selectedPaperTask} onSelect={onSelectPaperTask} />
       <div className="paper-lab-grid">
-        <PaperTaskDetail task={selectedPaperTask} selectedBenchmark={selected?.name ?? null} />
+        <ProblemIntakePanel
+          problemIntake={problemIntake}
+          problemPlan={problemPlan}
+          onChange={onUpdateProblemIntake}
+          onPlan={onPlanProblemRun}
+        />
         <RunConfigPanel
           budgetPreview={runBudgetPreview}
           busy={false}
@@ -1320,6 +1440,7 @@ function AlgorithmLibraryPage({
           onStartRun={onStartConfiguredRun}
         />
       </div>
+      <PaperTaskDetail task={selectedPaperTask} selectedBenchmark={selected?.name ?? null} />
       <RoleModelPanel agentModels={agentModels} roles={agentRoles} onUpdate={onUpdateAgentModel} />
       <EvidencePanel selectorVotes={selectorVotes} solutionsPayload={solutionsPayload} />
       <DataRegion title="Paper primitive catalog">
@@ -1333,7 +1454,12 @@ function AlgorithmLibraryPage({
             <p>尚未加载 S1 task mapping。</p>
           )}
         </div>
-        <AlgorithmCatalog algorithms={scopedAlgorithms} embedded />
+        <AlgorithmCatalog
+          algorithms={scopedAlgorithms}
+          embedded
+          selectedIds={selectedAlgorithmIds}
+          onToggle={onToggleAlgorithm}
+        />
       </DataRegion>
       <DashboardView
         activeRun={activeRun}
@@ -1385,6 +1511,84 @@ function PaperTaskTabs({
         </button>
       ))}
       {tasks.length === 0 ? <span className="muted">S1 task mapping 尚未加载。</span> : null}
+    </div>
+  );
+}
+
+function ProblemIntakePanel({
+  onChange,
+  onPlan,
+  problemIntake,
+  problemPlan
+}: {
+  onChange: (next: Partial<ProblemIntakeState>) => void;
+  onPlan: () => void;
+  problemIntake: ProblemIntakeState;
+  problemPlan: ProblemRunPlan | null;
+}) {
+  const canPlan = problemIntake.problem_statement.trim().length >= 20;
+  return (
+    <DataRegion title="Problem Intake">
+      <div className="problem-intake">
+        <label>
+          <span>完整问题描述</span>
+          <textarea
+            value={problemIntake.problem_statement}
+            onChange={(event) => onChange({ problem_statement: event.target.value })}
+            placeholder="描述科学问题、输入输出、约束、可用数据和期望评价方式"
+          />
+        </label>
+        <div className="problem-intake-grid">
+          <label>
+            <span>Requirements</span>
+            <textarea
+              value={problemIntake.requirements}
+              onChange={(event) => onChange({ requirements: event.target.value })}
+              placeholder="运行约束、禁止事项、依赖、预算"
+            />
+          </label>
+          <label>
+            <span>Evaluation</span>
+            <textarea
+              value={problemIntake.evaluation_criteria}
+              onChange={(event) => onChange({ evaluation_criteria: event.target.value })}
+              placeholder="metric、loss、验证方式"
+            />
+          </label>
+          <label>
+            <span>Data</span>
+            <textarea
+              value={problemIntake.data_description}
+              onChange={(event) => onChange({ data_description: event.target.value })}
+              placeholder="数据形状、变量、train/validation 边界"
+            />
+          </label>
+        </div>
+        <button className="icon-text-button full-width" disabled={!canPlan} type="button" onClick={onPlan}>
+          <Sparkles size={15} />
+          自动评选 benchmark 与解法
+        </button>
+        {problemPlan ? <ProblemPlanSummary plan={problemPlan} /> : null}
+      </div>
+    </DataRegion>
+  );
+}
+
+function ProblemPlanSummary({ plan }: { plan: ProblemRunPlan }) {
+  return (
+    <div className="problem-plan-summary">
+      <div>
+        <span>recommended benchmark</span>
+        <strong>{plan.recommended_benchmark.name}</strong>
+      </div>
+      <div>
+        <span>selected algorithms</span>
+        <strong>{plan.selected_algorithm_ids.join(", ") || "none"}</strong>
+      </div>
+      <p>{plan.claim_boundary}</p>
+      {plan.warnings.map((warning) => (
+        <small key={warning}>{warning}</small>
+      ))}
     </div>
   );
 }
@@ -1746,12 +1950,22 @@ function normalizeInteger(value: number, fallback: number, min: number) {
   return Math.max(min, Math.floor(value));
 }
 
-function AlgorithmCatalog({ algorithms, embedded = false }: { algorithms: AlgorithmSpec[]; embedded?: boolean }) {
+function AlgorithmCatalog({
+  algorithms,
+  embedded = false,
+  onToggle,
+  selectedIds = []
+}: {
+  algorithms: AlgorithmSpec[];
+  embedded?: boolean;
+  onToggle?: (algorithmId: string) => void;
+  selectedIds?: string[];
+}) {
   const visible = algorithms;
   const content = (
     <div className="algorithm-grid">
       {visible.map((algorithm) => (
-        <article className="algorithm-card" key={algorithm.id}>
+        <article className={selectedIds.includes(algorithm.id) ? "algorithm-card selected" : "algorithm-card"} key={algorithm.id}>
           <div>
             <span>{algorithm.family}</span>
             <h3>{algorithm.name}</h3>
@@ -1763,6 +1977,11 @@ function AlgorithmCatalog({ algorithms, embedded = false }: { algorithms: Algori
           </div>
           {algorithm.implementation_path ? <code>{algorithm.implementation_path}</code> : null}
           <strong>{algorithm.safety_notes}</strong>
+          {onToggle ? (
+            <button type="button" onClick={() => onToggle(algorithm.id)}>
+              {selectedIds.includes(algorithm.id) ? "已选" : "选择"}
+            </button>
+          ) : null}
         </article>
       ))}
       {visible.length === 0 ? <p className="muted">算法目录暂未加载。</p> : null}
