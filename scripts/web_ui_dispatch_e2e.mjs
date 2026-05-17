@@ -13,8 +13,21 @@ const browser = await chromium.launch({
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
   page.setDefaultTimeout(options.timeoutMs);
-  const websocketUrls = [];
-  page.on("websocket", (websocket) => websocketUrls.push(websocket.url()));
+  const websocketEvents = [];
+  const codeServerConnectionErrors = [];
+  page.on("console", (message) => {
+    const text = message.text();
+    if (/WebSocket|1006|Unexpected response code|workbench failed to connect|failed to connect to the server/i.test(text)) {
+      codeServerConnectionErrors.push(text);
+    }
+  });
+  page.on("websocket", (websocket) => {
+    const event = { url: websocket.url(), closed: false };
+    websocketEvents.push(event);
+    websocket.on("close", () => {
+      event.closed = true;
+    });
+  });
   await page.goto(options.baseUrl, { waitUntil: "domcontentloaded" });
 
   await expectVisible(page, "[data-testid='page-chat']", "Chat page did not render");
@@ -33,10 +46,19 @@ try {
   const codeServerWebsocketPromise = options.expectCodeServerWebsocket
     ? waitForCodeServerWebsocket(page, options.websocketTimeoutMs)
     : null;
+  let verifiedCodeServerOpenWebsocketCount = null;
   await sendChatMessage(page, "打开当前账号代码工作区");
   await expectVisible(page, "[data-testid='page-ide']", "Agent code action did not navigate to IDE page");
   await expectVisible(page, "[data-testid='vscode-iframe']", "IDE page did not open the VS Code iframe");
   const codeServerWebsocketUrl = codeServerWebsocketPromise ? await codeServerWebsocketPromise : null;
+  if (options.expectCodeServerWebsocket) {
+    verifiedCodeServerOpenWebsocketCount = await assertCodeServerWorkbenchConnected(
+      page,
+      websocketEvents,
+      codeServerConnectionErrors,
+      options.websocketStabilizeMs,
+    );
+  }
   await expectNotVisibleText(page, "[data-testid='page-ide']", "实验工作台", "IDE page leaked workbench copy");
 
   await page.locator("[data-testid='page-ide'] [data-testid='assistant-mode-ask']").click();
@@ -58,11 +80,13 @@ try {
           "ask_no_actions",
           "plan_no_dispatch",
           "agent_open_code_server_dispatch",
+          ...(options.expectCodeServerWebsocket ? ["code_server_websocket_stable"] : []),
           "ide_sidebar_chatui_ask",
           "library_workbench_boundary",
         ],
         code_server_websocket_url: codeServerWebsocketUrl,
-        observed_websocket_count: websocketUrls.length,
+        observed_websocket_count: websocketEvents.length,
+        verified_code_server_open_websocket_count: verifiedCodeServerOpenWebsocketCount,
       },
       null,
       2,
@@ -109,6 +133,31 @@ async function waitForCodeServerWebsocket(page, timeoutMs) {
   return websocket.url();
 }
 
+async function assertCodeServerWorkbenchConnected(page, websocketEvents, connectionErrors, stabilizeMs) {
+  await page.waitForTimeout(stabilizeMs);
+  const errorSample = connectionErrors.slice(0, 5);
+  if (errorSample.length > 0) {
+    throw new Error(`code-server WebSocket reported browser errors: ${JSON.stringify(errorSample)}`);
+  }
+  const openCodeServerSockets = websocketEvents.filter((event) => {
+    return !event.closed && /\/stable-[^/?]+/.test(event.url);
+  });
+  if (openCodeServerSockets.length === 0) {
+    throw new Error("code-server WebSocket opened but did not remain connected");
+  }
+
+  const iframe = await page.locator("[data-testid='vscode-iframe']").elementHandle();
+  const frame = await iframe?.contentFrame();
+  if (!frame) {
+    throw new Error("VS Code iframe did not expose a browser frame");
+  }
+  const bodyText = await frame.locator("body").innerText({ timeout: 5000 });
+  if (/An unexpected error occurred|workbench failed to connect|WebSocket close with status code 1006/i.test(bodyText)) {
+    throw new Error(`code-server workbench displayed a connection failure: ${bodyText.slice(0, 300)}`);
+  }
+  return openCodeServerSockets.length;
+}
+
 function parseArgs(args) {
   const parsed = {
     baseUrl: "http://127.0.0.1:5173",
@@ -116,6 +165,7 @@ function parseArgs(args) {
     headless: true,
     timeoutMs: 30000,
     websocketTimeoutMs: 60000,
+    websocketStabilizeMs: 15000,
     expectCodeServerWebsocket: false,
   };
   for (let i = 0; i < args.length; i += 1) {
@@ -128,6 +178,8 @@ function parseArgs(args) {
       parsed.timeoutMs = Number(requireValue(args, ++i, arg));
     } else if (arg === "--websocket-timeout-ms") {
       parsed.websocketTimeoutMs = Number(requireValue(args, ++i, arg));
+    } else if (arg === "--websocket-stabilize-ms") {
+      parsed.websocketStabilizeMs = Number(requireValue(args, ++i, arg));
     } else if (arg === "--expect-code-server-websocket") {
       parsed.expectCodeServerWebsocket = true;
     } else if (arg === "--headed") {

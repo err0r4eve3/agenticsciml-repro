@@ -259,7 +259,12 @@ node scripts/web_ui_dispatch_e2e.mjs \
 它验证第一页 ChatUI 的 Ask/Plan/Agent 分发、Agent 自动进入第二页 VS Code Web、
 第二页侧栏 ChatUI、第三页算法库边界，并在开启
 `--expect-code-server-websocket` 时要求 code-server iframe 通过 `ws://` 或 `wss://`
-建立 WebSocket。远端测试时把 `--base-url` 换成
+建立 WebSocket、稳定保持连接、iframe 内不出现 `WebSocket close with status code
+1006` 或 workbench connection failure。远端 nginx 反代必须保留浏览器请求里的
+端口，例如 VS Code server 块应使用 `proxy_set_header Host $http_host` 和
+`proxy_set_header X-Forwarded-Host $http_host`；如果传 `$host`，code-server 的
+origin guard 会把 `Origin: https://host:port` 判为不匹配并返回 `403`。远端测试时把
+`--base-url` 换成
 `https://agenticsciml.error-forever.com`。
 
 smoke 产生的 run 仍是 mock workflow shape evidence，不能写成论文分数或科学复现结论。

@@ -31,7 +31,13 @@
 - 新增 `scripts/web_ui_dispatch_e2e.mjs`，使用 `playwright-core` 和本机 Chrome
   channel 做真实浏览器 E2E，覆盖第一页 ChatUI Ask/Plan/Agent 分发、Agent 打开第二页
   VS Code Web、第二页侧栏 ChatUI、第三页算法库边界，以及可选 code-server WebSocket
-  路径检查。
+  路径检查。WebSocket 检查现在会等待连接稳定、捕获浏览器控制台中的 `403` / `1006`
+  错误，并检查 iframe 内没有 workbench connection failure。
+- 远端 nginx 反代 code-server 时必须保留端口化 Host。VS Code server 块应传
+  `proxy_set_header Host $http_host` 和
+  `proxy_set_header X-Forwarded-Host $http_host`，否则 code-server origin guard 会把浏览器
+  `Origin: https://host:port` 与上游 `Host: host` 判为不匹配，WebSocket 握手返回
+  `403`，前端表现为 `WebSocket close with status code 1006`。
 
 验证：
 
