@@ -1696,7 +1696,7 @@ tbody tr:hover,
   z-index: 3;
   top: 0;
   bottom: 0;
-  left: -5px;
+  left: 0;
   width: 10px;
   min-height: 0;
   border: 0;
@@ -1704,6 +1704,7 @@ tbody tr:hover,
   background: transparent;
   cursor: col-resize;
   padding: 0;
+  touch-action: none;
 }
 
 .agent-resize-handle::before {
