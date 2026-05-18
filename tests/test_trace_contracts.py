@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from agenticsciml.trace_contracts import FanoutTraceMetadata
@@ -62,3 +64,21 @@ def test_fanout_trace_metadata_validate_metadata_catches_legacy_mismatch() -> No
     )
 
     assert any("legacy mapping mismatch" in issue for issue in issues)
+
+
+def test_fanout_trace_metadata_accepts_sorted_json_for_mixed_parents() -> None:
+    payload = FanoutTraceMetadata.from_pairs(
+        [
+            ("solution_001", "solution_003"),
+            ("solution_000", "solution_004"),
+        ]
+    ).to_dict()
+    payload = json.loads(json.dumps(payload, sort_keys=True))
+
+    issues = FanoutTraceMetadata.validate_metadata(
+        payload,
+        context="trace event agenticsciml.parallel_children.start",
+        require_complete=True,
+    )
+
+    assert issues == []

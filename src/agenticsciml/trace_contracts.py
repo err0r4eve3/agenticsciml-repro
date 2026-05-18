@@ -241,11 +241,6 @@ def _validate_canonical_parts(
             f"{context} parent_to_children mismatch: "
             f"expected {derived_parent_to_children!r}, observed {parent_to_children!r}"
         )
-    if [child_id for child_ids_for_parent in parent_to_children.values() for child_id in child_ids_for_parent] != child_ids:
-        issues.append(
-            f"{context} parent_to_children child order mismatch: "
-            f"expected {child_ids!r}, observed {parent_to_children!r}"
-        )
     if parent_to_child_present:
         for parent_id, child_ids_for_parent in parent_to_children.items():
             expected_child_id = child_ids_for_parent[-1]
