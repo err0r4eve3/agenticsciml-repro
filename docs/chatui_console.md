@@ -87,8 +87,9 @@ evaluator、selector 或 champion selection 实现。
 - `Layered model routing`：列出 Data Analyst、Evaluator、Root Engineer、
   Retriever、Proposer、Critic、Engineer、Debugger、Result Analyst 和 Selector。
   默认仍使用后端单一 adapter；只有填写 role override 时，后端才按 role 创建模型配置。
-  `reasoning_effort` 先写入配置和 metadata 供 audit/未来路由使用，不强制传给可能不支持
-  该字段的 OpenAI-compatible chat provider。
+  `reasoning_effort` 当前允许 `low | medium | high | xhigh`，并会写入配置、
+  metadata 和传给支持该字段的 OpenAI-native Responses / OpenAI-compatible Chat
+  Completions provider。
 - `Evidence`：只读展示 `reports/selector_votes.json`、`tree.json`、
   `leaderboard.csv`、各 `solutions/solution_*/eval.json` 汇总出的 votes、loss/score、
   parent/tree summary、method tags、`policy_fidelity`、`emergence_audit` 和本地 SVG artifact。
@@ -199,6 +200,7 @@ Web API 暴露；本地开发需要打开仓库根目录时，必须显式设置
   当前本地账号。
 - `GET /api/solver/settings`：读取 `ask` / `plan` / `agent` 的默认
   `reasoning_effort` 和 `temperature`，前端模式切换控件以此显示当前设置。
+  返回的 `reasoning_efforts` 当前为 `low`、`medium`、`high`、`xhigh`。
 
 `GET /api/runs`、`POST /api/runs`、`GET /api/runs/{id}`、
 `GET /api/runs/{id}/events`、artifact API、code-server API 和

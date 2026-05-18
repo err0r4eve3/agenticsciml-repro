@@ -87,7 +87,7 @@ def test_solver_settings_expose_mode_defaults() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["default_assistant_mode"] == "ask"
-    assert payload["reasoning_efforts"] == ["low", "medium", "high"]
+    assert payload["reasoning_efforts"] == ["low", "medium", "high", "xhigh"]
     assert payload["temperature_range"] == [0.0, 2.0]
     assert payload["assistant_modes"] == {
         "ask": {"reasoning_effort": "medium", "temperature": 0.2},
@@ -334,7 +334,7 @@ def test_web_mock_run_persists_agent_model_overrides(tmp_path: Path) -> None:
                 "engineer": {
                     "model": "deepseek-v4-pro",
                     "temperature": 0.15,
-                    "reasoning_effort": "high",
+                    "reasoning_effort": "xhigh",
                 },
                 "selector": {
                     "model": "gpt-5-mini",
@@ -354,7 +354,7 @@ def test_web_mock_run_persists_agent_model_overrides(tmp_path: Path) -> None:
         "role": "engineer",
         "model": "deepseek-v4-pro",
         "temperature": 0.15,
-        "reasoning_effort": "high",
+        "reasoning_effort": "xhigh",
     }
     assert metadata["agent_models"]["engineer"]["model"] == "deepseek-v4-pro"
     assert metadata["agent_models"]["engineer"]["actual_model"] == "mock"
@@ -928,7 +928,7 @@ def test_solver_chat_mode_model_settings_are_distinct(tmp_path: Path) -> None:
             "selected_benchmark": "function_approx",
             "mode": "mock",
             "assistant_mode": "ask",
-            "reasoning_effort": "high",
+            "reasoning_effort": "xhigh",
             "temperature": 0.45,
             "workspace_scope": "account",
             "output_dir": str(tmp_path),
@@ -936,7 +936,7 @@ def test_solver_chat_mode_model_settings_are_distinct(tmp_path: Path) -> None:
     )
     assert override.status_code == 200
     assert override.json()["model_settings"] == {
-        "reasoning_effort": "high",
+        "reasoning_effort": "xhigh",
         "temperature": 0.45,
         "source": "request_override",
     }

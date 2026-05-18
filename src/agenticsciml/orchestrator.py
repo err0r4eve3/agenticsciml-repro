@@ -84,48 +84,58 @@ class AgenticSciMLOrchestrator:
             self._llm_for_role("data_analyst"),
             self.storage,
             default_temperature=self._temperature_for_role("data_analyst"),
+            default_reasoning_effort=self._reasoning_effort_for_role("data_analyst"),
         )
         self.evaluator = EvaluatorAgent(
             self._llm_for_role("evaluator"),
             self.storage,
             default_temperature=self._temperature_for_role("evaluator"),
+            default_reasoning_effort=self._reasoning_effort_for_role("evaluator"),
         )
         self.root_engineer = RootEngineerAgent(
             self._llm_for_role("root_engineer"),
             self.storage,
             default_temperature=self._temperature_for_role("root_engineer"),
+            default_reasoning_effort=self._reasoning_effort_for_role("root_engineer"),
         )
         self.retriever = RetrieverAgent(
             self._llm_for_role("retriever"),
             self.storage,
             default_temperature=self._temperature_for_role("retriever"),
+            default_reasoning_effort=self._reasoning_effort_for_role("retriever"),
         )
         self.proposer = ProposerAgent(
             self._llm_for_role("proposer"),
             self.storage,
             default_temperature=self._temperature_for_role("proposer"),
+            default_reasoning_effort=self._reasoning_effort_for_role("proposer"),
             critic_llm=self._llm_for_role("critic"),
             critic_temperature=self._temperature_for_role("critic"),
+            critic_reasoning_effort=self._reasoning_effort_for_role("critic"),
         )
         self.engineer = EngineerAgent(
             self._llm_for_role("engineer"),
             self.storage,
             default_temperature=self._temperature_for_role("engineer"),
+            default_reasoning_effort=self._reasoning_effort_for_role("engineer"),
         )
         self.debugger = DebuggerAgent(
             self._llm_for_role("debugger"),
             self.storage,
             default_temperature=self._temperature_for_role("debugger"),
+            default_reasoning_effort=self._reasoning_effort_for_role("debugger"),
         )
         self.result_analyst = ResultAnalystAgent(
             self._llm_for_role("result_analyst"),
             self.storage,
             default_temperature=self._temperature_for_role("result_analyst"),
+            default_reasoning_effort=self._reasoning_effort_for_role("result_analyst"),
         )
         self.selector = SelectorAgent(
             self._llm_for_role("selector"),
             self.storage,
             default_temperature=self._temperature_for_role("selector"),
+            default_reasoning_effort=self._reasoning_effort_for_role("selector"),
         )
         self.problem_bundle = ProblemBundle.load(config.benchmark_dir)
         self.contract: EvaluationContract | None = None
@@ -140,6 +150,10 @@ class AgenticSciMLOrchestrator:
     def _temperature_for_role(self, role: str) -> float:
         agent_config = self._agent_config_for_role(role)
         return agent_config.temperature if agent_config else 0.0
+
+    def _reasoning_effort_for_role(self, role: str) -> str | None:
+        agent_config = self._agent_config_for_role(role)
+        return agent_config.reasoning_effort if agent_config else None
 
     def _llm_for_role(self, role: str) -> LLMClient:
         if role in self._role_llms:

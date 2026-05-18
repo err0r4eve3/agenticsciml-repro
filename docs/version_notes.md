@@ -2,6 +2,26 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-18 Reasoning Effort Routing
+
+本次把 role-level `reasoning_effort` 从审计字段升级为真实 provider 参数。
+
+已实现：
+
+- ChatUI/API 允许 `low | medium | high | xhigh`，`GET /api/solver/settings`
+  返回同一组选项。
+- Orchestrator 会把每个 role 的 `reasoning_effort` 传入对应 agent；Proposer 内部
+  Critic 调用也使用 Critic role 配置。
+- `OpenAIAdapter` 在 OpenAI-native Responses 路径传 `reasoning={"effort": ...}`，
+  在 OpenAI-compatible Chat Completions 路径传 `reasoning_effort=...`。
+- `generation_span` 和 real LLM smoke ledger 会记录实际请求的 `reasoning_effort`。
+
+边界：
+
+- 默认模式仍保持 `ask=medium`、`plan=high`、`agent=high`；`xhigh` 只在显式覆盖时使用。
+- `none` 和 `minimal` 是官方可见枚举，但本轮不暴露在默认 UI，避免部分模型或兼容
+  endpoint 不支持时误配置。
+
 ## 2026-05-18 Candidate Emergence Audit
 
 本次根据 NotebookLM 对 AgenticSciML emergent discovery 定义的证据表，新增保守的
@@ -263,7 +283,7 @@ VS Code Web + 侧栏 ChatUI 保持轻量，不展示 benchmark/run 工作台。
   `EvolutionConfig.max_iterations + parallel_mutations` 预算。
 - 新增 `GET /api/agent-roles`，前端可为 Data Analyst、Evaluator、Root Engineer、
   Retriever、Proposer、Critic、Engineer、Debugger、Result Analyst 和 Selector 配置
-  role-level `model`、`temperature` 与审计用 `reasoning_effort`。
+  role-level `model`、`temperature` 与 provider-routed `reasoning_effort`。
 - orchestrator 支持 role-based LLM routing：默认继续使用单一 adapter；只有配置 role
   override 时才为该 role 选择模型。`config.json` 和 `run_metadata.json` 记录实际
   `agent_models` map。
@@ -552,7 +572,8 @@ backend、human review pause/resume 和 MCP/hosted tools sidecar。
   使用本地 Pydantic schema fail closed。
 - OpenAI-compatible provider support：`OpenAIAdapter` 可通过
   `OPENAI_BASE_URL` 指向 DeepSeek 等兼容 endpoint，并通过
-  `OPENAI_TIMEOUT_S` 设置 provider 请求超时。
+  `OPENAI_TIMEOUT_S` 设置 provider 请求超时；当 role 配置了
+  `reasoning_effort` 时，兼容 Chat Completions 请求会携带同名参数。
 - DeepSeek real-run hardening：`OpenAIAdapter` 会把 `deepseekv4pro` /
   `deepseekv4flash` 规范为 DeepSeek API 接受的 `deepseek-v4-pro` /
   `deepseek-v4-flash`；OpenAI-compatible chat JSON fallback 会把 Pydantic

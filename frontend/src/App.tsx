@@ -88,7 +88,7 @@ type ArtifactPayload =
 type RunMode = "mock" | "real" | "dry_run";
 type WorkspaceScope = "repo" | "account" | "run" | "solution";
 type AssistantMode = "ask" | "plan" | "agent";
-type ReasoningEffort = "low" | "medium" | "high";
+type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
 type PageKey = "chat" | "ide" | "library";
 
 const AGENT_PANEL_MIN_WIDTH = 280;
@@ -333,7 +333,7 @@ type CodeWorkspaceOption = CodeServerPayload & {
 
 const DEFAULT_SOLVER_SETTINGS: SolverSettings = {
   default_assistant_mode: "ask",
-  reasoning_efforts: ["low", "medium", "high"],
+  reasoning_efforts: ["low", "medium", "high", "xhigh"],
   temperature_range: [0, 2],
   assistant_modes: {
     ask: { reasoning_effort: "medium", temperature: 0.2 },
@@ -2249,8 +2249,8 @@ function RoleModelPanel({
     <DataRegion title="Layered model routing">
       <div className="role-model-panel">
         <p>
-          默认使用后端单一 adapter；只有填写 role override 时才按层路由。reasoning_effort 先持久化用于 audit，
-          OpenAI-compatible chat provider 可以忽略。
+          默认使用后端单一 adapter；只有填写 role override 时才按层路由。reasoning_effort 会写入 audit，
+          并传给支持该参数的 provider。
         </p>
         <div className="role-model-table">
           <table>
@@ -2297,6 +2297,7 @@ function RoleModelPanel({
                         <option value="low">low</option>
                         <option value="medium">medium</option>
                         <option value="high">high</option>
+                        <option value="xhigh">xhigh</option>
                       </select>
                     </td>
                   </tr>
@@ -2461,13 +2462,14 @@ function payloadAgentModels(value: unknown, fallback: Record<string, AgentModelC
     result[role] = {
       model: config.model,
       temperature: typeof config.temperature === "number" && Number.isFinite(config.temperature) ? config.temperature : 0,
-      reasoning_effort:
-        config.reasoning_effort === "low" || config.reasoning_effort === "medium" || config.reasoning_effort === "high"
-          ? config.reasoning_effort
-          : undefined
+      reasoning_effort: isReasoningEffort(config.reasoning_effort) ? config.reasoning_effort : undefined
     };
   }
   return Object.keys(result).length ? result : fallback;
+}
+
+function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return value === "low" || value === "medium" || value === "high" || value === "xhigh";
 }
 
 function nextStrategyLockId(existing: StrategyLock[]) {

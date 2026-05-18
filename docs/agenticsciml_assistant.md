@@ -58,7 +58,7 @@ repo-local skill 位于 `.agents/skills/agenticsciml-chatui-operator/SKILL.md`�
 - `selected_benchmark`：当前 benchmark。
 - `mode`：`mock | real | dry_run`。
 - `assistant_mode`：`ask | plan | agent`，默认 `ask`。
-- `reasoning_effort`：可选覆盖值，当前允许 `low | medium | high`。
+- `reasoning_effort`：可选覆盖值，当前允许 `low | medium | high | xhigh`。
 - `temperature`：可选覆盖值，范围 `0.0` 到 `2.0`。
 - `workspace_scope`：`repo | account | run | solution`；ChatUI 默认使用
   `account`。
@@ -98,6 +98,9 @@ repo-local skill 位于 `.agents/skills/agenticsciml-chatui-operator/SKILL.md`�
 
 前端应优先从 `GET /api/solver/settings` 读取这些默认值，再在每次
 `/api/solver/chat` 响应中展示 `model_settings` 的实际值。
+当真实 LLM 使用 OpenAI-native Responses 或 OpenAI-compatible Chat Completions
+adapter 时，role-level `reasoning_effort` 会传给 provider；若兼容 endpoint 不支持
+该字段，应让 provider 错误显式暴露，而不是把审计配置伪装成已生效。
 
 当前允许 action：
 

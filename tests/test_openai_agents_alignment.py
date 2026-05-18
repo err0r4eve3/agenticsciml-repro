@@ -89,6 +89,50 @@ class ExtraFieldProposalLLM(FlakyJsonLLM):
         }
 
 
+class ReasoningCaptureLLM(LLMClient):
+    def __init__(self):
+        self.calls: list[dict[str, Any]] = []
+
+    def complete_text(
+        self,
+        prompt: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+        reasoning_effort: str | None = None,
+    ) -> str:
+        self.calls.append(
+            {
+                "method": "complete_text",
+                "temperature": temperature,
+                "reasoning_effort": reasoning_effort,
+            }
+        )
+        return "ok"
+
+    def complete_json(
+        self,
+        prompt: str,
+        schema_name: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+        reasoning_effort: str | None = None,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            {
+                "method": "complete_json",
+                "temperature": temperature,
+                "reasoning_effort": reasoning_effort,
+            }
+        )
+        return {
+            "title": "Valid proposal",
+            "diagnosis": "Root underfits.",
+            "mutation_plan": ["Add features."],
+            "expected_effect": "Lower validation MSE.",
+            "risks": ["May overfit."],
+        }
+
+
 class WrongTypeProposalLLM(FlakyJsonLLM):
     def complete_json(
         self,
@@ -143,6 +187,31 @@ def test_agent_json_output_is_retried_and_schema_checked(tmp_path: Path) -> None
     )
 
     assert data["diagnosis"] == "Root underfits."
+
+
+def test_agent_base_routes_default_reasoning_effort_to_llm(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    llm = ReasoningCaptureLLM()
+    agent = AgentBase(
+        llm,
+        storage,
+        default_temperature=0.3,
+        default_reasoning_effort="xhigh",
+    )
+
+    assert agent.complete_text(prompt="summarize") == "ok"
+    data = agent.complete_json_checked(
+        prompt="return a proposal",
+        schema_name="proposal",
+        required_fields=("title", "diagnosis", "mutation_plan", "expected_effect", "risks"),
+        retries=0,
+    )
+
+    assert data["title"] == "Valid proposal"
+    assert llm.calls == [
+        {"method": "complete_text", "temperature": 0.3, "reasoning_effort": "xhigh"},
+        {"method": "complete_json", "temperature": 0.3, "reasoning_effort": "xhigh"},
+    ]
 
 
 def test_agent_json_output_fails_closed_after_retry_budget(tmp_path: Path) -> None:

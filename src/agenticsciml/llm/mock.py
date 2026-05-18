@@ -152,6 +152,7 @@ class MockLLMClient(LLMClient):
         prompt: str,
         system: str | None = None,
         temperature: float = 0.0,
+        reasoning_effort: str | None = None,
     ) -> str:
         if "data analyst" in prompt.lower():
             return (
@@ -171,6 +172,7 @@ class MockLLMClient(LLMClient):
         schema_name: str,
         system: str | None = None,
         temperature: float = 0.0,
+        reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
         name = schema_name.lower()
         if name == "selector":

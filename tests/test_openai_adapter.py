@@ -123,6 +123,21 @@ def test_openai_adapter_uses_native_structured_outputs_when_available(monkeypatc
     assert adapter.last_call_metadata["usage"]["completion_tokens"] == 5
 
 
+def test_openai_adapter_passes_reasoning_effort_to_native_responses(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeNativeOpenAI))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    FakeResponses.last_kwargs = None
+
+    adapter = OpenAIAdapter(model="gpt-5.5")
+    adapter.complete_json("return proposal", "proposal", reasoning_effort="xhigh")
+
+    assert FakeResponses.last_kwargs is not None
+    assert FakeResponses.last_kwargs["reasoning"] == {"effort": "xhigh"}
+    assert adapter.last_call_metadata is not None
+    assert adapter.last_call_metadata["reasoning_effort"] == "xhigh"
+
+
 def test_openai_adapter_compatible_json_fallback_still_rejects_schema_drift(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeChatOpenAI))
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -153,15 +168,18 @@ def test_openai_adapter_compatible_json_prompt_includes_schema_types(monkeypatch
     )
 
     adapter = OpenAIAdapter(model="deepseekv4pro")
-    payload = adapter.complete_json("return proposal", "proposal")
+    payload = adapter.complete_json("return proposal", "proposal", reasoning_effort="xhigh")
 
     assert payload["risks"] == ["r"]
     assert FakeChatCompletions.last_kwargs is not None
+    assert FakeChatCompletions.last_kwargs["reasoning_effort"] == "xhigh"
     message = FakeChatCompletions.last_kwargs["messages"][-1]["content"]
     assert "Required JSON Schema" in message
     assert '"risks"' in message
     assert '"type": "array"' in message
     assert "Arrays must be JSON arrays" in message
+    assert adapter.last_call_metadata is not None
+    assert adapter.last_call_metadata["reasoning_effort"] == "xhigh"
 
 
 def test_openai_adapter_compatible_json_extracts_object_from_wrapped_text(monkeypatch) -> None:

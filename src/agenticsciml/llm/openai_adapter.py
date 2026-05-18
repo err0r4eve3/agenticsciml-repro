@@ -57,20 +57,25 @@ class OpenAIAdapter(LLMClient):
         prompt: str,
         system: str | None = None,
         temperature: float = 0.0,
+        reasoning_effort: str | None = None,
     ) -> str:
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            temperature=temperature,
-        )
+        request_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        if reasoning_effort is not None:
+            request_kwargs["reasoning_effort"] = reasoning_effort
+        response = self.client.chat.completions.create(**request_kwargs)
         self.last_call_metadata = self._metadata(
             method="complete_text",
             schema_name=None,
             response=response,
+            reasoning_effort=reasoning_effort,
         )
         return response.choices[0].message.content or ""
 
@@ -80,6 +85,7 @@ class OpenAIAdapter(LLMClient):
         schema_name: str,
         system: str | None = None,
         temperature: float = 0.0,
+        reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
         if (
             self.provider_capabilities.supports_responses
@@ -91,12 +97,14 @@ class OpenAIAdapter(LLMClient):
                 schema_name,
                 system=system,
                 temperature=temperature,
+                reasoning_effort=reasoning_effort,
             )
         return self._complete_json_compatible(
             prompt,
             schema_name,
             system=system,
             temperature=temperature,
+            reasoning_effort=reasoning_effort,
         )
 
     def _complete_json_responses(
@@ -105,20 +113,31 @@ class OpenAIAdapter(LLMClient):
         schema_name: str,
         system: str | None,
         temperature: float,
+        reasoning_effort: str | None,
     ) -> dict[str, Any]:
         model = output_model_for(schema_name)
         if model is None:
-            return self._complete_json_compatible(prompt, schema_name, system=system, temperature=temperature)
-        response = self.client.responses.parse(
-            model=self.model,
-            input=_response_input(prompt, system),
-            temperature=temperature,
-            text_format=model,
-        )
+            return self._complete_json_compatible(
+                prompt,
+                schema_name,
+                system=system,
+                temperature=temperature,
+                reasoning_effort=reasoning_effort,
+            )
+        request_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "input": _response_input(prompt, system),
+            "temperature": temperature,
+            "text_format": model,
+        }
+        if reasoning_effort is not None:
+            request_kwargs["reasoning"] = {"effort": reasoning_effort}
+        response = self.client.responses.parse(**request_kwargs)
         self.last_call_metadata = self._metadata(
             method="complete_json",
             schema_name=schema_name,
             response=response,
+            reasoning_effort=reasoning_effort,
         )
         parsed = _extract_parsed_response(response)
         if parsed is None:
@@ -137,9 +156,15 @@ class OpenAIAdapter(LLMClient):
         schema_name: str,
         system: str | None,
         temperature: float,
+        reasoning_effort: str | None,
     ) -> dict[str, Any]:
         json_prompt = _compatible_json_prompt(prompt, schema_name)
-        text = self.complete_text(json_prompt, system=system, temperature=temperature)
+        text = self.complete_text(
+            json_prompt,
+            system=system,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+        )
         json_text = _extract_json_object_text(text)
         try:
             payload = json.loads(json_text)
@@ -149,8 +174,15 @@ class OpenAIAdapter(LLMClient):
             raise RuntimeError(f"Model JSON for {schema_name} must be an object.")
         return validate_output_payload(payload, schema_name=schema_name)
 
-    def _metadata(self, *, method: str, schema_name: str | None, response: Any) -> dict[str, Any]:
-        return {
+    def _metadata(
+        self,
+        *,
+        method: str,
+        schema_name: str | None,
+        response: Any,
+        reasoning_effort: str | None,
+    ) -> dict[str, Any]:
+        metadata = {
             "provider": self.provider_name,
             "model": self.model,
             "method": method,
@@ -159,6 +191,9 @@ class OpenAIAdapter(LLMClient):
             "provider_capabilities": self.provider_capabilities.to_dict(),
             "usage": _usage_metadata(response),
         }
+        if reasoning_effort is not None:
+            metadata["reasoning_effort"] = reasoning_effort
+        return metadata
 
 
 def _response_input(prompt: str, system: str | None) -> list[dict[str, str]]:

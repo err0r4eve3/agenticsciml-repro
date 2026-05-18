@@ -11,6 +11,7 @@ class LLMClient(ABC):
         prompt: str,
         system: str | None = None,
         temperature: float = 0.0,
+        reasoning_effort: str | None = None,
     ) -> str:
         raise NotImplementedError
 
@@ -21,5 +22,6 @@ class LLMClient(ABC):
         schema_name: str,
         system: str | None = None,
         temperature: float = 0.0,
+        reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
         raise NotImplementedError

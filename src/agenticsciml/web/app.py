@@ -31,7 +31,8 @@ from agenticsciml.readiness import build_readiness_report
 RunMode = Literal["mock", "real", "dry_run"]
 WorkspaceScope = Literal["repo", "account", "run", "solution"]
 AssistantMode = Literal["ask", "plan", "agent"]
-ReasoningEffort = Literal["low", "medium", "high"]
+ReasoningEffort = Literal["low", "medium", "high", "xhigh"]
+REASONING_EFFORTS: tuple[ReasoningEffort, ...] = ("low", "medium", "high", "xhigh")
 DEFAULT_ACCOUNT_ID = "local"
 ACCOUNT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$")
 PLANNER_VERSION = "problem_intake_keyword_planner.v1"
@@ -210,8 +211,8 @@ def create_app() -> FastAPI:
         return {
             "roles": list(AGENT_ROLES),
             "reasoning_effort_note": (
-                "reasoning_effort is persisted for audit and future routing; "
-                "OpenAI-compatible chat providers may ignore it."
+                "reasoning_effort is persisted for audit and passed to providers "
+                "that expose a compatible reasoning_effort parameter."
             ),
         }
 
@@ -942,7 +943,7 @@ def _agent_requests_from_configs(agents: dict[str, AgentConfig]) -> dict[str, Ag
     for role, config in agents.items():
         reasoning_effort = (
             cast(ReasoningEffort, config.reasoning_effort)
-            if config.reasoning_effort in {"low", "medium", "high"}
+            if config.reasoning_effort in REASONING_EFFORTS
             else None
         )
         requests[role] = AgentModelRequest(
@@ -1819,7 +1820,7 @@ def _problem_intake_request_from_chat(request: SolverChatRequest) -> ProblemInta
 def _solver_settings_payload() -> dict[str, object]:
     return {
         "default_assistant_mode": "ask",
-        "reasoning_efforts": ["low", "medium", "high"],
+        "reasoning_efforts": list(REASONING_EFFORTS),
         "temperature_range": [0.0, 2.0],
         "assistant_modes": {
             mode: dict(settings)

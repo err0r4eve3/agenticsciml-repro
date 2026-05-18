@@ -17,12 +17,20 @@ class ProposerAgent(AgentBase):
         llm,
         storage,
         default_temperature: float = 0.0,
+        default_reasoning_effort: str | None = None,
         critic_llm=None,
         critic_temperature: float = 0.0,
+        critic_reasoning_effort: str | None = None,
     ):
-        super().__init__(llm, storage, default_temperature=default_temperature)
+        super().__init__(
+            llm,
+            storage,
+            default_temperature=default_temperature,
+            default_reasoning_effort=default_reasoning_effort,
+        )
         self.critic_llm = critic_llm or llm
         self.critic_temperature = critic_temperature
+        self.critic_reasoning_effort = critic_reasoning_effort
 
     def debate(
         self,
@@ -64,6 +72,7 @@ class ProposerAgent(AgentBase):
                 self.critic_llm,
                 self.storage,
                 default_temperature=self.critic_temperature,
+                default_reasoning_effort=self.critic_reasoning_effort,
             )
             if use_critic
             else None
