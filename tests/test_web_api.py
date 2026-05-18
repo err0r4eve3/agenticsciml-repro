@@ -181,6 +181,7 @@ def test_run_readiness_preview_audits_proxy_claims_and_strategy_seeds() -> None:
                     "kind": "mathematical_intuition",
                     "text": "Preserve local basis structure for discontinuities.",
                     "scope": "all_branches",
+                    "inspection": {"required_terms": ["piecewise"]},
                 }
             ],
             "branch_context": {"expected_inherited_lock_ids": ["lock_piecewise"]},
@@ -201,6 +202,8 @@ def test_run_readiness_preview_audits_proxy_claims_and_strategy_seeds() -> None:
     assert payload["algorithm_seed_preview"][0]["catalog_role"] == "strategy_seed"
     assert payload["algorithm_seed_preview"][0]["is_evaluated_implementation"] is False
     assert payload["strategy_lock_preview"][0]["lock_id"] == "lock_piecewise"
+    assert payload["strategy_lock_preview"][0]["auditable_criteria_count"] == 1
+    assert payload["manual_strategy_locks"][0]["inspection"] == {"required_terms": ["piecewise"]}
     assert "planning/readiness_report.json" in payload["artifact_capture_requirements"]
     assert "solutions/*/policy_fidelity_report.json" in payload["artifact_capture_requirements"]
     serialized = json.dumps(payload)
@@ -282,14 +285,15 @@ def test_web_mock_run_persists_readiness_report(tmp_path: Path) -> None:
             "output_dir": str(tmp_path),
             "selected_algorithm_ids": ["piecewise_local_basis"],
             "manual_strategy_locks": [
-                {
-                    "lock_id": "lock_piecewise",
-                    "kind": "constraint",
-                    "text": "Keep the piecewise local basis intent visible.",
-                    "scope": "all_branches",
-                }
-            ],
-        },
+                    {
+                        "lock_id": "lock_piecewise",
+                        "kind": "constraint",
+                        "text": "Keep the piecewise local basis intent visible.",
+                        "scope": "all_branches",
+                        "inspection": {"required_terms": ["MODEL"]},
+                    }
+                ],
+            },
     )
 
     assert response.status_code == 200
@@ -300,6 +304,7 @@ def test_web_mock_run_persists_readiness_report(tmp_path: Path) -> None:
     assert readiness["readiness_version"] == "run_readiness.v1"
     assert readiness["selected_algorithm_ids"] == ["piecewise_local_basis"]
     assert readiness["manual_strategy_locks"][0]["lock_id"] == "lock_piecewise"
+    assert readiness["manual_strategy_locks"][0]["inspection"] == {"required_terms": ["MODEL"]}
     assert config["readiness_report"]["readiness_id"] == readiness["readiness_id"]
     assert metadata["readiness_summary"]["readiness_id"] == readiness["readiness_id"]
     assert metadata["readiness_summary"]["status"] == "ready_with_warnings"
@@ -310,7 +315,7 @@ def test_web_mock_run_persists_readiness_report(tmp_path: Path) -> None:
     )
     assert policy_report["inspector_version"] == "strategy_fidelity.v1"
     assert policy_report["execution_allowed"] is True
-    assert policy_report["summary"]["auditable_lock_count"] == 0
+    assert policy_report["summary"]["auditable_lock_count"] == 1
 
 
 def test_web_mock_run_persists_agent_model_overrides(tmp_path: Path) -> None:

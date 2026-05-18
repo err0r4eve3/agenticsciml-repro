@@ -23,6 +23,14 @@ ARTIFACT_CAPTURE_REQUIREMENTS = (
     "solutions/*/policy_fidelity_report.json",
     "reports/",
 )
+STRATEGY_LOCK_INSPECTION_KEYS = (
+    "required_terms",
+    "forbidden_terms",
+    "required_imports",
+    "forbidden_imports",
+    "required_call_names",
+    "forbidden_call_names",
+)
 
 
 def build_readiness_report(
@@ -337,6 +345,7 @@ def _strategy_lock_preview(
             "required": lock["required"],
             "status": "recorded",
             "inheritance_expected": lock["lock_id"] in expected or lock["scope"] == "all_branches",
+            "auditable_criteria_count": _strategy_lock_criteria_count(lock),
             "notes": [
                 "Manual strategy locks are user hypotheses or constraints; they are not validated scientific facts."
             ],
@@ -347,13 +356,44 @@ def _strategy_lock_preview(
 
 def _normalize_strategy_lock(item: dict[str, Any], index: int) -> dict[str, object]:
     lock_id = _first_text(item.get("lock_id"), item.get("id")) or f"manual_lock_{index + 1:03d}"
-    return {
+    normalized: dict[str, object] = {
         "lock_id": lock_id,
         "kind": _first_text(item.get("kind")) or "constraint",
         "text": _first_text(item.get("text"), item.get("description")) or "",
         "scope": _first_text(item.get("scope")) or "all_branches",
         "required": bool(item.get("required", True)),
     }
+    inspection = _normalized_inspection_mapping(item.get("inspection"))
+    if inspection:
+        normalized["inspection"] = inspection
+    for key in STRATEGY_LOCK_INSPECTION_KEYS:
+        values = _dedupe_text_values(item.get(key))
+        if values:
+            normalized[key] = values
+    return normalized
+
+
+def _normalized_inspection_mapping(value: object) -> dict[str, list[str]]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[str, list[str]] = {}
+    for key in STRATEGY_LOCK_INSPECTION_KEYS:
+        values = _dedupe_text_values(value.get(key))
+        if values:
+            normalized[key] = values
+    return normalized
+
+
+def _strategy_lock_criteria_count(lock: dict[str, object]) -> int:
+    count = 0
+    inspection = lock.get("inspection")
+    if isinstance(inspection, dict):
+        count += sum(len(value) for value in inspection.values() if isinstance(value, list))
+    for key in STRATEGY_LOCK_INSPECTION_KEYS:
+        value = lock.get(key)
+        if isinstance(value, list):
+            count += len(value)
+    return count
 
 
 def _check(
@@ -386,6 +426,12 @@ def _dedupe_strings(values: object) -> list[str]:
         if value and value not in normalized:
             normalized.append(value)
     return normalized
+
+
+def _dedupe_text_values(values: object) -> list[str]:
+    if isinstance(values, str):
+        values = [values]
+    return _dedupe_strings(values)
 
 
 def _first_text(*values: object) -> str | None:

@@ -15,6 +15,8 @@
 - Orchestrator 在 `train_and_evaluate` 前运行 inspector。若 required lock 的可机器
   检查条件失败，会写入 `solutions/<id>/policy_fidelity_report.json`，记录
   `guardrail_span=strategy_fidelity_inspector`，并以 `guardrail_error` 标记 failed node。
+- readiness normalization 会保留 `manual_strategy_locks.inspection` 和同名顶层条件字段，
+  避免 Web/API 启动路径丢失用户提供的审计约束。
 - `GET /api/runs/{id}/solutions` 现在会返回每个 solution 的 `policy_fidelity` 摘要；
   solution artifact index 也会列出 `policy_fidelity_report.json`。
 - readiness artifact capture requirements 增加
