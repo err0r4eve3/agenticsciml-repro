@@ -46,6 +46,29 @@ def build_data_observation_package(benchmark_dir: Path) -> tuple[dict[str, Any],
     return manifest, svg
 
 
+def build_data_eda_package(manifest: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    eda_output = {
+        "schema_version": 1,
+        "benchmark_name": manifest.get("benchmark_name"),
+        "source_mode": manifest.get("source_mode"),
+        "privacy_boundary": "training_data_only_no_private_labels",
+        "input_artifacts": ["reports/data_observations.json"],
+        "array_checks": _eda_array_checks(manifest),
+        "plot_checks": _eda_plot_checks(manifest),
+        "modeling_notes": _eda_modeling_notes(manifest),
+        "replay": {
+            "script": "reports/data_eda.py",
+            "input": "training npz only",
+            "command": "python reports/data_eda.py --train-data <train_data.npz> --output reports/data_eda.json",
+        },
+        "claim_boundary": (
+            "This EDA output summarizes training data only. It is workflow context for agents, "
+            "not evaluator truth and not paper-score evidence."
+        ),
+    }
+    return eda_output, DATA_EDA_SCRIPT
+
+
 def build_solution_observation_package(
     solution_id: str,
     workspace: Path,
@@ -87,6 +110,58 @@ def build_solution_observation_package(
     return manifest, svg
 
 
+DATA_EDA_SCRIPT = r'''from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+import numpy as np
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Training-data-only EDA for AgenticSciML runs.")
+    parser.add_argument("--train-data", required=True)
+    parser.add_argument("--output", required=True)
+    args = parser.parse_args()
+    train_path = Path(args.train_data)
+    if any(part.lower().startswith("val") for part in train_path.parts):
+        raise SystemExit("Refusing to inspect private-label data path.")
+    with np.load(train_path) as payload:
+        arrays = {name: np.asarray(payload[name]) for name in payload.files}
+    output = {
+        "schema_version": 1,
+        "privacy_boundary": "training_data_only_no_private_labels",
+        "arrays": {name: summarize_array(value) for name, value in sorted(arrays.items())},
+    }
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(output, indent=2, sort_keys=True, allow_nan=False), encoding="utf-8")
+    return 0
+
+
+def summarize_array(value: np.ndarray) -> dict[str, object]:
+    array = np.asarray(value)
+    numeric = np.asarray(array, dtype=float).reshape(-1) if array.size else np.asarray([], dtype=float)
+    finite = numeric[np.isfinite(numeric)]
+    return {
+        "shape": [int(item) for item in array.shape],
+        "dtype": str(array.dtype),
+        "size": int(array.size),
+        "finite_count": int(finite.size),
+        "nan_count": int(np.isnan(numeric).sum()) if numeric.size else 0,
+        "min": float(np.min(finite)) if finite.size else None,
+        "max": float(np.max(finite)) if finite.size else None,
+        "mean": float(np.mean(finite)) if finite.size else None,
+        "std": float(np.std(finite)) if finite.size else None,
+    }
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+
+
 def prompt_observation_summary(manifest: dict[str, Any]) -> str:
     lines = [
         f"schema_version: {manifest.get('schema_version')}",
@@ -114,6 +189,137 @@ def prompt_observation_summary(manifest: dict[str, Any]) -> str:
             f"x={plot.get('x_array')} y={plot.get('y_array')}"
         )
     return "\n".join(lines)
+
+
+def prompt_eda_summary(eda_output: dict[str, Any]) -> str:
+    lines = [
+        f"schema_version: {eda_output.get('schema_version')}",
+        f"privacy_boundary: {eda_output.get('privacy_boundary')}",
+        "array_checks:",
+    ]
+    for check in eda_output.get("array_checks", []):
+        if not isinstance(check, dict):
+            continue
+        lines.append(
+            "- "
+            f"{check.get('array')}: status={check.get('status')} "
+            f"notes={'; '.join(str(item) for item in check.get('notes', []))}"
+        )
+    lines.append("plot_checks:")
+    for check in eda_output.get("plot_checks", []):
+        if not isinstance(check, dict):
+            continue
+        lines.append(
+            "- "
+            f"{check.get('path')}: kind={check.get('kind')} "
+            f"status={check.get('status')}"
+        )
+    lines.append("modeling_notes:")
+    for note in eda_output.get("modeling_notes", []):
+        lines.append(f"- {note}")
+    return "\n".join(lines)
+
+
+def _eda_array_checks(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    for name, summary in manifest.get("arrays", {}).items():
+        if not isinstance(summary, dict):
+            continue
+        notes: list[str] = []
+        size = _int_or_zero(summary.get("size"))
+        finite_count = _int_or_zero(summary.get("finite_count"))
+        nan_count = _int_or_zero(summary.get("nan_count"))
+        std = summary.get("std")
+        min_value = summary.get("min")
+        max_value = summary.get("max")
+        shape = summary.get("shape")
+        if nan_count:
+            notes.append("contains non-finite values")
+        if size and finite_count < size:
+            notes.append("finite count is smaller than total size")
+        if isinstance(std, (int, float)) and std == 0:
+            notes.append("constant finite values")
+        if isinstance(shape, list) and len(shape) > 2:
+            notes.append("multi-dimensional tensor; downstream plots use flattened first channel")
+        if (
+            isinstance(min_value, (int, float))
+            and isinstance(max_value, (int, float))
+            and min_value != 0
+            and abs(max_value / min_value) > 1000
+        ):
+            notes.append("large dynamic range")
+        checks.append(
+            {
+                "array": name,
+                "shape": shape,
+                "dtype": summary.get("dtype"),
+                "status": "warning" if notes else "ok",
+                "notes": notes or ["no obvious numeric issue from summary stats"],
+            }
+        )
+    return checks
+
+
+def _eda_plot_checks(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    plots = manifest.get("plots", [])
+    if not isinstance(plots, list) or not plots:
+        return [
+            {
+                "path": None,
+                "kind": "none",
+                "status": "warning",
+                "notes": ["no training-data plot was generated"],
+            }
+        ]
+    checks = []
+    for plot in plots:
+        if not isinstance(plot, dict):
+            continue
+        checks.append(
+            {
+                "path": plot.get("path"),
+                "kind": plot.get("kind"),
+                "status": "ok",
+                "notes": [
+                    f"x={plot.get('x_array')}",
+                    f"y={plot.get('y_array')}",
+                    "privacy boundary preserved",
+                ],
+            }
+        )
+    return checks
+
+
+def _eda_modeling_notes(manifest: dict[str, Any]) -> list[str]:
+    notes = ["Use these observations as modeling context only; evaluator contract remains authoritative."]
+    arrays = manifest.get("arrays", {})
+    if isinstance(arrays, dict):
+        high_dimensional = [
+            name
+            for name, summary in arrays.items()
+            if isinstance(summary, dict)
+            and isinstance(summary.get("shape"), list)
+            and len(summary["shape"]) > 2
+        ]
+        if high_dimensional:
+            notes.append(
+                "High-dimensional arrays detected: "
+                + ", ".join(str(item) for item in sorted(high_dimensional)[:4])
+            )
+        target_like = [
+            name
+            for name in arrays
+            if str(name).lower().startswith(("u", "y", "target"))
+        ]
+        if target_like:
+            notes.append("Target-like training arrays available: " + ", ".join(sorted(target_like)[:4]))
+    if manifest.get("plots"):
+        notes.append("A training-only overview plot is available for qualitative pattern inspection.")
+    return notes
+
+
+def _int_or_zero(value: Any) -> int:
+    return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0
 
 
 def _load_training_arrays(benchmark_dir: Path) -> tuple[dict[str, np.ndarray], str]:

@@ -23,7 +23,8 @@ Sources checked:
 ## Agent Roles
 
 - Data Analyst: inspects public training data and writes `data_analysis.md`,
-  `data_observations.json`, and `data_overview.svg`.
+  `data_observations.json`, `data_overview.svg`, and replayable EDA artifacts
+  `data_eda.py` / `data_eda.json`.
 - Evaluator: creates `evaluate.py`, `guidelines.md`, and the scoring contract.
 - Root Engineer: creates the first baseline solution without KB or debate.
 - Retriever: selects 0-1 relevant KB entries for a parent solution.

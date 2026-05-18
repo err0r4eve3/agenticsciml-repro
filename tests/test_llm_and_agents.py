@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -125,7 +127,10 @@ def test_data_analyst_writes_training_observation_artifacts(tmp_path: Path) -> N
 
     manifest_path = storage.run_dir / "reports" / "data_observations.json"
     svg_path = storage.run_dir / "reports" / "data_overview.svg"
+    eda_script_path = storage.run_dir / "reports" / "data_eda.py"
+    eda_output_path = storage.run_dir / "reports" / "data_eda.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    eda_output = json.loads(eda_output_path.read_text(encoding="utf-8"))
 
     assert manifest["benchmark_name"] == "function_approx"
     assert manifest["source_mode"] in {"generated_seed0", "repo_existing"}
@@ -134,8 +139,40 @@ def test_data_analyst_writes_training_observation_artifacts(tmp_path: Path) -> N
     assert manifest["arrays"]["u_train"]["shape"] == [200, 1]
     assert "val_data" not in manifest_path.read_text(encoding="utf-8")
     assert svg_path.exists()
+    assert eda_script_path.exists()
+    assert eda_output["privacy_boundary"] == "training_data_only_no_private_labels"
+    assert eda_output["array_checks"][0]["status"] in {"ok", "warning"}
+    assert "val_data" not in eda_output_path.read_text(encoding="utf-8")
     assert "Observation manifest:" in llm.last_prompt
+    assert "Replayable EDA summary:" in llm.last_prompt
     assert "reports/data_overview.svg" in llm.last_prompt
+
+
+def test_data_eda_script_replays_training_npz_only(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    DataAnalystAgent(RecordingLLM(), storage).analyze(Path("examples/function_approx"))
+    train_path = tmp_path / "train_data.npz"
+    output_path = tmp_path / "eda-replay.json"
+    np.savez(train_path, x_train=np.array([[0.0], [1.0]]), u_train=np.array([[2.0], [3.0]]))
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(storage.run_dir / "reports" / "data_eda.py"),
+            "--train-data",
+            str(train_path),
+            "--output",
+            str(output_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert completed.returncode == 0
+    assert payload["privacy_boundary"] == "training_data_only_no_private_labels"
+    assert payload["arrays"]["x_train"]["shape"] == [2, 1]
 
 
 def test_result_analyst_writes_prediction_only_observation_artifacts(tmp_path: Path) -> None:

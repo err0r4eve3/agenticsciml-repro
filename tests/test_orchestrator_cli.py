@@ -133,6 +133,8 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert (run_dir / "tree.mmd").exists()
     assert (run_dir / "reports" / "data_observations.json").exists()
     assert (run_dir / "reports" / "data_overview.svg").exists()
+    assert (run_dir / "reports" / "data_eda.py").exists()
+    assert (run_dir / "reports" / "data_eda.json").exists()
     assert (run_dir / "solutions" / "solution_000" / "solution_observations.json").exists()
     assert (run_dir / "solutions" / "solution_000" / "prediction_overview.svg").exists()
     assert (run_dir / "solutions" / "solution_000" / "emergence_report.json").exists()

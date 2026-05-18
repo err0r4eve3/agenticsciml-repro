@@ -2,6 +2,31 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-18 Data Analyst Replayable EDA
+
+本次继续补论文 workflow 缺口，把 Data Analyst 的训练集观察从单次 summary 扩展为
+可复跑 EDA artifact。
+
+已实现：
+
+- `DataAnalystAgent` 继续只读取 training data，不接触 private validation labels。
+- 新增 `reports/data_eda.py`：一个可复跑的训练 `.npz` EDA 脚本，会拒绝明显的私有
+  label 路径，并输出数组统计。
+- 新增 `reports/data_eda.json`：保存训练集-only array checks、plot checks、
+  modeling notes、replay command 和 claim boundary。
+- Data Analyst prompt 增加 `Replayable EDA summary`，让后续 root/evaluator 看到的是
+  可审计 EDA 摘要，而不是只依赖自然语言观察。
+
+验证：
+
+- `tests/test_llm_and_agents.py` 覆盖 EDA script/json 写入、prompt 注入和脚本 replay。
+- `tests/test_orchestrator_cli.py` 覆盖完整 mock run 生成 EDA artifacts。
+
+边界：
+
+- 这仍是 deterministic local EDA，不是论文级自动生成任意 EDA 程序或任意 evaluator
+  synthesis；它只加强 workflow traceability 和训练数据观察可复验性。
+
 ## 2026-05-18 Typed Analysis Base Context
 
 本次根据 Pro 复审建议，补齐论文 workflow 中 Analysis Base 的可审计上下文边界。

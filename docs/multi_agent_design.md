@@ -177,7 +177,8 @@ Phase 4: Champion export
 - `AgentBase.require_inputs()` 将 `AgentSpec.input_schema` 接入运行时，缺少输入字段会 fail closed 并写入 guardrail trace。
 - `AgentBase.complete_json_checked()` 默认使用 `AgentSpec.output_schema` 校验代码消费的 LLM 输出。
 - `DataAnalystAgent` 会生成 `reports/data_observations.json` 和 `reports/data_overview.svg`，
-  prompt 只消费训练数据观察摘要，不接触 private validation labels。
+  以及可复跑的 `reports/data_eda.py` / `reports/data_eda.json`。prompt 只消费训练数据观察
+  和 replayable EDA 摘要，不接触 private validation labels。
 - `ResultAnalystAgent` 会生成 `solution_observations.json` 和
   `prediction_overview.svg`，prompt 只消费 `predict_input.npz`、`predictions.npz`、
   `eval.json` 和日志摘要，保持 prediction-only 边界。

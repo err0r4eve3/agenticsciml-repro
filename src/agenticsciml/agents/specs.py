@@ -82,7 +82,13 @@ AGENT_SPECS: dict[str, AgentSpec] = {
         visible_context=("problem bundle", "data config", "training observation manifest", "data overview plot"),
         tools=("llm", "filesystem read"),
         budget={"calls": 1},
-        artifacts=("reports/data_analysis.md", "reports/data_observations.json", "reports/data_overview.svg"),
+        artifacts=(
+            "reports/data_analysis.md",
+            "reports/data_observations.json",
+            "reports/data_overview.svg",
+            "reports/data_eda.py",
+            "reports/data_eda.json",
+        ),
         failure_policy="fail the run before solution generation",
     ),
     "evaluator": AgentSpec(
