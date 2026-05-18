@@ -481,6 +481,7 @@ class ExperimentConfig:
     evolution: EvolutionConfig = field(default_factory=EvolutionConfig)
     use_mock: bool = True
     agents: dict[str, AgentConfig] = field(default_factory=dict)
+    selector_panel: list[AgentConfig] = field(default_factory=list)
     strategy_seed_ids: list[str] = field(default_factory=list)
     problem_intake: dict[str, Any] = field(default_factory=dict)
     planner_snapshot: dict[str, Any] = field(default_factory=dict)
@@ -496,6 +497,7 @@ class ExperimentConfig:
             "evolution": self.evolution.to_dict(),
             "use_mock": self.use_mock,
             "agents": {role: cfg.to_dict() for role, cfg in self.agents.items()},
+            "selector_panel": [cfg.to_dict() for cfg in self.selector_panel],
             "strategy_seed_ids": list(self.strategy_seed_ids),
             "problem_intake": dict(self.problem_intake),
             "planner_snapshot": dict(self.planner_snapshot),
@@ -516,6 +518,10 @@ class ExperimentConfig:
                 role: AgentConfig.from_dict(agent_data)
                 for role, agent_data in data.get("agents", {}).items()
             },
+            selector_panel=[
+                AgentConfig.from_dict(agent_data)
+                for agent_data in data.get("selector_panel", [])
+            ],
             strategy_seed_ids=[str(item) for item in data.get("strategy_seed_ids", [])],
             problem_intake=(
                 dict(data["problem_intake"])

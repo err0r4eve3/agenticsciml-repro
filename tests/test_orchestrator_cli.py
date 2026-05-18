@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from agenticsciml.benchmarks import BenchmarkContractFactory
-from agenticsciml.config import ExperimentConfig, EvolutionConfig
+from agenticsciml.config import AgentConfig, ExperimentConfig, EvolutionConfig
 from agenticsciml.evidence import (
     EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE,
     SCIENTIFIC_CLAIM_NOT_SUPPORTED,
@@ -413,6 +413,76 @@ def test_parallel_mutation_fanout_respects_max_children_per_node(tmp_path: Path)
     slots = orchestrator._mutation_parent_slots([parent], mutation_budget=3)
 
     assert [slot.node_id for slot in slots] == ["solution_000"]
+
+
+def test_configured_selector_panel_records_member_provenance(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="selector-panel-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(
+            max_iterations=0,
+            parallel_mutations=2,
+            selector_vote_count=2,
+            max_debug_retries=0,
+        ),
+        use_mock=True,
+        selector_panel=[
+            AgentConfig(role="selector_alpha", model="gpt-5-mini", temperature=0.05, reasoning_effort="high"),
+            AgentConfig(role="selector_beta", model="deepseek-v4-pro", temperature=0.1, reasoning_effort="xhigh"),
+        ],
+    )
+    orchestrator = AgenticSciMLOrchestrator(config, MockLLMClient())
+    contract = BenchmarkContractFactory.create_contract(orchestrator.problem_bundle)
+    orchestrator.nodes = [
+        SolutionNode(
+            node_id="solution_000",
+            parent_id=None,
+            workspace=str(tmp_path / "solution_000"),
+            score=SolutionScore("validation_mse", 0.5, higher_is_better=False),
+            status="evaluated",
+            benchmark_name=contract.benchmark_name,
+            contract_hash=contract.contract_hash,
+        ),
+        SolutionNode(
+            node_id="solution_001",
+            parent_id=None,
+            workspace=str(tmp_path / "solution_001"),
+            score=SolutionScore("validation_mse", 0.8, higher_is_better=False),
+            status="evaluated",
+            benchmark_name=contract.benchmark_name,
+            contract_hash=contract.contract_hash,
+        ),
+        SolutionNode(
+            node_id="solution_002",
+            parent_id=None,
+            workspace=str(tmp_path / "solution_002"),
+            score=SolutionScore("validation_mse", 0.1, higher_is_better=False),
+            status="evaluated",
+            benchmark_name=contract.benchmark_name,
+            contract_hash=contract.contract_hash,
+        ),
+    ]
+
+    selected = orchestrator._select_parents()
+
+    artifact = json.loads(
+        (orchestrator.storage.run_dir / "reports" / "selector_votes.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert [node.node_id for node in selected][:2] == ["solution_002", "solution_000"]
+    assert artifact["ensemble_mode"] == "configured_selector_panel"
+    assert [member["member_id"] for member in artifact["selector_panel_members"]] == [
+        "selector_alpha",
+        "selector_beta",
+    ]
+    assert [vote["configured_model"] for vote in artifact["votes"]] == [
+        "gpt-5-mini",
+        "deepseek-v4-pro",
+    ]
+    assert all(vote["actual_model"] == "mock" for vote in artifact["votes"])
+    assert "only heterogeneous provider evidence" in artifact["claim_boundary"]
 
 
 def test_analysis_context_includes_parent_sibling_and_uncle_reports(tmp_path: Path) -> None:

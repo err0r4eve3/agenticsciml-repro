@@ -9,7 +9,7 @@ from pathlib import Path
 
 from agenticsciml.ablation import DEFAULT_VARIANTS, run_ablation
 from agenticsciml.benchmarks import list_benchmarks
-from agenticsciml.config import EvolutionConfig, ExperimentConfig
+from agenticsciml.config import AgentConfig, EvolutionConfig, ExperimentConfig
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.llm_smoke import DEFAULT_SMOKE_VARIANTS, run_llm_smoke, verify_llm_smoke_output
@@ -76,6 +76,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         output_dir=Path(args.output_dir).resolve(),
         evolution=evolution,
         use_mock=args.mock,
+        selector_panel=[
+            AgentConfig(role=f"selector_{index:03d}", model=model, temperature=0.05, reasoning_effort="high")
+            for index, model in enumerate(_split_csv(args.selector_panel_models), start=1)
+        ],
         auto_approve_evaluation=not args.require_evaluation_approval,
         resume=args.resume,
     )
@@ -205,6 +209,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--no-branch-context", action="store_true")
     run.add_argument("--selector-vote-count", type=int, default=3)
     run.add_argument(
+        "--selector-panel-models",
+        default="",
+        help="comma-separated selector panel model names; records per-member selector vote provenance",
+    )
+    run.add_argument(
         "--require-evaluation-approval",
         action="store_true",
         help="write evaluation_approval.json and pause before root generation until status is approved",
@@ -263,6 +272,10 @@ def build_parser() -> argparse.ArgumentParser:
     benchmarks.add_argument("--json", action="store_true")
     benchmarks.set_defaults(func=cmd_benchmarks)
     return parser
+
+
+def _split_csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 def main(argv: list[str] | None = None) -> int:

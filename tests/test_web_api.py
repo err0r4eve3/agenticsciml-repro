@@ -387,6 +387,18 @@ def test_web_mock_run_persists_agent_model_overrides(tmp_path: Path) -> None:
                     "reasoning_effort": "medium",
                 },
             },
+            "selector_panel": [
+                {
+                    "model": "gpt-5-mini",
+                    "temperature": 0.05,
+                    "reasoning_effort": "high",
+                },
+                {
+                    "model": "deepseek-v4-pro",
+                    "temperature": 0.1,
+                    "reasoning_effort": "xhigh",
+                },
+            ],
             "selected_algorithm_ids": ["fourier_feature_mlp", "piecewise_local_basis"],
         },
     )
@@ -403,6 +415,12 @@ def test_web_mock_run_persists_agent_model_overrides(tmp_path: Path) -> None:
     }
     assert metadata["agent_models"]["engineer"]["model"] == "deepseek-v4-pro"
     assert metadata["agent_models"]["engineer"]["actual_model"] == "mock"
+    assert [item["model"] for item in config["selector_panel"]] == ["gpt-5-mini", "deepseek-v4-pro"]
+    assert metadata["selector_panel"]["ensemble_mode"] == "configured_selector_panel"
+    assert [item["configured_model"] for item in metadata["selector_panel"]["members"]] == [
+        "gpt-5-mini",
+        "deepseek-v4-pro",
+    ]
     assert config["strategy_seed_ids"] == ["fourier_feature_mlp", "piecewise_local_basis"]
     assert metadata["strategy_seed_ids"] == ["fourier_feature_mlp", "piecewise_local_basis"]
 
@@ -582,6 +600,7 @@ def test_web_run_budget_fields_are_applied(tmp_path: Path) -> None:
         "parallel_mutations": 2,
         "selector_vote_count": 4,
         "max_children_per_node": 3,
+        "selector_panel_member_count": 0,
     }
 
     mock_run = client.post(

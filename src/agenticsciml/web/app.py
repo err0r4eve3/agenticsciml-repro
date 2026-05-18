@@ -108,6 +108,7 @@ class RunStartRequest(BaseModel):
     selector_vote_count: int = Field(default=3, ge=1)
     max_children_per_node: int = Field(default=10, ge=1)
     agent_models: dict[str, AgentModelRequest] = Field(default_factory=dict)
+    selector_panel: list[AgentModelRequest] = Field(default_factory=list, max_length=16)
     selected_algorithm_ids: list[str] = Field(default_factory=list)
     manual_strategy_locks: list[dict[str, Any]] = Field(default_factory=list)
     branch_context: dict[str, Any] = Field(default_factory=dict)
@@ -131,6 +132,7 @@ class ProblemIntakeRequest(BaseModel):
     max_children_per_node: int = Field(default=10, ge=1, le=200)
     selected_algorithm_ids: list[str] = Field(default_factory=list)
     agent_models: dict[str, AgentModelRequest] = Field(default_factory=dict)
+    selector_panel: list[AgentModelRequest] = Field(default_factory=list, max_length=16)
     allow_custom_benchmark: bool = False
 
 
@@ -144,6 +146,7 @@ class RunReadinessRequest(BaseModel):
     parallel_mutations: int = Field(default=2, ge=1)
     selector_vote_count: int = Field(default=3, ge=1)
     max_children_per_node: int = Field(default=10, ge=1)
+    selector_panel: list[AgentModelRequest] = Field(default_factory=list, max_length=16)
     selected_algorithm_ids: list[str] = Field(default_factory=list)
     manual_strategy_locks: list[dict[str, Any]] = Field(default_factory=list)
     branch_context: dict[str, Any] = Field(default_factory=dict)
@@ -169,6 +172,7 @@ class SolverChatRequest(BaseModel):
     max_children_per_node: int = Field(default=10, ge=1, le=200)
     selected_algorithm_ids: list[str] = Field(default_factory=list)
     agent_models: dict[str, AgentModelRequest] = Field(default_factory=dict)
+    selector_panel: list[AgentModelRequest] = Field(default_factory=list, max_length=16)
 
 
 class AccountCreateRequest(BaseModel):
@@ -305,6 +309,10 @@ def create_app() -> FastAPI:
                     role: config.to_dict()
                     for role, config in _agent_configs_from_request(request).items()
                 },
+                "selector_panel": [
+                    config.to_dict()
+                    for config in _selector_panel_from_request(request)
+                ],
                 "selected_algorithm_ids": _normalized_algorithm_ids(request.selected_algorithm_ids),
                 "readiness_report": readiness_report,
             }
@@ -466,6 +474,7 @@ def _run_orchestrator(
             evolution=evolution,
             use_mock=request.mode == "mock",
             agents=_agent_configs_from_request(request),
+            selector_panel=_selector_panel_from_request(request),
             strategy_seed_ids=_normalized_algorithm_ids(request.selected_algorithm_ids),
             problem_intake=_normalized_mapping(request.problem_intake),
             planner_snapshot=_normalized_mapping(request.planner_snapshot),
@@ -500,6 +509,7 @@ def _effective_run_budget(request: RunStartRequest | RunReadinessRequest) -> dic
         "parallel_mutations": parallel_mutations,
         "selector_vote_count": request.selector_vote_count,
         "max_children_per_node": request.max_children_per_node,
+        "selector_panel_member_count": len(request.selector_panel),
     }
 
 
@@ -586,6 +596,7 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
                     role: config.to_dict()
                     for role, config in _agent_configs_from_problem_request(request).items()
                 },
+                "selector_panel": _selector_panel_payload_from_models(request.selector_panel),
                 "background": True,
             },
         }
@@ -617,6 +628,7 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
             role: config.to_dict()
             for role, config in _agent_configs_from_problem_request(request).items()
         },
+        "selector_panel": _selector_panel_payload_from_models(request.selector_panel),
         "custom_problem_package": custom_problem_package,
         "run_allowed": run_allowed,
         "actions": actions,
@@ -745,6 +757,17 @@ def _agent_configs_from_problem_request(request: ProblemIntakeRequest) -> dict[s
         )
         for role, agent_model in request.agent_models.items()
     }
+
+
+def _selector_panel_payload_from_models(models: list[AgentModelRequest]) -> list[dict[str, object]]:
+    return [
+        {
+            "model": model.model.strip(),
+            "temperature": model.temperature,
+            "reasoning_effort": model.reasoning_effort,
+        }
+        for model in models
+    ]
 
 
 def _intake_text(request: ProblemIntakeRequest) -> str:
@@ -977,6 +1000,20 @@ def _agent_configs_from_request(request: RunStartRequest) -> dict[str, AgentConf
     }
 
 
+def _selector_panel_from_request(
+    request: RunStartRequest | RunReadinessRequest,
+) -> list[AgentConfig]:
+    return [
+        AgentConfig(
+            role=f"selector_{index:03d}",
+            model=agent_model.model.strip(),
+            temperature=agent_model.temperature,
+            reasoning_effort=agent_model.reasoning_effort,
+        )
+        for index, agent_model in enumerate(request.selector_panel, start=1)
+    ]
+
+
 def _merge_resume_request(run_id: str, request: RunStartRequest) -> RunStartRequest:
     output_dir = _resolve_output_dir(request.output_dir, account_id=request.account_id)
     run_dir = _resolve_run_dir(run_id, output_dir)
@@ -997,6 +1034,8 @@ def _merge_resume_request(run_id: str, request: RunStartRequest) -> RunStartRequ
             updates["selected_algorithm_ids"] = list(existing_config.strategy_seed_ids)
         if "agent_models" not in explicitly_set:
             updates["agent_models"] = _agent_requests_from_configs(existing_config.agents)
+        if "selector_panel" not in explicitly_set:
+            updates["selector_panel"] = _agent_requests_from_config_list(existing_config.selector_panel)
         if "problem_intake" not in explicitly_set:
             updates["problem_intake"] = dict(existing_config.problem_intake)
         if "planner_snapshot" not in explicitly_set:
@@ -1031,6 +1070,21 @@ def _agent_requests_from_configs(agents: dict[str, AgentConfig]) -> dict[str, Ag
             reasoning_effort=reasoning_effort,
         )
     return requests
+
+
+def _agent_requests_from_config_list(agents: list[AgentConfig]) -> list[AgentModelRequest]:
+    return [
+        AgentModelRequest(
+            model=config.model,
+            temperature=config.temperature,
+            reasoning_effort=(
+                cast(ReasoningEffort, config.reasoning_effort)
+                if config.reasoning_effort in REASONING_EFFORTS
+                else None
+            ),
+        )
+        for config in agents
+    ]
 
 
 def _normalized_mapping(value: dict[str, Any] | None) -> dict[str, Any]:
@@ -1893,6 +1947,7 @@ def _problem_intake_request_from_chat(request: SolverChatRequest) -> ProblemInta
         max_children_per_node=request.max_children_per_node,
         selected_algorithm_ids=request.selected_algorithm_ids,
         agent_models=request.agent_models,
+        selector_panel=request.selector_panel,
         allow_custom_benchmark=False,
     )
 

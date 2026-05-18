@@ -253,7 +253,11 @@ def test_selector_votes_always_include_best_and_tie_break_by_loss(tmp_path: Path
 
     assert result.selected_parent_ids == ["best", "promising"]
     assert result.vote_counts == {"promising": 2, "worse_loss": 2}
-    assert (storage.run_dir / "reports" / "selector_votes.json").exists()
+    artifact = json.loads((storage.run_dir / "reports" / "selector_votes.json").read_text(encoding="utf-8"))
+    assert artifact["schema_version"] == 1
+    assert artifact["ensemble_mode"] == "single_provider_multi_vote"
+    assert artifact["selector_panel_members"][0]["member_id"] == "selector"
+    assert "not heterogeneous selector ensemble evidence" in artifact["claim_boundary"]
 
 
 def test_agents_save_transcripts_and_structured_outputs(tmp_path: Path) -> None:

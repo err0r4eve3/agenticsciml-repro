@@ -19,6 +19,12 @@ from agenticsciml.agents import (
     SelectorAgent,
 )
 from agenticsciml.agents.base import StructuredOutputError
+from agenticsciml.agents.selector import (
+    CONFIGURED_PANEL_CLAIM_BOUNDARY,
+    SINGLE_SELECTOR_CLAIM_BOUNDARY,
+    SelectorVoteResult,
+    build_selector_vote_result,
+)
 from agenticsciml.algorithm_catalog import list_algorithms
 from agenticsciml.benchmarks import BenchmarkContractFactory, ProblemBundle
 from agenticsciml.config import (
@@ -195,6 +201,24 @@ class AgenticSciMLOrchestrator:
             )
         self._role_llms[role] = role_llm
         return role_llm
+
+    def _llm_for_agent_config(self, agent_config: AgentConfig) -> LLMClient:
+        requested_model = agent_config.model
+        base_model = getattr(self.llm, "model", None)
+        if (
+            requested_model
+            and requested_model != "mock"
+            and requested_model != base_model
+            and not self.config.use_mock
+            and all(hasattr(self.llm, attr) for attr in ("api_key", "base_url", "timeout_s"))
+        ):
+            return self.llm.__class__(
+                model=requested_model,
+                api_key=getattr(self.llm, "api_key"),
+                base_url=getattr(self.llm, "base_url"),
+                timeout_s=getattr(self.llm, "timeout_s"),
+            )
+        return self.llm
 
     def run(self) -> Path:
         started = time.monotonic()
@@ -1183,11 +1207,10 @@ class AgenticSciMLOrchestrator:
 
         best = selected[0] if selected else self._best_node(available)
         selected = [best]
-        vote_result = self.selector.select_with_votes(
+        vote_result = self._select_with_selector_panel(
             candidates=[node.to_dict() for node in available],
             best_node_id=best.node_id,
             max_to_select=self.config.evolution.parallel_mutations,
-            vote_count=self.config.evolution.selector_vote_count,
         )
         self.storage.record_trace(
             "agent_span",
@@ -1197,6 +1220,9 @@ class AgenticSciMLOrchestrator:
                 "selected_parent_ids": vote_result.selected_parent_ids,
                 "vote_counts": vote_result.vote_counts,
                 "vote_count": self.config.evolution.selector_vote_count,
+                "actual_vote_count": len(vote_result.votes),
+                "ensemble_mode": vote_result.ensemble_mode,
+                "selector_panel_members": vote_result.panel_members,
             },
         )
         by_id = {node.node_id: node for node in available}
@@ -1215,6 +1241,102 @@ class AgenticSciMLOrchestrator:
                 selected.append(node)
                 selected_ids.add(node.node_id)
         return selected[: self.config.evolution.parallel_mutations]
+
+    def _select_with_selector_panel(
+        self,
+        *,
+        candidates: list[dict[str, object]],
+        best_node_id: str,
+        max_to_select: int,
+    ) -> SelectorVoteResult:
+        if not self.config.selector_panel:
+            selector_llm = self._llm_for_role("selector")
+            selector_config = self._effective_agent_config_for_role("selector")
+            return self.selector.select_with_votes(
+                candidates=candidates,
+                best_node_id=best_node_id,
+                max_to_select=max_to_select,
+                vote_count=self.config.evolution.selector_vote_count,
+                panel_member=self._selector_member_metadata(
+                    "selector",
+                    selector_config,
+                    selector_llm,
+                    source="single_selector",
+                ),
+                ensemble_mode="single_provider_multi_vote",
+                panel_members=[
+                    self._selector_member_metadata(
+                        "selector",
+                        selector_config,
+                        selector_llm,
+                        source="single_selector",
+                    )
+                ],
+                claim_boundary=SINGLE_SELECTOR_CLAIM_BOUNDARY,
+            )
+
+        panel_members: list[dict[str, object]] = []
+        votes: list[dict[str, object]] = []
+        messages = []
+        vote_total = max(self.config.evolution.selector_vote_count, len(self.config.selector_panel))
+        for vote_index in range(vote_total):
+            member_index = vote_index % len(self.config.selector_panel)
+            member_config = self.config.selector_panel[member_index]
+            member_llm = self._llm_for_agent_config(member_config)
+            member_id = member_config.role if member_config.role != "selector" else f"selector_{member_index + 1:03d}"
+            member = self._selector_member_metadata(
+                member_id,
+                member_config,
+                member_llm,
+                source="selector_panel",
+            )
+            if member_index >= len(panel_members):
+                panel_members.append(member)
+            selector = SelectorAgent(
+                member_llm,
+                self.storage,
+                default_temperature=member_config.temperature,
+                default_reasoning_effort=member_config.reasoning_effort,
+            )
+            vote, message = selector.cast_vote(
+                candidates=candidates,
+                best_node_id=best_node_id,
+                max_to_select=max_to_select,
+                vote_index=vote_index + 1,
+                vote_count=vote_total,
+                panel_member=member,
+            )
+            votes.append(vote)
+            messages.append(message)
+        result = build_selector_vote_result(
+            candidates=candidates,
+            best_node_id=best_node_id,
+            max_to_select=max_to_select,
+            votes=votes,
+            ensemble_mode="configured_selector_panel",
+            panel_members=panel_members,
+            claim_boundary=CONFIGURED_PANEL_CLAIM_BOUNDARY,
+        )
+        self.storage.save_json("reports/selector_votes.json", result.to_dict())
+        self.storage.save_transcript(None, "selector", messages)
+        return result
+
+    def _selector_member_metadata(
+        self,
+        member_id: str,
+        agent_config: AgentConfig,
+        llm: LLMClient,
+        *,
+        source: str,
+    ) -> dict[str, object]:
+        return {
+            "member_id": member_id,
+            "role": "selector",
+            "configured_model": agent_config.model,
+            "actual_model": getattr(llm, "model", "mock" if self.config.use_mock else llm.__class__.__name__),
+            "provider": llm.__class__.__name__,
+            "source": source,
+        }
 
     def _best_node(self, nodes: list[SolutionNode] | None = None) -> SolutionNode:
         candidates = nodes or self.nodes
@@ -1522,7 +1644,44 @@ class AgenticSciMLOrchestrator:
                 "adapter_type": getattr(role_llm, "adapter_type", None),
             }
         metadata["agent_models"] = role_models
+        metadata["selector_panel"] = self._selector_panel_metadata()
         return metadata
+
+    def _selector_panel_metadata(self) -> dict[str, object]:
+        if not self.config.selector_panel:
+            selector_config = self._effective_agent_config_for_role("selector")
+            selector_llm = self._llm_for_role("selector")
+            return {
+                "ensemble_mode": "single_provider_multi_vote",
+                "vote_count": self.config.evolution.selector_vote_count,
+                "members": [
+                    self._selector_member_metadata(
+                        "selector",
+                        selector_config,
+                        selector_llm,
+                        source="single_selector",
+                    )
+                ],
+                "claim_boundary": SINGLE_SELECTOR_CLAIM_BOUNDARY,
+            }
+        members = []
+        for index, config in enumerate(self.config.selector_panel, start=1):
+            member_llm = self._llm_for_agent_config(config)
+            member_id = config.role if config.role != "selector" else f"selector_{index:03d}"
+            members.append(
+                self._selector_member_metadata(
+                    member_id,
+                    config,
+                    member_llm,
+                    source="selector_panel",
+                )
+            )
+        return {
+            "ensemble_mode": "configured_selector_panel",
+            "vote_count": max(self.config.evolution.selector_vote_count, len(self.config.selector_panel)),
+            "members": members,
+            "claim_boundary": CONFIGURED_PANEL_CLAIM_BOUNDARY,
+        }
 
     def _effective_agent_config_for_role(self, role: str) -> AgentConfig:
         agent_config = self._agent_config_for_role(role)

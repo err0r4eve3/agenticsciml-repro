@@ -192,7 +192,9 @@ Phase 4: Champion export
   不足名额再由 deterministic `SearchPolicy` 用 recent improvement、diverse underexplored
   和 `max_children_per_node` 约束补齐。默认 `selector_vote_count=3`，这是同一
   provider 的多票 evidence；除非后续显式配置多 provider，不声明论文级异构
-  selector ensemble。
+  selector ensemble。若配置 `selector_panel`，每票会记录 member、configured model、
+  actual model、provider 和 source；mock run 中多个 configured member 仍不等同真实异构
+  provider evidence。
 - Analysis Base 会在每个 child mutation 前写出
   `solutions/<solution_id>/analysis_context.json`，把 mutation parent、已有 sibling
   children、uncle nodes 和缺失报告分别结构化记录。Proposer prompt 使用

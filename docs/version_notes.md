@@ -2,6 +2,39 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-18 Selector Panel Provenance
+
+本次补齐 selector ensemble 的配置与证据层，但仍保持 claim boundary：默认
+`selector_vote_count` 只是同一 selector 路径多票，不自动声明论文级异构模型 panel。
+
+已实现：
+
+- `ExperimentConfig` 新增 `selector_panel`，可配置多个 selector member 的 model、
+  temperature 和 reasoning effort。
+- CLI 新增 `--selector-panel-models`，Web API `POST /api/runs` /
+  `/api/problem-intake/plan` 支持 `selector_panel`。
+- 有 `selector_panel` 时，orchestrator 会轮询 panel member cast votes；没有配置时保留
+  现有 single-selector multi-vote 行为。
+- `reports/selector_votes.json` 新增 `schema_version`、`ensemble_mode`、
+  `selector_panel_members`、per-vote `member_id`、`configured_model`、`actual_model`、
+  `provider`、`source` 和 `claim_boundary`。
+- `run_metadata.json` 新增 `selector_panel` runtime metadata，记录实际 selector panel
+  证据来源。
+
+验证：
+
+- `tests/test_llm_and_agents.py` 覆盖默认 selector votes 仍标注为
+  `single_provider_multi_vote`。
+- `tests/test_orchestrator_cli.py` 覆盖 configured selector panel 的 per-member vote
+  provenance。
+- `tests/test_web_api.py` 覆盖 Web run request 会持久化 selector panel config 和 metadata。
+
+边界：
+
+- Mock run 中 `actual_model=mock`，即使配置了多个 member，也只能说明 panel 配置和
+  provenance 管线可用；只有真实 provider/model provenance 不同时，才能作为异构
+  selector evidence。
+
 ## 2026-05-18 Data Analyst Replayable EDA
 
 本次继续补论文 workflow 缺口，把 Data Analyst 的训练集观察从单次 summary 扩展为
