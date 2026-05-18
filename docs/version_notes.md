@@ -2,6 +2,39 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-18 Custom Proxy Evaluator Generation
+
+本次把非 catalog 问题从 scaffold-only 推进到可运行的本地 proxy evaluator 生成。
+
+已实现：
+
+- `POST /api/problem-intake/plan` 在 `allow_custom_benchmark=true` 时会在当前账号
+  namespace 下生成 `.agenticsciml/accounts/<account_id>/benchmarks/<custom_id>/`
+  benchmark bundle。
+- 生成的 bundle 包含 `Problem.md`、`Requirements.md`、`Evaluation.md`、
+  `Data_config.json`、`Benchmark_spec.json`、`generate_data.py`、`evaluate.py` 和
+  `guidelines.md`。
+- `Benchmark_spec.json` 可被 `ProblemBundle.load()` 动态识别，不需要把每个临时问题
+  写入 checked-in `BENCHMARKS` catalog。
+- `generate_data.py` 生成确定性的训练/验证代理数据；`evaluate.py` 使用私有验证标签
+  计算 `custom_proxy_relative_l2`，继续走 prediction-only evaluation boundary。
+- Planner 返回的 `start_run` action 会指向生成的 custom benchmark，并保留
+  `problem_intake`、`planner_snapshot`、algorithm strategy seeds、account namespace 和
+  run budget。
+
+验证：
+
+- `tests/test_web_api.py::test_problem_intake_custom_benchmark_generates_runnable_evaluator`
+  覆盖 custom problem 生成 evaluator bundle 后可立即启动 mock run，并写出
+  `evaluation_contract.json` 与 `solutions/solution_000/eval.json`。
+
+边界：
+
+- 自动 evaluator 是 deterministic workflow proxy，只能证明 AgenticSciML loop、artifact
+  plumbing、private-label evaluation boundary 可运行。
+- 它不是 paper-like benchmark，不支持科学结论、paper score reproduction 或真实有限元
+  指标声明；需要人工替换/审查 domain evaluator 后才能提升证据等级。
+
 ## 2026-05-18 Selector Panel Provenance
 
 本次补齐 selector ensemble 的配置与证据层，但仍保持 claim boundary：默认
@@ -117,9 +150,9 @@ approval pause、以及非库内问题不能被错误当作已有 benchmark 运�
   文件后把状态改为 `approved`，再用 `--resume` 继续。
 - Resume 支持 evaluation-pending pre-root run：该状态不写空 solution-tree checkpoint，
   避免把“尚未生成 root”的审批暂停误报为合法 solution tree。
-- `POST /api/problem-intake/plan` 增加 `allow_custom_benchmark=true` 的 scaffold-only
-  返回。它列出新 benchmark bundle 所需文件和评价合约要求，但不创建 evaluator、不返回
-  `start_run` action，也不把未知问题映射为可运行事实。
+- `POST /api/problem-intake/plan` 支持 `allow_custom_benchmark=true` 的安全路径：早期
+  版本只返回 scaffold；当前版本会生成本地 deterministic proxy evaluator bundle，并
+  返回可运行的 `start_run` action，但仍把 evidence 标记为 proxy / not supported。
 
 验证：
 
@@ -130,8 +163,8 @@ approval pause、以及非库内问题不能被错误当作已有 benchmark 运�
 
 边界：
 
-- 本轮仍未实现 paper-style Data Analyst 自动 EDA 后合成全新 evaluator；非库内问题现在只
-  能进入安全脚手架和人工评审流程。
+- 当前自动 evaluator 仍是 workflow proxy，不是 paper-style Data Analyst 自动合成真实
+  领域 evaluator；非库内问题可以跑通流程，但不能据此声称科学有效。
 - Selector ensemble 仍是当前单 selector 多票机制，不是 GPT/Grok/Gemini 多 provider
   panel。
 

@@ -70,7 +70,10 @@ evaluator、selector 或 champion selection 实现。
 - `Problem Intake`：高阶用户可输入完整问题描述、requirements、evaluation 和 data
   description。`POST /api/problem-intake/plan` 会在当前本地 benchmark catalog 内自动评选
   benchmark 候选、算法 seed 候选、run budget 和 start_run action；这一步是受控规划层，
-  不会生成新 evaluator 或绕过 contract。
+  默认不会生成新 evaluator 或绕过 contract。若显式传入
+  `allow_custom_benchmark=true`，后端会在当前账号 namespace 下生成一个 deterministic
+  proxy evaluator bundle，并返回指向该 bundle 的 `start_run` action；该路径仍只支持
+  workflow proxy evidence，不支持科学结论。
 - `Run Config`：可设置 `target_solution_count`、`max_iterations`、
   `parallel_mutations`、`selector_vote_count`、`max_children_per_node` 和 `mode`。
   `target_solution_count` 是 UI 便捷输入；后端会转换成确定性的
@@ -172,7 +175,12 @@ Web API 暴露；本地开发需要打开仓库根目录时，必须显式设置
   每个 role 的默认 `temperature` / `reasoning_effort` policy。
 - `POST /api/problem-intake/plan`：从完整问题描述生成本地 benchmark 推荐、
   algorithm rankings、selected strategy seeds、run budget、`problem_intake`、
-  `planner_snapshot` 和可展示的 start_run action。
+  `planner_snapshot` 和可展示的 start_run action。若请求体显式设置
+  `allow_custom_benchmark=true`，API 会写入 account-scoped custom benchmark bundle：
+  `Problem.md`、`Requirements.md`、`Evaluation.md`、`Data_config.json`、
+  `Benchmark_spec.json`、`generate_data.py`、`evaluate.py` 和 `guidelines.md`，再返回指向
+  该 custom benchmark 的 action。生成 evaluator 的 claim boundary 固定为 proxy /
+  workflow-only。
 - `POST /api/run-readiness/preview`：启动前生成确定性 pre-run audit。它只检查本地
   benchmark fidelity、claim boundary、selected strategy seeds、人工 strategy locks、
   branch inheritance expectations、run budget、real-mode gates 和 artifact capture

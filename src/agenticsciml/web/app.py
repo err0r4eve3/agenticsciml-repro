@@ -26,6 +26,10 @@ from agenticsciml.config import (
     ExperimentConfig,
     agent_role_default_model_settings,
 )
+from agenticsciml.custom_benchmarks import (
+    CUSTOM_BENCHMARK_CLAIM_BOUNDARY,
+    create_custom_benchmark_bundle,
+)
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
@@ -126,6 +130,7 @@ class ProblemIntakeRequest(BaseModel):
     evaluation_criteria: str = Field(default="", max_length=8000)
     data_description: str = Field(default="", max_length=8000)
     mode: RunMode = "mock"
+    account_id: str | None = None
     target_solution_count: int = Field(default=5, ge=1, le=200)
     parallel_mutations: int = Field(default=2, ge=1, le=32)
     selector_vote_count: int = Field(default=3, ge=1, le=32)
@@ -562,7 +567,12 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
         "max_children_per_node": request.max_children_per_node,
     }
     warnings = [
-        "This planner maps the problem to the current local benchmark catalog; it does not create a new evaluator.",
+        (
+            "This planner maps the problem to the current local benchmark catalog; "
+            "custom mode creates only an auto-generated proxy evaluator."
+        )
+        if request.allow_custom_benchmark
+        else "This planner maps the problem to the current local benchmark catalog; it does not create a new evaluator.",
         "Selected algorithms are strategy seeds for prompts and audit, not proven implementations.",
     ]
     if request.mode == "real":
@@ -577,41 +587,54 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
         run_budget={**run_budget, "mode": request.mode},
     )
     custom_problem_package = None
+    action_payload: dict[str, object] = {
+        "benchmark": recommended_name,
+        "mode": request.mode,
+        "target_solution_count": request.target_solution_count,
+        "max_iterations": max_iterations,
+        "parallel_mutations": request.parallel_mutations,
+        "selector_vote_count": request.selector_vote_count,
+        "max_children_per_node": request.max_children_per_node,
+        "selected_algorithm_ids": selected_algorithm_ids,
+        "problem_intake": problem_intake,
+        "planner_snapshot": planner_snapshot,
+        "agent_models": {
+            role: config.to_dict()
+            for role, config in _agent_configs_from_problem_request(request).items()
+        },
+        "selector_panel": _selector_panel_payload_from_models(request.selector_panel),
+        "background": True,
+    }
+    if request.account_id:
+        action_payload["account_id"] = _resolve_account_id(request.account_id)
     run_allowed = True
-    actions: list[dict[str, object]] = [
-        {
-            "type": "start_run",
-            "payload": {
-                "benchmark": recommended_name,
-                "mode": request.mode,
-                "target_solution_count": request.target_solution_count,
-                "max_iterations": max_iterations,
-                "parallel_mutations": request.parallel_mutations,
-                "selector_vote_count": request.selector_vote_count,
-                "max_children_per_node": request.max_children_per_node,
-                "selected_algorithm_ids": selected_algorithm_ids,
-                "problem_intake": problem_intake,
-                "planner_snapshot": planner_snapshot,
-                "agent_models": {
-                    role: config.to_dict()
-                    for role, config in _agent_configs_from_problem_request(request).items()
-                },
-                "selector_panel": _selector_panel_payload_from_models(request.selector_panel),
-                "background": True,
-            },
-        }
-    ]
     if request.allow_custom_benchmark:
         custom_problem_package = _custom_problem_package(
             request,
             benchmark_candidates=benchmark_candidates,
             algorithm_rankings=algorithm_rankings,
         )
-        run_allowed = False
-        actions = []
-        warnings.append(
-            "Custom benchmark mode is scaffold-only: create and approve a local evaluator bundle before starting a run."
+        action_payload["benchmark"] = str(custom_problem_package["benchmark"])
+        action_payload["auto_approve_evaluation"] = True
+        planner_snapshot["generated_custom_benchmark"] = {
+            "benchmark": custom_problem_package["benchmark"],
+            "benchmark_dir": custom_problem_package["benchmark_dir"],
+            "status": custom_problem_package["status"],
+            "fidelity_level": "proxy",
+        }
+        planner_snapshot["claim_boundary"] = (
+            "Custom problem intake generated a deterministic proxy evaluator bundle. "
+            "It can exercise the AgenticSciML workflow, but it is workflow proxy evidence only."
         )
+        warnings.append(
+            "Created an auto-generated proxy evaluator bundle for workflow testing; it is not scientific validation."
+        )
+    actions: list[dict[str, object]] = [
+        {
+            "type": "start_run",
+            "payload": action_payload,
+        }
+    ]
     return {
         "problem_summary": _compact_summary(request.problem_statement),
         "problem_intake": problem_intake,
@@ -688,18 +711,29 @@ def _custom_problem_package(
         for item in algorithm_rankings
         if item.get("selected")
     ][:6]
+    bundle = create_custom_benchmark_bundle(
+        _custom_benchmarks_dir(request.account_id),
+        problem_statement=request.problem_statement,
+        requirements=request.requirements,
+        evaluation_criteria=request.evaluation_criteria,
+        data_description=request.data_description,
+    )
     return {
         "schema_version": 1,
-        "status": "scaffold_only",
-        "run_allowed": False,
-        "approval_required": True,
-        "suggested_bundle_root": "examples/custom_problem_<slug>",
+        "status": "generated_proxy_evaluator",
+        "run_allowed": True,
+        "approval_required": False,
+        "human_review_recommended": True,
+        "benchmark": bundle.benchmark,
+        "benchmark_dir": str(bundle.benchmark_dir),
         "problem_summary": _compact_summary(request.problem_statement),
+        "created_files": list(bundle.files),
         "required_files": [
             "Problem.md",
             "Requirements.md",
             "Evaluation.md",
             "Data_config.json",
+            "Benchmark_spec.json",
             "generate_data.py",
             "evaluate.py",
             "guidelines.md",
@@ -709,15 +743,11 @@ def _custom_problem_package(
             "Keep validation labels and validation file paths evaluator-only.",
             "Expose a prediction-only evaluate.py contract with a private metric.",
             "Add benchmark fidelity metadata and paper-gap notes before any run.",
-            "Require human approval of evaluation_approval.json before root generation.",
+            "Treat the generated evaluator as proxy workflow evidence until a human replaces or approves the domain metric.",
         ],
         "nearest_catalog_candidates": benchmark_candidates[:3],
         "strategy_seed_suggestions": selected_algorithms,
-        "claim_boundary": (
-            "This is a scaffold preview for a new local benchmark. It does not create files, "
-            "does not synthesize an evaluator, and cannot support a run until a benchmark bundle "
-            "is reviewed, registered, and approved."
-        ),
+        "claim_boundary": CUSTOM_BENCHMARK_CLAIM_BOUNDARY,
     }
 
 
@@ -1192,6 +1222,14 @@ def _resolve_benchmark_dir(
     for spec in list_benchmarks():
         if spec.name == benchmark:
             return spec.path.resolve()
+    custom_candidate = (_custom_benchmarks_dir(account_id) / benchmark).resolve(strict=False)
+    if custom_candidate.exists():
+        try:
+            custom_spec = benchmark_for_path(custom_candidate)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if custom_spec is not None:
+            return custom_candidate
     raise HTTPException(status_code=404, detail=f"Unknown benchmark: {benchmark}")
 
 
@@ -1235,6 +1273,7 @@ def _account_root(account_id: str | None, *, create: bool = True) -> Path:
     if create:
         (account_root / "workspace").mkdir(parents=True, exist_ok=True)
         (account_root / "runs").mkdir(parents=True, exist_ok=True)
+        (account_root / "benchmarks").mkdir(parents=True, exist_ok=True)
     return account_root
 
 
@@ -1244,6 +1283,15 @@ def _account_workspace_dir(account_id: str | None) -> Path:
 
 def _account_runs_dir(account_id: str | None) -> Path:
     return (_account_root(account_id) / "runs").resolve(strict=True)
+
+
+def _custom_benchmarks_dir(account_id: str | None) -> Path:
+    if account_id:
+        path = _account_root(account_id) / "benchmarks"
+    else:
+        path = REPO_ROOT / ".agenticsciml" / "custom_benchmarks"
+    path.mkdir(parents=True, exist_ok=True)
+    return path.resolve()
 
 
 def _ensure_account(account_id: str | None, display_name: str | None = None) -> dict[str, object]:

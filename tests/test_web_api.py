@@ -159,7 +159,8 @@ def test_problem_intake_plans_benchmark_and_strategy_seeds() -> None:
     )
 
 
-def test_problem_intake_custom_benchmark_returns_scaffold_only() -> None:
+def test_problem_intake_custom_benchmark_generates_runnable_evaluator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTICSCIML_ACCOUNTS_ROOT", str(tmp_path / "accounts"))
     client = TestClient(create_app())
 
     response = client.post(
@@ -173,6 +174,7 @@ def test_problem_intake_custom_benchmark_returns_scaffold_only() -> None:
             "evaluation_criteria": "Private relative error on hidden complex fields and coefficient recovery.",
             "data_description": "Synthetic source/receiver pairs and measured boundary responses.",
             "allow_custom_benchmark": True,
+            "account_id": "custom-user",
             "selected_algorithm_ids": ["pinn_residual_minimizer"],
         },
     )
@@ -180,14 +182,38 @@ def test_problem_intake_custom_benchmark_returns_scaffold_only() -> None:
     assert response.status_code == 200
     payload = response.json()
     scaffold = payload["custom_problem_package"]
-    assert payload["run_allowed"] is False
-    assert payload["actions"] == []
-    assert scaffold["status"] == "scaffold_only"
-    assert scaffold["run_allowed"] is False
+    assert payload["run_allowed"] is True
+    assert payload["actions"][0]["type"] == "start_run"
+    assert payload["actions"][0]["payload"]["account_id"] == "custom-user"
+    assert payload["actions"][0]["payload"]["benchmark"] == scaffold["benchmark"]
+    assert scaffold["status"] == "generated_proxy_evaluator"
+    assert scaffold["run_allowed"] is True
+    assert Path(scaffold["benchmark_dir"]).exists()
     assert "evaluate.py" in scaffold["required_files"]
     assert scaffold["strategy_seed_suggestions"][0]["id"] == "pinn_residual_minimizer"
-    assert any("scaffold-only" in warning for warning in payload["warnings"])
-    assert "does not synthesize an evaluator" in scaffold["claim_boundary"]
+    assert any("auto-generated proxy evaluator" in warning for warning in payload["warnings"])
+    assert "workflow proxy" in scaffold["claim_boundary"]
+
+    run_payload = dict(payload["actions"][0]["payload"])
+    run_payload.update(
+        {
+            "mode": "mock",
+            "max_iterations": 0,
+            "target_solution_count": None,
+            "background": False,
+            "output_dir": "runs",
+        }
+    )
+    run_response = client.post("/api/runs", json=run_payload)
+
+    assert run_response.status_code == 200
+    run = run_response.json()
+    run_dir = Path(run["run_dir"])
+    assert (run_dir / "evaluation_contract.json").exists()
+    assert (run_dir / "solutions" / "solution_000" / "eval.json").exists()
+    metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    assert metadata["benchmark_fidelity_level"] == "proxy"
+    assert metadata["scientific_claim"] == "not_supported"
 
 
 def test_problem_intake_rejects_unknown_algorithm() -> None:

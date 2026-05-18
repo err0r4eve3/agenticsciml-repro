@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agenticsciml.custom_benchmarks import CUSTOM_BENCHMARK_SPEC
 from agenticsciml.config import DataConfig, EvaluationContract
 from agenticsciml.evidence import evidence_metadata_for_run
 from agenticsciml.execution.runner import run_command
@@ -441,11 +442,69 @@ def list_benchmarks() -> list[BenchmarkSpec]:
 
 
 def benchmark_for_path(path: Path) -> BenchmarkSpec | None:
-    resolved = path.resolve()
+    resolved = path.expanduser().resolve(strict=False)
     for spec in BENCHMARKS.values():
         if resolved == spec.path.resolve():
             return spec
-    return BENCHMARKS.get(path.name)
+    static_spec = BENCHMARKS.get(path.name)
+    if static_spec is not None:
+        return static_spec
+    return _custom_benchmark_for_path(resolved)
+
+
+def _custom_benchmark_for_path(path: Path) -> BenchmarkSpec | None:
+    spec_path = path / CUSTOM_BENCHMARK_SPEC
+    if not spec_path.exists():
+        return None
+    try:
+        payload = json.loads(spec_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid custom benchmark spec JSON: {spec_path}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"Custom benchmark spec must be a JSON object: {spec_path}")
+    if payload.get("schema_version") != 1:
+        raise ValueError(f"Unsupported custom benchmark spec schema_version: {spec_path}")
+    name = _required_str(payload, "name", spec_path)
+    if name != path.name:
+        raise ValueError(
+            "Custom benchmark spec name must match directory name: "
+            f"{name!r} != {path.name!r}"
+        )
+    return BenchmarkSpec(
+        name=name,
+        path=path,
+        paper_section=_required_str(payload, "paper_section", spec_path),
+        paper_task_name=_required_str(payload, "paper_task_name", spec_path),
+        family=_required_str(payload, "family", spec_path),
+        metric=_required_str(payload, "metric", spec_path),
+        description=_required_str(payload, "description", spec_path),
+        fidelity_level=_required_str(payload, "fidelity_level", spec_path),
+        expected_runtime_s=_required_int(payload, "expected_runtime_s", spec_path),
+        requires_torch=_required_bool(payload, "requires_torch", spec_path),
+        requires_gpu=_required_bool(payload, "requires_gpu", spec_path),
+        paper_gap_notes=_required_str(payload, "paper_gap_notes", spec_path),
+    )
+
+
+def _required_str(payload: dict[str, Any], key: str, spec_path: Path) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"Custom benchmark spec field {key!r} must be a non-empty string: {spec_path}")
+    return value
+
+
+def _required_int(payload: dict[str, Any], key: str, spec_path: Path) -> int:
+    value = payload.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"Custom benchmark spec field {key!r} must be an integer: {spec_path}")
+    return value
+
+
+def _required_bool(payload: dict[str, Any], key: str, spec_path: Path) -> bool:
+    value = payload.get(key)
+    if not isinstance(value, bool):
+        raise ValueError(f"Custom benchmark spec field {key!r} must be a boolean: {spec_path}")
+    return value
 
 
 _GENERATED_DATA_DIGEST_CACHE: dict[tuple[str, str, str, str, str], dict[str, str]] = {}
