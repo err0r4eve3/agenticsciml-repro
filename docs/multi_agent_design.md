@@ -192,6 +192,10 @@ Phase 4: Champion export
   和 `max_children_per_node` 约束补齐。默认 `selector_vote_count=3`，这是同一
   provider 的多票 evidence；除非后续显式配置多 provider，不声明论文级异构
   selector ensemble。
+- Analysis Base 会在每个 child mutation 前写出
+  `solutions/<solution_id>/analysis_context.json`，把 mutation parent、已有 sibling
+  children、uncle nodes 和缺失报告分别结构化记录。Proposer prompt 使用
+  parent/sibling/uncle 关系标签，而不是无类型 related report 拼接。
 - `RetrievalQueryBuilder` 用 benchmark metadata、parent analysis、failure kind、method tags、score trend 和 leaderboard top-k 构造 KB query；`use_kb` 与 `random_kb` 可用于 ablation。
 - `SolutionNode` 持久化 selector/retriever 需要的结构化元数据，包括 `method_tags`、`failure_kind`、`score_delta_from_parent`、`num_debug_attempts`、`benchmark_name` 和 `contract_hash`。
 - `EmergenceAudit` 会为每个 solution 写入 `emergence_report.json`，只给出

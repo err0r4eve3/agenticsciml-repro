@@ -69,6 +69,7 @@ BRANCH_INTENTS = (
 )
 
 EVALUATION_APPROVAL_SCHEMA_VERSION = 1
+ANALYSIS_CONTEXT_SCHEMA_VERSION = 1
 
 
 class EvaluationApprovalRequired(RuntimeError):
@@ -881,7 +882,9 @@ class AgenticSciMLOrchestrator:
         parent_workspace = Path(parent.workspace)
         parent_analysis = self.analysis_by_node.get(parent.node_id)
         parent_summary = parent_analysis.summary if parent_analysis else parent.status
-        related_reports = self._related_reports(parent)
+        analysis_context = self._analysis_context_for_parent(parent, solution_id)
+        self.storage.save_json(Path("solutions") / solution_id / "analysis_context.json", analysis_context)
+        related_reports = [self._format_analysis_context(analysis_context)]
         kb_text = None
         kb_entry = None
         query = RetrievalQueryBuilder.build(
@@ -1264,20 +1267,135 @@ class AgenticSciMLOrchestrator:
                 tags.append(tag)
         return tags or ["mutation"]
 
-    def _related_reports(self, parent: SolutionNode) -> list[str]:
-        reports: list[str] = []
+    def _analysis_context_for_parent(self, parent: SolutionNode, solution_id: str) -> dict[str, object]:
+        omitted_reports: list[dict[str, object]] = []
+        sibling_reports = [
+            entry
+            for child_id in parent.children
+            if child_id != solution_id
+            for entry in [self._analysis_context_entry(child_id, "sibling", omitted_reports)]
+            if entry is not None
+        ]
+        uncle_reports: list[dict[str, object]] = []
         if parent.parent_id:
-            parent_node = self._node_by_id(parent.parent_id)
-            if parent_node:
-                for sibling_id in parent_node.children:
-                    if sibling_id != parent.node_id:
-                        report = self.analysis_by_node.get(sibling_id)
-                        if report:
-                            reports.append(report.summary)
-        report = self.analysis_by_node.get(parent.node_id)
-        if report:
-            reports.append(report.summary)
-        return reports[:4]
+            grandparent = self._node_by_id(parent.parent_id)
+            if grandparent is None:
+                omitted_reports.append(
+                    {
+                        "relationship": "uncle",
+                        "node_id": parent.parent_id,
+                        "reason": "grandparent_node_missing",
+                    }
+                )
+            else:
+                uncle_reports = [
+                    entry
+                    for uncle_id in grandparent.children
+                    if uncle_id != parent.node_id
+                    for entry in [self._analysis_context_entry(uncle_id, "uncle", omitted_reports)]
+                    if entry is not None
+                ]
+        return {
+            "schema_version": ANALYSIS_CONTEXT_SCHEMA_VERSION,
+            "child_id": solution_id,
+            "parent_id": parent.node_id,
+            "parent_report": self._analysis_context_entry(parent.node_id, "parent", omitted_reports),
+            "sibling_reports": sibling_reports,
+            "uncle_reports": uncle_reports,
+            "omitted_reports": omitted_reports,
+            "claim_boundary": (
+                "Analysis Base context is relationship-labeled workflow context for mutation planning. "
+                "It is not scientific evidence or paper-level discovery proof."
+            ),
+        }
+
+    def _analysis_context_entry(
+        self,
+        node_id: str,
+        relationship: str,
+        omitted_reports: list[dict[str, object]],
+    ) -> dict[str, object] | None:
+        node = self._node_by_id(node_id)
+        if node is None:
+            omitted_reports.append(
+                {
+                    "relationship": relationship,
+                    "node_id": node_id,
+                    "reason": "node_missing",
+                }
+            )
+            return None
+        report = self.analysis_by_node.get(node_id)
+        if report is None:
+            omitted_reports.append(
+                {
+                    "relationship": relationship,
+                    "node_id": node_id,
+                    "reason": "analysis_report_missing",
+                }
+            )
+            return None
+        report_path = Path(node.analysis_path) if node.analysis_path else Path(node.workspace) / "analysis.md"
+        return {
+            "relationship": relationship,
+            "node_id": node_id,
+            "report_path": self._run_relative_path(report_path),
+            "summary": report.summary,
+            "strengths": list(report.strengths),
+            "weaknesses": list(report.weaknesses),
+            "next_steps": list(report.next_steps),
+        }
+
+    def _run_relative_path(self, path: Path) -> str:
+        try:
+            return str(path.resolve().relative_to(self.storage.run_dir.resolve()))
+        except ValueError:
+            return str(path)
+
+    def _format_analysis_context(self, context: dict[str, object]) -> str:
+        sections = [
+            self._format_analysis_context_section(
+                "Parent analysis",
+                [context["parent_report"]] if context.get("parent_report") else [],
+            ),
+            self._format_analysis_context_section(
+                "Sibling analyses",
+                context.get("sibling_reports", []),
+            ),
+            self._format_analysis_context_section(
+                "Uncle analyses",
+                context.get("uncle_reports", []),
+            ),
+        ]
+        omitted = context.get("omitted_reports", [])
+        if isinstance(omitted, list) and omitted:
+            lines = [
+                "- "
+                + ", ".join(
+                    f"{key}={item.get(key)}"
+                    for key in ("relationship", "node_id", "reason")
+                    if isinstance(item, dict) and item.get(key)
+                )
+                for item in omitted
+                if isinstance(item, dict)
+            ]
+            sections.append("Omitted reports:\n" + "\n".join(lines))
+        else:
+            sections.append("Omitted reports:\n- none")
+        return "\n\n".join(sections)
+
+    def _format_analysis_context_section(self, title: str, reports: object) -> str:
+        if not isinstance(reports, list) or not reports:
+            return f"{title}:\n- none"
+        lines: list[str] = []
+        for report in reports:
+            if not isinstance(report, dict):
+                continue
+            lines.append(
+                f"- node_id={report.get('node_id')} path={report.get('report_path')}\n"
+                f"  summary: {report.get('summary', '')}"
+            )
+        return f"{title}:\n" + ("\n".join(lines) if lines else "- none")
 
     def _node_by_id(self, node_id: str) -> SolutionNode | None:
         for node in self.nodes:

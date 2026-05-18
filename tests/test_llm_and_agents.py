@@ -51,6 +51,14 @@ class RecordingLLM(LLMClient):
             }
         if schema_name == "root_engineer":
             return {"proposal": "plain isolated baseline", "code": "class MODEL:\n    pass\n"}
+        if schema_name == "proposal":
+            return {
+                "title": "Use labeled analysis base",
+                "diagnosis": "Parent and relative reports are available.",
+                "mutation_plan": ["Preserve parent strengths", "Avoid sibling weakness"],
+                "expected_effect": "Better scoped mutation",
+                "risks": ["Analysis context may be sparse"],
+            }
         return {
             "metric_name": "validation_mse",
             "higher_is_better": False,
@@ -315,6 +323,29 @@ def test_agent_span_trace_includes_spec_metadata(tmp_path: Path) -> None:
     trace_text = (storage.run_dir / "trace.jsonl").read_text(encoding="utf-8")
     assert '"state_node": "mutation proposal"' in trace_text
     assert '"spec_role": "proposer"' in trace_text
+
+
+def test_proposer_prompt_uses_labeled_analysis_base_context(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    llm = RecordingLLM()
+
+    ProposerAgent(llm, storage).debate(
+        solution_id="solution_001",
+        parent_summary="score=1.0",
+        kb_entry=None,
+        related_reports=[
+            "Parent analysis:\n- node_id=solution_000 path=solutions/solution_000/analysis.md\n  summary: root report",
+            "Sibling analyses:\n- node_id=solution_002 path=solutions/solution_002/analysis.md\n  summary: sibling report",
+            "Uncle analyses:\n- node_id=solution_003 path=solutions/solution_003/analysis.md\n  summary: uncle report",
+        ],
+        use_critic=False,
+    )
+
+    assert "Analysis Base context (parent/sibling/uncle reports)" in llm.last_prompt
+    assert "Parent analysis" in llm.last_prompt
+    assert "Sibling analyses" in llm.last_prompt
+    assert "Uncle analyses" in llm.last_prompt
+    assert "Related reports" not in llm.last_prompt
 
 
 def test_critic_agent_writes_structured_artifact(tmp_path: Path) -> None:

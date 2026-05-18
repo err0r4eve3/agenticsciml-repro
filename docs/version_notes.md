@@ -2,6 +2,33 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-18 Typed Analysis Base Context
+
+本次根据 Pro 复审建议，补齐论文 workflow 中 Analysis Base 的可审计上下文边界。
+
+已实现：
+
+- 每个 child mutation 在 proposal 前写入
+  `solutions/<solution_id>/analysis_context.json`。
+- artifact 明确区分 `parent_report`、`sibling_reports`、`uncle_reports` 和
+  `omitted_reports`，不再只把若干 analysis summary 作为无类型字符串塞进 prompt。
+- sibling 定义为 mutation parent 已存在的 children；uncle 定义为 mutation parent
+  的 parent 的其他 children。缺失 node 或 analysis report 会写入 `omitted_reports`
+  和原因，避免静默丢上下文。
+- Proposer prompt 的上下文标题改为
+  `Analysis Base context (parent/sibling/uncle reports)`，并保留关系标签。
+
+验证：
+
+- `tests/test_orchestrator_cli.py` 覆盖 parent/sibling/uncle 抽取、缺失报告记录、
+  child mutation artifact 落盘。
+- `tests/test_llm_and_agents.py` 覆盖 Proposer prompt 使用关系标签。
+
+边界：
+
+- Analysis Base context 只是 workflow traceability，不证明论文级 emergent discovery、
+  异构 selector ensemble 或 paper-score reproduction。
+
 ## 2026-05-18 Paper Workflow P0 Alignment
 
 本次修复论文工作流对齐审查中的三个 P0 边界：root baseline 隔离、evaluation

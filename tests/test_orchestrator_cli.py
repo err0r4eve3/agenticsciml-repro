@@ -16,7 +16,7 @@ from agenticsciml.evidence import (
 )
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator, EvaluationApprovalRequired
-from agenticsciml.state import SolutionNode, SolutionScore
+from agenticsciml.state import AnalysisReport, SolutionNode, SolutionScore
 
 
 FAILING_TRAIN_SOLUTION = r'''
@@ -411,6 +411,126 @@ def test_parallel_mutation_fanout_respects_max_children_per_node(tmp_path: Path)
     slots = orchestrator._mutation_parent_slots([parent], mutation_budget=3)
 
     assert [slot.node_id for slot in slots] == ["solution_000"]
+
+
+def test_analysis_context_includes_parent_sibling_and_uncle_reports(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="analysis-context-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+    )
+    orchestrator = AgenticSciMLOrchestrator(config, MockLLMClient())
+    contract = BenchmarkContractFactory.create_contract(orchestrator.problem_bundle)
+
+    def node(node_id: str, parent_id: str | None) -> SolutionNode:
+        workspace = orchestrator.storage.create_solution_workspace(node_id)
+        return SolutionNode(
+            node_id=node_id,
+            parent_id=parent_id,
+            workspace=str(workspace),
+            score=SolutionScore("validation_mse", 1.0, higher_is_better=False),
+            status="evaluated",
+            analysis_path=str(workspace / "analysis.md"),
+            benchmark_name=contract.benchmark_name,
+            contract_hash=contract.contract_hash,
+        )
+
+    root = node("solution_000", None)
+    parent = node("solution_001", "solution_000")
+    uncle = node("solution_002", "solution_000")
+    sibling = node("solution_003", "solution_001")
+    root.children = ["solution_001", "solution_002"]
+    parent.children = ["solution_003"]
+    orchestrator.nodes = [root, parent, uncle, sibling]
+    orchestrator.analysis_by_node = {
+        "solution_001": AnalysisReport("solution_001", "parent improved smoothness"),
+        "solution_002": AnalysisReport("solution_002", "uncle explored regularization"),
+        "solution_003": AnalysisReport("solution_003", "sibling overfit high frequencies"),
+    }
+
+    context = orchestrator._analysis_context_for_parent(parent, "solution_004")
+    formatted = orchestrator._format_analysis_context(context)
+
+    assert context["parent_report"]["node_id"] == "solution_001"  # type: ignore[index]
+    assert [item["node_id"] for item in context["sibling_reports"]] == ["solution_003"]  # type: ignore[index]
+    assert [item["node_id"] for item in context["uncle_reports"]] == ["solution_002"]  # type: ignore[index]
+    assert context["omitted_reports"] == []
+    assert "Parent analysis" in formatted
+    assert "Sibling analyses" in formatted
+    assert "Uncle analyses" in formatted
+
+
+def test_analysis_context_records_missing_reports(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="analysis-context-missing-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+    )
+    orchestrator = AgenticSciMLOrchestrator(config, MockLLMClient())
+    contract = BenchmarkContractFactory.create_contract(orchestrator.problem_bundle)
+    root = SolutionNode(
+        node_id="solution_000",
+        parent_id=None,
+        workspace=str(orchestrator.storage.create_solution_workspace("solution_000")),
+        score=SolutionScore("validation_mse", 1.0, higher_is_better=False),
+        status="evaluated",
+        benchmark_name=contract.benchmark_name,
+        contract_hash=contract.contract_hash,
+    )
+    parent = SolutionNode(
+        node_id="solution_001",
+        parent_id="solution_000",
+        workspace=str(orchestrator.storage.create_solution_workspace("solution_001")),
+        score=SolutionScore("validation_mse", 0.9, higher_is_better=False),
+        status="evaluated",
+        benchmark_name=contract.benchmark_name,
+        contract_hash=contract.contract_hash,
+    )
+    root.children = ["solution_001", "solution_002"]
+    parent.children = ["solution_003"]
+    orchestrator.nodes = [root, parent]
+    orchestrator.analysis_by_node = {
+        "solution_001": AnalysisReport("solution_001", "parent report exists"),
+    }
+
+    context = orchestrator._analysis_context_for_parent(parent, "solution_004")
+    omitted = context["omitted_reports"]
+
+    assert {"relationship": "sibling", "node_id": "solution_003", "reason": "node_missing"} in omitted
+    assert {"relationship": "uncle", "node_id": "solution_002", "reason": "node_missing"} in omitted
+
+
+def test_child_mutation_writes_analysis_context_artifact(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="analysis-context-artifact-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=1, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+    context = json.loads(
+        (run_dir / "solutions" / "solution_001" / "analysis_context.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    transcript = json.loads(
+        (run_dir / "solutions" / "solution_001" / "transcripts" / "proposal_debate.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert context["schema_version"] == 1
+    assert context["parent_report"]["node_id"] == "solution_000"
+    assert context["sibling_reports"] == []
+    assert context["uncle_reports"] == []
+    assert "Analysis Base context" in transcript[0]["prompt"]
+    assert "Parent analysis" in transcript[0]["prompt"]
 
 
 def test_solution_id_allocator_uses_max_existing_suffix(tmp_path: Path) -> None:

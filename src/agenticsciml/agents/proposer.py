@@ -59,7 +59,8 @@ class ProposerAgent(AgentBase):
         context = (
             f"Parent summary:\n{parent_summary}\n\n"
             f"KB entry:\n{kb_entry or 'none'}\n\n"
-            f"Related reports:\n{chr(10).join(related_reports) if related_reports else 'none'}\n\n"
+            "Analysis Base context (parent/sibling/uncle reports):\n"
+            f"{chr(10).join(related_reports) if related_reports else 'none'}\n\n"
             "Branch context:\n"
             f"{json.dumps(branch_context or {}, indent=2, sort_keys=True)}\n\n"
             "User problem-intake context (non-contract):\n"
