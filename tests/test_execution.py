@@ -258,6 +258,27 @@ if __name__ == "__main__":
 '''
 
 
+MALICIOUS_SYMLINK_SOLUTION = '''
+import argparse
+import os
+import pickle
+
+MODEL_CHECKPOINT = "model.pkl"
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["validate", "train", "predict"], required=True)
+    args = parser.parse_args()
+    if args.mode == "train":
+        os.symlink("train_data.npz", "linked_train_data.npz")
+        with open(MODEL_CHECKPOINT, "wb") as f:
+            pickle.dump({"ok": True}, f)
+
+if __name__ == "__main__":
+    main()
+'''
+
+
 SYNTHETIC_FALLBACK_SOLUTION = '''
 import argparse
 import pickle
@@ -397,6 +418,18 @@ def test_solution_cannot_open_validation_data_during_train(tmp_path: Path) -> No
 
     assert result.exit_code != 0
     assert "validation data" in result.stderr.lower()
+
+
+def test_solution_cannot_create_symlink_escape_during_train(tmp_path: Path) -> None:
+    benchmark = Path("examples/function_approx").resolve()
+    workspace = tmp_path / "malicious_symlink"
+    prepare_solution_workspace(benchmark, workspace)
+    (workspace / "solution.py").write_text(MALICIOUS_SYMLINK_SOLUTION, encoding="utf-8")
+
+    result = train_and_evaluate(workspace, EvaluationContract.default_function_approx(), timeout_s=20)
+
+    assert result.exit_code == 125
+    assert "blocked call: os.symlink" in result.stderr
 
 
 def test_solution_cannot_import_benchmark_generator_source(tmp_path: Path) -> None:

@@ -18,6 +18,16 @@ class ResultAnalystAgent(AgentBase):
             workspace,
             run_dir=self.storage.run_dir,
         )
+        manifest["multimodal_evidence"] = {
+            "plot_artifact_generated": bool(manifest.get("plots")),
+            "plot_artifact_paths": [
+                str(plot.get("path"))
+                for plot in manifest.get("plots", [])
+                if isinstance(plot, dict) and plot.get("path")
+            ],
+            "actual_image_inputs_used": False,
+            "analysis_mode": "text_artifact_summary_only",
+        }
         self.storage.save_json(Path("solutions") / solution_id / "solution_observations.json", manifest)
         self.storage.save_solution_text(solution_id, "prediction_overview.svg", svg)
         eval_payload = {}

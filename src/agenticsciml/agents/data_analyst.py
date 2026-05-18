@@ -18,6 +18,16 @@ class DataAnalystAgent(AgentBase):
     def analyze(self, benchmark_dir: Path) -> str:
         self.require_inputs({"benchmark_dir": benchmark_dir})
         manifest, svg = build_data_observation_package(benchmark_dir)
+        manifest["multimodal_evidence"] = {
+            "plot_artifact_generated": bool(manifest.get("plots")),
+            "plot_artifact_paths": [
+                str(plot.get("path"))
+                for plot in manifest.get("plots", [])
+                if isinstance(plot, dict) and plot.get("path")
+            ],
+            "actual_image_inputs_used": False,
+            "analysis_mode": "text_artifact_summary_only",
+        }
         eda_output, eda_script = build_data_eda_package(manifest)
         self.storage.save_json("reports/data_observations.json", manifest)
         self.storage.save_text("reports/data_overview.svg", svg)

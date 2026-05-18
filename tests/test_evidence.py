@@ -10,6 +10,7 @@ from agenticsciml.evidence import (
     SCIENTIFIC_CLAIM_NOT_VALIDATED,
     SCIENTIFIC_CLAIM_PROXY_WORKFLOW_ONLY,
     SCIENTIFIC_CLAIMS,
+    claim_gate_for_run,
     evidence_metadata_for_run,
 )
 
@@ -42,3 +43,35 @@ def test_real_non_proxy_runs_start_as_not_validated(fidelity_level: str) -> None
     assert metadata["evidence_mode"] == f"real_llm_{fidelity_level}_benchmark"
     assert metadata["scientific_claim"] == SCIENTIFIC_CLAIM_NOT_VALIDATED
     assert metadata["scientific_claim"] in SCIENTIFIC_CLAIMS
+
+
+def test_workflow_proxy_claim_gate_allows_launch_without_scientific_claims() -> None:
+    gate = claim_gate_for_run(
+        claim_level="workflow_proxy",
+        use_mock=True,
+        fidelity_level="proxy",
+        is_custom_proxy=True,
+    )
+
+    assert gate["status"] == "allowed"
+    assert gate["paper_level_claim_supported"] is False
+    assert gate["scientific_claim_supported"] is False
+    assert gate["evaluator_trust_level"] == "synthetic_proxy"
+
+
+def test_paper_workflow_claim_gate_blocks_missing_paper_evidence() -> None:
+    gate = claim_gate_for_run(
+        claim_level="paper_workflow",
+        use_mock=True,
+        fidelity_level="faithful-small",
+        domain_evaluator_approved=False,
+        paper_benchmark_approved=False,
+        selector_heterogeneous=False,
+        kb_paper_equivalent=False,
+        actual_multimodal_evidence=False,
+    )
+
+    assert gate["status"] == "blocked"
+    assert gate["paper_level_claim_supported"] is False
+    assert "paper_workflow requires real LLM mode" in gate["reasons"]
+    assert "paper_workflow requires paper-like benchmark fidelity, got faithful-small" in gate["reasons"]

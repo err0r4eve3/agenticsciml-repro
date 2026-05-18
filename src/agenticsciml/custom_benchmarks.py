@@ -19,12 +19,13 @@ CUSTOM_EVALUATOR_SYNTHESIS_MD = "evaluator_synthesis.md"
 CUSTOM_EDA_SCRIPT = "eda/data_eda.py"
 CUSTOM_EDA_SEED0 = "eda/data_eda_seed0.json"
 CUSTOM_EDA_SVG = "eda/data_overview_seed0.svg"
-CUSTOM_SYNTHESIS_LEVEL = "autonomous_eda_evaluator_synthesis"
+CUSTOM_SYNTHESIS_LEVEL = "autonomous_workflow_proxy_evaluator_synthesis"
 CUSTOM_EVIDENCE_LEVEL = "workflow_proxy"
 CUSTOM_APPROVAL_SCOPE = "workflow_proxy_run_only"
+CUSTOM_EVALUATOR_TRUST_LEVEL = "synthetic_proxy"
 
 CUSTOM_BENCHMARK_CLAIM_BOUNDARY = (
-    "This auto-generated EDA/evaluator synthesis bundle is a deterministic workflow "
+    "This auto-generated workflow-proxy evaluator scaffold is a deterministic "
     "proxy derived from the user's problem text. It is useful for exercising the "
     "AgenticSciML loop, artifact plumbing, training-only EDA, and private-label "
     "evaluation boundary. It is not a scientific validation of the real problem, "
@@ -89,7 +90,7 @@ def create_custom_benchmark_bundle(
         "schema_version": CUSTOM_BENCHMARK_SCHEMA_VERSION,
         "name": benchmark,
         "paper_section": "custom",
-        "paper_task_name": "User-defined autonomous proxy evaluator",
+        "paper_task_name": "User-defined workflow-proxy evaluator scaffold",
         "family": _family_from_problem_class(problem_class),
         "metric": "custom_proxy_relative_l2",
         "description": _one_line(problem_statement),
@@ -190,6 +191,11 @@ def _evaluator_synthesis_payload(
         "synthesis_level": CUSTOM_SYNTHESIS_LEVEL,
         "evidence_level": CUSTOM_EVIDENCE_LEVEL,
         "approval_scope": CUSTOM_APPROVAL_SCOPE,
+        "evaluator_trust_level": CUSTOM_EVALUATOR_TRUST_LEVEL,
+        "domain_evaluator_present": False,
+        "metric_validated_by_domain_expert": False,
+        "paper_benchmark_equivalent": False,
+        "requires_replacement_for_scientific_claim": True,
         "benchmark": benchmark,
         "problem_digest": problem_digest,
         "problem_class": problem_class,
@@ -242,6 +248,8 @@ def _evaluator_synthesis_payload(
             "workflow_proxy_run_requires_human_review": False,
             "scientific_claim_requires_human_domain_review": True,
             "paper_level_claim_supported": False,
+            "paper_benchmark_equivalent": False,
+            "metric_validated_by_domain_expert": False,
             "domain_evaluator_replacement_recommended": True,
             "approval_scope": CUSTOM_APPROVAL_SCOPE,
         },
@@ -259,10 +267,15 @@ def _evaluator_synthesis_md(payload: dict[str, Any]) -> str:
     data_schema = payload["data_schema"]
     quality_gates = payload["quality_gates"]
     return (
-        "# Autonomous Evaluator Synthesis\n\n"
+        "# Workflow-Proxy Evaluator Scaffold\n\n"
         f"- synthesis_level: `{payload['synthesis_level']}`\n"
         f"- evidence_level: `{payload['evidence_level']}`\n"
         f"- approval_scope: `{payload['approval_scope']}`\n"
+        f"- evaluator_trust_level: `{payload['evaluator_trust_level']}`\n"
+        f"- domain_evaluator_present: `{payload['domain_evaluator_present']}`\n"
+        f"- metric_validated_by_domain_expert: `{payload['metric_validated_by_domain_expert']}`\n"
+        f"- paper_benchmark_equivalent: `{payload['paper_benchmark_equivalent']}`\n"
+        f"- requires_replacement_for_scientific_claim: `{payload['requires_replacement_for_scientific_claim']}`\n"
         f"- benchmark: `{payload['benchmark']}`\n"
         f"- problem_class: `{payload['problem_class']}`\n"
         f"- primary_metric: `{metric['primary']}`\n"
@@ -422,7 +435,7 @@ def _guidelines_md() -> str:
         "- Implement `solution.py` with `--mode=validate`, `--mode=train`, and `--mode=predict`.\n"
         "- `train` may read only `train_data.npz`.\n"
         "- `predict` receives `predict_input.npz` with only `x_val` and must write `predictions.npz`.\n"
-        "- `evaluator_synthesis.json` records the autonomous EDA/evaluator synthesis boundary.\n"
+        "- `evaluator_synthesis.json` records the workflow-proxy evaluator scaffold boundary.\n"
         "- `eda/data_eda.py` can replay training-data-only EDA on a public training `.npz`.\n"
         "- Do not read `val_data.npz`, evaluator-private paths, network resources, or host secrets.\n"
         "- Treat this benchmark as workflow proxy evidence only.\n"
@@ -526,7 +539,7 @@ def _eda_svg(x: np.ndarray, y: np.ndarray) -> str:
             '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="240" viewBox="0 0 640 240">'
             '<rect width="100%" height="100%" fill="#ffffff"/>'
             '<text x="32" y="48" font-family="Arial, sans-serif" font-size="16" fill="#111827">'
-            "Autonomous EDA seed0 overview</text>"
+            "Workflow-proxy EDA seed0 overview</text>"
             '<text x="32" y="88" font-family="Arial, sans-serif" font-size="13" fill="#6b7280">'
             "No finite training points found.</text></svg>"
         )
@@ -549,7 +562,7 @@ def _eda_svg(x: np.ndarray, y: np.ndarray) -> str:
         [
             f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
             '<rect width="100%" height="100%" fill="#ffffff"/>',
-            f'<text x="{left}" y="24" font-family="Arial, sans-serif" font-size="16" fill="#111827">Autonomous EDA seed0 overview</text>',
+            f'<text x="{left}" y="24" font-family="Arial, sans-serif" font-size="16" fill="#111827">Workflow-proxy EDA seed0 overview</text>',
             f'<line x1="{left}" y1="{top + plot_h}" x2="{left + plot_w}" y2="{top + plot_h}" stroke="#111827" stroke-width="1"/>',
             f'<line x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_h}" stroke="#111827" stroke-width="1"/>',
             *points,

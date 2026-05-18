@@ -486,6 +486,11 @@ class ExperimentConfig:
     problem_intake: dict[str, Any] = field(default_factory=dict)
     planner_snapshot: dict[str, Any] = field(default_factory=dict)
     readiness_report: dict[str, Any] = field(default_factory=dict)
+    claim_level: str = "workflow_proxy"
+    domain_evaluator_approved: bool = False
+    domain_reviewer: str | None = None
+    domain_review_notes: str | None = None
+    paper_benchmark_approved: bool = False
     auto_approve_evaluation: bool = True
     resume: bool = False
 
@@ -502,6 +507,11 @@ class ExperimentConfig:
             "problem_intake": dict(self.problem_intake),
             "planner_snapshot": dict(self.planner_snapshot),
             "readiness_report": dict(self.readiness_report),
+            "claim_level": self.claim_level,
+            "domain_evaluator_approved": self.domain_evaluator_approved,
+            "domain_reviewer": self.domain_reviewer,
+            "domain_review_notes": self.domain_review_notes,
+            "paper_benchmark_approved": self.paper_benchmark_approved,
             "auto_approve_evaluation": self.auto_approve_evaluation,
             "resume": self.resume,
         }
@@ -538,6 +548,19 @@ class ExperimentConfig:
                 if isinstance(data.get("readiness_report"), dict)
                 else {}
             ),
+            claim_level=str(data.get("claim_level", "workflow_proxy")),
+            domain_evaluator_approved=bool(data.get("domain_evaluator_approved", False)),
+            domain_reviewer=(
+                str(data["domain_reviewer"])
+                if data.get("domain_reviewer") is not None
+                else None
+            ),
+            domain_review_notes=(
+                str(data["domain_review_notes"])
+                if data.get("domain_review_notes") is not None
+                else None
+            ),
+            paper_benchmark_approved=bool(data.get("paper_benchmark_approved", False)),
             auto_approve_evaluation=bool(data.get("auto_approve_evaluation", True)),
             resume=bool(data.get("resume", False)),
         )

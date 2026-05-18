@@ -53,6 +53,9 @@ type RunSummary = {
     solution_count?: number;
     evidence_mode?: string;
     scientific_claim?: string;
+    claim_gate?: ClaimGate;
+    kb_manifest?: KbManifest;
+    multimodal_evidence?: MultimodalEvidence;
   };
   trace_summary: null | {
     event_count?: number;
@@ -64,6 +67,32 @@ type RunSummary = {
   leaderboard: Array<Record<string, string>>;
   artifacts: ArtifactEntry[];
   error?: string;
+};
+
+type ClaimGate = {
+  schema_version: number;
+  claim_level: ClaimLevel;
+  status: "allowed" | "blocked" | "downgraded";
+  paper_level_claim_supported: boolean;
+  scientific_claim_supported: boolean;
+  evaluator_trust_level: string;
+  paper_benchmark_equivalent: boolean;
+  domain_evaluator_present: boolean;
+  metric_validated_by_domain_expert: boolean;
+  reasons: string[];
+};
+
+type KbManifest = {
+  coverage_status: string;
+  paper_kb_equivalent: boolean;
+  entry_count: number;
+  paper_reference_entry_count: number;
+};
+
+type MultimodalEvidence = {
+  actual_image_inputs_used: boolean;
+  analysis_mode: string;
+  plot_artifact_generated?: boolean;
 };
 
 type ArtifactEntry = {
@@ -86,6 +115,7 @@ type ArtifactPayload =
     };
 
 type RunMode = "mock" | "real" | "dry_run";
+type ClaimLevel = "workflow_proxy" | "paper_workflow";
 type WorkspaceScope = "repo" | "account" | "run" | "solution";
 type AssistantMode = "ask" | "plan" | "agent";
 type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
@@ -217,6 +247,12 @@ type ReadinessReport = {
     check_count: number;
   };
   checks: ReadinessCheck[];
+  claim_gate: ClaimGate;
+  kb_manifest?: KbManifest;
+  selector_panel_preview?: {
+    configured_member_count: number;
+    configured_heterogeneous: boolean;
+  };
   benchmark_fidelity_preview: Array<{
     benchmark: string;
     fidelity_level: string;
@@ -272,6 +308,16 @@ type ProblemRunPlan = {
   actions: SolverAction[];
   warnings: string[];
   claim_boundary: string;
+  custom_problem_package?: null | {
+    status: string;
+    synthesis_level: string;
+    evaluator_trust_level: string;
+    paper_benchmark_equivalent: boolean;
+    domain_evaluator_present: boolean;
+    metric_validated_by_domain_expert: boolean;
+    requires_replacement_for_scientific_claim: boolean;
+    claim_boundary: string;
+  };
 };
 
 type AgentMessage = {
@@ -396,6 +442,7 @@ const api = {
     max_children_per_node: number;
     selected_algorithm_ids: string[];
     agent_models: Record<string, AgentModelConfig>;
+    claim_level?: ClaimLevel;
   }): Promise<ProblemRunPlan> {
     return postJson<ProblemRunPlan>("/api/problem-intake/plan", body);
   },
@@ -413,6 +460,11 @@ const api = {
     branch_context?: Record<string, unknown>;
     problem_intake?: Record<string, unknown>;
     planner_snapshot?: Record<string, unknown>;
+    claim_level?: ClaimLevel;
+    domain_evaluator_approved?: boolean;
+    domain_reviewer?: string | null;
+    domain_review_notes?: string | null;
+    paper_benchmark_approved?: boolean;
     real_confirmed?: boolean;
   }): Promise<ReadinessReport> {
     return postJson<ReadinessReport>("/api/run-readiness/preview", body);
@@ -440,6 +492,11 @@ const api = {
     branch_context?: Record<string, unknown>;
     problem_intake?: Record<string, unknown>;
     planner_snapshot?: Record<string, unknown>;
+    claim_level?: ClaimLevel;
+    domain_evaluator_approved?: boolean;
+    domain_reviewer?: string | null;
+    domain_review_notes?: string | null;
+    paper_benchmark_approved?: boolean;
     background?: boolean;
     real_confirmed?: boolean;
   }): Promise<RunSummary> {
@@ -460,6 +517,11 @@ const api = {
       branch_context: body.branch_context ?? {},
       problem_intake: body.problem_intake ?? {},
       planner_snapshot: body.planner_snapshot ?? {},
+      claim_level: body.claim_level ?? "workflow_proxy",
+      domain_evaluator_approved: body.domain_evaluator_approved ?? false,
+      domain_reviewer: body.domain_reviewer ?? null,
+      domain_review_notes: body.domain_review_notes ?? null,
+      paper_benchmark_approved: body.paper_benchmark_approved ?? false,
       background: body.background ?? false,
       real_confirmed: body.real_confirmed ?? false
     });
@@ -520,6 +582,7 @@ const api = {
     max_children_per_node: number;
     selected_algorithm_ids: string[];
     agent_models: Record<string, AgentModelConfig>;
+    claim_level?: ClaimLevel;
   }): Promise<SolverResponse> {
     return postJson<SolverResponse>("/api/solver/chat", body);
   },
@@ -805,7 +868,7 @@ export function App() {
     if (nextMode === "real" && !realConfirmed) {
       setPendingRealAction({
         type: "start_run",
-        payload: { benchmark: selectedBenchmark, mode: "real", background }
+        payload: { benchmark: selectedBenchmark, mode: "real", claim_level: "workflow_proxy", background }
       });
       setAgentCollapsed(false);
       return;
@@ -828,6 +891,7 @@ export function App() {
         branch_context: strategyLockBranchContext(strategyLocks),
         problem_intake: problemPlan?.recommended_benchmark.name === selectedBenchmark ? problemPlan.problem_intake : {},
         planner_snapshot: problemPlan?.recommended_benchmark.name === selectedBenchmark ? problemPlan.planner_snapshot : {},
+        claim_level: "workflow_proxy",
         background,
         real_confirmed: realConfirmed
       });
@@ -864,6 +928,7 @@ export function App() {
         branch_context: strategyLockBranchContext(strategyLocks),
         problem_intake: problemPlan?.recommended_benchmark.name === selectedBenchmark ? problemPlan.problem_intake : {},
         planner_snapshot: problemPlan?.recommended_benchmark.name === selectedBenchmark ? problemPlan.planner_snapshot : {},
+        claim_level: "workflow_proxy",
         real_confirmed: realConfirmed
       });
       setReadinessReport(report);
@@ -899,7 +964,8 @@ export function App() {
         selector_vote_count: runConfig.selector_vote_count,
         max_children_per_node: runConfig.max_children_per_node,
         selected_algorithm_ids: selectedAlgorithmIds,
-        agent_models: activeAgentModels()
+        agent_models: activeAgentModels(),
+        claim_level: "workflow_proxy"
       });
       setMessages((current) => [
         ...current,
@@ -1031,6 +1097,7 @@ export function App() {
     const nextAgentModels = payloadAgentModels(payload.agent_models, activeAgentModels());
     const nextProblemIntake = payloadRecord(payload.problem_intake, {});
     const nextPlannerSnapshot = payloadRecord(payload.planner_snapshot, {});
+    const nextClaimLevel = payload.claim_level === "paper_workflow" ? "paper_workflow" : "workflow_proxy";
 
     setBusy(true);
     setError(null);
@@ -1050,6 +1117,7 @@ export function App() {
         branch_context: strategyLockBranchContext(strategyLocks),
         problem_intake: nextProblemIntake,
         planner_snapshot: nextPlannerSnapshot,
+        claim_level: nextClaimLevel,
         background: Boolean(payload.background),
         real_confirmed: realConfirmed
       });
@@ -1201,7 +1269,8 @@ export function App() {
         selector_vote_count: runConfig.selector_vote_count,
         max_children_per_node: runConfig.max_children_per_node,
         selected_algorithm_ids: selectedAlgorithmIds,
-        agent_models: activeAgentModels()
+        agent_models: activeAgentModels(),
+        claim_level: "workflow_proxy"
       });
       setProblemPlan(plan);
       setReadinessReport(null);
@@ -1787,9 +1856,9 @@ function AlgorithmLibraryPage({
     <section className="library-content paper-lab">
       <section className="paper-lab-head">
         <div>
-          <p className="eyebrow">Paper Run Lab</p>
-          <h2>论文对齐实验页</h2>
-          <span>S1 任务、faithful-small / proxy benchmark、selector votes、solution loss 和本地 artifact 只读证据。</span>
+          <p className="eyebrow">Paper Workflow Evidence</p>
+          <h2>算法库 / 论文工作流证据</h2>
+          <span>S1 任务、faithful-small / proxy benchmark、selector votes、solution loss 和本地 artifact 只读证据，不表示论文成绩复现。</span>
         </div>
         <StatusBadge tone="info">not paper-score evidence</StatusBadge>
       </section>
@@ -1991,6 +2060,16 @@ function ProblemPlanSummary({ plan }: { plan: ProblemRunPlan }) {
         <strong>{plan.selected_algorithm_ids.join(", ") || "none"}</strong>
       </div>
       <p>{plan.claim_boundary}</p>
+      {plan.custom_problem_package ? (
+        <div className="claim-gate-mini">
+          <span>{plan.custom_problem_package.status}</span>
+          <strong>{plan.custom_problem_package.evaluator_trust_level}</strong>
+          <small>
+            paper_equivalent={String(plan.custom_problem_package.paper_benchmark_equivalent)} · replacement_required=
+            {String(plan.custom_problem_package.requires_replacement_for_scientific_claim)}
+          </small>
+        </div>
+      ) : null}
       {plan.warnings.map((warning) => (
         <small key={warning}>{warning}</small>
       ))}
@@ -2219,6 +2298,17 @@ function RunReadinessSummary({ report }: { report: ReadinessReport }) {
       <div className="readiness-meta">
         <span>{report.benchmark_fidelity_preview[0]?.fidelity_level ?? "unknown"} fidelity</span>
         <span>{report.algorithm_seed_preview.length} strategy seeds</span>
+        <span>{report.claim_gate.claim_level} claim</span>
+        <span>KB {report.kb_manifest?.coverage_status ?? "unknown"}</span>
+      </div>
+      <div className="claim-gate-mini">
+        <span>{report.claim_gate.status}</span>
+        <strong>{report.claim_gate.evaluator_trust_level}</strong>
+        <small>
+          paper={String(report.claim_gate.paper_level_claim_supported)} · scientific=
+          {String(report.claim_gate.scientific_claim_supported)} · selector=
+          {String(report.selector_panel_preview?.configured_heterogeneous ?? false)}
+        </small>
       </div>
       {visibleChecks.map((check) => (
         <div className={`readiness-check ${check.severity}`} key={check.check_id}>
@@ -2637,6 +2727,10 @@ function DashboardView({
         <Metric label="benchmark" value={selected?.name ?? "unknown"} />
         <Metric label="fidelity" value={selected?.fidelity_level ?? "unknown"} />
         <Metric label="scientific_claim" value={metadata?.scientific_claim ?? selected?.scientific_claim ?? "unknown"} />
+        <Metric label="claim_gate" value={metadata?.claim_gate?.status ?? "unknown"} />
+        <Metric label="claim_level" value={metadata?.claim_gate?.claim_level ?? "workflow_proxy"} />
+        <Metric label="kb" value={metadata?.kb_manifest?.coverage_status ?? "unknown"} />
+        <Metric label="multimodal" value={metadata?.multimodal_evidence?.analysis_mode ?? "unknown"} />
         <Metric label="quality_gate" value={String(qualityGate ?? "pending")} />
         <Metric label="champion" value={metadata?.champion_node_id ?? "none"} />
         <Metric label="solutions" value={String(metadata?.solution_count ?? 0)} />

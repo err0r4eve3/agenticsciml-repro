@@ -36,14 +36,14 @@ from agenticsciml.config import (
     ExperimentConfig,
     agent_role_default_model_settings,
 )
-from agenticsciml.evidence import evidence_metadata_for_run
+from agenticsciml.evidence import claim_gate_for_run, evidence_metadata_for_run
 from agenticsciml.emergence_audit import audit_solution_emergence
 from agenticsciml.execution.runner import RunResult
 from agenticsciml.execution.sandbox import prepare_solution_workspace, train_and_evaluate
 from agenticsciml.llm.base import LLMClient
 from agenticsciml.patching import PatchApplicationError
 from agenticsciml.readiness import readiness_summary
-from agenticsciml.retrieval.kb_store import KnowledgeBase
+from agenticsciml.retrieval.kb_store import KnowledgeBase, kb_manifest_for_dir
 from agenticsciml.retrieval.query_builder import RetrievalQueryBuilder
 from agenticsciml.reporting import (
     write_leaderboard,
@@ -1621,6 +1621,18 @@ class AgenticSciMLOrchestrator:
             source = best_workspace / filename
             if source.exists():
                 shutil.copy2(source, champion_dir / filename)
+        evidence_metadata = self._evidence_metadata()
+        self.storage.save_json(
+            "champion/claim_gate.json",
+            {
+                "schema_version": 1,
+                "champion": best.node_id,
+                "benchmark_name": self.problem_bundle.benchmark_name,
+                "claim_gate": evidence_metadata.get("claim_gate"),
+                "evidence_mode": evidence_metadata.get("evidence_mode"),
+                "scientific_claim": evidence_metadata.get("scientific_claim"),
+            },
+        )
         self.storage.save_json(
             "run_metadata.json",
             {
@@ -1633,7 +1645,7 @@ class AgenticSciMLOrchestrator:
                 "strategy_seed_ids": list(self.config.strategy_seed_ids),
                 "strategy_seed_count": len(self.config.strategy_seed_ids),
                 **self._planning_metadata(),
-                **self._evidence_metadata(),
+                **evidence_metadata,
                 **self._llm_runtime_metadata(),
                 "llm_calls": self._llm_call_summary(),
             },
@@ -1682,10 +1694,57 @@ class AgenticSciMLOrchestrator:
         }
 
     def _evidence_metadata(self) -> dict[str, object]:
-        return evidence_metadata_for_run(
+        metadata = evidence_metadata_for_run(
             use_mock=self.config.use_mock,
             fidelity_level=self.problem_bundle.benchmark_spec.fidelity_level,
         )
+        kb_manifest = kb_manifest_for_dir(self.config.benchmark_dir / "kb")
+        selector_diversity = self._selector_panel_runtime_diversity()
+        metadata["claim_gate"] = claim_gate_for_run(
+            claim_level=self.config.claim_level,
+            use_mock=self.config.use_mock,
+            fidelity_level=self.problem_bundle.benchmark_spec.fidelity_level,
+            is_custom_proxy=self.problem_bundle.benchmark_spec.paper_section == "custom",
+            domain_evaluator_approved=self.config.domain_evaluator_approved,
+            domain_reviewer=self.config.domain_reviewer,
+            domain_review_notes=self.config.domain_review_notes,
+            paper_benchmark_approved=self.config.paper_benchmark_approved,
+            selector_heterogeneous=bool(selector_diversity.get("heterogeneous_selector_evidence")),
+            kb_paper_equivalent=bool(kb_manifest.get("paper_kb_equivalent")),
+            actual_multimodal_evidence=self._actual_multimodal_evidence_used(),
+        )
+        metadata["kb_manifest"] = kb_manifest
+        metadata["multimodal_evidence"] = {
+            "actual_image_inputs_used": self._actual_multimodal_evidence_used(),
+            "analysis_mode": "text_artifact_summary_only",
+        }
+        return metadata
+
+    def _selector_panel_runtime_diversity(self) -> dict[str, object]:
+        latest = self.storage.run_dir / "reports" / "selector_votes.json"
+        if latest.exists():
+            try:
+                payload = json.loads(latest.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                payload = {}
+            diversity = payload.get("selector_diversity")
+            if isinstance(diversity, dict):
+                return diversity
+        return {}
+
+    def _actual_multimodal_evidence_used(self) -> bool:
+        manifests = [self.storage.run_dir / "reports" / "data_observations.json"]
+        if self.storage.solutions_dir.exists():
+            manifests.extend(self.storage.solutions_dir.glob("solution_*/solution_observations.json"))
+        for path in manifests:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (FileNotFoundError, json.JSONDecodeError):
+                continue
+            multimodal = payload.get("multimodal_evidence")
+            if isinstance(multimodal, dict) and multimodal.get("actual_image_inputs_used") is True:
+                return True
+        return False
 
     def _llm_runtime_metadata(self) -> dict[str, object]:
         metadata: dict[str, object] = {}

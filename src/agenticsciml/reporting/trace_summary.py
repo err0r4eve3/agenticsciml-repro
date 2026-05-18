@@ -12,6 +12,7 @@ from agenticsciml.state import (
     validate_solution_tree_graph_payload,
 )
 from agenticsciml.trace_contracts import FanoutTraceMetadata, fanout_trace_references
+from agenticsciml.evidence import CLAIM_GATE_BLOCKED
 
 
 REQUIRED_EVENT_TYPES = (
@@ -167,6 +168,7 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
         _check_trace_event_sequence(issues, events)
     _check_workflow_lifecycle_sequence(issues, events)
     _check_run_state_consistency(issues, run_metadata, workflow_metadata, workflow_end_metadata)
+    _check_claim_gate_consistency(issues, run_metadata, workflow_metadata)
     trace_node_reference_counts = _check_solution_artifact_consistency(
         issues,
         run_dir,
@@ -193,6 +195,56 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
         "trace_node_reference_node_coverage": trace_node_reference_counts["node_coverage"],
         "trace_node_lifecycle_stage_coverage": trace_node_reference_counts["lifecycle_stage_coverage"],
     }
+
+
+def _check_claim_gate_consistency(
+    issues: list[str],
+    run_metadata: dict[str, Any] | None,
+    workflow_metadata: dict[str, Any] | None,
+) -> None:
+    if run_metadata is None:
+        return
+    claim_gate = run_metadata.get("claim_gate")
+    if not isinstance(claim_gate, dict):
+        if (
+            run_metadata.get("paper_level_claim_supported") is True
+            or run_metadata.get("scientific_claim_supported") is True
+            or (
+                isinstance(workflow_metadata, dict)
+                and isinstance(workflow_metadata.get("claim_gate"), dict)
+            )
+        ):
+            issues.append("run_metadata.json claim_gate is missing or invalid")
+        return
+    paper_supported = claim_gate.get("paper_level_claim_supported") is True
+    scientific_supported = claim_gate.get("scientific_claim_supported") is True
+    if claim_gate.get("status") == CLAIM_GATE_BLOCKED and (paper_supported or scientific_supported):
+        issues.append("claim_gate blocked status cannot support paper or scientific claims")
+    if run_metadata.get("paper_level_claim_supported") is True and not paper_supported:
+        issues.append("run_metadata.json paper_level_claim_supported overclaims claim_gate")
+    if run_metadata.get("scientific_claim_supported") is True and not scientific_supported:
+        issues.append("run_metadata.json scientific_claim_supported overclaims claim_gate")
+    if workflow_metadata is not None:
+        workflow_gate = workflow_metadata.get("claim_gate")
+        if not isinstance(workflow_gate, dict):
+            issues.append("trace workflow start claim_gate is missing or invalid")
+        else:
+            _compare_metadata_value(
+                issues,
+                "claim_gate claim_level",
+                claim_gate.get("claim_level"),
+                workflow_gate.get("claim_level"),
+                "run_metadata.json",
+                "trace workflow start",
+            )
+            _compare_metadata_value(
+                issues,
+                "claim_gate paper_level_claim_supported",
+                claim_gate.get("paper_level_claim_supported"),
+                workflow_gate.get("paper_level_claim_supported"),
+                "run_metadata.json",
+                "trace workflow start",
+            )
 
 
 def _read_json_file(path: Path, issues: list[str]) -> dict[str, Any] | None:

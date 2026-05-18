@@ -21,8 +21,13 @@ def test_web_benchmarks_match_catalog() -> None:
     response = client.get("/api/benchmarks")
 
     assert response.status_code == 200
-    names = {item["name"] for item in response.json()["benchmarks"]}
+    payload = response.json()
+    names = {item["name"] for item in payload["benchmarks"]}
     assert "function_approx" in names
+    first = payload["benchmarks"][0]
+    assert "fidelity_matrix" in first
+    assert "paper_benchmark_equivalent" in first["fidelity_matrix"]
+    assert first["fidelity_matrix"]["hidden_label_protocol"] == "trusted local evaluator with hidden validation labels"
 
 
 def test_web_algorithms_expose_professional_catalog() -> None:
@@ -74,6 +79,7 @@ def test_paper_tasks_expose_s1_mapping() -> None:
         benchmark["name"] == "cylinder_wake_reconstruction_faithful_small"
         for benchmark in s16["benchmarks"]
     )
+    assert all("fidelity_matrix" in benchmark for benchmark in s16["benchmarks"])
     assert s16["algorithms"][0]["id"] == "paper_cylinder_bandlimited_filter"
     assert "not paper-score evidence" in s16["claim_boundary"]
     assert "reports/data_overview.svg" in s16["local_artifact_figures"]
@@ -186,9 +192,15 @@ def test_problem_intake_custom_benchmark_generates_runnable_evaluator(tmp_path: 
     assert payload["actions"][0]["type"] == "start_run"
     assert payload["actions"][0]["payload"]["account_id"] == "custom-user"
     assert payload["actions"][0]["payload"]["benchmark"] == scaffold["benchmark"]
-    assert scaffold["status"] == "autonomous_eda_evaluator_synthesized"
+    assert scaffold["status"] == "custom_proxy_benchmark_scaffolded"
+    assert scaffold["synthesis_level"] == "autonomous_workflow_proxy_evaluator_synthesis"
     assert scaffold["run_allowed"] is True
     assert scaffold["workflow_run_approval_required"] is False
+    assert scaffold["evaluator_trust_level"] == "synthetic_proxy"
+    assert scaffold["domain_evaluator_present"] is False
+    assert scaffold["metric_validated_by_domain_expert"] is False
+    assert scaffold["paper_benchmark_equivalent"] is False
+    assert scaffold["requires_replacement_for_scientific_claim"] is True
     assert scaffold["domain_evidence_review_required"] is True
     assert scaffold["paper_level_claim_supported"] is False
     assert scaffold["scientific_claim_supported"] is False
@@ -205,7 +217,12 @@ def test_problem_intake_custom_benchmark_generates_runnable_evaluator(tmp_path: 
     assert "eda/data_eda.py" in scaffold["created_files"]
     assert "eda/data_eda_seed0.json" in scaffold["created_files"]
     synthesis = json.loads((benchmark_dir / "evaluator_synthesis.json").read_text(encoding="utf-8"))
-    assert synthesis["synthesis_level"] == "autonomous_eda_evaluator_synthesis"
+    assert synthesis["synthesis_level"] == "autonomous_workflow_proxy_evaluator_synthesis"
+    assert synthesis["evaluator_trust_level"] == "synthetic_proxy"
+    assert synthesis["domain_evaluator_present"] is False
+    assert synthesis["metric_validated_by_domain_expert"] is False
+    assert synthesis["paper_benchmark_equivalent"] is False
+    assert synthesis["requires_replacement_for_scientific_claim"] is True
     assert synthesis["problem_class"] == "inverse_reconstruction"
     assert synthesis["metric"]["primary"] == "custom_proxy_relative_l2"
     assert synthesis["data_schema"]["prediction_input"] == "x_val"
@@ -218,8 +235,8 @@ def test_problem_intake_custom_benchmark_generates_runnable_evaluator(tmp_path: 
     assert seed_eda["privacy_boundary"] == "training_data_only_no_private_labels"
     assert "val_data" not in seed_eda_path.read_text(encoding="utf-8")
     assert scaffold["strategy_seed_suggestions"][0]["id"] == "pinn_residual_minimizer"
-    assert any("autonomous EDA/evaluator synthesis" in warning for warning in payload["warnings"])
-    assert "workflow proxy" in scaffold["claim_boundary"]
+    assert any("workflow-proxy evaluator scaffold" in warning for warning in payload["warnings"])
+    assert "workflow-proxy" in scaffold["claim_boundary"]
 
     run_payload = dict(payload["actions"][0]["payload"])
     run_payload.update(
@@ -245,6 +262,9 @@ def test_problem_intake_custom_benchmark_generates_runnable_evaluator(tmp_path: 
     metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
     assert metadata["benchmark_fidelity_level"] == "proxy"
     assert metadata["scientific_claim"] == "not_supported"
+    assert metadata["claim_gate"]["status"] == "allowed"
+    assert metadata["claim_gate"]["evaluator_trust_level"] == "synthetic_proxy"
+    assert metadata["claim_gate"]["paper_level_claim_supported"] is False
 
 
 def test_problem_intake_rejects_unknown_algorithm() -> None:
@@ -293,8 +313,12 @@ def test_run_readiness_preview_audits_proxy_claims_and_strategy_seeds() -> None:
     assert payload["launch_allowed"] is True
     assert payload["run_budget"]["max_iterations"] == 2
     assert payload["run_budget"]["planned_solution_budget"] == 5
+    assert payload["claim_gate"]["status"] == "allowed"
+    assert payload["claim_gate"]["paper_level_claim_supported"] is False
+    assert payload["kb_manifest"]["coverage_status"] in {"missing", "local_kb_seed"}
     check_ids = {check["check_id"] for check in payload["checks"]}
     assert "claim-boundary.proxy-warning" in check_ids
+    assert "claim-gate.workflow-proxy" in check_ids
     assert "algorithm-selection.catalog-seeds" in check_ids
     assert payload["algorithm_seed_preview"][0]["algorithm_id"] == "piecewise_local_basis"
     assert payload["algorithm_seed_preview"][0]["catalog_role"] == "strategy_seed"
@@ -344,6 +368,50 @@ def test_run_readiness_preview_blocks_unknown_algorithm_and_real_without_gates(
         "real-mode.requires-confirmation",
         "real-mode.server-disabled",
     ]
+
+
+def test_paper_workflow_claim_gate_blocks_readiness_and_launch(tmp_path: Path) -> None:
+    client = TestClient(create_app())
+
+    readiness_response = client.post(
+        "/api/run-readiness/preview",
+        json={
+            "benchmark": "function_approx_faithful_small",
+            "mode": "mock",
+            "claim_level": "paper_workflow",
+            "domain_evaluator_approved": True,
+            "paper_benchmark_approved": True,
+            "selector_panel": [
+                {"model": "gpt-5-mini", "temperature": 0.05},
+                {"model": "deepseek-v4-pro", "temperature": 0.05},
+            ],
+        },
+    )
+
+    assert readiness_response.status_code == 200
+    readiness = readiness_response.json()
+    assert readiness["status"] == "blocked"
+    assert readiness["launch_allowed"] is False
+    assert readiness["claim_gate"]["status"] == "blocked"
+    assert "paper_workflow requires real LLM mode" in readiness["claim_gate"]["reasons"]
+    assert any(
+        check["check_id"] == "claim-gate.paper-workflow" and not check["passed"]
+        for check in readiness["checks"]
+    )
+
+    run_response = client.post(
+        "/api/runs",
+        json={
+            "benchmark": "function_approx_faithful_small",
+            "mode": "mock",
+            "claim_level": "paper_workflow",
+            "experiment_id": "blocked-paper-workflow",
+            "output_dir": str(tmp_path),
+        },
+    )
+
+    assert run_response.status_code == 400
+    assert "claim gate blocked launch" in run_response.json()["detail"]
 
 
 def test_web_mock_run_writes_required_artifacts(tmp_path: Path) -> None:

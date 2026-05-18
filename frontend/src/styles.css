@@ -520,6 +520,20 @@ ul {
   line-height: 1.45;
 }
 
+.claim-gate-mini {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 4px 8px;
+  align-items: baseline;
+  border-top: 1px solid rgba(51, 43, 35, 0.08);
+  padding-top: 7px;
+}
+
+.claim-gate-mini small {
+  grid-column: 1 / -1;
+  line-height: 1.35;
+}
+
 .strategy-locks {
   display: grid;
   gap: 9px;

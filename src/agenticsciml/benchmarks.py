@@ -77,6 +77,7 @@ class BenchmarkSpec:
             "requires_gpu": self.requires_gpu,
             "paper_gap_notes": self.paper_gap_notes,
             "claim_boundaries": self.claim_boundaries(),
+            "fidelity_matrix": self.fidelity_matrix(),
         }
 
     def fidelity_metadata(self) -> dict[str, object]:
@@ -112,6 +113,22 @@ class BenchmarkSpec:
             "real_llm": evidence_metadata_for_run(use_mock=False, fidelity_level=self.fidelity_level),
             "paper_score_reproduction": "not_supported",
             "notes": self.paper_gap_notes,
+        }
+
+    def fidelity_matrix(self) -> dict[str, object]:
+        paper_equivalent = self.fidelity_level == "paper-like"
+        return {
+            "paper_scale_target": self.paper_task_name,
+            "local_fixture_scope": self.fidelity_level,
+            "metric_delta": "paper-equivalent" if paper_equivalent else self.paper_gap_notes,
+            "hidden_label_protocol": "trusted local evaluator with hidden validation labels",
+            "training_budget_delta": "paper-scale" if paper_equivalent else "reduced local budget",
+            "solver_dependency_delta": {
+                "requires_torch": self.requires_torch,
+                "requires_gpu": self.requires_gpu,
+            },
+            "missing_requirements": [] if paper_equivalent else [self.paper_gap_notes],
+            "paper_benchmark_equivalent": paper_equivalent,
         }
 
 

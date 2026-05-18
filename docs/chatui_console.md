@@ -44,7 +44,7 @@ ChatUI 前端是单页本地工作台，不引入路由层，但用左侧功能�
   iframe 和右侧可拖动调整宽度、可收起的 ChatUI 侧边栏，不显示 benchmark、run、
   quality gate、artifact、启动命令或 sidecar 说明块。VS Code Web 和侧边栏之间只保留
   弱分隔线，避免形成明显的双栏卡片边框。
-- `算法库` 页承载 Paper Run Lab：benchmark、运行模式、run/gate 状态、S1 论文任务
+- `算法库` 页承载 Paper Workflow Evidence：benchmark、运行模式、run/gate 状态、S1 论文任务
   映射、run budget、分层模型配置、selector votes、solution loss/tree、leaderboard、
   trace preview 和 artifact 浏览。
 - ChatUI 自然语言输入仍调用 `/api/solver/chat`；`open_code_server` action 会切到
@@ -57,7 +57,7 @@ ChatUI 前端是单页本地工作台，不引入路由层，但用左侧功能�
 Agent 面板只分发受控动作。`mock` 和 `dry_run` actions 可由前端调用现有 API
 执行；`real` mode action 默认拦截为待确认状态，不会隐式触发真实 LLM 调用。
 
-## Paper Run Lab
+## 算法库 / Paper Workflow Evidence
 
 第三页把原算法库升级为论文对齐实验页，但仍是控制面和证据浏览器，不是新的
 evaluator、selector 或 champion selection 实现。
@@ -72,11 +72,17 @@ evaluator、selector 或 champion selection 实现。
   benchmark 候选、算法 seed 候选、run budget 和 start_run action；这一步是受控规划层，
   默认不会生成新 evaluator 或绕过 contract。若显式传入
   `allow_custom_benchmark=true`，后端会在当前账号 namespace 下生成一个 deterministic
-  autonomous EDA + proxy evaluator synthesis bundle，并返回指向该 bundle 的
-  `start_run` action；该路径仍只支持 workflow proxy evidence，不支持科学结论。
+  workflow-proxy EDA / evaluator scaffold bundle，并返回指向该 bundle 的
+  `start_run` action；该路径仍只支持 workflow-proxy evidence，不支持科学结论。
   其中 `workflow_run_approval_required=false` 只表示 proxy workflow 可直接启动；
   `domain_evidence_review_required=true` 表示科学或 paper-level claim 必须先人工审查/
   替换 domain evaluator。
+- `Claim Gate`：默认 `claim_level=workflow_proxy`，允许 mock/proxy/custom scaffold
+  run，但固定输出 `paper_level_claim_supported=false` 和
+  `scientific_claim_supported=false`。`claim_level=paper_workflow` 是严格门禁；只有 real
+  mode、paper-like benchmark、人工 domain evaluator approval、paper benchmark approval、
+  异构 selector panel、paper-like KB provenance 和实际 multimodal evidence 全部满足时
+  才允许启动，否则 readiness 和 `/api/runs` 会 fail closed。
 - `Run Config`：可设置 `target_solution_count`、`max_iterations`、
   `parallel_mutations`、`selector_vote_count`、`max_children_per_node` 和 `mode`。
   `target_solution_count` 是 UI 便捷输入；后端会转换成确定性的
@@ -179,21 +185,26 @@ Web API 暴露；本地开发需要打开仓库根目录时，必须显式设置
 - `POST /api/problem-intake/plan`：从完整问题描述生成本地 benchmark 推荐、
   algorithm rankings、selected strategy seeds、run budget、`problem_intake`、
   `planner_snapshot` 和可展示的 start_run action。若请求体显式设置
-  `allow_custom_benchmark=true`，API 会写入 account-scoped custom benchmark bundle：
+  `allow_custom_benchmark=true`，API 会写入 account-scoped custom proxy benchmark bundle：
   `Problem.md`、`Requirements.md`、`Evaluation.md`、`Data_config.json`、
   `Benchmark_spec.json`、`evaluator_synthesis.json`、`evaluator_synthesis.md`、
   `generate_data.py`、`evaluate.py`、`guidelines.md`、`eda/data_eda.py`、
   `eda/data_eda_seed0.json` 和 `eda/data_overview_seed0.svg`，再返回指向该 custom
-  benchmark 的 action。生成 evaluator 的 claim boundary 固定为 proxy / workflow-only，
+  benchmark 的 action。生成 evaluator scaffold 的 claim boundary 固定为 proxy / workflow-only，
   并且最终 `evaluation_contract.json` 会把 synthesis/EDA artifacts 纳入 source
   manifest digest。API 同时返回 `evidence_level=workflow_proxy`、
-  `approval_scope=workflow_proxy_run_only`、`domain_evidence_review_required=true` 和
+  `approval_scope=workflow_proxy_run_only`、`domain_evidence_review_required=true`、
+  `evaluator_trust_level=synthetic_proxy`、`domain_evaluator_present=false`、
+  `metric_validated_by_domain_expert=false`、`paper_benchmark_equivalent=false`、
+  `requires_replacement_for_scientific_claim=true` 和
   `paper_level_claim_supported=false`，前端必须把这些字段展示为证据边界，而不是运行
   blocker。
 - `POST /api/run-readiness/preview`：启动前生成确定性 pre-run audit。它只检查本地
   benchmark fidelity、claim boundary、selected strategy seeds、人工 strategy locks、
   branch inheritance expectations、run budget、real-mode gates 和 artifact capture
-  约束；不调用 LLM、不联网、不执行 generated code，也不生成 evaluator。
+  约束；不调用 LLM、不联网、不执行 generated code，也不生成 evaluator。响应包含
+  `claim_gate`、`kb_manifest` 和 selector panel preview，用于显示 workflow-proxy 或
+  paper-workflow claim blocker。
 - `GET /api/accounts` / `POST /api/accounts`：列出或创建本地账号 namespace；
   仅写入本地目录和非密钥元数据，不提供公网认证。
 - `POST /api/runs`：启动 mock/real/dry-run run；real mode 需要请求体
@@ -203,7 +214,9 @@ Web API 暴露；本地开发需要打开仓库根目录时，必须显式设置
   `manual_strategy_locks`、`branch_context`、`problem_intake`、`planner_snapshot` 和
   `agent_models`；后端只把这些转换成
   `EvolutionConfig` / `AgentConfig` / 非权威 problem context / strategy seed
-  context，不改写 evaluator 或 artifact schema。非 dry-run 启动会把 readiness report
+  context，不改写 evaluator 或 artifact schema。请求体还接受 `claim_level`、
+  `domain_evaluator_approved`、`domain_reviewer`、`domain_review_notes` 和
+  `paper_benchmark_approved`；`paper_workflow` claim gate 未通过时启动会被拒绝。非 dry-run 启动会把 readiness report
   写入 `planning/readiness_report.json` 并在 `run_metadata.json` 中记录 summary；带有
   可审计 strategy locks 的 run 还会在每个 solution 下写入
   `policy_fidelity_report.json`。

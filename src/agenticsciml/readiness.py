@@ -6,6 +6,12 @@ from typing import Any
 
 from agenticsciml.algorithm_catalog import AlgorithmSpec
 from agenticsciml.benchmarks import BenchmarkSpec
+from agenticsciml.evidence import (
+    CLAIM_GATE_BLOCKED,
+    CLAIM_LEVEL_WORKFLOW_PROXY,
+    claim_gate_for_run,
+)
+from agenticsciml.retrieval.kb_store import kb_manifest_for_dir
 
 
 ARTIFACT_CAPTURE_REQUIREMENTS = (
@@ -19,6 +25,7 @@ ARTIFACT_CAPTURE_REQUIREMENTS = (
     "checkpoint.json",
     "tree.json",
     "leaderboard.csv",
+    "champion/claim_gate.json",
     "solutions/",
     "solutions/*/policy_fidelity_report.json",
     "solutions/*/emergence_report.json",
@@ -45,15 +52,38 @@ def build_readiness_report(
     planner_snapshot: dict[str, Any],
     manual_strategy_locks: list[dict[str, Any]] | None = None,
     branch_context: dict[str, Any] | None = None,
+    selector_panel: list[dict[str, Any]] | None = None,
+    claim_level: str = CLAIM_LEVEL_WORKFLOW_PROXY,
+    domain_evaluator_approved: bool = False,
+    domain_reviewer: str | None = None,
+    domain_review_notes: str | None = None,
+    paper_benchmark_approved: bool = False,
     real_confirmed: bool = False,
     real_mode_enabled: bool = False,
 ) -> dict[str, object]:
     normalized_ids = _dedupe_strings(selected_algorithm_ids)
     locks = [_normalize_strategy_lock(item, index) for index, item in enumerate(manual_strategy_locks or [])]
     branch = dict(branch_context or {})
+    selector_panel_items = [dict(item) for item in selector_panel or []]
+    kb_manifest = kb_manifest_for_dir(benchmark.path / "kb")
+    selector_config_heterogeneous = _selector_panel_config_heterogeneous(selector_panel_items)
+    claim_gate = claim_gate_for_run(
+        claim_level=claim_level,
+        use_mock=mode != "real",
+        fidelity_level=benchmark.fidelity_level,
+        is_custom_proxy=benchmark.paper_section == "custom",
+        domain_evaluator_approved=domain_evaluator_approved,
+        domain_reviewer=domain_reviewer,
+        domain_review_notes=domain_review_notes,
+        paper_benchmark_approved=paper_benchmark_approved,
+        selector_heterogeneous=selector_config_heterogeneous,
+        kb_paper_equivalent=bool(kb_manifest.get("paper_kb_equivalent")),
+        actual_multimodal_evidence=False,
+    )
     checks: list[dict[str, object]] = []
 
     _append_claim_boundary_checks(checks, benchmark)
+    _append_claim_gate_checks(checks, claim_gate)
     _append_algorithm_checks(checks, algorithms, normalized_ids)
     _append_strategy_lock_checks(checks, locks, branch)
     _append_real_mode_checks(checks, mode=mode, real_confirmed=real_confirmed, real_mode_enabled=real_mode_enabled)
@@ -93,6 +123,11 @@ def build_readiness_report(
         "selected_algorithm_ids": normalized_ids,
         "manual_strategy_locks": locks,
         "branch_context": branch,
+        "claim_level": claim_gate["claim_level"],
+        "domain_evaluator_approved": domain_evaluator_approved,
+        "domain_reviewer": claim_gate.get("domain_reviewer"),
+        "domain_review_notes": claim_gate.get("domain_review_notes"),
+        "paper_benchmark_approved": paper_benchmark_approved,
     }
     report_id = "readiness_" + hashlib.sha256(
         json.dumps(report_payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
@@ -109,7 +144,13 @@ def build_readiness_report(
             "check_count": len(checks),
         },
         "checks": checks,
+        "claim_gate": claim_gate,
         "benchmark_fidelity_preview": _benchmark_fidelity_preview(benchmark),
+        "kb_manifest": kb_manifest,
+        "selector_panel_preview": {
+            "configured_member_count": len(selector_panel_items),
+            "configured_heterogeneous": selector_config_heterogeneous,
+        },
         "algorithm_seed_preview": _algorithm_seed_preview(algorithms, normalized_ids),
         "strategy_lock_preview": _strategy_lock_preview(locks, branch),
         "real_mode_gates": {
@@ -135,6 +176,7 @@ def readiness_summary(report: dict[str, Any]) -> dict[str, object]:
         "blocker_count": summary.get("blocker_count", 0),
         "warning_count": summary.get("warning_count", 0),
         "check_count": summary.get("check_count", 0),
+        "claim_gate": report.get("claim_gate") if isinstance(report.get("claim_gate"), dict) else {},
     }
 
 
@@ -159,6 +201,24 @@ def _append_claim_boundary_checks(checks: list[dict[str, object]], benchmark: Be
             True,
             f"Selected benchmark fidelity is {benchmark.fidelity_level}; claim boundaries still come from completed run artifacts.",
             source_refs=[{"kind": "benchmark_catalog", "id": benchmark.name}],
+        )
+    )
+
+
+def _append_claim_gate_checks(checks: list[dict[str, object]], claim_gate: dict[str, Any]) -> None:
+    blocked = claim_gate.get("status") == CLAIM_GATE_BLOCKED
+    checks.append(
+        _check(
+            "claim-gate.paper-workflow" if blocked else "claim-gate.workflow-proxy",
+            "claim_gate",
+            "blocker" if blocked else "info",
+            not blocked,
+            (
+                "paper_workflow claim gate blocked launch: "
+                + "; ".join(str(reason) for reason in claim_gate.get("reasons", []))
+                if blocked
+                else "Claim gate allows launch only within the recorded evidence boundary."
+            ),
         )
     )
 
@@ -395,6 +455,19 @@ def _strategy_lock_criteria_count(lock: dict[str, object]) -> int:
         if isinstance(value, list):
             count += len(value)
     return count
+
+
+def _selector_panel_config_heterogeneous(selector_panel: list[dict[str, Any]]) -> bool:
+    if len(selector_panel) < 2:
+        return False
+    signatures = {
+        (
+            str(item.get("model", "")).strip(),
+            str(item.get("provider", item.get("base_url", ""))).strip(),
+        )
+        for item in selector_panel
+    }
+    return len(signatures) > 1
 
 
 def _check(

@@ -13,6 +13,23 @@ class KnowledgeBaseEntry:
     description: str
     content: str
     path: Path
+    source_title: str = ""
+    source_url_or_doi: str = ""
+    source_type: str = "local_note"
+    task_tags: tuple[str, ...] = ()
+    implementation_snippet_available: bool = False
+
+    def provenance(self) -> dict[str, object]:
+        return {
+            "entry_id": self.entry_id,
+            "title": self.title,
+            "source_title": self.source_title,
+            "source_url_or_doi": self.source_url_or_doi,
+            "source_type": self.source_type,
+            "task_tags": list(self.task_tags),
+            "implementation_snippet_available": self.implementation_snippet_available,
+            "path": str(self.path),
+        }
 
 
 class KnowledgeBase:
@@ -32,6 +49,11 @@ class KnowledgeBase:
                 description=record["description"],
                 content=path.read_text(encoding="utf-8"),
                 path=path,
+                source_title=str(record.get("source_title", "")),
+                source_url_or_doi=str(record.get("source_url_or_doi", "")),
+                source_type=str(record.get("source_type", "local_note")),
+                task_tags=tuple(str(item) for item in record.get("task_tags", []) if isinstance(item, str)),
+                implementation_snippet_available=bool(record.get("implementation_snippet_available", False)),
             )
         return cls(entries)
 
@@ -47,3 +69,42 @@ class KnowledgeBase:
             return None
         rng = random.Random(f"{seed}:{salt}")
         return entries[rng.randrange(len(entries))]
+
+    def manifest(self) -> dict[str, object]:
+        entries = sorted(self.entries.values(), key=lambda entry: entry.entry_id)
+        entry_count = len(entries)
+        missing_provenance = [
+            entry.entry_id
+            for entry in entries
+            if not (
+                entry.source_title.strip()
+                and entry.source_url_or_doi.strip()
+                and entry.source_type.strip()
+                and entry.task_tags
+            )
+        ]
+        paper_kb_equivalent = entry_count >= 70 and not missing_provenance
+        return {
+            "schema_version": 1,
+            "entry_count": entry_count,
+            "paper_reference_entry_count": 70,
+            "coverage_status": "paper_kb_equivalent" if paper_kb_equivalent else "local_kb_seed",
+            "paper_kb_equivalent": paper_kb_equivalent,
+            "provenance_complete": not missing_provenance,
+            "provenance_complete_count": entry_count - len(missing_provenance),
+            "missing_provenance_entry_ids": missing_provenance,
+            "entries": [entry.provenance() for entry in entries],
+        }
+
+
+def kb_manifest_for_dir(kb_dir: Path) -> dict[str, object]:
+    if not (kb_dir / "index.json").exists():
+        return {
+            "schema_version": 1,
+            "entry_count": 0,
+            "paper_reference_entry_count": 70,
+            "coverage_status": "missing",
+            "paper_kb_equivalent": False,
+            "entries": [],
+        }
+    return KnowledgeBase.load(kb_dir).manifest()

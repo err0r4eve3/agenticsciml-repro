@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from agenticsciml.agents.retriever import RetrieverAgent
@@ -16,6 +17,13 @@ def test_kb_loads_entries() -> None:
 
     assert entry.title == "Fourier Features"
     assert "oscillation" in entry.description.lower()
+    manifest = kb.manifest()
+    assert manifest["coverage_status"] == "local_kb_seed"
+    assert manifest["paper_kb_equivalent"] is False
+    assert manifest["paper_reference_entry_count"] == 70
+    assert manifest["provenance_complete"] is False
+    assert manifest["provenance_complete_count"] < manifest["entry_count"]
+    assert "fourier_features" in manifest["missing_provenance_entry_ids"]
 
 
 def test_burgers_kb_loads_source_grounded_entries() -> None:
@@ -85,6 +93,11 @@ def test_retriever_respects_no_kb_mode(tmp_path: Path) -> None:
 
     assert entry is None
     assert not (storage.run_dir / "solutions" / "solution_001" / "retrieved_kb.md").exists()
+    retrieved = storage.run_dir / "solutions" / "solution_001" / "retrieved_kb.json"
+    assert retrieved.exists()
+    payload = json.loads(retrieved.read_text(encoding="utf-8"))
+    assert payload["retrieval_mode"] == "disabled"
+    assert payload["paper_kb_equivalent"] is False
 
 
 def test_retriever_random_kb_is_deterministic(tmp_path: Path) -> None:
@@ -114,3 +127,8 @@ def test_retriever_random_kb_is_deterministic(tmp_path: Path) -> None:
     assert first is not None
     assert second is not None
     assert first.entry_id == second.entry_id
+    retrieved = storage.run_dir / "solutions" / "solution_001" / "retrieved_kb.json"
+    payload = json.loads(retrieved.read_text(encoding="utf-8"))
+    assert payload["retrieval_mode"] == "random"
+    assert payload["selected_entry"]["entry_id"] == first.entry_id
+    assert payload["kb_manifest"]["coverage_status"] == "local_kb_seed"

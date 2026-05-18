@@ -2,10 +2,55 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
-## 2026-05-18 Autonomous EDA And Evaluator Synthesis
+## 2026-05-18 Claim Gate And Evidence Boundary Hardening
 
-本次把非 catalog 问题从单一 proxy evaluator 推进到可审计的自主 EDA + evaluator
-synthesis bundle。
+本次按论文对齐复审优先项补齐 claim gate 和证据边界硬化。默认运行仍是
+`workflow_proxy`，可用于验证 AgenticSciML workflow、artifact plumbing 和本地
+evaluator contract；`paper_workflow` 变成严格 fail-closed 门禁，当前 proxy /
+faithful-small / custom scaffold 默认不能被写成论文级科学证据。
+
+已实现：
+
+- `ExperimentConfig`、Web run/readiness/problem-intake 请求、run metadata、
+  workflow-start trace、trace summary 和 Web run response 增加 `claim_level` 与
+  `claim_gate`。
+- `workflow_proxy` claim gate 允许当前 mock/proxy/custom scaffold run，但固定输出
+  `paper_level_claim_supported=false` 和 `scientific_claim_supported=false`。
+- `paper_workflow` 要求 real mode、`paper-like` benchmark、domain evaluator approval、
+  paper benchmark approval、异构 selector evidence、paper-equivalent KB provenance 和
+  actual multimodal image evidence；缺失任一条件时 readiness 和 `/api/runs` fail closed。
+- Trace summary 增加 overclaim consistency check：metadata 或 workflow-start trace 若
+  声称 paper/scientific support 但 claim gate 不支持，则 quality gate 失败。
+- Custom problem intake 可见字段改为 workflow-proxy evaluator scaffold / custom proxy
+  benchmark bundle，并写入 `evaluator_trust_level=synthetic_proxy`、
+  `domain_evaluator_present=false`、`metric_validated_by_domain_expert=false`、
+  `paper_benchmark_equivalent=false` 和
+  `requires_replacement_for_scientific_claim=true`。
+- KB 条目支持 provenance 字段；Retriever 持久化 `retrieved_kb.json` 和
+  `kb_manifest`，当前 KB 明确标记为 `local_kb_seed` / `paper_kb_equivalent=false`。
+  `paper_kb_equivalent` 需要条目数达到论文参考规模且每条具备基本 provenance。
+- Data Analyst / Result Analyst observation manifest 记录 `multimodal_evidence`；当前
+  adapter 未传 vision image，因此 `actual_image_inputs_used=false`，只能支持
+  workflow proxy。
+- 前端第三页改为“算法库 / Paper Workflow Evidence”，展示 claim gate、KB coverage、
+  selector diversity 和 multimodal evidence 状态。
+
+验证：
+
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_evidence.py tests/test_web_api.py tests/test_trace_reporting.py -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_execution.py -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_retrieval.py tests/test_llm_and_agents.py tests/test_orchestrator_cli.py -q`
+
+边界：
+
+- 本轮不实现真正 vision/multimodal provider 调用，不补齐论文 70-entry KB，也不重写
+  selector、evaluator、champion selection 或 artifact schema。
+- `paper_workflow` 通过不了不是回归；在当前证据不足时阻断论文级 claim 是预期行为。
+
+## 2026-05-18 Workflow-Proxy EDA And Evaluator Scaffold
+
+本次把非 catalog 问题从单一 proxy evaluator 推进到可审计的 workflow-proxy EDA +
+evaluator scaffold bundle。
 
 已实现：
 
@@ -16,7 +61,7 @@ synthesis bundle。
   `Data_config.json`、`Benchmark_spec.json`、`evaluator_synthesis.json`、
   `evaluator_synthesis.md`、`generate_data.py`、`evaluate.py`、`guidelines.md`、
   `eda/data_eda.py`、`eda/data_eda_seed0.json` 和 `eda/data_overview_seed0.svg`。
-- `evaluator_synthesis.json` 记录 typed synthesis spec：problem class、data schema、
+- `evaluator_synthesis.json` 记录 typed scaffold spec：problem class、data schema、
   metric schema、prediction-only/private-label 边界、EDA artifacts、quality gates 和
   synthesis limits。边界字段统一为 `evidence_level=workflow_proxy`、
   `approval_scope=workflow_proxy_run_only`、`workflow_proxy_run_requires_human_review=false`、
@@ -31,7 +76,7 @@ synthesis bundle。
 - `evaluation_contract.json` 的 benchmark source manifest 会绑定
   `evaluator_synthesis.json`、`evaluator_synthesis.md` 和 EDA artifacts 的 digest，避免
   evaluator 合成证据与最终 contract 脱钩。
-- Planner 返回的 `start_run` action 会指向生成的 custom benchmark，并保留
+- Planner 返回的 `start_run` action 会指向生成的 custom proxy benchmark，并保留
   `problem_intake`、`planner_snapshot`、algorithm strategy seeds、account namespace 和
   run budget。`planner_snapshot.generated_custom_benchmark` 同步记录 evidence/review
   boundary，避免把可运行 workflow proxy 误读成 domain-reviewed evaluator。
@@ -39,13 +84,13 @@ synthesis bundle。
 验证：
 
 - `tests/test_web_api.py::test_problem_intake_custom_benchmark_generates_runnable_evaluator`
-  覆盖 custom problem 生成 autonomous EDA/evaluator synthesis bundle 后可立即启动 mock
+  覆盖 custom problem 生成 workflow-proxy EDA/evaluator scaffold bundle 后可立即启动 mock
   run，并写出 `evaluation_contract.json` 与 `solutions/solution_000/eval.json`，且
   contract source manifest 绑定 synthesis/EDA artifacts。
 
 边界：
 
-- 自动 EDA/evaluator synthesis 是 deterministic workflow proxy，只能证明 AgenticSciML
+- workflow-proxy EDA/evaluator scaffold 是 deterministic workflow proxy，只能证明 AgenticSciML
   loop、artifact plumbing、training-only EDA 和 private-label evaluation boundary 可运行。
 - 它不是 paper-like benchmark，不支持科学结论、paper score reproduction 或真实有限元
   指标声明；需要人工替换/审查 domain evaluator 后才能提升证据等级。
@@ -174,7 +219,7 @@ approval pause、以及非库内问题不能被错误当作已有 benchmark 运�
 - `tests/test_llm_and_agents.py` 覆盖 root prompt 不包含策略种子段。
 - `tests/test_orchestrator_cli.py` 覆盖 evaluation approval pending、approval 后 resume
   生成 root。
-- `tests/test_web_api.py` 覆盖 custom benchmark scaffold-only response。
+- `tests/test_web_api.py` 覆盖 custom proxy benchmark scaffold response。
 
 边界：
 
@@ -334,7 +379,7 @@ Inspector-style pre-run audit，而不是继续增加 benchmark 或自动生成 
 - `POST /api/runs` 现在会为非 dry-run 生成并持久化
   `planning/readiness_report.json`；`config.json` 保存完整 readiness report，
   `run_metadata.json` 保存 `readiness_summary`。
-- 前端 Paper Run Lab 的 `Run Config` 区域新增 `检查 run readiness` 操作，展示
+- 前端 Paper Workflow Evidence 页的 `Run Config` 区域新增 `检查 run readiness` 操作，展示
   blocker/warning、benchmark fidelity、strategy seed 数量和 pre-run audit 边界。
 - readiness 把 algorithm catalog 条目继续标注为 `strategy_seed`，不会把它们提升为
   已评估实现；proxy / faithful-small claim boundary 仍必须由 run artifacts 和
@@ -356,7 +401,7 @@ Inspector-style pre-run audit，而不是继续增加 benchmark 或自动生成 
 
 ## 2026-05-17 Manual Strategy Locks UI
 
-本次继续把 readiness 审计往实际工作台推进：前端 Paper Run Lab 新增 `Strategy Locks`
+本次继续把 readiness 审计往实际工作台推进：前端 Paper Workflow Evidence 页新增 `Strategy Locks`
 面板，允许用户把高阶数学直觉或约束作为人工锁定输入。
 
 已实现：
@@ -372,7 +417,7 @@ Inspector-style pre-run audit，而不是继续增加 benchmark 或自动生成 
 验证：
 
 - `npm run build`
-- 浏览器 smoke：打开远端/本地 Paper Run Lab，添加 lock 后刷新 readiness，确认
+- 浏览器 smoke：打开远端/本地 Paper Workflow Evidence 页，添加 lock 后刷新 readiness，确认
   `strategy seeds` / warnings 区域正常渲染。
 
 ## 2026-05-17 ChatUI workflow live smoke
@@ -429,7 +474,7 @@ Inspector-style pre-run audit，而不是继续增加 benchmark 或自动生成 
 
 ## 2026-05-17 Problem Intake 与人工算法选择
 
-本次补齐 Paper Run Lab 中更接近论文入口的使用方式：高阶用户先完整描述问题，再由
+本次补齐 Paper Workflow Evidence 页中更接近论文入口的使用方式：高阶用户先完整描述问题，再由
 agent 控制面自动评选 benchmark、算法 seed 和 run budget；人工算法库仍可手动选择。
 
 已实现：
@@ -439,7 +484,7 @@ agent 控制面自动评选 benchmark、算法 seed 和 run budget；人工算�
 - planner 在当前本地 benchmark catalog 内返回推荐 benchmark、候选 benchmark 排序、
   algorithm rankings、selected strategy seeds、run config 和可展示的 `start_run`
   action。
-- 前端 Paper Run Lab 新增 `Problem Intake` 表单，支持自动评选 benchmark 与解法 seed。
+- 前端 Paper Workflow Evidence 页新增 `Problem Intake` 表单，支持自动评选 benchmark 与解法 seed。
 - 算法库卡片支持人工选择；已选 algorithm ids 会进入 `POST /api/runs`。
 - `ExperimentConfig` 新增 `strategy_seed_ids`、`problem_intake` 和
   `planner_snapshot`，并写入 `config.json`。
@@ -468,9 +513,9 @@ agent 控制面自动评选 benchmark、算法 seed 和 run budget；人工算�
 - 真正的全流程仍由 Python orchestrator 生成 root、选择 parent、展开 solution tree、
   执行 evaluator、写 trace/leaderboard/champion。
 
-## 2026-05-17 Paper Run Lab
+## 2026-05-17 Paper Workflow Evidence Page
 
-本次把第三页“算法库”升级为 AgenticSciML Paper Run Lab，第一页纯 ChatUI 和第二页
+本次把第三页“算法库”升级为 AgenticSciML Paper Workflow Evidence 页，第一页纯 ChatUI 和第二页
 VS Code Web + 侧栏 ChatUI 保持轻量，不展示 benchmark/run 工作台。
 
 已实现：
@@ -502,7 +547,7 @@ VS Code Web + 侧栏 ChatUI 保持轻量，不展示 benchmark/run 工作台。
 
 边界：
 
-- Paper Run Lab 只展示本地 evidence 和 paper-section 对齐信息，不复制论文图片本体。
+- Paper Workflow Evidence 页只展示本地 evidence 和 paper-section 对齐信息，不复制论文图片本体。
 - `faithful-small` / `proxy` benchmark 和 mock run 仍不是 paper-score evidence。
 - 前端不接管 evaluator、selector、champion selection、solution tree schema 或
   artifact schema。

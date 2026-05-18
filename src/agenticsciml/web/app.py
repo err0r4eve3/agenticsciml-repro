@@ -30,9 +30,11 @@ from agenticsciml.custom_benchmarks import (
     CUSTOM_APPROVAL_SCOPE,
     CUSTOM_BENCHMARK_CLAIM_BOUNDARY,
     CUSTOM_EVIDENCE_LEVEL,
+    CUSTOM_EVALUATOR_TRUST_LEVEL,
     CUSTOM_SYNTHESIS_LEVEL,
     create_custom_benchmark_bundle,
 )
+from agenticsciml.evidence import CLAIM_GATE_BLOCKED
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
@@ -41,6 +43,7 @@ from agenticsciml.readiness import build_readiness_report
 
 
 RunMode = Literal["mock", "real", "dry_run"]
+ClaimLevel = Literal["workflow_proxy", "paper_workflow"]
 WorkspaceScope = Literal["repo", "account", "run", "solution"]
 AssistantMode = Literal["ask", "plan", "agent"]
 ReasoningEffort = Literal["low", "medium", "high", "xhigh"]
@@ -121,6 +124,11 @@ class RunStartRequest(BaseModel):
     branch_context: dict[str, Any] = Field(default_factory=dict)
     problem_intake: dict[str, Any] = Field(default_factory=dict)
     planner_snapshot: dict[str, Any] = Field(default_factory=dict)
+    claim_level: ClaimLevel = "workflow_proxy"
+    domain_evaluator_approved: bool = False
+    domain_reviewer: str | None = Field(default=None, max_length=120)
+    domain_review_notes: str | None = Field(default=None, max_length=2000)
+    paper_benchmark_approved: bool = False
     auto_approve_evaluation: bool = True
     resume: bool = False
     background: bool = False
@@ -142,6 +150,11 @@ class ProblemIntakeRequest(BaseModel):
     agent_models: dict[str, AgentModelRequest] = Field(default_factory=dict)
     selector_panel: list[AgentModelRequest] = Field(default_factory=list, max_length=16)
     allow_custom_benchmark: bool = False
+    claim_level: ClaimLevel = "workflow_proxy"
+    domain_evaluator_approved: bool = False
+    domain_reviewer: str | None = Field(default=None, max_length=120)
+    domain_review_notes: str | None = Field(default=None, max_length=2000)
+    paper_benchmark_approved: bool = False
 
 
 class RunReadinessRequest(BaseModel):
@@ -160,6 +173,11 @@ class RunReadinessRequest(BaseModel):
     branch_context: dict[str, Any] = Field(default_factory=dict)
     problem_intake: dict[str, Any] = Field(default_factory=dict)
     planner_snapshot: dict[str, Any] = Field(default_factory=dict)
+    claim_level: ClaimLevel = "workflow_proxy"
+    domain_evaluator_approved: bool = False
+    domain_reviewer: str | None = Field(default=None, max_length=120)
+    domain_review_notes: str | None = Field(default=None, max_length=2000)
+    paper_benchmark_approved: bool = False
     real_confirmed: bool = False
 
 
@@ -181,6 +199,7 @@ class SolverChatRequest(BaseModel):
     selected_algorithm_ids: list[str] = Field(default_factory=list)
     agent_models: dict[str, AgentModelRequest] = Field(default_factory=dict)
     selector_panel: list[AgentModelRequest] = Field(default_factory=list, max_length=16)
+    claim_level: ClaimLevel = "workflow_proxy"
 
 
 class AccountCreateRequest(BaseModel):
@@ -294,6 +313,12 @@ def create_app() -> FastAPI:
         benchmark_name = benchmark_spec.name if benchmark_spec else benchmark_dir.name
         run_dir = output_dir / run_id
         readiness_report = _readiness_report_for_request(request, benchmark_dir)
+        claim_gate = readiness_report.get("claim_gate") if isinstance(readiness_report, dict) else {}
+        if isinstance(claim_gate, dict) and claim_gate.get("status") == CLAIM_GATE_BLOCKED:
+            raise HTTPException(
+                status_code=400,
+                detail="claim gate blocked launch: " + "; ".join(str(item) for item in claim_gate.get("reasons", [])),
+            )
 
         if request.mode == "dry_run":
             run_budget = _effective_run_budget(request)
@@ -323,6 +348,7 @@ def create_app() -> FastAPI:
                 ],
                 "selected_algorithm_ids": _normalized_algorithm_ids(request.selected_algorithm_ids),
                 "readiness_report": readiness_report,
+                "claim_gate": readiness_report.get("claim_gate"),
             }
 
         record = RunRecord(
@@ -487,6 +513,11 @@ def _run_orchestrator(
             problem_intake=_normalized_mapping(request.problem_intake),
             planner_snapshot=_normalized_mapping(request.planner_snapshot),
             readiness_report=dict(readiness_report),
+            claim_level=request.claim_level,
+            domain_evaluator_approved=request.domain_evaluator_approved,
+            domain_reviewer=request.domain_reviewer,
+            domain_review_notes=request.domain_review_notes,
+            paper_benchmark_approved=request.paper_benchmark_approved,
             auto_approve_evaluation=request.auto_approve_evaluation,
             resume=request.resume,
         )
@@ -538,6 +569,12 @@ def _readiness_report_for_request(
         planner_snapshot=_normalized_mapping(request.planner_snapshot),
         manual_strategy_locks=list(request.manual_strategy_locks),
         branch_context=_normalized_mapping(request.branch_context),
+        selector_panel=_selector_panel_payload_from_models(request.selector_panel),
+        claim_level=request.claim_level,
+        domain_evaluator_approved=request.domain_evaluator_approved,
+        domain_reviewer=request.domain_reviewer,
+        domain_review_notes=request.domain_review_notes,
+        paper_benchmark_approved=request.paper_benchmark_approved,
         real_confirmed=request.real_confirmed,
         real_mode_enabled=_real_web_runs_enabled(),
     )
@@ -601,6 +638,11 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
         "selected_algorithm_ids": selected_algorithm_ids,
         "problem_intake": problem_intake,
         "planner_snapshot": planner_snapshot,
+        "claim_level": request.claim_level,
+        "domain_evaluator_approved": request.domain_evaluator_approved,
+        "domain_reviewer": request.domain_reviewer,
+        "domain_review_notes": request.domain_review_notes,
+        "paper_benchmark_approved": request.paper_benchmark_approved,
         "agent_models": {
             role: config.to_dict()
             for role, config in _agent_configs_from_problem_request(request).items()
@@ -627,16 +669,25 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
             "synthesis_level": custom_problem_package["synthesis_level"],
             "evidence_level": custom_problem_package["evidence_level"],
             "approval_scope": custom_problem_package["approval_scope"],
+            "evaluator_trust_level": custom_problem_package["evaluator_trust_level"],
+            "domain_evaluator_present": custom_problem_package["domain_evaluator_present"],
+            "metric_validated_by_domain_expert": custom_problem_package[
+                "metric_validated_by_domain_expert"
+            ],
+            "paper_benchmark_equivalent": custom_problem_package["paper_benchmark_equivalent"],
+            "requires_replacement_for_scientific_claim": custom_problem_package[
+                "requires_replacement_for_scientific_claim"
+            ],
             "domain_evidence_review_required": custom_problem_package["domain_evidence_review_required"],
             "paper_level_claim_supported": custom_problem_package["paper_level_claim_supported"],
         }
         planner_snapshot["claim_boundary"] = (
-            "Custom problem intake generated deterministic autonomous EDA/evaluator synthesis. "
-            "The resulting benchmark can run as workflow proxy evidence only; domain review is "
+            "Custom problem intake generated a deterministic workflow-proxy evaluator scaffold. "
+            "The resulting custom proxy benchmark bundle can run as workflow proxy evidence only; domain review is "
             "required before any scientific or paper-level claim."
         )
         warnings.append(
-            "Created autonomous EDA/evaluator synthesis for workflow testing; domain review is required before scientific claims."
+            "Created a workflow-proxy evaluator scaffold for workflow testing; domain review is required before scientific claims."
         )
     actions: list[dict[str, object]] = [
         {
@@ -729,10 +780,15 @@ def _custom_problem_package(
     )
     return {
         "schema_version": 1,
-        "status": "autonomous_eda_evaluator_synthesized",
+        "status": "custom_proxy_benchmark_scaffolded",
         "synthesis_level": CUSTOM_SYNTHESIS_LEVEL,
         "evidence_level": CUSTOM_EVIDENCE_LEVEL,
         "approval_scope": CUSTOM_APPROVAL_SCOPE,
+        "evaluator_trust_level": CUSTOM_EVALUATOR_TRUST_LEVEL,
+        "domain_evaluator_present": False,
+        "metric_validated_by_domain_expert": False,
+        "paper_benchmark_equivalent": False,
+        "requires_replacement_for_scientific_claim": True,
         "run_allowed": True,
         "approval_required": False,
         "workflow_run_approval_required": False,
@@ -764,7 +820,7 @@ def _custom_problem_package(
             "Keep validation labels and validation file paths evaluator-only.",
             "Expose a prediction-only evaluate.py contract with a private metric.",
             "Add benchmark fidelity metadata and paper-gap notes before any run.",
-            "Treat the generated evaluator as proxy workflow evidence until a human replaces or approves the domain metric.",
+            "Treat the generated evaluator scaffold as proxy workflow evidence until a human replaces or approves the domain metric.",
         ],
         "nearest_catalog_candidates": benchmark_candidates[:3],
         "strategy_seed_suggestions": selected_algorithms,
@@ -1091,6 +1147,16 @@ def _merge_resume_request(run_id: str, request: RunStartRequest) -> RunStartRequ
             updates["problem_intake"] = dict(existing_config.problem_intake)
         if "planner_snapshot" not in explicitly_set:
             updates["planner_snapshot"] = dict(existing_config.planner_snapshot)
+        if "claim_level" not in explicitly_set:
+            updates["claim_level"] = existing_config.claim_level
+        if "domain_evaluator_approved" not in explicitly_set:
+            updates["domain_evaluator_approved"] = existing_config.domain_evaluator_approved
+        if "domain_reviewer" not in explicitly_set:
+            updates["domain_reviewer"] = existing_config.domain_reviewer
+        if "domain_review_notes" not in explicitly_set:
+            updates["domain_review_notes"] = existing_config.domain_review_notes
+        if "paper_benchmark_approved" not in explicitly_set:
+            updates["paper_benchmark_approved"] = existing_config.paper_benchmark_approved
         if "auto_approve_evaluation" not in explicitly_set:
             updates["auto_approve_evaluation"] = existing_config.auto_approve_evaluation
 
@@ -1900,6 +1966,7 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
                         "benchmark": request.selected_benchmark,
                         "mode": request.mode,
                         "account_id": resolved_account_id,
+                        "claim_level": request.claim_level,
                         "background": True,
                     },
                 }
@@ -2035,6 +2102,7 @@ def _problem_intake_request_from_chat(request: SolverChatRequest) -> ProblemInta
         agent_models=request.agent_models,
         selector_panel=request.selector_panel,
         allow_custom_benchmark=False,
+        claim_level=request.claim_level,
     )
 
 

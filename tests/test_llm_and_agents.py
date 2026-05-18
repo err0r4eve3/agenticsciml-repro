@@ -136,6 +136,9 @@ def test_data_analyst_writes_training_observation_artifacts(tmp_path: Path) -> N
     assert manifest["benchmark_name"] == "function_approx"
     assert manifest["source_mode"] in {"generated_seed0", "repo_existing"}
     assert manifest["plots"][0]["path"] == "reports/data_overview.svg"
+    assert manifest["multimodal_evidence"]["plot_artifact_generated"] is True
+    assert manifest["multimodal_evidence"]["actual_image_inputs_used"] is False
+    assert manifest["multimodal_evidence"]["analysis_mode"] == "text_artifact_summary_only"
     assert manifest["arrays"]["x_train"]["shape"] == [200, 1]
     assert manifest["arrays"]["u_train"]["shape"] == [200, 1]
     assert "val_data" not in manifest_path.read_text(encoding="utf-8")
@@ -197,6 +200,9 @@ def test_result_analyst_writes_prediction_only_observation_artifacts(tmp_path: P
     assert manifest["solution_id"] == "solution_001"
     assert manifest["privacy_boundary"] == "prediction_only_no_validation_labels"
     assert manifest["plots"][0]["path"] == "solutions/solution_001/prediction_overview.svg"
+    assert manifest["multimodal_evidence"]["plot_artifact_generated"] is True
+    assert manifest["multimodal_evidence"]["actual_image_inputs_used"] is False
+    assert manifest["multimodal_evidence"]["analysis_mode"] == "text_artifact_summary_only"
     assert manifest["arrays"]["predict_input.x_val"]["shape"] == [5, 1]
     assert manifest["arrays"]["predictions.predictions"]["shape"] == [5, 1]
     assert svg_path.exists()
