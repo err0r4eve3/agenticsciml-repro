@@ -89,7 +89,11 @@ evaluator、selector 或 champion selection 实现。
   默认仍使用后端单一 adapter；只有填写 role override 时，后端才按 role 创建模型配置。
   `reasoning_effort` 当前允许 `low | medium | high | xhigh`，并会写入配置、
   metadata 和传给支持该字段的 OpenAI-native Responses / OpenAI-compatible Chat
-  Completions provider。
+  Completions provider。未填写 override 时，后端按 role 默认 policy 生效：
+  `evaluator=0.00/high`、`root_engineer=0.10/xhigh`、`engineer=0.10/xhigh`、
+  `debugger=0.05/xhigh`、`proposer=0.55/xhigh`、`critic=0.35/high`、
+  `data_analyst=0.35/high`、`result_analyst=0.30/high`、`selector=0.05/high`、
+  `retriever=0.00/medium`。
 - `Evidence`：只读展示 `reports/selector_votes.json`、`tree.json`、
   `leaderboard.csv`、各 `solutions/solution_*/eval.json` 汇总出的 votes、loss/score、
   parent/tree summary、method tags、`policy_fidelity`、`emergence_audit` 和本地 SVG artifact。
@@ -157,7 +161,8 @@ Web API 暴露；本地开发需要打开仓库根目录时，必须显式设置
   在 `中文` / `EN` 间切换。
 - `GET /api/paper-tasks`：读取 S1 小标题、本地 benchmark 映射、reference primitive、
   local figure artifact 约定和 claim boundary。
-- `GET /api/agent-roles`：读取可配置的 agent role 列表和分层模型配置说明。
+- `GET /api/agent-roles`：读取可配置的 agent role 列表、分层模型配置说明和
+  每个 role 的默认 `temperature` / `reasoning_effort` policy。
 - `POST /api/problem-intake/plan`：从完整问题描述生成本地 benchmark 推荐、
   algorithm rankings、selected strategy seeds、run budget、`problem_intake`、
   `planner_snapshot` 和可展示的 start_run action。

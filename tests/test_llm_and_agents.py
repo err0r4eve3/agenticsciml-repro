@@ -10,11 +10,12 @@ from agenticsciml.agents import (
     EvaluatorAgent,
     ProposerAgent,
     ResultAnalystAgent,
+    RootEngineerAgent,
     SelectorAgent,
 )
 from agenticsciml.agents.base import ArtifactMissingError, InputContractError
 from agenticsciml.agents.specs import AGENT_SPECS, AgentSpec, PromptTemplate
-from agenticsciml.benchmarks import ProblemBundle
+from agenticsciml.benchmarks import BenchmarkContractFactory, ProblemBundle
 from agenticsciml.llm.base import LLMClient
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.storage import ExperimentStorage
@@ -48,6 +49,8 @@ class RecordingLLM(LLMClient):
                 "weaknesses": ["prediction-only plots do not expose labels"],
                 "next_steps": ["compare with sibling observations"],
             }
+        if schema_name == "root_engineer":
+            return {"proposal": "plain isolated baseline", "code": "class MODEL:\n    pass\n"}
         return {
             "metric_name": "validation_mse",
             "higher_is_better": False,
@@ -155,6 +158,27 @@ def test_result_analyst_writes_prediction_only_observation_artifacts(tmp_path: P
     assert "prediction_overview.svg" in llm.last_prompt
     assert "val_data" not in llm.last_prompt
     assert "u_val" not in llm.last_prompt
+
+
+def test_root_engineer_prompt_excludes_strategy_seed_context(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    llm = RecordingLLM()
+    bundle = ProblemBundle.load(Path("examples/function_approx"))
+    contract = BenchmarkContractFactory.create_contract(bundle)
+
+    RootEngineerAgent(llm, storage).generate(
+        "solution_000",
+        problem_bundle=bundle,
+        contract=contract,
+        guidelines="Follow local evaluator only.",
+        data_report="Data analyst saw smooth x_train observations.",
+        problem_intake_context="User wants sparse sensors and no future leakage.",
+    )
+
+    assert "User wants sparse sensors" in llm.last_prompt
+    assert "strategy seed catalogs" in llm.last_prompt
+    assert "Human/Planner Selected Strategy Seeds" not in llm.last_prompt
+    assert "paper_cylinder_bandlimited_filter" not in llm.last_prompt
 
 
 def test_selector_votes_always_include_best_and_tie_break_by_loss(tmp_path: Path) -> None:

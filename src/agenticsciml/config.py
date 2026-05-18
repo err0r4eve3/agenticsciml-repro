@@ -171,6 +171,67 @@ class AgentConfig:
         )
 
 
+DEFAULT_AGENT_ROLE_MODEL_SETTINGS: dict[str, dict[str, Any]] = {
+    "data_analyst": {
+        "temperature": 0.35,
+        "reasoning_effort": "high",
+        "rationale": "Analysis needs synthesis across benchmark files while staying evidence-bound.",
+    },
+    "evaluator": {
+        "temperature": 0.0,
+        "reasoning_effort": "high",
+        "rationale": "Evaluation contracts must be deterministic, but contract validation is high-stakes.",
+    },
+    "root_engineer": {
+        "temperature": 0.1,
+        "reasoning_effort": "xhigh",
+        "rationale": "Root solution generation should be stable and deeply reasoned.",
+    },
+    "retriever": {
+        "temperature": 0.0,
+        "reasoning_effort": "medium",
+        "rationale": "Retrieval selection should be deterministic and comparatively lightweight.",
+    },
+    "proposer": {
+        "temperature": 0.55,
+        "reasoning_effort": "xhigh",
+        "rationale": "Proposal generation is the main creative search step and benefits from deeper reasoning.",
+    },
+    "critic": {
+        "temperature": 0.35,
+        "reasoning_effort": "high",
+        "rationale": "Critique needs alternative hypotheses without drifting away from constraints.",
+    },
+    "engineer": {
+        "temperature": 0.1,
+        "reasoning_effort": "xhigh",
+        "rationale": "Patch generation must be reproducible and carefully reasoned.",
+    },
+    "debugger": {
+        "temperature": 0.05,
+        "reasoning_effort": "xhigh",
+        "rationale": "Repair work should be conservative and inspect failure evidence deeply.",
+    },
+    "result_analyst": {
+        "temperature": 0.3,
+        "reasoning_effort": "high",
+        "rationale": "Result summaries need interpretation while preserving evidence boundaries.",
+    },
+    "selector": {
+        "temperature": 0.05,
+        "reasoning_effort": "high",
+        "rationale": "Parent selection should be stable but still reason over tradeoffs.",
+    },
+}
+
+
+def agent_role_default_model_settings(role: str) -> dict[str, Any]:
+    settings = DEFAULT_AGENT_ROLE_MODEL_SETTINGS.get(role)
+    if settings is None:
+        return {"temperature": 0.0, "reasoning_effort": "medium", "rationale": "Unknown role default."}
+    return dict(settings)
+
+
 @dataclass(slots=True)
 class EvolutionConfig:
     max_iterations: int = 1

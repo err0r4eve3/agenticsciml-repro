@@ -2,6 +2,64 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-18 Paper Workflow P0 Alignment
+
+本次修复论文工作流对齐审查中的三个 P0 边界：root baseline 隔离、evaluation
+approval pause、以及非库内问题不能被错误当作已有 benchmark 运行。
+
+已实现：
+
+- Root Engineer prompt 不再包含 human/planner selected strategy seeds；这些策略种子只允许
+  进入后续 proposer/engineer mutation 上下文，避免污染单 agent root baseline。
+- Orchestrator 新增 `evaluation_approval.json` 审批门。默认 mock 流程仍可
+  `auto_approved` 兼容现有测试和 CLI；当 `auto_approve_evaluation=False` 或 CLI 使用
+  `--require-evaluation-approval` 时，会在 root 生成前暂停，要求人工审查
+  `evaluation_contract.json`、`reports/evaluation_contract.md`、data analysis 和 benchmark
+  文件后把状态改为 `approved`，再用 `--resume` 继续。
+- Resume 支持 evaluation-pending pre-root run：该状态不写空 solution-tree checkpoint，
+  避免把“尚未生成 root”的审批暂停误报为合法 solution tree。
+- `POST /api/problem-intake/plan` 增加 `allow_custom_benchmark=true` 的 scaffold-only
+  返回。它列出新 benchmark bundle 所需文件和评价合约要求，但不创建 evaluator、不返回
+  `start_run` action，也不把未知问题映射为可运行事实。
+
+验证：
+
+- `tests/test_llm_and_agents.py` 覆盖 root prompt 不包含策略种子段。
+- `tests/test_orchestrator_cli.py` 覆盖 evaluation approval pending、approval 后 resume
+  生成 root。
+- `tests/test_web_api.py` 覆盖 custom benchmark scaffold-only response。
+
+边界：
+
+- 本轮仍未实现 paper-style Data Analyst 自动 EDA 后合成全新 evaluator；非库内问题现在只
+  能进入安全脚手架和人工评审流程。
+- Selector ensemble 仍是当前单 selector 多票机制，不是 GPT/Grok/Gemini 多 provider
+  panel。
+
+## 2026-05-18 Role Model Policy Defaults
+
+本次把角色级模型设置从“全员默认 0.0 temperature + 无 reasoning effort”改为按角色
+职责分配的默认 policy。
+
+已实现：
+
+- 确定性/执行类 role 使用低温：`evaluator=0.00/high`、
+  `root_engineer=0.10/xhigh`、`engineer=0.10/xhigh`、`debugger=0.05/xhigh`、
+  `selector=0.05/high`、`retriever=0.00/medium`。
+- 创造/分析类 role 使用更高温度：`proposer=0.55/xhigh`、
+  `critic=0.35/high`、`data_analyst=0.35/high`、`result_analyst=0.30/high`。
+- Orchestrator 在没有用户 override 时直接使用这些 defaults；用户传入 role override
+  时仍优先生效。
+- `GET /api/agent-roles` 和 `GET /api/solver/settings` 会返回 role default policy，
+  前端 Layered model routing 面板也会展示对应默认值。
+- `run_metadata.json` 的 `agent_models` 现在记录所有 role 的有效 policy，并用
+  `source=role_default | request_override` 标识来源。
+
+边界：
+
+- role default 不改变模型 ID；没有 role model override 时仍使用后端当前 adapter/model。
+- Mock run 继续只验证工作流形状，不产生科学结论。
+
 ## 2026-05-18 Reasoning Effort Routing
 
 本次把 role-level `reasoning_effort` 从审计字段升级为真实 provider 参数。

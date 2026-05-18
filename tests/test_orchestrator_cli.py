@@ -15,7 +15,7 @@ from agenticsciml.evidence import (
     SCIENTIFIC_CLAIM_NOT_SUPPORTED,
 )
 from agenticsciml.llm.mock import MockLLMClient
-from agenticsciml.orchestrator import AgenticSciMLOrchestrator
+from agenticsciml.orchestrator import AgenticSciMLOrchestrator, EvaluationApprovalRequired
 from agenticsciml.state import SolutionNode, SolutionScore
 
 
@@ -203,6 +203,64 @@ def test_manual_strategy_lock_inspector_blocks_unfaithful_solution(tmp_path: Pat
         and event["metadata"]["passed"] is False
         for event in trace_events
     )
+
+
+def test_evaluation_approval_gate_pauses_before_root_generation(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="approval-pending-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+        auto_approve_evaluation=False,
+    )
+
+    with pytest.raises(EvaluationApprovalRequired, match="Evaluation approval required"):
+        AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+
+    run_dir = tmp_path / "approval-pending-run"
+    approval = json.loads((run_dir / "evaluation_approval.json").read_text(encoding="utf-8"))
+    assert approval["status"] == "pending"
+    assert approval["approval_required"] is True
+    assert approval["contract_hash"]
+    assert (run_dir / "evaluation_contract.json").exists()
+    assert not (run_dir / "solutions" / "solution_000").exists()
+    assert not (run_dir / "checkpoint.json").exists()
+
+
+def test_evaluation_approval_resume_creates_root_after_manual_approval(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="approval-resume-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+        auto_approve_evaluation=False,
+    )
+    with pytest.raises(EvaluationApprovalRequired):
+        AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+    run_dir = tmp_path / "approval-resume-run"
+    approval_path = run_dir / "evaluation_approval.json"
+    approval = json.loads(approval_path.read_text(encoding="utf-8"))
+    approval["status"] = "approved"
+    approval_path.write_text(json.dumps(approval), encoding="utf-8")
+    resume_config = ExperimentConfig(
+        experiment_id="approval-resume-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+        auto_approve_evaluation=False,
+        resume=True,
+    )
+
+    resumed_run_dir = AgenticSciMLOrchestrator(resume_config, MockLLMClient()).run()
+
+    tree = json.loads((resumed_run_dir / "tree.json").read_text(encoding="utf-8"))
+    checkpoint = json.loads((resumed_run_dir / "checkpoint.json").read_text(encoding="utf-8"))
+    assert tree["nodes"][0]["node_id"] == "solution_000"
+    assert checkpoint["phase"] == "completed"
+    assert checkpoint["nodes"][0]["node_id"] == "solution_000"
 
 
 def test_parallel_mutations_run_as_parallel_child_jobs(tmp_path: Path) -> None:

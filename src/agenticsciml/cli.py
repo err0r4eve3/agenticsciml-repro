@@ -76,6 +76,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         output_dir=Path(args.output_dir).resolve(),
         evolution=evolution,
         use_mock=args.mock,
+        auto_approve_evaluation=not args.require_evaluation_approval,
         resume=args.resume,
     )
     llm = MockLLMClient() if args.mock else OpenAIAdapter()
@@ -203,6 +204,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--random-seed", type=int, default=0)
     run.add_argument("--no-branch-context", action="store_true")
     run.add_argument("--selector-vote-count", type=int, default=3)
+    run.add_argument(
+        "--require-evaluation-approval",
+        action="store_true",
+        help="write evaluation_approval.json and pause before root generation until status is approved",
+    )
     run.add_argument("--resume", action="store_true")
     run.set_defaults(func=cmd_run)
 

@@ -21,7 +21,13 @@ from agenticsciml.agents import (
 from agenticsciml.agents.base import StructuredOutputError
 from agenticsciml.algorithm_catalog import list_algorithms
 from agenticsciml.benchmarks import BenchmarkContractFactory, ProblemBundle
-from agenticsciml.config import AgentConfig, EvaluationContract, ExperimentConfig
+from agenticsciml.config import (
+    DEFAULT_AGENT_ROLE_MODEL_SETTINGS,
+    AgentConfig,
+    EvaluationContract,
+    ExperimentConfig,
+    agent_role_default_model_settings,
+)
 from agenticsciml.evidence import evidence_metadata_for_run
 from agenticsciml.emergence_audit import audit_solution_emergence
 from agenticsciml.execution.runner import RunResult
@@ -61,6 +67,12 @@ BRANCH_INTENTS = (
     "loss_weighting_or_sampling",
     "regularization_or_simplicity",
 )
+
+EVALUATION_APPROVAL_SCHEMA_VERSION = 1
+
+
+class EvaluationApprovalRequired(RuntimeError):
+    pass
 
 
 class AgenticSciMLOrchestrator:
@@ -149,11 +161,16 @@ class AgenticSciMLOrchestrator:
 
     def _temperature_for_role(self, role: str) -> float:
         agent_config = self._agent_config_for_role(role)
-        return agent_config.temperature if agent_config else 0.0
+        if agent_config:
+            return agent_config.temperature
+        return float(agent_role_default_model_settings(role)["temperature"])
 
     def _reasoning_effort_for_role(self, role: str) -> str | None:
         agent_config = self._agent_config_for_role(role)
-        return agent_config.reasoning_effort if agent_config else None
+        if agent_config and agent_config.reasoning_effort is not None:
+            return agent_config.reasoning_effort
+        value = agent_role_default_model_settings(role).get("reasoning_effort")
+        return str(value) if value is not None else None
 
     def _llm_for_role(self, role: str) -> LLMClient:
         if role in self._role_llms:
@@ -200,11 +217,19 @@ class AgenticSciMLOrchestrator:
         if resumed:
             contract = self._load_or_create_contract()
             self.contract = contract
-            self._validate_loaded_checkpoint(contract)
+            if self.loaded_checkpoint is not None:
+                self._validate_loaded_checkpoint(contract)
+            if not self.nodes:
+                data_report = self._read_data_report()
+                self._require_evaluation_approval(contract)
+                root = self._create_root(contract, data_report)
+                self.nodes.append(root)
+                self._save_checkpoint("root_created")
         else:
             data_report = self.data_analyst.analyze(self.config.benchmark_dir)
             contract = self.evaluator.create_contract(self.problem_bundle, data_report)
             self.contract = contract
+            self._require_evaluation_approval(contract)
 
             root = self._create_root(contract, data_report)
             self.nodes.append(root)
@@ -252,6 +277,13 @@ class AgenticSciMLOrchestrator:
             return False
         checkpoint_path = self.storage.run_dir / "checkpoint.json"
         if not checkpoint_path.exists():
+            if (self.storage.run_dir / "evaluation_approval.json").exists():
+                self.storage.record_trace(
+                    "workflow_span",
+                    "agenticsciml.resume.pre_root_loaded",
+                    {"checkpoint_phase": "evaluation_pending", "node_count": 0},
+                )
+                return True
             raise FileNotFoundError(f"Cannot resume without checkpoint: {checkpoint_path}")
         payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
         self.loaded_checkpoint = payload
@@ -338,6 +370,114 @@ class AgenticSciMLOrchestrator:
                     f"Node {node.node_id} contract hash mismatch: "
                     f"{node.contract_hash} != {contract.contract_hash}"
                 )
+
+    def _read_data_report(self) -> str:
+        data_report_path = self.storage.run_dir / "reports" / "data_analysis.md"
+        return data_report_path.read_text(encoding="utf-8") if data_report_path.exists() else ""
+
+    def _evaluation_approval_payload(
+        self,
+        *,
+        status: str,
+        contract: EvaluationContract,
+        note: str,
+    ) -> dict[str, object]:
+        return {
+            "schema_version": EVALUATION_APPROVAL_SCHEMA_VERSION,
+            "status": status,
+            "benchmark_name": contract.benchmark_name,
+            "contract_hash": contract.contract_hash,
+            "approval_required": status != "auto_approved",
+            "review_files": [
+                "evaluation_contract.json",
+                "reports/evaluation_contract.md",
+                "reports/data_analysis.md",
+                "Problem.md",
+                "Requirements.md",
+                "Evaluation.md",
+                "guidelines.md",
+            ],
+            "next_action": (
+                "Set status to 'approved' only after reviewing the evaluator, guidelines, "
+                "claim boundary, data split, and metric contract; then resume the run."
+            ),
+            "claim_boundary": (
+                "Approval only confirms the local evaluation contract is acceptable for this run. "
+                "It does not prove paper-score reproduction or scientific discovery."
+            ),
+            "note": note,
+        }
+
+    def _require_evaluation_approval(self, contract: EvaluationContract) -> None:
+        approval_path = self.storage.run_dir / "evaluation_approval.json"
+        if approval_path.exists():
+            payload = json.loads(approval_path.read_text(encoding="utf-8"))
+            if payload.get("schema_version") != EVALUATION_APPROVAL_SCHEMA_VERSION:
+                raise ValueError("Evaluation approval schema_version is unsupported")
+            if payload.get("benchmark_name") != contract.benchmark_name:
+                raise ValueError(
+                    "Evaluation approval benchmark mismatch: "
+                    f"stored {payload.get('benchmark_name')}, expected {contract.benchmark_name}"
+                )
+            if payload.get("contract_hash") != contract.contract_hash:
+                raise ValueError(
+                    "Evaluation approval contract hash mismatch: "
+                    f"stored {payload.get('contract_hash')}, expected {contract.contract_hash}"
+                )
+            status = str(payload.get("status", ""))
+            if status in {"approved", "auto_approved"}:
+                self.storage.record_trace(
+                    "guardrail_span",
+                    "agenticsciml.evaluation_approval.passed",
+                    {"status": status, "contract_hash": contract.contract_hash, "passed": True},
+                )
+                return
+            if status == "rejected":
+                self.storage.record_trace(
+                    "guardrail_span",
+                    "agenticsciml.evaluation_approval.rejected",
+                    {"contract_hash": contract.contract_hash, "passed": False},
+                )
+                raise RuntimeError("Evaluation contract was rejected; root generation is blocked.")
+            self.storage.record_trace(
+                "guardrail_span",
+                "agenticsciml.evaluation_approval.required",
+                {"status": status or "pending", "contract_hash": contract.contract_hash, "passed": False},
+            )
+            raise EvaluationApprovalRequired(
+                "Evaluation approval required before root generation: review evaluation_approval.json "
+                "and set status to 'approved' before resuming."
+            )
+
+        if self.config.auto_approve_evaluation:
+            payload = self._evaluation_approval_payload(
+                status="auto_approved",
+                contract=contract,
+                note="auto_approve_evaluation=True; no manual evaluator pause was requested.",
+            )
+            self.storage.save_json("evaluation_approval.json", payload)
+            self.storage.record_trace(
+                "guardrail_span",
+                "agenticsciml.evaluation_approval.auto_approved",
+                {"contract_hash": contract.contract_hash, "passed": True},
+            )
+            return
+
+        payload = self._evaluation_approval_payload(
+            status="pending",
+            contract=contract,
+            note="auto_approve_evaluation=False; root generation is paused until manual approval.",
+        )
+        self.storage.save_json("evaluation_approval.json", payload)
+        self.storage.record_trace(
+            "guardrail_span",
+            "agenticsciml.evaluation_approval.required",
+            {"contract_hash": contract.contract_hash, "passed": False},
+        )
+        raise EvaluationApprovalRequired(
+            "Evaluation approval required before root generation: review evaluation_approval.json "
+            "and set status to 'approved' before resuming."
+        )
 
     def _next_solution_id(self) -> str:
         return self._reserve_solution_ids(1)[0]
@@ -504,7 +644,6 @@ class AgenticSciMLOrchestrator:
             guidelines=self._guidelines_text(),
             data_report=data_report,
             problem_intake_context=self._problem_intake_context(),
-            strategy_seed_context=self._strategy_seed_context(),
         )
         return self._execute_analyze_node(
             solution_id,
@@ -1246,10 +1385,13 @@ class AgenticSciMLOrchestrator:
         elif isinstance(budget, dict):
             metadata["llm_budget"] = budget
         role_models: dict[str, object] = {}
-        for role, agent_config in sorted(self.config.agents.items()):
+        roles = sorted(set(DEFAULT_AGENT_ROLE_MODEL_SETTINGS) | set(self.config.agents))
+        for role in roles:
+            agent_config = self._effective_agent_config_for_role(role)
             role_llm = self._llm_for_role(role)
             role_models[role] = {
                 **agent_config.to_dict(),
+                "source": "request_override" if role in self.config.agents else "role_default",
                 "actual_model": getattr(
                     role_llm,
                     "model",
@@ -1263,6 +1405,26 @@ class AgenticSciMLOrchestrator:
             }
         metadata["agent_models"] = role_models
         return metadata
+
+    def _effective_agent_config_for_role(self, role: str) -> AgentConfig:
+        agent_config = self._agent_config_for_role(role)
+        if agent_config is not None:
+            if agent_config.reasoning_effort is not None:
+                return agent_config
+            settings = agent_role_default_model_settings(role)
+            return AgentConfig(
+                role=role,
+                model=agent_config.model,
+                temperature=agent_config.temperature,
+                reasoning_effort=str(settings["reasoning_effort"]),
+            )
+        settings = agent_role_default_model_settings(role)
+        return AgentConfig(
+            role=role,
+            model="default",
+            temperature=float(settings["temperature"]),
+            reasoning_effort=str(settings["reasoning_effort"]),
+        )
 
 
 def _failure_phase(command: list[str]) -> str:

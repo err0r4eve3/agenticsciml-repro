@@ -20,7 +20,12 @@ from pydantic import BaseModel, Field
 
 from agenticsciml.algorithm_catalog import ALGORITHM_CLAIM_BOUNDARY, list_algorithms
 from agenticsciml.benchmarks import REPO_ROOT, benchmark_for_path, list_benchmarks
-from agenticsciml.config import AgentConfig, EvolutionConfig, ExperimentConfig
+from agenticsciml.config import (
+    AgentConfig,
+    EvolutionConfig,
+    ExperimentConfig,
+    agent_role_default_model_settings,
+)
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
@@ -50,17 +55,26 @@ PLANNED_AGENT_CALLS = (
     "result_analyst",
 )
 
-AGENT_ROLES: tuple[dict[str, str], ...] = (
-    {"role": "data_analyst", "label": "Data Analyst", "kind": "analysis"},
-    {"role": "evaluator", "label": "Evaluator", "kind": "contract"},
-    {"role": "root_engineer", "label": "Root Engineer", "kind": "generation"},
-    {"role": "retriever", "label": "Retriever", "kind": "retrieval"},
-    {"role": "proposer", "label": "Proposer", "kind": "planning"},
-    {"role": "critic", "label": "Critic", "kind": "review"},
-    {"role": "engineer", "label": "Engineer", "kind": "patch"},
-    {"role": "debugger", "label": "Debugger", "kind": "repair"},
-    {"role": "result_analyst", "label": "Result Analyst", "kind": "analysis"},
-    {"role": "selector", "label": "Selector", "kind": "selection"},
+def _agent_role(role: str, label: str, kind: str) -> dict[str, object]:
+    return {
+        "role": role,
+        "label": label,
+        "kind": kind,
+        "default_model_settings": agent_role_default_model_settings(role),
+    }
+
+
+AGENT_ROLES: tuple[dict[str, object], ...] = (
+    _agent_role("data_analyst", "Data Analyst", "analysis"),
+    _agent_role("evaluator", "Evaluator", "contract"),
+    _agent_role("root_engineer", "Root Engineer", "generation"),
+    _agent_role("retriever", "Retriever", "retrieval"),
+    _agent_role("proposer", "Proposer", "planning"),
+    _agent_role("critic", "Critic", "review"),
+    _agent_role("engineer", "Engineer", "patch"),
+    _agent_role("debugger", "Debugger", "repair"),
+    _agent_role("result_analyst", "Result Analyst", "analysis"),
+    _agent_role("selector", "Selector", "selection"),
 )
 
 ASSISTANT_MODE_MODEL_SETTINGS: dict[AssistantMode, dict[str, object]] = {
@@ -99,6 +113,7 @@ class RunStartRequest(BaseModel):
     branch_context: dict[str, Any] = Field(default_factory=dict)
     problem_intake: dict[str, Any] = Field(default_factory=dict)
     planner_snapshot: dict[str, Any] = Field(default_factory=dict)
+    auto_approve_evaluation: bool = True
     resume: bool = False
     background: bool = False
     real_confirmed: bool = False
@@ -116,6 +131,7 @@ class ProblemIntakeRequest(BaseModel):
     max_children_per_node: int = Field(default=10, ge=1, le=200)
     selected_algorithm_ids: list[str] = Field(default_factory=list)
     agent_models: dict[str, AgentModelRequest] = Field(default_factory=dict)
+    allow_custom_benchmark: bool = False
 
 
 class RunReadinessRequest(BaseModel):
@@ -454,6 +470,7 @@ def _run_orchestrator(
             problem_intake=_normalized_mapping(request.problem_intake),
             planner_snapshot=_normalized_mapping(request.planner_snapshot),
             readiness_report=dict(readiness_report),
+            auto_approve_evaluation=request.auto_approve_evaluation,
             resume=request.resume,
         )
         llm = MockLLMClient() if request.mode == "mock" else OpenAIAdapter()
@@ -549,6 +566,41 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
         selected_algorithm_ids=selected_algorithm_ids,
         run_budget={**run_budget, "mode": request.mode},
     )
+    custom_problem_package = None
+    run_allowed = True
+    actions: list[dict[str, object]] = [
+        {
+            "type": "start_run",
+            "payload": {
+                "benchmark": recommended_name,
+                "mode": request.mode,
+                "target_solution_count": request.target_solution_count,
+                "max_iterations": max_iterations,
+                "parallel_mutations": request.parallel_mutations,
+                "selector_vote_count": request.selector_vote_count,
+                "max_children_per_node": request.max_children_per_node,
+                "selected_algorithm_ids": selected_algorithm_ids,
+                "problem_intake": problem_intake,
+                "planner_snapshot": planner_snapshot,
+                "agent_models": {
+                    role: config.to_dict()
+                    for role, config in _agent_configs_from_problem_request(request).items()
+                },
+                "background": True,
+            },
+        }
+    ]
+    if request.allow_custom_benchmark:
+        custom_problem_package = _custom_problem_package(
+            request,
+            benchmark_candidates=benchmark_candidates,
+            algorithm_rankings=algorithm_rankings,
+        )
+        run_allowed = False
+        actions = []
+        warnings.append(
+            "Custom benchmark mode is scaffold-only: create and approve a local evaluator bundle before starting a run."
+        )
     return {
         "problem_summary": _compact_summary(request.problem_statement),
         "problem_intake": problem_intake,
@@ -565,28 +617,9 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
             role: config.to_dict()
             for role, config in _agent_configs_from_problem_request(request).items()
         },
-        "actions": [
-            {
-                "type": "start_run",
-                "payload": {
-                    "benchmark": recommended_name,
-                    "mode": request.mode,
-                    "target_solution_count": request.target_solution_count,
-                    "max_iterations": max_iterations,
-                    "parallel_mutations": request.parallel_mutations,
-                    "selector_vote_count": request.selector_vote_count,
-                    "max_children_per_node": request.max_children_per_node,
-                    "selected_algorithm_ids": selected_algorithm_ids,
-                    "problem_intake": problem_intake,
-                    "planner_snapshot": planner_snapshot,
-                    "agent_models": {
-                        role: config.to_dict()
-                        for role, config in _agent_configs_from_problem_request(request).items()
-                    },
-                    "background": True,
-                },
-            }
-        ],
+        "custom_problem_package": custom_problem_package,
+        "run_allowed": run_allowed,
+        "actions": actions,
         "warnings": warnings,
         "claim_boundary": (
             "Planner recommendations and strategy seeds are not scientific evidence. "
@@ -628,6 +661,50 @@ def _planner_snapshot(
         "claim_boundary": (
             "Problem-intake planning is a controlled mapping to local benchmark and strategy seed catalogs. "
             "It is not evaluator synthesis and is not scientific evidence."
+        ),
+    }
+
+
+def _custom_problem_package(
+    request: ProblemIntakeRequest,
+    *,
+    benchmark_candidates: list[dict[str, object]],
+    algorithm_rankings: list[dict[str, object]],
+) -> dict[str, object]:
+    selected_algorithms = [
+        item["algorithm"]
+        for item in algorithm_rankings
+        if item.get("selected")
+    ][:6]
+    return {
+        "schema_version": 1,
+        "status": "scaffold_only",
+        "run_allowed": False,
+        "approval_required": True,
+        "suggested_bundle_root": "examples/custom_problem_<slug>",
+        "problem_summary": _compact_summary(request.problem_statement),
+        "required_files": [
+            "Problem.md",
+            "Requirements.md",
+            "Evaluation.md",
+            "Data_config.json",
+            "generate_data.py",
+            "evaluate.py",
+            "guidelines.md",
+        ],
+        "evaluator_contract_requirements": [
+            "Define deterministic train and validation data generation or checked-in data artifacts.",
+            "Keep validation labels and validation file paths evaluator-only.",
+            "Expose a prediction-only evaluate.py contract with a private metric.",
+            "Add benchmark fidelity metadata and paper-gap notes before any run.",
+            "Require human approval of evaluation_approval.json before root generation.",
+        ],
+        "nearest_catalog_candidates": benchmark_candidates[:3],
+        "strategy_seed_suggestions": selected_algorithms,
+        "claim_boundary": (
+            "This is a scaffold preview for a new local benchmark. It does not create files, "
+            "does not synthesize an evaluator, and cannot support a run until a benchmark bundle "
+            "is reviewed, registered, and approved."
         ),
     }
 
@@ -861,7 +938,7 @@ def _validate_run_start_request(request: RunStartRequest) -> None:
 
 
 def _validate_agent_model_roles(agent_models: dict[str, AgentModelRequest]) -> None:
-    known_roles = {role["role"] for role in AGENT_ROLES}
+    known_roles = {str(role["role"]) for role in AGENT_ROLES}
     unknown_roles = sorted(set(agent_models) - known_roles)
     if unknown_roles:
         raise HTTPException(
@@ -924,6 +1001,8 @@ def _merge_resume_request(run_id: str, request: RunStartRequest) -> RunStartRequ
             updates["problem_intake"] = dict(existing_config.problem_intake)
         if "planner_snapshot" not in explicitly_set:
             updates["planner_snapshot"] = dict(existing_config.planner_snapshot)
+        if "auto_approve_evaluation" not in explicitly_set:
+            updates["auto_approve_evaluation"] = existing_config.auto_approve_evaluation
 
     return request.model_copy(update=updates)
 
@@ -1814,6 +1893,7 @@ def _problem_intake_request_from_chat(request: SolverChatRequest) -> ProblemInta
         max_children_per_node=request.max_children_per_node,
         selected_algorithm_ids=request.selected_algorithm_ids,
         agent_models=request.agent_models,
+        allow_custom_benchmark=False,
     )
 
 
@@ -1825,6 +1905,10 @@ def _solver_settings_payload() -> dict[str, object]:
         "assistant_modes": {
             mode: dict(settings)
             for mode, settings in ASSISTANT_MODE_MODEL_SETTINGS.items()
+        },
+        "agent_role_defaults": {
+            str(role["role"]): dict(role["default_model_settings"])
+            for role in AGENT_ROLES
         },
     }
 

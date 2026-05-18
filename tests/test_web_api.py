@@ -94,6 +94,13 @@ def test_solver_settings_expose_mode_defaults() -> None:
         "plan": {"reasoning_effort": "high", "temperature": 0.35},
         "agent": {"reasoning_effort": "high", "temperature": 0.1},
     }
+    assert payload["agent_role_defaults"]["proposer"] == {
+        "temperature": 0.55,
+        "reasoning_effort": "xhigh",
+        "rationale": "Proposal generation is the main creative search step and benefits from deeper reasoning.",
+    }
+    assert payload["agent_role_defaults"]["debugger"]["temperature"] == 0.05
+    assert payload["agent_role_defaults"]["debugger"]["reasoning_effort"] == "xhigh"
 
 
 def test_agent_roles_expose_layered_model_contract() -> None:
@@ -107,6 +114,9 @@ def test_agent_roles_expose_layered_model_contract() -> None:
     assert roles["data_analyst"]["label"] == "Data Analyst"
     assert roles["engineer"]["kind"] == "patch"
     assert roles["selector"]["label"] == "Selector"
+    assert roles["proposer"]["default_model_settings"]["temperature"] == 0.55
+    assert roles["evaluator"]["default_model_settings"]["temperature"] == 0.0
+    assert roles["engineer"]["default_model_settings"]["reasoning_effort"] == "xhigh"
     assert "reasoning_effort" in payload["reasoning_effort_note"]
 
 
@@ -147,6 +157,37 @@ def test_problem_intake_plans_benchmark_and_strategy_seeds() -> None:
         item["algorithm"]["id"] == "paper_cylinder_bandlimited_filter" and item["selected"]
         for item in payload["algorithm_rankings"]
     )
+
+
+def test_problem_intake_custom_benchmark_returns_scaffold_only() -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/problem-intake/plan",
+        json={
+            "problem_statement": (
+                "I want to solve a new inverse scattering SciML problem with complex-valued sensor fields, "
+                "unknown material coefficients, and a private finite-element validation metric."
+            ),
+            "requirements": "Do not map this to an existing toy benchmark; outline a new evaluator bundle.",
+            "evaluation_criteria": "Private relative error on hidden complex fields and coefficient recovery.",
+            "data_description": "Synthetic source/receiver pairs and measured boundary responses.",
+            "allow_custom_benchmark": True,
+            "selected_algorithm_ids": ["pinn_residual_minimizer"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    scaffold = payload["custom_problem_package"]
+    assert payload["run_allowed"] is False
+    assert payload["actions"] == []
+    assert scaffold["status"] == "scaffold_only"
+    assert scaffold["run_allowed"] is False
+    assert "evaluate.py" in scaffold["required_files"]
+    assert scaffold["strategy_seed_suggestions"][0]["id"] == "pinn_residual_minimizer"
+    assert any("scaffold-only" in warning for warning in payload["warnings"])
+    assert "does not synthesize an evaluator" in scaffold["claim_boundary"]
 
 
 def test_problem_intake_rejects_unknown_algorithm() -> None:
@@ -271,6 +312,10 @@ def test_web_mock_run_writes_required_artifacts(tmp_path: Path) -> None:
     assert (run_dir / "trace_summary.json").exists()
     assert payload["metadata"]["run_state"] == "exported"
     assert payload["trace_summary"]["quality_gate"]["passed"] is True
+    metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    assert metadata["agent_models"]["proposer"]["source"] == "role_default"
+    assert metadata["agent_models"]["proposer"]["temperature"] == 0.55
+    assert metadata["agent_models"]["proposer"]["reasoning_effort"] == "xhigh"
 
 
 def test_web_mock_run_persists_readiness_report(tmp_path: Path) -> None:
@@ -413,7 +458,8 @@ def test_web_mock_run_persists_problem_intake_and_prompt_context(tmp_path: Path)
     assert "User Problem Intake Context (Non-Contract)" in prompt
     assert "non-authoritative run context" in prompt
     assert "Solve a discontinuous function approximation problem" in prompt
-    assert "non-authoritative strategy seeds" in prompt
+    assert "Root baseline isolation" in prompt
+    assert "non-authoritative strategy seeds" not in prompt
 
 
 def test_web_resume_preserves_seed_models_and_problem_context(tmp_path: Path) -> None:

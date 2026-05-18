@@ -19,7 +19,6 @@ class RootEngineerAgent(AgentBase):
         guidelines: str,
         data_report: str | None = None,
         problem_intake_context: str | None = None,
-        strategy_seed_context: str | None = None,
     ) -> str:
         self.require_inputs(
             {
@@ -29,12 +28,12 @@ class RootEngineerAgent(AgentBase):
                 "guidelines": guidelines,
                 "data_report": data_report,
                 "problem_intake_context": problem_intake_context,
-                "strategy_seed_context": strategy_seed_context,
             }
         )
         prompt = (
             "Generate the root single-agent baseline solution.py. "
-            "Do not use KB or multi-agent debate. Return JSON with proposal and code.\n\n"
+            "Do not use KB, strategy seed catalogs, or multi-agent debate. "
+            "Return JSON with proposal and code.\n\n"
             "## User Problem Intake Context (Non-Contract)\n\n"
             f"{problem_intake_context or 'No user problem-intake context provided.'}\n\n"
             "## ProblemBundle Summary\n\n"
@@ -51,8 +50,8 @@ class RootEngineerAgent(AgentBase):
             f"{guidelines[:2500]}\n\n"
             "## data_analysis.md\n\n"
             f"{data_report or 'No data analysis report available.'}\n\n"
-            "## Human/Planner Selected Strategy Seeds\n\n"
-            f"{strategy_seed_context or 'No strategy seeds selected.'}\n\n"
+            "Root baseline isolation: human/planner-selected strategy seeds are intentionally excluded "
+            "from this prompt. They may guide later mutations only after the baseline exists.\n\n"
             "Forbidden actions: do not read validation data, do not modify evaluator files, "
             "do not use network or subprocess calls.\n"
             "Contract reminder: solution.py must define class MODEL and support "

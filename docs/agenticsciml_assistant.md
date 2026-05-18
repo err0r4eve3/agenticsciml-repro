@@ -102,6 +102,21 @@ repo-local skill 位于 `.agents/skills/agenticsciml-chatui-operator/SKILL.md`�
 adapter 时，role-level `reasoning_effort` 会传给 provider；若兼容 endpoint 不支持
 该字段，应让 provider 错误显式暴露，而不是把审计配置伪装成已生效。
 
+默认 role-level 设置：
+
+| role | temperature | reasoning_effort | 用途 |
+| --- | ---: | --- | --- |
+| data_analyst | 0.35 | high | 证据约束下的分析综合 |
+| evaluator | 0.00 | high | 确定性 evaluation contract |
+| root_engineer | 0.10 | xhigh | 稳定生成根解 |
+| retriever | 0.00 | medium | 确定性检索 |
+| proposer | 0.55 | xhigh | 创造性方案搜索 |
+| critic | 0.35 | high | 替代假设和风险审查 |
+| engineer | 0.10 | xhigh | 稳定 patch 生成 |
+| debugger | 0.05 | xhigh | 保守修复失败 |
+| result_analyst | 0.30 | high | 结果解释和边界总结 |
+| selector | 0.05 | high | 稳定 parent selection |
+
 当前允许 action：
 
 - `start_run`

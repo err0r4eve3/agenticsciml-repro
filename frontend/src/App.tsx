@@ -234,6 +234,11 @@ type AgentRole = {
   role: string;
   label: string;
   kind: string;
+  default_model_settings?: {
+    temperature: number;
+    reasoning_effort: ReasoningEffort;
+    rationale?: string;
+  };
 };
 
 type AgentModelConfig = {
@@ -287,6 +292,14 @@ type SolverSettings = {
   reasoning_efforts: ReasoningEffort[];
   temperature_range: [number, number];
   assistant_modes: Record<AssistantMode, ModeModelSettings>;
+  agent_role_defaults?: Record<
+    string,
+    {
+      temperature: number;
+      reasoning_effort: ReasoningEffort;
+      rationale?: string;
+    }
+  >;
 };
 
 type SolverAction = {
@@ -340,6 +353,11 @@ const DEFAULT_SOLVER_SETTINGS: SolverSettings = {
     plan: { reasoning_effort: "high", temperature: 0.35 },
     agent: { reasoning_effort: "high", temperature: 0.1 }
   }
+};
+
+const FALLBACK_AGENT_MODEL_SETTINGS = {
+  temperature: 0,
+  reasoning_effort: "medium" as ReasoningEffort
 };
 
 const api = {
@@ -1097,7 +1115,8 @@ export function App() {
 
   function updateAgentModel(role: string, next: Partial<AgentModelConfig>) {
     setAgentModels((current) => {
-      const existing = current[role] ?? { model: "", temperature: 0, reasoning_effort: "medium" as const };
+      const defaults = defaultAgentModelConfig(role, agentRoles);
+      const existing = current[role] ?? defaults;
       const merged = { ...existing, ...next };
       if (!merged.model.trim()) {
         const rest = { ...current };
@@ -2265,7 +2284,7 @@ function RoleModelPanel({
             </thead>
             <tbody>
               {roles.map((role) => {
-                const config = agentModels[role.role] ?? { model: "", temperature: 0, reasoning_effort: "medium" as const };
+                const config = agentModels[role.role] ?? defaultAgentModelConfig(role.role, roles);
                 return (
                   <tr key={role.role}>
                     <td>{role.label}</td>
@@ -2466,6 +2485,17 @@ function payloadAgentModels(value: unknown, fallback: Record<string, AgentModelC
     };
   }
   return Object.keys(result).length ? result : fallback;
+}
+
+function defaultAgentModelConfig(role: string, roles: AgentRole[]): AgentModelConfig {
+  const settings = roles.find((item) => item.role === role)?.default_model_settings ?? FALLBACK_AGENT_MODEL_SETTINGS;
+  return {
+    model: "",
+    temperature: Number.isFinite(settings.temperature) ? settings.temperature : FALLBACK_AGENT_MODEL_SETTINGS.temperature,
+    reasoning_effort: isReasoningEffort(settings.reasoning_effort)
+      ? settings.reasoning_effort
+      : FALLBACK_AGENT_MODEL_SETTINGS.reasoning_effort
+  };
 }
 
 function isReasoningEffort(value: unknown): value is ReasoningEffort {
