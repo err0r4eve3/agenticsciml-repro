@@ -18,7 +18,10 @@ synthesis bundle。
   `eda/data_eda.py`、`eda/data_eda_seed0.json` 和 `eda/data_overview_seed0.svg`。
 - `evaluator_synthesis.json` 记录 typed synthesis spec：problem class、data schema、
   metric schema、prediction-only/private-label 边界、EDA artifacts、quality gates 和
-  synthesis limits。
+  synthesis limits。边界字段统一为 `evidence_level=workflow_proxy`、
+  `approval_scope=workflow_proxy_run_only`、`workflow_proxy_run_requires_human_review=false`、
+  `scientific_claim_requires_human_domain_review=true` 和
+  `paper_level_claim_supported=false`。
 - `eda/data_eda.py` 是可复跑的 training-data-only EDA 脚本；`eda/data_eda_seed0.json`
   和 `eda/data_overview_seed0.svg` 是 seed0 proxy data 的可审计 EDA 输出。
 - `Benchmark_spec.json` 可被 `ProblemBundle.load()` 动态识别，不需要把每个临时问题
@@ -30,7 +33,8 @@ synthesis bundle。
   evaluator 合成证据与最终 contract 脱钩。
 - Planner 返回的 `start_run` action 会指向生成的 custom benchmark，并保留
   `problem_intake`、`planner_snapshot`、algorithm strategy seeds、account namespace 和
-  run budget。
+  run budget。`planner_snapshot.generated_custom_benchmark` 同步记录 evidence/review
+  boundary，避免把可运行 workflow proxy 误读成 domain-reviewed evaluator。
 
 验证：
 

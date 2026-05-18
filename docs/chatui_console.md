@@ -74,6 +74,9 @@ evaluator、selector 或 champion selection 实现。
   `allow_custom_benchmark=true`，后端会在当前账号 namespace 下生成一个 deterministic
   autonomous EDA + proxy evaluator synthesis bundle，并返回指向该 bundle 的
   `start_run` action；该路径仍只支持 workflow proxy evidence，不支持科学结论。
+  其中 `workflow_run_approval_required=false` 只表示 proxy workflow 可直接启动；
+  `domain_evidence_review_required=true` 表示科学或 paper-level claim 必须先人工审查/
+  替换 domain evaluator。
 - `Run Config`：可设置 `target_solution_count`、`max_iterations`、
   `parallel_mutations`、`selector_vote_count`、`max_children_per_node` 和 `mode`。
   `target_solution_count` 是 UI 便捷输入；后端会转换成确定性的
@@ -183,7 +186,10 @@ Web API 暴露；本地开发需要打开仓库根目录时，必须显式设置
   `eda/data_eda_seed0.json` 和 `eda/data_overview_seed0.svg`，再返回指向该 custom
   benchmark 的 action。生成 evaluator 的 claim boundary 固定为 proxy / workflow-only，
   并且最终 `evaluation_contract.json` 会把 synthesis/EDA artifacts 纳入 source
-  manifest digest。
+  manifest digest。API 同时返回 `evidence_level=workflow_proxy`、
+  `approval_scope=workflow_proxy_run_only`、`domain_evidence_review_required=true` 和
+  `paper_level_claim_supported=false`，前端必须把这些字段展示为证据边界，而不是运行
+  blocker。
 - `POST /api/run-readiness/preview`：启动前生成确定性 pre-run audit。它只检查本地
   benchmark fidelity、claim boundary、selected strategy seeds、人工 strategy locks、
   branch inheritance expectations、run budget、real-mode gates 和 artifact capture

@@ -188,6 +188,16 @@ def test_problem_intake_custom_benchmark_generates_runnable_evaluator(tmp_path: 
     assert payload["actions"][0]["payload"]["benchmark"] == scaffold["benchmark"]
     assert scaffold["status"] == "autonomous_eda_evaluator_synthesized"
     assert scaffold["run_allowed"] is True
+    assert scaffold["workflow_run_approval_required"] is False
+    assert scaffold["domain_evidence_review_required"] is True
+    assert scaffold["paper_level_claim_supported"] is False
+    assert scaffold["scientific_claim_supported"] is False
+    assert scaffold["approval_scope"] == "workflow_proxy_run_only"
+    assert scaffold["evidence_level"] == "workflow_proxy"
+    generated = payload["planner_snapshot"]["generated_custom_benchmark"]
+    assert generated["evidence_level"] == "workflow_proxy"
+    assert generated["domain_evidence_review_required"] is True
+    assert generated["paper_level_claim_supported"] is False
     benchmark_dir = Path(scaffold["benchmark_dir"])
     assert benchmark_dir.exists()
     assert "evaluate.py" in scaffold["required_files"]
@@ -200,12 +210,15 @@ def test_problem_intake_custom_benchmark_generates_runnable_evaluator(tmp_path: 
     assert synthesis["metric"]["primary"] == "custom_proxy_relative_l2"
     assert synthesis["data_schema"]["prediction_input"] == "x_val"
     assert synthesis["quality_gates"]["human_domain_review_required"] is True
+    assert synthesis["review_boundary"]["workflow_proxy_run_requires_human_review"] is False
+    assert synthesis["review_boundary"]["scientific_claim_requires_human_domain_review"] is True
+    assert synthesis["review_boundary"]["paper_level_claim_supported"] is False
     seed_eda_path = benchmark_dir / "eda" / "data_eda_seed0.json"
     seed_eda = json.loads(seed_eda_path.read_text(encoding="utf-8"))
     assert seed_eda["privacy_boundary"] == "training_data_only_no_private_labels"
     assert "val_data" not in seed_eda_path.read_text(encoding="utf-8")
     assert scaffold["strategy_seed_suggestions"][0]["id"] == "pinn_residual_minimizer"
-    assert any("auto-generated proxy evaluator" in warning for warning in payload["warnings"])
+    assert any("autonomous EDA/evaluator synthesis" in warning for warning in payload["warnings"])
     assert "workflow proxy" in scaffold["claim_boundary"]
 
     run_payload = dict(payload["actions"][0]["payload"])

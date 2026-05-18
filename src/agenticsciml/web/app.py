@@ -27,7 +27,10 @@ from agenticsciml.config import (
     agent_role_default_model_settings,
 )
 from agenticsciml.custom_benchmarks import (
+    CUSTOM_APPROVAL_SCOPE,
     CUSTOM_BENCHMARK_CLAIM_BOUNDARY,
+    CUSTOM_EVIDENCE_LEVEL,
+    CUSTOM_SYNTHESIS_LEVEL,
     create_custom_benchmark_bundle,
 )
 from agenticsciml.llm.mock import MockLLMClient
@@ -622,13 +625,18 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
             "status": custom_problem_package["status"],
             "fidelity_level": "proxy",
             "synthesis_level": custom_problem_package["synthesis_level"],
+            "evidence_level": custom_problem_package["evidence_level"],
+            "approval_scope": custom_problem_package["approval_scope"],
+            "domain_evidence_review_required": custom_problem_package["domain_evidence_review_required"],
+            "paper_level_claim_supported": custom_problem_package["paper_level_claim_supported"],
         }
         planner_snapshot["claim_boundary"] = (
-            "Custom problem intake generated a deterministic proxy evaluator bundle. "
-            "It can exercise the AgenticSciML workflow, but it is workflow proxy evidence only."
+            "Custom problem intake generated deterministic autonomous EDA/evaluator synthesis. "
+            "The resulting benchmark can run as workflow proxy evidence only; domain review is "
+            "required before any scientific or paper-level claim."
         )
         warnings.append(
-            "Created an auto-generated proxy evaluator bundle for workflow testing; it is not scientific validation."
+            "Created autonomous EDA/evaluator synthesis for workflow testing; domain review is required before scientific claims."
         )
     actions: list[dict[str, object]] = [
         {
@@ -722,9 +730,15 @@ def _custom_problem_package(
     return {
         "schema_version": 1,
         "status": "autonomous_eda_evaluator_synthesized",
-        "synthesis_level": "autonomous_eda_evaluator_synthesis",
+        "synthesis_level": CUSTOM_SYNTHESIS_LEVEL,
+        "evidence_level": CUSTOM_EVIDENCE_LEVEL,
+        "approval_scope": CUSTOM_APPROVAL_SCOPE,
         "run_allowed": True,
         "approval_required": False,
+        "workflow_run_approval_required": False,
+        "domain_evidence_review_required": True,
+        "paper_level_claim_supported": False,
+        "scientific_claim_supported": False,
         "human_review_recommended": True,
         "benchmark": bundle.benchmark,
         "benchmark_dir": str(bundle.benchmark_dir),
@@ -737,11 +751,13 @@ def _custom_problem_package(
             "Data_config.json",
             "Benchmark_spec.json",
             "evaluator_synthesis.json",
+            "evaluator_synthesis.md",
             "generate_data.py",
             "evaluate.py",
             "guidelines.md",
             "eda/data_eda.py",
             "eda/data_eda_seed0.json",
+            "eda/data_overview_seed0.svg",
         ],
         "evaluator_contract_requirements": [
             "Define deterministic train and validation data generation or checked-in data artifacts.",

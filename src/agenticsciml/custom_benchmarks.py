@@ -20,13 +20,15 @@ CUSTOM_EDA_SCRIPT = "eda/data_eda.py"
 CUSTOM_EDA_SEED0 = "eda/data_eda_seed0.json"
 CUSTOM_EDA_SVG = "eda/data_overview_seed0.svg"
 CUSTOM_SYNTHESIS_LEVEL = "autonomous_eda_evaluator_synthesis"
+CUSTOM_EVIDENCE_LEVEL = "workflow_proxy"
+CUSTOM_APPROVAL_SCOPE = "workflow_proxy_run_only"
 
 CUSTOM_BENCHMARK_CLAIM_BOUNDARY = (
-    "This auto-generated evaluator is a deterministic workflow proxy derived from "
-    "the user's problem text. It is useful for exercising the AgenticSciML loop, "
-    "artifact plumbing, and private-label evaluation boundary. It is not a "
-    "scientific validation of the real problem, not a paper-like benchmark, and "
-    "not evidence for paper-score reproduction."
+    "This auto-generated EDA/evaluator synthesis bundle is a deterministic workflow "
+    "proxy derived from the user's problem text. It is useful for exercising the "
+    "AgenticSciML loop, artifact plumbing, training-only EDA, and private-label "
+    "evaluation boundary. It is not a scientific validation of the real problem, "
+    "not a paper-like benchmark, and not evidence for paper-score reproduction."
 )
 
 
@@ -186,6 +188,8 @@ def _evaluator_synthesis_payload(
     return {
         "schema_version": 1,
         "synthesis_level": CUSTOM_SYNTHESIS_LEVEL,
+        "evidence_level": CUSTOM_EVIDENCE_LEVEL,
+        "approval_scope": CUSTOM_APPROVAL_SCOPE,
         "benchmark": benchmark,
         "problem_digest": problem_digest,
         "problem_class": problem_class,
@@ -234,6 +238,13 @@ def _evaluator_synthesis_payload(
             "paper_score_reproduction_supported": False,
             "scientific_claim_supported": False,
         },
+        "review_boundary": {
+            "workflow_proxy_run_requires_human_review": False,
+            "scientific_claim_requires_human_domain_review": True,
+            "paper_level_claim_supported": False,
+            "domain_evaluator_replacement_recommended": True,
+            "approval_scope": CUSTOM_APPROVAL_SCOPE,
+        },
         "synthesis_limits": [
             "The generated data model is a deterministic proxy inferred from text, not the real experiment.",
             "The evaluator does not implement private finite-element, lab, or paper-scale metrics.",
@@ -250,6 +261,8 @@ def _evaluator_synthesis_md(payload: dict[str, Any]) -> str:
     return (
         "# Autonomous Evaluator Synthesis\n\n"
         f"- synthesis_level: `{payload['synthesis_level']}`\n"
+        f"- evidence_level: `{payload['evidence_level']}`\n"
+        f"- approval_scope: `{payload['approval_scope']}`\n"
         f"- benchmark: `{payload['benchmark']}`\n"
         f"- problem_class: `{payload['problem_class']}`\n"
         f"- primary_metric: `{metric['primary']}`\n"
@@ -259,6 +272,10 @@ def _evaluator_synthesis_md(payload: dict[str, Any]) -> str:
         f"- prediction_input: `{data_schema['prediction_input']}`\n"
         f"- private_target: `{data_schema['private_target']}`\n"
         f"- human_domain_review_required: `{quality_gates['human_domain_review_required']}`\n\n"
+        "## Review Boundary\n\n"
+        "- workflow proxy runs do not require human domain review.\n"
+        "- scientific or paper-level claims require human domain review and a domain evaluator replacement.\n"
+        "- paper-level claims are not supported by this generated bundle.\n\n"
         "## Boundary\n\n"
         f"{payload['claim_boundary']}\n"
     )
