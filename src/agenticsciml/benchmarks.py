@@ -8,7 +8,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agenticsciml.custom_benchmarks import CUSTOM_BENCHMARK_SPEC
+from agenticsciml.custom_benchmarks import (
+    CUSTOM_BENCHMARK_SPEC,
+    CUSTOM_EDA_SCRIPT,
+    CUSTOM_EDA_SEED0,
+    CUSTOM_EDA_SVG,
+    CUSTOM_EVALUATOR_SYNTHESIS,
+    CUSTOM_EVALUATOR_SYNTHESIS_MD,
+)
 from agenticsciml.config import DataConfig, EvaluationContract
 from agenticsciml.evidence import evidence_metadata_for_run
 from agenticsciml.execution.runner import run_command
@@ -544,6 +551,17 @@ def _benchmark_source_manifest(
         "generate_data.py": _file_digest(benchmark_dir / "generate_data.py"),
         "guidelines.md": _file_digest(benchmark_dir / "guidelines.md"),
     }
+    for relative_path in (
+        CUSTOM_BENCHMARK_SPEC,
+        CUSTOM_EVALUATOR_SYNTHESIS,
+        CUSTOM_EVALUATOR_SYNTHESIS_MD,
+        CUSTOM_EDA_SCRIPT,
+        CUSTOM_EDA_SEED0,
+        CUSTOM_EDA_SVG,
+    ):
+        artifact_path = benchmark_dir / relative_path
+        if artifact_path.exists():
+            artifacts[relative_path] = _file_digest(artifact_path)
 
     train_file = benchmark_dir / train_path
     validation_file = benchmark_dir / validation_path

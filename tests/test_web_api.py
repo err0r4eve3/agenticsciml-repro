@@ -186,10 +186,24 @@ def test_problem_intake_custom_benchmark_generates_runnable_evaluator(tmp_path: 
     assert payload["actions"][0]["type"] == "start_run"
     assert payload["actions"][0]["payload"]["account_id"] == "custom-user"
     assert payload["actions"][0]["payload"]["benchmark"] == scaffold["benchmark"]
-    assert scaffold["status"] == "generated_proxy_evaluator"
+    assert scaffold["status"] == "autonomous_eda_evaluator_synthesized"
     assert scaffold["run_allowed"] is True
-    assert Path(scaffold["benchmark_dir"]).exists()
+    benchmark_dir = Path(scaffold["benchmark_dir"])
+    assert benchmark_dir.exists()
     assert "evaluate.py" in scaffold["required_files"]
+    assert "evaluator_synthesis.json" in scaffold["required_files"]
+    assert "eda/data_eda.py" in scaffold["created_files"]
+    assert "eda/data_eda_seed0.json" in scaffold["created_files"]
+    synthesis = json.loads((benchmark_dir / "evaluator_synthesis.json").read_text(encoding="utf-8"))
+    assert synthesis["synthesis_level"] == "autonomous_eda_evaluator_synthesis"
+    assert synthesis["problem_class"] == "inverse_reconstruction"
+    assert synthesis["metric"]["primary"] == "custom_proxy_relative_l2"
+    assert synthesis["data_schema"]["prediction_input"] == "x_val"
+    assert synthesis["quality_gates"]["human_domain_review_required"] is True
+    seed_eda_path = benchmark_dir / "eda" / "data_eda_seed0.json"
+    seed_eda = json.loads(seed_eda_path.read_text(encoding="utf-8"))
+    assert seed_eda["privacy_boundary"] == "training_data_only_no_private_labels"
+    assert "val_data" not in seed_eda_path.read_text(encoding="utf-8")
     assert scaffold["strategy_seed_suggestions"][0]["id"] == "pinn_residual_minimizer"
     assert any("auto-generated proxy evaluator" in warning for warning in payload["warnings"])
     assert "workflow proxy" in scaffold["claim_boundary"]
@@ -211,6 +225,10 @@ def test_problem_intake_custom_benchmark_generates_runnable_evaluator(tmp_path: 
     run_dir = Path(run["run_dir"])
     assert (run_dir / "evaluation_contract.json").exists()
     assert (run_dir / "solutions" / "solution_000" / "eval.json").exists()
+    contract = json.loads((run_dir / "evaluation_contract.json").read_text(encoding="utf-8"))
+    assert "evaluator_synthesis.json" in contract["benchmark_source_manifest"]["artifacts"]
+    assert "eda/data_eda.py" in contract["benchmark_source_manifest"]["artifacts"]
+    assert "eda/data_eda_seed0.json" in contract["benchmark_source_manifest"]["artifacts"]
     metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
     assert metadata["benchmark_fidelity_level"] == "proxy"
     assert metadata["scientific_claim"] == "not_supported"

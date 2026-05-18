@@ -72,8 +72,8 @@ evaluator、selector 或 champion selection 实现。
   benchmark 候选、算法 seed 候选、run budget 和 start_run action；这一步是受控规划层，
   默认不会生成新 evaluator 或绕过 contract。若显式传入
   `allow_custom_benchmark=true`，后端会在当前账号 namespace 下生成一个 deterministic
-  proxy evaluator bundle，并返回指向该 bundle 的 `start_run` action；该路径仍只支持
-  workflow proxy evidence，不支持科学结论。
+  autonomous EDA + proxy evaluator synthesis bundle，并返回指向该 bundle 的
+  `start_run` action；该路径仍只支持 workflow proxy evidence，不支持科学结论。
 - `Run Config`：可设置 `target_solution_count`、`max_iterations`、
   `parallel_mutations`、`selector_vote_count`、`max_children_per_node` 和 `mode`。
   `target_solution_count` 是 UI 便捷输入；后端会转换成确定性的
@@ -178,9 +178,12 @@ Web API 暴露；本地开发需要打开仓库根目录时，必须显式设置
   `planner_snapshot` 和可展示的 start_run action。若请求体显式设置
   `allow_custom_benchmark=true`，API 会写入 account-scoped custom benchmark bundle：
   `Problem.md`、`Requirements.md`、`Evaluation.md`、`Data_config.json`、
-  `Benchmark_spec.json`、`generate_data.py`、`evaluate.py` 和 `guidelines.md`，再返回指向
-  该 custom benchmark 的 action。生成 evaluator 的 claim boundary 固定为 proxy /
-  workflow-only。
+  `Benchmark_spec.json`、`evaluator_synthesis.json`、`evaluator_synthesis.md`、
+  `generate_data.py`、`evaluate.py`、`guidelines.md`、`eda/data_eda.py`、
+  `eda/data_eda_seed0.json` 和 `eda/data_overview_seed0.svg`，再返回指向该 custom
+  benchmark 的 action。生成 evaluator 的 claim boundary 固定为 proxy / workflow-only，
+  并且最终 `evaluation_contract.json` 会把 synthesis/EDA artifacts 纳入 source
+  manifest digest。
 - `POST /api/run-readiness/preview`：启动前生成确定性 pre-run audit。它只检查本地
   benchmark fidelity、claim boundary、selected strategy seeds、人工 strategy locks、
   branch inheritance expectations、run budget、real-mode gates 和 artifact capture

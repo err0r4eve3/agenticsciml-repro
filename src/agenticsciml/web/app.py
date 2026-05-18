@@ -621,6 +621,7 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
             "benchmark_dir": custom_problem_package["benchmark_dir"],
             "status": custom_problem_package["status"],
             "fidelity_level": "proxy",
+            "synthesis_level": custom_problem_package["synthesis_level"],
         }
         planner_snapshot["claim_boundary"] = (
             "Custom problem intake generated a deterministic proxy evaluator bundle. "
@@ -720,7 +721,8 @@ def _custom_problem_package(
     )
     return {
         "schema_version": 1,
-        "status": "generated_proxy_evaluator",
+        "status": "autonomous_eda_evaluator_synthesized",
+        "synthesis_level": "autonomous_eda_evaluator_synthesis",
         "run_allowed": True,
         "approval_required": False,
         "human_review_recommended": True,
@@ -734,9 +736,12 @@ def _custom_problem_package(
             "Evaluation.md",
             "Data_config.json",
             "Benchmark_spec.json",
+            "evaluator_synthesis.json",
             "generate_data.py",
             "evaluate.py",
             "guidelines.md",
+            "eda/data_eda.py",
+            "eda/data_eda_seed0.json",
         ],
         "evaluator_contract_requirements": [
             "Define deterministic train and validation data generation or checked-in data artifacts.",

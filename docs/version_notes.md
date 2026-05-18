@@ -2,9 +2,10 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
-## 2026-05-18 Custom Proxy Evaluator Generation
+## 2026-05-18 Autonomous EDA And Evaluator Synthesis
 
-本次把非 catalog 问题从 scaffold-only 推进到可运行的本地 proxy evaluator 生成。
+本次把非 catalog 问题从单一 proxy evaluator 推进到可审计的自主 EDA + evaluator
+synthesis bundle。
 
 已实现：
 
@@ -12,12 +13,21 @@
   namespace 下生成 `.agenticsciml/accounts/<account_id>/benchmarks/<custom_id>/`
   benchmark bundle。
 - 生成的 bundle 包含 `Problem.md`、`Requirements.md`、`Evaluation.md`、
-  `Data_config.json`、`Benchmark_spec.json`、`generate_data.py`、`evaluate.py` 和
-  `guidelines.md`。
+  `Data_config.json`、`Benchmark_spec.json`、`evaluator_synthesis.json`、
+  `evaluator_synthesis.md`、`generate_data.py`、`evaluate.py`、`guidelines.md`、
+  `eda/data_eda.py`、`eda/data_eda_seed0.json` 和 `eda/data_overview_seed0.svg`。
+- `evaluator_synthesis.json` 记录 typed synthesis spec：problem class、data schema、
+  metric schema、prediction-only/private-label 边界、EDA artifacts、quality gates 和
+  synthesis limits。
+- `eda/data_eda.py` 是可复跑的 training-data-only EDA 脚本；`eda/data_eda_seed0.json`
+  和 `eda/data_overview_seed0.svg` 是 seed0 proxy data 的可审计 EDA 输出。
 - `Benchmark_spec.json` 可被 `ProblemBundle.load()` 动态识别，不需要把每个临时问题
   写入 checked-in `BENCHMARKS` catalog。
 - `generate_data.py` 生成确定性的训练/验证代理数据；`evaluate.py` 使用私有验证标签
   计算 `custom_proxy_relative_l2`，继续走 prediction-only evaluation boundary。
+- `evaluation_contract.json` 的 benchmark source manifest 会绑定
+  `evaluator_synthesis.json`、`evaluator_synthesis.md` 和 EDA artifacts 的 digest，避免
+  evaluator 合成证据与最终 contract 脱钩。
 - Planner 返回的 `start_run` action 会指向生成的 custom benchmark，并保留
   `problem_intake`、`planner_snapshot`、algorithm strategy seeds、account namespace 和
   run budget。
@@ -25,13 +35,14 @@
 验证：
 
 - `tests/test_web_api.py::test_problem_intake_custom_benchmark_generates_runnable_evaluator`
-  覆盖 custom problem 生成 evaluator bundle 后可立即启动 mock run，并写出
-  `evaluation_contract.json` 与 `solutions/solution_000/eval.json`。
+  覆盖 custom problem 生成 autonomous EDA/evaluator synthesis bundle 后可立即启动 mock
+  run，并写出 `evaluation_contract.json` 与 `solutions/solution_000/eval.json`，且
+  contract source manifest 绑定 synthesis/EDA artifacts。
 
 边界：
 
-- 自动 evaluator 是 deterministic workflow proxy，只能证明 AgenticSciML loop、artifact
-  plumbing、private-label evaluation boundary 可运行。
+- 自动 EDA/evaluator synthesis 是 deterministic workflow proxy，只能证明 AgenticSciML
+  loop、artifact plumbing、training-only EDA 和 private-label evaluation boundary 可运行。
 - 它不是 paper-like benchmark，不支持科学结论、paper score reproduction 或真实有限元
   指标声明；需要人工替换/审查 domain evaluator 后才能提升证据等级。
 
