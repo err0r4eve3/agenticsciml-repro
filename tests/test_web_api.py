@@ -206,6 +206,7 @@ def test_run_readiness_preview_audits_proxy_claims_and_strategy_seeds() -> None:
     assert payload["manual_strategy_locks"][0]["inspection"] == {"required_terms": ["piecewise"]}
     assert "planning/readiness_report.json" in payload["artifact_capture_requirements"]
     assert "solutions/*/policy_fidelity_report.json" in payload["artifact_capture_requirements"]
+    assert "solutions/*/emergence_report.json" in payload["artifact_capture_requirements"]
     serialized = json.dumps(payload)
     assert "chain_of_thought" not in serialized
     assert "private_reasoning" not in serialized
@@ -577,6 +578,17 @@ def test_selector_votes_and_solutions_are_read_only_evidence(tmp_path: Path) -> 
         ),
         encoding="utf-8",
     )
+    (run_dir / "solutions" / "solution_000" / "emergence_report.json").write_text(
+        json.dumps(
+            {
+                "auditor_version": "emergence_audit.v1",
+                "claim_level": "not_assessed",
+                "blocking_gaps": ["root_solution_not_emergent"],
+                "claim_boundary": "candidate only",
+            }
+        ),
+        encoding="utf-8",
+    )
     (run_dir / "tree.json").write_text(
         json.dumps(
             {
@@ -632,6 +644,13 @@ def test_selector_votes_and_solutions_are_read_only_evidence(tmp_path: Path) -> 
     assert payload["solutions"][0]["loss"] == 0.25
     assert payload["solutions"][0]["method_tags"] == ["baseline"]
     assert payload["solutions"][0]["policy_fidelity"] == {"available": False}
+    assert payload["solutions"][0]["emergence_audit"] == {
+        "available": True,
+        "auditor_version": "emergence_audit.v1",
+        "claim_level": "not_assessed",
+        "blocking_gap_count": 1,
+        "claim_boundary": "candidate only",
+    }
     assert {figure["path"] for figure in payload["figures"]} == {
         "reports/data_overview.svg",
         "solutions/solution_000/prediction_overview.svg",

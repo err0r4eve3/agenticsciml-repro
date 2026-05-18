@@ -194,6 +194,9 @@ Phase 4: Champion export
   selector ensemble。
 - `RetrievalQueryBuilder` 用 benchmark metadata、parent analysis、failure kind、method tags、score trend 和 leaderboard top-k 构造 KB query；`use_kb` 与 `random_kb` 可用于 ablation。
 - `SolutionNode` 持久化 selector/retriever 需要的结构化元数据，包括 `method_tags`、`failure_kind`、`score_delta_from_parent`、`num_debug_attempts`、`benchmark_name` 和 `contract_hash`。
+- `EmergenceAudit` 会为每个 solution 写入 `emergence_report.json`，只给出
+  `candidate_emergent` 等保守标签；它检查 KB/catalog overlap、prior-result 证据、
+  score improvement 和 policy fidelity，不输出论文级 proved emergent discovery。
 - `trace_summary.json` 汇总 `trace.jsonl`，用 required span types 和 guardrail failures 形成最小 trace quality gate。
 - `run_metadata.json` 汇总 wall time、champion、solution count 和按 role 聚合的 LLM 调用统计。
 

@@ -23,6 +23,7 @@ from agenticsciml.algorithm_catalog import list_algorithms
 from agenticsciml.benchmarks import BenchmarkContractFactory, ProblemBundle
 from agenticsciml.config import AgentConfig, EvaluationContract, ExperimentConfig
 from agenticsciml.evidence import evidence_metadata_for_run
+from agenticsciml.emergence_audit import audit_solution_emergence
 from agenticsciml.execution.runner import RunResult
 from agenticsciml.execution.sandbox import prepare_solution_workspace, train_and_evaluate
 from agenticsciml.llm.base import LLMClient
@@ -916,7 +917,7 @@ class AgenticSciMLOrchestrator:
         score_delta = None
         if parent_node and parent_node.score and score:
             score_delta = score.value - parent_node.score.value
-        return SolutionNode(
+        node = SolutionNode(
             node_id=solution_id,
             parent_id=parent_id,
             workspace=str(workspace),
@@ -932,6 +933,38 @@ class AgenticSciMLOrchestrator:
             score_delta_from_parent=score_delta,
             num_debug_attempts=debug_attempts,
         )
+        self._write_emergence_report(node, parent_node)
+        return node
+
+    def _write_emergence_report(
+        self,
+        node: SolutionNode,
+        parent_node: SolutionNode | None,
+    ) -> None:
+        root_node = self._root_node() or (node if node.parent_id is None else None)
+        report = audit_solution_emergence(
+            node=node,
+            parent_node=parent_node,
+            root_node=root_node,
+            benchmark_dir=self.config.benchmark_dir,
+            strategy_seed_ids=list(self.config.strategy_seed_ids),
+        )
+        self.storage.save_json(Path("solutions") / node.node_id / "emergence_report.json", report)
+        self.storage.record_trace(
+            "tool_span",
+            "emergence_audit",
+            {
+                "solution_id": node.node_id,
+                "claim_level": report["claim_level"],
+                "blocking_gap_count": len(report["blocking_gaps"]),
+            },
+        )
+
+    def _root_node(self) -> SolutionNode | None:
+        for node in self.nodes:
+            if node.parent_id is None:
+                return node
+        return None
 
     def _inspect_then_train_and_evaluate(
         self,

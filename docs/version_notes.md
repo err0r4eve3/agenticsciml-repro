@@ -2,6 +2,46 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-18 Candidate Emergence Audit
+
+本次根据 NotebookLM 对 AgenticSciML emergent discovery 定义的证据表，新增保守的
+候选涌现审计层。ChatGPT Pro 复核已准备非敏感 prompt，但本轮被 Chrome 登录态阻塞，
+页面显示会话过期；因此代码实现依据当前仓库事实和 NotebookLM 的来源综合，不把 Pro
+作为已完成复核证据。
+
+已实现：
+
+- 新增 `agenticsciml.emergence_audit`。它对每个 solution 的 proposal、analysis、
+  engineering summary、method tags、KB entries、algorithm catalog、parent/root score
+  和 `policy_fidelity_report.json` 做确定性审计。
+- Orchestrator 在每个 evaluated/failed node 形成后写入
+  `solutions/<id>/emergence_report.json`，并记录 `tool_span=emergence_audit`。
+- 审计报告只允许保守标签：`not_assessed`、`kb_direct`、`catalog_seeded`、
+  `prior_result_adapted`、`implementation_unfaithful` 和 `candidate_emergent`。
+  当前不会输出 `proved_emergent_discovery`。
+- `candidate_emergent` 需要同时满足：低 KB/catalog 直接重叠、有 prior-result 适配证据、
+  相对 parent 的 evaluator score 改善、且 policy fidelity artifact 存在并通过。
+- `GET /api/runs/{id}/solutions` 返回 `emergence_audit` 摘要；solution artifact index
+  增加 `emergence_report.json`。
+- 前端 Solution loss/tree 表新增 emergence claim 列，显示保守标签和 blocking gap 数量。
+- readiness artifact capture requirements 增加
+  `solutions/*/emergence_report.json`。
+
+验证：
+
+- `tests/test_emergence_audit.py` 覆盖 missing artifacts、direct KB match 和
+  candidate-emergent 三种判定。
+- `tests/test_orchestrator_cli.py` 覆盖 mock run 会生成 per-solution
+  `emergence_report.json`，且不会产生强 discovery claim。
+- `tests/test_web_api.py` 覆盖 solution summary 和 readiness artifact requirement。
+
+边界：
+
+- 该审计只提供候选标签，不是论文级涌现发现证明。
+- Mock run 仍必须保持 `scientific_claim=not_supported`。
+- 真正接近论文声明还需要 real LLM、多 seed、KB/no-KB/random-KB ablation、失败样本审查
+  、物理/可视一致性检查和外部复核。
+
 ## 2026-05-18 Strategy Fidelity Inspector
 
 本次根据 NotebookLM 对 ATHENA Inspector / AgenticSciML KB symptom mapping 的建议，

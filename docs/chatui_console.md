@@ -91,7 +91,7 @@ evaluator、selector 或 champion selection 实现。
   该字段的 OpenAI-compatible chat provider。
 - `Evidence`：只读展示 `reports/selector_votes.json`、`tree.json`、
   `leaderboard.csv`、各 `solutions/solution_*/eval.json` 汇总出的 votes、loss/score、
-  parent/tree summary、method tags 和本地 SVG artifact。
+  parent/tree summary、method tags、`policy_fidelity`、`emergence_audit` 和本地 SVG artifact。
 - `Local figures`：优先列出 `reports/data_overview.svg` 与
   `solutions/*/prediction_overview.svg`。未来 loss curve artifact 可按同样路径规则接入。
 

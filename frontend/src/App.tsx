@@ -160,6 +160,11 @@ type SolutionSummary = {
   method_tags: string[];
   failure_kind?: string | null;
   num_debug_attempts?: number | null;
+  emergence_audit?: {
+    available: boolean;
+    claim_level?: string | null;
+    blocking_gap_count?: number;
+  };
   workspace: string;
   artifacts: ArtifactEntry[];
 };
@@ -2371,6 +2376,7 @@ function SolutionsTable({ payload }: { payload: SolutionsPayload | null }) {
             <th>loss/score</th>
             <th>delta</th>
             <th>tags</th>
+            <th>emergence</th>
           </tr>
         </thead>
         <tbody>
@@ -2383,17 +2389,26 @@ function SolutionsTable({ payload }: { payload: SolutionsPayload | null }) {
               <td>{formatScore(solution.loss ?? solution.score)}</td>
               <td>{formatScore(solution.score_delta_from_parent)}</td>
               <td>{solution.method_tags.slice(0, 3).join(", ") || "none"}</td>
+              <td>{formatEmergenceClaim(solution.emergence_audit)}</td>
             </tr>
           ))}
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={7}>选择包含 tree.json 的 run 后显示 solution tree summary。</td>
+              <td colSpan={8}>选择包含 tree.json 的 run 后显示 solution tree summary。</td>
             </tr>
           ) : null}
         </tbody>
       </table>
     </div>
   );
+}
+
+function formatEmergenceClaim(
+  audit: SolutionSummary["emergence_audit"]
+): string {
+  if (!audit?.available) return "none";
+  const gaps = audit.blocking_gap_count ?? 0;
+  return gaps ? `${audit.claim_level ?? "unknown"} (${gaps})` : audit.claim_level ?? "unknown";
 }
 
 function FigureArtifactsView({ figures }: { figures: ArtifactEntry[] }) {

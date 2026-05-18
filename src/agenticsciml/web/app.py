@@ -1246,6 +1246,7 @@ def _solution_summary(
     method_tags = node.get("method_tags")
     children = node.get("children")
     policy_fidelity = _policy_fidelity_summary(workspace / "policy_fidelity_report.json")
+    emergence_audit = _emergence_audit_summary(workspace / "emergence_report.json")
     return {
         "node_id": node_id,
         "parent_id": node.get("parent_id"),
@@ -1260,6 +1261,7 @@ def _solution_summary(
         "failure_kind": node.get("failure_kind"),
         "num_debug_attempts": node.get("num_debug_attempts"),
         "policy_fidelity": policy_fidelity,
+        "emergence_audit": emergence_audit,
         "workspace": f"solutions/{node_id}",
         "artifacts": _solution_artifacts(run_dir, workspace),
     }
@@ -1281,6 +1283,20 @@ def _policy_fidelity_summary(path: Path) -> dict[str, object]:
     }
 
 
+def _emergence_audit_summary(path: Path) -> dict[str, object]:
+    payload = _read_optional_json(path)
+    if not isinstance(payload, dict):
+        return {"available": False}
+    gaps = payload.get("blocking_gaps")
+    return {
+        "available": True,
+        "auditor_version": payload.get("auditor_version"),
+        "claim_level": payload.get("claim_level"),
+        "blocking_gap_count": len(gaps) if isinstance(gaps, list) else 0,
+        "claim_boundary": payload.get("claim_boundary"),
+    }
+
+
 def _solution_artifacts(run_dir: Path, workspace: Path) -> list[dict[str, object]]:
     artifact_names = (
         "eval.json",
@@ -1288,6 +1304,7 @@ def _solution_artifacts(run_dir: Path, workspace: Path) -> list[dict[str, object
         "proposal.md",
         "branch_context.json",
         "policy_fidelity_report.json",
+        "emergence_report.json",
         "prediction_overview.svg",
     )
     return [

@@ -21,6 +21,7 @@ ARTIFACT_CAPTURE_REQUIREMENTS = (
     "leaderboard.csv",
     "solutions/",
     "solutions/*/policy_fidelity_report.json",
+    "solutions/*/emergence_report.json",
     "reports/",
 )
 STRATEGY_LOCK_INSPECTION_KEYS = (

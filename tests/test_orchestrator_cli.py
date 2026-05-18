@@ -135,6 +135,7 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert (run_dir / "reports" / "data_overview.svg").exists()
     assert (run_dir / "solutions" / "solution_000" / "solution_observations.json").exists()
     assert (run_dir / "solutions" / "solution_000" / "prediction_overview.svg").exists()
+    assert (run_dir / "solutions" / "solution_000" / "emergence_report.json").exists()
     assert (run_dir / "trace_summary.json").exists()
     assert (run_dir / "openai_sdk_trace.json").exists()
     run_metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
@@ -152,6 +153,13 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     checkpoint = json.loads((run_dir / "checkpoint.json").read_text(encoding="utf-8"))
     assert checkpoint["phase"] == "completed"
     assert len(checkpoint["nodes"]) == len(tree["nodes"])
+    child_emergence = json.loads(
+        (run_dir / "solutions" / child_nodes[0]["node_id"] / "emergence_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert child_emergence["auditor_version"] == "emergence_audit.v1"
+    assert child_emergence["claim_level"] != "proved_emergent_discovery"
 
 
 def test_manual_strategy_lock_inspector_blocks_unfaithful_solution(tmp_path: Path) -> None:
