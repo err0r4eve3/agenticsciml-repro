@@ -1314,13 +1314,20 @@ def _selector_votes_payload(run_id: str, run_dir: Path) -> dict[str, object]:
     votes = payload.get("votes")
     vote_counts = payload.get("vote_counts")
     selected_parent_ids = payload.get("selected_parent_ids")
+    panel_members = payload.get("selector_panel_members")
+    selector_diversity = payload.get("selector_diversity")
     return {
         "run_id": run_id,
         "available": selector_path.exists() and bool(payload),
         "path": "reports/selector_votes.json",
+        "schema_version": payload.get("schema_version"),
+        "ensemble_mode": payload.get("ensemble_mode"),
+        "selector_panel_members": panel_members if isinstance(panel_members, list) else [],
+        "selector_diversity": selector_diversity if isinstance(selector_diversity, dict) else {},
         "selected_parent_ids": selected_parent_ids if isinstance(selected_parent_ids, list) else [],
         "vote_counts": vote_counts if isinstance(vote_counts, dict) else {},
         "votes": votes if isinstance(votes, list) else [],
+        "claim_boundary": payload.get("claim_boundary"),
     }
 
 

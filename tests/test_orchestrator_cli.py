@@ -423,7 +423,7 @@ def test_configured_selector_panel_records_member_provenance(tmp_path: Path) -> 
         evolution=EvolutionConfig(
             max_iterations=0,
             parallel_mutations=2,
-            selector_vote_count=2,
+            selector_vote_count=3,
             max_debug_retries=0,
         ),
         use_mock=True,
@@ -481,7 +481,14 @@ def test_configured_selector_panel_records_member_provenance(tmp_path: Path) -> 
         "gpt-5-mini",
         "deepseek-v4-pro",
     ]
+    assert len(artifact["votes"]) == 2
     assert all(vote["actual_model"] == "mock" for vote in artifact["votes"])
+    assert artifact["selector_diversity"]["actual_vote_count"] == 2
+    assert artifact["selector_diversity"]["panel_member_count"] == 2
+    assert artifact["selector_diversity"]["mock_evidence"] is True
+    assert artifact["selector_diversity"]["provider_diversity"] is False
+    assert artifact["selector_diversity"]["panel_repeated_members"] is False
+    assert artifact["selector_diversity"]["heterogeneous_selector_evidence"] is False
     assert "only heterogeneous provider evidence" in artifact["claim_boundary"]
 
 

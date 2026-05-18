@@ -94,8 +94,9 @@ evaluator、selector 或 champion selection 实现。
   `debugger=0.05/xhigh`、`proposer=0.55/xhigh`、`critic=0.35/high`、
   `data_analyst=0.35/high`、`result_analyst=0.30/high`、`selector=0.05/high`、
   `retriever=0.00/medium`。`selector_panel` 可配置多个 selector member；UI/报告必须
-  依据 `reports/selector_votes.json` 中的 `actual_model` / `provider` 判断是否真的具备
-  异构模型证据，mock 或同 provider panel 不能被描述为论文级 selector ensemble。
+  优先读取 `reports/selector_votes.json` 中的 `selector_diversity`，再参考
+  `actual_model` / `provider`，判断是否真的具备异构模型证据；mock、同 provider panel
+  或 repeated-member votes 不能被描述为论文级 selector ensemble。
 - `Evidence`：只读展示 `reports/selector_votes.json`、`tree.json`、
   `leaderboard.csv`、各 `solutions/solution_*/eval.json` 汇总出的 votes、loss/score、
   parent/tree summary、method tags、`policy_fidelity`、`emergence_audit` 和本地 SVG artifact。

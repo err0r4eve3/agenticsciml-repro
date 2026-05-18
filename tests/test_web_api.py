@@ -688,9 +688,25 @@ def test_selector_votes_and_solutions_are_read_only_evidence(tmp_path: Path) -> 
     (run_dir / "reports" / "selector_votes.json").write_text(
         json.dumps(
             {
+                "schema_version": 2,
+                "ensemble_mode": "configured_selector_panel",
+                "selector_panel_members": [
+                    {
+                        "member_id": "selector_alpha",
+                        "configured_model": "gpt-5-mini",
+                        "actual_model": "mock",
+                        "provider": "MockLLMClient",
+                    }
+                ],
+                "selector_diversity": {
+                    "mock_evidence": True,
+                    "provider_diversity": False,
+                    "heterogeneous_selector_evidence": False,
+                },
                 "selected_parent_ids": ["solution_000"],
                 "vote_counts": {"solution_000": 3},
                 "votes": [{"candidate_id": "solution_000", "rationale": "best loss"}],
+                "claim_boundary": "mock evidence only",
             }
         ),
         encoding="utf-8",
@@ -698,6 +714,10 @@ def test_selector_votes_and_solutions_are_read_only_evidence(tmp_path: Path) -> 
     votes = client.get("/api/runs/paper-run/selector-votes", params={"output_dir": str(tmp_path)})
     assert votes.status_code == 200
     assert votes.json()["available"] is True
+    assert votes.json()["schema_version"] == 2
+    assert votes.json()["ensemble_mode"] == "configured_selector_panel"
+    assert votes.json()["selector_panel_members"][0]["actual_model"] == "mock"
+    assert votes.json()["selector_diversity"]["heterogeneous_selector_evidence"] is False
     assert votes.json()["vote_counts"] == {"solution_000": 3}
 
     solutions = client.get("/api/runs/paper-run/solutions", params={"output_dir": str(tmp_path)})

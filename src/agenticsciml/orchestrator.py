@@ -1223,6 +1223,7 @@ class AgenticSciMLOrchestrator:
                 "actual_vote_count": len(vote_result.votes),
                 "ensemble_mode": vote_result.ensemble_mode,
                 "selector_panel_members": vote_result.panel_members,
+                "selector_diversity": vote_result.diversity,
             },
         )
         by_id = {node.node_id: node for node in available}
@@ -1278,7 +1279,7 @@ class AgenticSciMLOrchestrator:
         panel_members: list[dict[str, object]] = []
         votes: list[dict[str, object]] = []
         messages = []
-        vote_total = max(self.config.evolution.selector_vote_count, len(self.config.selector_panel))
+        vote_total = len(self.config.selector_panel)
         for vote_index in range(vote_total):
             member_index = vote_index % len(self.config.selector_panel)
             member_config = self.config.selector_panel[member_index]
@@ -1678,7 +1679,7 @@ class AgenticSciMLOrchestrator:
             )
         return {
             "ensemble_mode": "configured_selector_panel",
-            "vote_count": max(self.config.evolution.selector_vote_count, len(self.config.selector_panel)),
+            "vote_count": len(self.config.selector_panel),
             "members": members,
             "claim_boundary": CONFIGURED_PANEL_CLAIM_BOUNDARY,
         }

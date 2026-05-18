@@ -13,20 +13,23 @@
   temperature 和 reasoning effort。
 - CLI 新增 `--selector-panel-models`，Web API `POST /api/runs` /
   `/api/problem-intake/plan` 支持 `selector_panel`。
-- 有 `selector_panel` 时，orchestrator 会轮询 panel member cast votes；没有配置时保留
-  现有 single-selector multi-vote 行为。
-- `reports/selector_votes.json` 新增 `schema_version`、`ensemble_mode`、
+- 有 `selector_panel` 时，orchestrator 默认按 panel member 一成员一票 cast vote，避免
+  因 `selector_vote_count` 与 panel 长度不一致造成成员权重不均；没有配置时保留现有
+  single-selector multi-vote 行为。
+- `reports/selector_votes.json` 使用 `schema_version=2`，新增 `ensemble_mode`、
   `selector_panel_members`、per-vote `member_id`、`configured_model`、`actual_model`、
-  `provider`、`source` 和 `claim_boundary`。
+  `provider`、`source`、`selector_diversity` 和 `claim_boundary`。其中
+  `selector_diversity` 明确记录 `mock_evidence`、actual model/provider diversity、
+  panel member/vote count、repeated-member 状态和 `heterogeneous_selector_evidence`。
 - `run_metadata.json` 新增 `selector_panel` runtime metadata，记录实际 selector panel
   证据来源。
 
 验证：
 
 - `tests/test_llm_and_agents.py` 覆盖默认 selector votes 仍标注为
-  `single_provider_multi_vote`。
+  `single_provider_multi_vote`，并覆盖单张 ballot 内重复/非法 ID 不会重复计票。
 - `tests/test_orchestrator_cli.py` 覆盖 configured selector panel 的 per-member vote
-  provenance。
+  provenance，以及两成员 panel 不因默认 `selector_vote_count=3` 产生第三张偏置票。
 - `tests/test_web_api.py` 覆盖 Web run request 会持久化 selector panel config 和 metadata。
 
 边界：

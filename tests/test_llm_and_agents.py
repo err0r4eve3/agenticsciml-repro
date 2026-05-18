@@ -16,6 +16,7 @@ from agenticsciml.agents import (
     SelectorAgent,
 )
 from agenticsciml.agents.base import ArtifactMissingError, InputContractError
+from agenticsciml.agents.selector import build_selector_vote_result
 from agenticsciml.agents.specs import AGENT_SPECS, AgentSpec, PromptTemplate
 from agenticsciml.benchmarks import BenchmarkContractFactory, ProblemBundle
 from agenticsciml.llm.base import LLMClient
@@ -254,10 +255,55 @@ def test_selector_votes_always_include_best_and_tie_break_by_loss(tmp_path: Path
     assert result.selected_parent_ids == ["best", "promising"]
     assert result.vote_counts == {"promising": 2, "worse_loss": 2}
     artifact = json.loads((storage.run_dir / "reports" / "selector_votes.json").read_text(encoding="utf-8"))
-    assert artifact["schema_version"] == 1
+    assert artifact["schema_version"] == 2
     assert artifact["ensemble_mode"] == "single_provider_multi_vote"
     assert artifact["selector_panel_members"][0]["member_id"] == "selector"
+    assert artifact["selector_diversity"]["panel_repeated_members"] is True
+    assert artifact["selector_diversity"]["heterogeneous_selector_evidence"] is False
     assert "not heterogeneous selector ensemble evidence" in artifact["claim_boundary"]
+
+
+def test_selector_vote_result_deduplicates_and_filters_ballots() -> None:
+    candidates = [
+        {"node_id": "best", "score": {"value": 0.1, "higher_is_better": False}},
+        {"node_id": "promising", "score": {"value": 0.2, "higher_is_better": False}},
+        {"node_id": "other", "score": {"value": 0.3, "higher_is_better": False}},
+    ]
+    result = build_selector_vote_result(
+        candidates=candidates,
+        best_node_id="best",
+        max_to_select=2,
+        votes=[
+            {
+                "member_id": "selector_alpha",
+                "selected_parent_ids": [
+                    "promising",
+                    "promising",
+                    "best",
+                    "missing",
+                    "other",
+                    "other",
+                ],
+                "rationale": "duplicates and invalid ids should not overweight a candidate",
+            }
+        ],
+        ensemble_mode="configured_selector_panel",
+        panel_members=[
+            {
+                "member_id": "selector_alpha",
+                "role": "selector",
+                "configured_model": "gpt-5-mini",
+                "actual_model": "gpt-5-mini",
+                "provider": "OpenAICompatibleLLMClient",
+                "source": "selector_panel",
+            }
+        ],
+        claim_boundary="test",
+    )
+
+    assert result.votes[0]["selected_parent_ids"] == ["promising", "other"]
+    assert result.vote_counts == {"other": 1, "promising": 1}
+    assert result.selected_parent_ids == ["best", "promising"]
 
 
 def test_agents_save_transcripts_and_structured_outputs(tmp_path: Path) -> None:
