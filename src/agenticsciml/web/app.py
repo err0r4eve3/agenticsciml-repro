@@ -1245,6 +1245,7 @@ def _solution_summary(
     )
     method_tags = node.get("method_tags")
     children = node.get("children")
+    policy_fidelity = _policy_fidelity_summary(workspace / "policy_fidelity_report.json")
     return {
         "node_id": node_id,
         "parent_id": node.get("parent_id"),
@@ -1258,8 +1259,25 @@ def _solution_summary(
         "method_tags": method_tags if isinstance(method_tags, list) else [],
         "failure_kind": node.get("failure_kind"),
         "num_debug_attempts": node.get("num_debug_attempts"),
+        "policy_fidelity": policy_fidelity,
         "workspace": f"solutions/{node_id}",
         "artifacts": _solution_artifacts(run_dir, workspace),
+    }
+
+
+def _policy_fidelity_summary(path: Path) -> dict[str, object]:
+    payload = _read_optional_json(path)
+    if not isinstance(payload, dict):
+        return {"available": False}
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    return {
+        "available": True,
+        "status": payload.get("status"),
+        "execution_allowed": payload.get("execution_allowed"),
+        "inspector_version": payload.get("inspector_version"),
+        "failed_blocker_count": summary.get("failed_blocker_count", 0),
+        "failed_warning_count": summary.get("failed_warning_count", 0),
+        "auditable_lock_count": summary.get("auditable_lock_count", 0),
     }
 
 
@@ -1269,6 +1287,7 @@ def _solution_artifacts(run_dir: Path, workspace: Path) -> list[dict[str, object
         "analysis.md",
         "proposal.md",
         "branch_context.json",
+        "policy_fidelity_report.json",
         "prediction_overview.svg",
     )
     return [

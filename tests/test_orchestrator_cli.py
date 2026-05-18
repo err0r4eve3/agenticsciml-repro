@@ -154,6 +154,49 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert len(checkpoint["nodes"]) == len(tree["nodes"])
 
 
+def test_manual_strategy_lock_inspector_blocks_unfaithful_solution(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="policy-lock-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+        readiness_report={
+            "manual_strategy_locks": [
+                {
+                    "lock_id": "lock_lbfgs",
+                    "required": True,
+                    "inspection": {"required_terms": ["LBFGS"]},
+                }
+            ]
+        },
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+
+    report = json.loads(
+        (run_dir / "solutions" / "solution_000" / "policy_fidelity_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    tree = json.loads((run_dir / "tree.json").read_text(encoding="utf-8"))
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert report["status"] == "blocked"
+    assert report["execution_allowed"] is False
+    assert "Required strategy term not found" in report["checks"][0]["message"]
+    assert tree["nodes"][0]["status"] == "failed"
+    assert tree["nodes"][0]["failure_kind"] == "guardrail_error"
+    assert any(
+        event["name"] == "strategy_fidelity_inspector"
+        and event["metadata"]["passed"] is False
+        for event in trace_events
+    )
+
+
 def test_parallel_mutations_run_as_parallel_child_jobs(tmp_path: Path) -> None:
     config = ExperimentConfig(
         experiment_id="parallel-run",

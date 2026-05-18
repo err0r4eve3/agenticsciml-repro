@@ -202,6 +202,7 @@ def test_run_readiness_preview_audits_proxy_claims_and_strategy_seeds() -> None:
     assert payload["algorithm_seed_preview"][0]["is_evaluated_implementation"] is False
     assert payload["strategy_lock_preview"][0]["lock_id"] == "lock_piecewise"
     assert "planning/readiness_report.json" in payload["artifact_capture_requirements"]
+    assert "solutions/*/policy_fidelity_report.json" in payload["artifact_capture_requirements"]
     serialized = json.dumps(payload)
     assert "chain_of_thought" not in serialized
     assert "private_reasoning" not in serialized
@@ -302,6 +303,14 @@ def test_web_mock_run_persists_readiness_report(tmp_path: Path) -> None:
     assert config["readiness_report"]["readiness_id"] == readiness["readiness_id"]
     assert metadata["readiness_summary"]["readiness_id"] == readiness["readiness_id"]
     assert metadata["readiness_summary"]["status"] == "ready_with_warnings"
+    policy_report = json.loads(
+        (run_dir / "solutions" / "solution_000" / "policy_fidelity_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert policy_report["inspector_version"] == "strategy_fidelity.v1"
+    assert policy_report["execution_allowed"] is True
+    assert policy_report["summary"]["auditable_lock_count"] == 0
 
 
 def test_web_mock_run_persists_agent_model_overrides(tmp_path: Path) -> None:
@@ -617,6 +626,7 @@ def test_selector_votes_and_solutions_are_read_only_evidence(tmp_path: Path) -> 
     assert payload["solutions"][0]["score"] == 0.25
     assert payload["solutions"][0]["loss"] == 0.25
     assert payload["solutions"][0]["method_tags"] == ["baseline"]
+    assert payload["solutions"][0]["policy_fidelity"] == {"available": False}
     assert {figure["path"] for figure in payload["figures"]} == {
         "reports/data_overview.svg",
         "solutions/solution_000/prediction_overview.svg",

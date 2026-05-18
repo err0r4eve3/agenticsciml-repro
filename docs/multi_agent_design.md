@@ -115,6 +115,9 @@ AgenticSciML 的每次架构或实验边界变化，都应能从 `docs/index.md`
 - `tracing`：保存 prompt、response、stdout、stderr、score 和 artifact。
 - `guardrails`：禁止修改 evaluator、禁止删除工作区外文件、测试禁止联网、限制无限循环和资源消耗。
 - `static sandbox checks`：运行 generated `solution.py` 前先阻断网络模块、子进程、危险删除操作和明显绝对路径写入。
+- `strategy fidelity inspector`：若 run 带有可机器审计的 manual strategy locks，
+  在执行 generated `solution.py` 前检查 required / forbidden terms、imports 和 calls，
+  并把结果写入 `solutions/<id>/policy_fidelity_report.json` 与 guardrail trace。
 
 SciML 的 evaluator 应尽量是 deterministic code，而不是 LLM judge。
 

@@ -20,6 +20,7 @@ ARTIFACT_CAPTURE_REQUIREMENTS = (
     "tree.json",
     "leaderboard.csv",
     "solutions/",
+    "solutions/*/policy_fidelity_report.json",
     "reports/",
 )
 

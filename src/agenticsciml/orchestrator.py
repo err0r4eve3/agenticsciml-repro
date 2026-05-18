@@ -23,6 +23,7 @@ from agenticsciml.algorithm_catalog import list_algorithms
 from agenticsciml.benchmarks import BenchmarkContractFactory, ProblemBundle
 from agenticsciml.config import AgentConfig, EvaluationContract, ExperimentConfig
 from agenticsciml.evidence import evidence_metadata_for_run
+from agenticsciml.execution.runner import RunResult
 from agenticsciml.execution.sandbox import prepare_solution_workspace, train_and_evaluate
 from agenticsciml.llm.base import LLMClient
 from agenticsciml.patching import PatchApplicationError
@@ -49,6 +50,7 @@ from agenticsciml.state import (
     validate_solution_tree_artifact_payload,
 )
 from agenticsciml.storage import ExperimentStorage
+from agenticsciml.strategy_inspector import inspect_solution_strategy, strategy_locks_from_readiness
 from agenticsciml.trace_contracts import FanoutTraceMetadata
 
 
@@ -830,7 +832,7 @@ class AgenticSciMLOrchestrator:
         parent_node: SolutionNode | None = None,
         method_tags: list[str] | None = None,
     ) -> SolutionNode:
-        result = train_and_evaluate(workspace, contract, timeout_s=self.config.evolution.timeout_s)
+        result = self._inspect_then_train_and_evaluate(solution_id, workspace, contract)
         self.storage.record_trace(
             "tool_span",
             "train_and_evaluate",
@@ -880,7 +882,7 @@ class AgenticSciMLOrchestrator:
             debug_attempts = attempt_index
             if not changed:
                 break
-            result = train_and_evaluate(workspace, contract, timeout_s=self.config.evolution.timeout_s)
+            result = self._inspect_then_train_and_evaluate(solution_id, workspace, contract)
             self.storage.record_trace(
                 "tool_span",
                 "train_and_evaluate.retry",
@@ -930,6 +932,48 @@ class AgenticSciMLOrchestrator:
             score_delta_from_parent=score_delta,
             num_debug_attempts=debug_attempts,
         )
+
+    def _inspect_then_train_and_evaluate(
+        self,
+        solution_id: str,
+        workspace: Path,
+        contract: EvaluationContract,
+    ) -> RunResult:
+        locks = strategy_locks_from_readiness(self.config.readiness_report)
+        if locks:
+            report = inspect_solution_strategy(workspace / "solution.py", locks)
+            self.storage.save_json(Path("solutions") / solution_id / "policy_fidelity_report.json", report)
+            self.storage.record_trace(
+                "guardrail_span",
+                "strategy_fidelity_inspector",
+                {
+                    "solution_id": solution_id,
+                    "passed": bool(report["execution_allowed"]),
+                    "status": report["status"],
+                    "failed_blocker_count": report["summary"]["failed_blocker_count"],
+                    "failed_warning_count": report["summary"]["failed_warning_count"],
+                    "auditable_lock_count": report["summary"]["auditable_lock_count"],
+                },
+            )
+            if not report["execution_allowed"]:
+                failed = [
+                    str(check["message"])
+                    for check in report["checks"]
+                    if check["severity"] == "blocker" and not check["passed"]
+                ]
+                message = (
+                    "Guardrail violation: generated solution failed strategy fidelity inspector: "
+                    + "; ".join(failed)
+                )
+                self.storage.save_solution_text(solution_id, "train.log", message + "\n")
+                return RunResult(
+                    command=["strategy_fidelity_inspector", "solution.py"],
+                    exit_code=125,
+                    stdout="",
+                    stderr=message,
+                    duration_s=0.0,
+                )
+        return train_and_evaluate(workspace, contract, timeout_s=self.config.evolution.timeout_s)
 
     def _select_parents(self) -> list[SolutionNode]:
         available = [
@@ -1003,6 +1047,8 @@ class AgenticSciMLOrchestrator:
             return "contract_error"
         if "syntaxerror" in text:
             return "invalid_code"
+        if "guardrail violation" in text:
+            return "guardrail_error"
         return "runtime_error"
 
     def _method_tags(self, proposal: Proposal, kb_entry_id: str | None) -> list[str]:

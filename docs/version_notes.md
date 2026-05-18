@@ -2,6 +2,36 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-18 Strategy Fidelity Inspector
+
+本次根据 NotebookLM 对 ATHENA Inspector / AgenticSciML KB symptom mapping 的建议，
+把上一轮 manual strategy locks 继续推进到执行前 guardrail。
+
+已实现：
+
+- 新增 `agenticsciml.strategy_inspector`。它对 `solution.py` 做确定性静态检查，
+  支持 `required_terms`、`forbidden_terms`、`required_imports`、`forbidden_imports`、
+  `required_call_names` 和 `forbidden_call_names`。
+- Orchestrator 在 `train_and_evaluate` 前运行 inspector。若 required lock 的可机器
+  检查条件失败，会写入 `solutions/<id>/policy_fidelity_report.json`，记录
+  `guardrail_span=strategy_fidelity_inspector`，并以 `guardrail_error` 标记 failed node。
+- `GET /api/runs/{id}/solutions` 现在会返回每个 solution 的 `policy_fidelity` 摘要；
+  solution artifact index 也会列出 `policy_fidelity_report.json`。
+- readiness artifact capture requirements 增加
+  `solutions/*/policy_fidelity_report.json`。
+
+验证：
+
+- `tests/test_strategy_inspector.py` 覆盖 required / forbidden 条件、lock text 标记语法和
+  非结构化 lock 的非阻断行为。
+- `tests/test_orchestrator_cli.py` 覆盖不符合 required lock 的 generated solution 会在执行前
+  fail closed。
+
+边界：
+
+- Inspector 只检查明确写出的机器可审计条件；普通自然语言 lock 仍只作为 planning context。
+- 该检查不是科学验证，不证明策略有效，也不替代 evaluator score 或真实 run artifact。
+
 ## 2026-05-17 算法库双语说明
 
 本次增强第三页算法库的信息密度和中英双语兼容。

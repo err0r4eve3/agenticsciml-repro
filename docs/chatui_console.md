@@ -80,7 +80,10 @@ evaluator、selector 或 champion selection 实现。
   要求。
 - `Strategy Locks`：记录用户想强制保留的约束、数学直觉、invariant、modeling choice
   或 assumption。当前前端会把非空 locks 送入 readiness 和 run request；后端只把它们
-  当作用户假设/约束保存和审计，不当作科学事实。
+  当作用户假设/约束保存和审计，不当作科学事实。若请求体中提供了明确的机器可审计
+  条件（例如 `required_terms`、`forbidden_call_names` 或 `inspection.required_imports`），
+  orchestrator 会在执行 `solution.py` 前写入 `policy_fidelity_report.json` 并 fail closed
+  于 required 条件失败的候选解。
 - `Layered model routing`：列出 Data Analyst、Evaluator、Root Engineer、
   Retriever、Proposer、Critic、Engineer、Debugger、Result Analyst 和 Selector。
   默认仍使用后端单一 adapter；只有填写 role override 时，后端才按 role 创建模型配置。
@@ -171,11 +174,15 @@ Web API 暴露；本地开发需要打开仓库根目录时，必须显式设置
   `agent_models`；后端只把这些转换成
   `EvolutionConfig` / `AgentConfig` / 非权威 problem context / strategy seed
   context，不改写 evaluator 或 artifact schema。非 dry-run 启动会把 readiness report
-  写入 `planning/readiness_report.json` 并在 `run_metadata.json` 中记录 summary。
+  写入 `planning/readiness_report.json` 并在 `run_metadata.json` 中记录 summary；带有
+  可审计 strategy locks 的 run 还会在每个 solution 下写入
+  `policy_fidelity_report.json`。
 - `POST /api/runs/{id}/resume`：以已有 run id 恢复；未显式覆盖时会先读取既有
   `config.json` 并保留 benchmark、`strategy_seed_ids`、`agent_models`、
   `problem_intake` 和 `planner_snapshot`。
 - `GET /api/runs/{id}`：读取 metadata、leaderboard、trace summary 和 artifact index。
+- `GET /api/runs/{id}/solutions`：读取 solution tree、leaderboard-derived score、
+  local figures、artifact refs 和每个 solution 的 `policy_fidelity` 摘要。
 - `GET /api/runs/{id}/events`：SSE 输出 trace events。
 - `GET /api/runs/{id}/artifacts/*`：只读 UTF-8 artifact，拒绝路径逃逸和 symlink 逃逸。
 - `GET /api/runs/{id}/selector-votes`：只读读取
