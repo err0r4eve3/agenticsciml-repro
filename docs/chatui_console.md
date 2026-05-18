@@ -97,6 +97,10 @@ evaluator、selector 或 champion selection 实现。
   优先读取 `reports/selector_votes.json` 中的 `selector_diversity`，再参考
   `actual_model` / `provider`，判断是否真的具备异构模型证据；mock、同 provider panel
   或 repeated-member votes 不能被描述为论文级 selector ensemble。
+- selector evidence UI 应同时读取 `run_metadata.json` 的 `selector_voting_exercised`
+  / `selector_vote_events`，以及 `reports/selector_votes/selection_*.json` 历史。
+  配置了 `selector_panel` 但 `selector_vote_events=0` 时，只能展示“已配置，尚未投票”，
+  不能展示为已经发生的 selector ensemble 证据。
 - `Evidence`：只读展示 `reports/selector_votes.json`、`tree.json`、
   `leaderboard.csv`、各 `solutions/solution_*/eval.json` 汇总出的 votes、loss/score、
   parent/tree summary、method tags、`policy_fidelity`、`emergence_audit` 和本地 SVG artifact。

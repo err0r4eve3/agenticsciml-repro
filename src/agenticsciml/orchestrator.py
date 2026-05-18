@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import threading
@@ -22,6 +23,7 @@ from agenticsciml.agents.base import StructuredOutputError
 from agenticsciml.agents.selector import (
     CONFIGURED_PANEL_CLAIM_BOUNDARY,
     SINGLE_SELECTOR_CLAIM_BOUNDARY,
+    SELECTOR_VOTES_SCHEMA_VERSION,
     SelectorVoteResult,
     build_selector_vote_result,
 )
@@ -76,6 +78,7 @@ BRANCH_INTENTS = (
 
 EVALUATION_APPROVAL_SCHEMA_VERSION = 1
 ANALYSIS_CONTEXT_SCHEMA_VERSION = 1
+SELECTOR_POLICY_SCHEMA_VERSION = 1
 
 
 class EvaluationApprovalRequired(RuntimeError):
@@ -236,14 +239,17 @@ class AgenticSciMLOrchestrator:
                 **self._evidence_metadata(),
             },
         )
-        self.storage.save_json("config.json", self.config.to_dict())
-        self._write_planning_artifacts()
+        if not self.config.resume:
+            self.storage.save_json("config.json", self.config.to_dict())
+            self._write_planning_artifacts()
         resumed = self._load_checkpoint_if_requested()
         if resumed:
             contract = self._load_or_create_contract()
             self.contract = contract
             if self.loaded_checkpoint is not None:
                 self._validate_loaded_checkpoint(contract)
+            self.storage.save_json("config.json", self.config.to_dict())
+            self._write_planning_artifacts()
             if not self.nodes:
                 data_report = self._read_data_report()
                 self._require_evaluation_approval(contract)
@@ -351,6 +357,7 @@ class AgenticSciMLOrchestrator:
         return reports
 
     def _save_checkpoint(self, phase: str) -> None:
+        selector_policy = self._selector_policy_snapshot()
         self.storage.save_json(
             "checkpoint.json",
             {
@@ -359,6 +366,8 @@ class AgenticSciMLOrchestrator:
                 "experiment_id": self.config.experiment_id,
                 "benchmark_name": self.problem_bundle.benchmark_name,
                 "contract_hash": self.contract.contract_hash if self.contract else "",
+                "selector_policy": selector_policy,
+                "selector_policy_digest": self._selector_policy_digest(selector_policy),
                 "nodes": [node.to_dict() for node in self.nodes],
                 "analysis_node_ids": sorted(self.analysis_by_node),
             },
@@ -383,6 +392,22 @@ class AgenticSciMLOrchestrator:
             raise ValueError(
                 "Checkpoint contract hash mismatch: "
                 f"stored {payload.get('contract_hash')}, expected {contract.contract_hash}"
+            )
+        selector_policy = self._selector_policy_snapshot()
+        selector_policy_digest = self._selector_policy_digest(selector_policy)
+        if payload.get("selector_policy_digest") != selector_policy_digest:
+            self.storage.record_trace(
+                "guardrail_span",
+                "agenticsciml.selector_policy.resume_mismatch",
+                {
+                    "passed": False,
+                    "stored_selector_policy_digest": payload.get("selector_policy_digest"),
+                    "current_selector_policy_digest": selector_policy_digest,
+                },
+            )
+            raise ValueError(
+                "Checkpoint selector policy mismatch: "
+                f"stored {payload.get('selector_policy_digest')}, expected {selector_policy_digest}"
             )
         for node in self.nodes:
             if node.benchmark_name != contract.benchmark_name:
@@ -657,6 +682,31 @@ class AgenticSciMLOrchestrator:
             + json.dumps(seeds, indent=2, sort_keys=True)
         )
         return self._strategy_seed_context_cache
+
+    def _selector_policy_snapshot(self) -> dict[str, object]:
+        selector_config = self._effective_agent_config_for_role("selector")
+        has_panel = bool(self.config.selector_panel)
+        return {
+            "schema_version": SELECTOR_POLICY_SCHEMA_VERSION,
+            "selector_votes_schema_version": SELECTOR_VOTES_SCHEMA_VERSION,
+            "ensemble_mode": "configured_selector_panel" if has_panel else "single_provider_multi_vote",
+            "panel_vote_policy": (
+                "one_vote_per_configured_member" if has_panel else "single_selector_repeated_votes"
+            ),
+            "configured_selector_vote_count": self.config.evolution.selector_vote_count,
+            "effective_vote_count": len(self.config.selector_panel)
+            if has_panel
+            else self.config.evolution.selector_vote_count,
+            "selector_agent": selector_config.to_dict(),
+            "selector_panel": [config.to_dict() for config in self.config.selector_panel],
+        }
+
+    def _selector_policy_digest(self, policy: dict[str, object] | None = None) -> str:
+        payload = policy or self._selector_policy_snapshot()
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode(
+            "utf-8"
+        )
+        return hashlib.sha256(encoded).hexdigest()
 
     def _create_root(self, contract: EvaluationContract, data_report: str | None) -> SolutionNode:
         solution_id = self._next_solution_id()
@@ -1216,6 +1266,7 @@ class AgenticSciMLOrchestrator:
             "agent_span",
             "selector_votes",
             {
+                "selection_index": self._selector_vote_event_count(),
                 "best_node_id": best.node_id,
                 "selected_parent_ids": vote_result.selected_parent_ids,
                 "vote_counts": vote_result.vote_counts,
@@ -1253,7 +1304,7 @@ class AgenticSciMLOrchestrator:
         if not self.config.selector_panel:
             selector_llm = self._llm_for_role("selector")
             selector_config = self._effective_agent_config_for_role("selector")
-            return self.selector.select_with_votes(
+            result = self.selector.select_with_votes(
                 candidates=candidates,
                 best_node_id=best_node_id,
                 max_to_select=max_to_select,
@@ -1275,6 +1326,8 @@ class AgenticSciMLOrchestrator:
                 ],
                 claim_boundary=SINGLE_SELECTOR_CLAIM_BOUNDARY,
             )
+            self._save_selector_vote_result(result, candidates=candidates, best_node_id=best_node_id)
+            return result
 
         panel_members: list[dict[str, object]] = []
         votes: list[dict[str, object]] = []
@@ -1318,9 +1371,39 @@ class AgenticSciMLOrchestrator:
             panel_members=panel_members,
             claim_boundary=CONFIGURED_PANEL_CLAIM_BOUNDARY,
         )
-        self.storage.save_json("reports/selector_votes.json", result.to_dict())
+        self._save_selector_vote_result(result, candidates=candidates, best_node_id=best_node_id)
         self.storage.save_transcript(None, "selector", messages)
         return result
+
+    def _save_selector_vote_result(
+        self,
+        result: SelectorVoteResult,
+        *,
+        candidates: list[dict[str, object]],
+        best_node_id: str,
+    ) -> int:
+        selection_index = self._selector_vote_event_count() + 1
+        payload = {
+            **result.to_dict(),
+            "selection_index": selection_index,
+            "best_node_id": best_node_id,
+            "candidate_count": len(candidates),
+            "candidate_ids": [
+                str(candidate.get("node_id"))
+                for candidate in candidates
+                if candidate.get("node_id") is not None
+            ],
+            "selector_policy_digest": self._selector_policy_digest(),
+        }
+        self.storage.save_json("reports/selector_votes.json", payload)
+        self.storage.save_json(f"reports/selector_votes/selection_{selection_index:06d}.json", payload)
+        return selection_index
+
+    def _selector_vote_event_count(self) -> int:
+        votes_dir = self.storage.run_dir / "reports" / "selector_votes"
+        if not votes_dir.exists():
+            return 0
+        return sum(1 for path in votes_dir.glob("selection_*.json") if path.is_file())
 
     def _selector_member_metadata(
         self,
@@ -1646,6 +1729,8 @@ class AgenticSciMLOrchestrator:
             }
         metadata["agent_models"] = role_models
         metadata["selector_panel"] = self._selector_panel_metadata()
+        metadata["selector_policy"] = self._selector_policy_snapshot()
+        metadata["selector_policy_digest"] = self._selector_policy_digest()
         return metadata
 
     def _selector_panel_metadata(self) -> dict[str, object]:
@@ -1655,6 +1740,8 @@ class AgenticSciMLOrchestrator:
             return {
                 "ensemble_mode": "single_provider_multi_vote",
                 "vote_count": self.config.evolution.selector_vote_count,
+                "selector_voting_exercised": self._selector_vote_event_count() > 0,
+                "selector_vote_events": self._selector_vote_event_count(),
                 "members": [
                     self._selector_member_metadata(
                         "selector",
@@ -1680,6 +1767,8 @@ class AgenticSciMLOrchestrator:
         return {
             "ensemble_mode": "configured_selector_panel",
             "vote_count": len(self.config.selector_panel),
+            "selector_voting_exercised": self._selector_vote_event_count() > 0,
+            "selector_vote_events": self._selector_vote_event_count(),
             "members": members,
             "claim_boundary": CONFIGURED_PANEL_CLAIM_BOUNDARY,
         }

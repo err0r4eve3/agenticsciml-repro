@@ -492,6 +492,93 @@ def test_configured_selector_panel_records_member_provenance(tmp_path: Path) -> 
     assert "only heterogeneous provider evidence" in artifact["claim_boundary"]
 
 
+def test_selector_vote_history_keeps_each_selection_artifact(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="selector-history-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(
+            max_iterations=3,
+            parallel_mutations=1,
+            selector_vote_count=3,
+            max_debug_retries=0,
+        ),
+        use_mock=True,
+        selector_panel=[
+            AgentConfig(role="selector_alpha", model="gpt-5-mini", temperature=0.05),
+            AgentConfig(role="selector_beta", model="deepseek-v4-pro", temperature=0.05),
+        ],
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+
+    vote_files = sorted((run_dir / "reports" / "selector_votes").glob("selection_*.json"))
+    latest = json.loads((run_dir / "reports" / "selector_votes.json").read_text(encoding="utf-8"))
+    metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+
+    assert [path.name for path in vote_files] == ["selection_000001.json", "selection_000002.json"]
+    assert latest["selection_index"] == 2
+    assert latest["selector_policy_digest"] == metadata["selector_policy_digest"]
+    assert metadata["selector_panel"]["selector_voting_exercised"] is True
+    assert metadata["selector_panel"]["selector_vote_events"] == 2
+
+
+def test_configured_selector_panel_without_selection_is_not_exercised(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="selector-not-exercised-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+        selector_panel=[
+            AgentConfig(role="selector_alpha", model="gpt-5-mini", temperature=0.05),
+            AgentConfig(role="selector_beta", model="deepseek-v4-pro", temperature=0.05),
+        ],
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+
+    metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    checkpoint = json.loads((run_dir / "checkpoint.json").read_text(encoding="utf-8"))
+    assert metadata["selector_panel"]["selector_voting_exercised"] is False
+    assert metadata["selector_panel"]["selector_vote_events"] == 0
+    assert not (run_dir / "reports" / "selector_votes.json").exists()
+    assert checkpoint["selector_policy_digest"] == metadata["selector_policy_digest"]
+
+
+def test_resume_rejects_selector_policy_change_without_overwriting_config(tmp_path: Path) -> None:
+    first_config = ExperimentConfig(
+        experiment_id="selector-policy-resume-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+        selector_panel=[
+            AgentConfig(role="selector_alpha", model="gpt-5-mini", temperature=0.05),
+        ],
+    )
+    run_dir = AgenticSciMLOrchestrator(first_config, MockLLMClient()).run()
+    original_config = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+
+    resume_config = ExperimentConfig(
+        experiment_id="selector-policy-resume-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=1, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+        resume=True,
+        selector_panel=[
+            AgentConfig(role="selector_beta", model="deepseek-v4-pro", temperature=0.05),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="Checkpoint selector policy mismatch"):
+        AgenticSciMLOrchestrator(resume_config, MockLLMClient()).run()
+
+    preserved_config = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+    assert preserved_config["selector_panel"] == original_config["selector_panel"]
+
+
 def test_analysis_context_includes_parent_sibling_and_uncle_reports(tmp_path: Path) -> None:
     config = ExperimentConfig(
         experiment_id="analysis-context-run",

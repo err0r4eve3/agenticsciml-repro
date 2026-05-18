@@ -21,8 +21,17 @@
   `provider`、`source`、`selector_diversity` 和 `claim_boundary`。其中
   `selector_diversity` 明确记录 `mock_evidence`、actual model/provider diversity、
   panel member/vote count、repeated-member 状态和 `heterogeneous_selector_evidence`。
+- 每次 selector 真正参与 parent selection 时，除了覆盖 `reports/selector_votes.json`
+  作为 latest view，还会写入
+  `reports/selector_votes/selection_000001.json` 这类 per-selection artifact，避免
+  多轮 run 丢失早期 vote rationale 和 panel provenance。
+- `checkpoint.json` 和 `run_metadata.json` 记录 `selector_policy` 与
+  `selector_policy_digest`。Resume 时若 selector vote schema、single/panel mode、
+  selector role config 或 panel config 改变，会 fail closed，且在拒绝前不覆盖旧
+  `config.json`。
 - `run_metadata.json` 新增 `selector_panel` runtime metadata，记录实际 selector panel
-  证据来源。
+  证据来源，并用 `selector_voting_exercised` / `selector_vote_events` 区分“配置了
+  panel”和“selector 实际参与了本 run 的选择”。
 
 验证：
 
@@ -30,6 +39,8 @@
   `single_provider_multi_vote`，并覆盖单张 ballot 内重复/非法 ID 不会重复计票。
 - `tests/test_orchestrator_cli.py` 覆盖 configured selector panel 的 per-member vote
   provenance，以及两成员 panel 不因默认 `selector_vote_count=3` 产生第三张偏置票。
+- `tests/test_orchestrator_cli.py` 还覆盖 per-selection vote artifact retention、
+  early-stage no-vote metadata，以及 resume selector policy mismatch fail-closed。
 - `tests/test_web_api.py` 覆盖 Web run request 会持久化 selector panel config 和 metadata。
 
 边界：

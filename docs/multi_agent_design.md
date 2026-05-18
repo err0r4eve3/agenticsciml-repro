@@ -195,6 +195,12 @@ Phase 4: Champion export
   selector ensemble。若配置 `selector_panel`，默认每个 member 一票，并记录 member、
   configured model、actual model、provider、source 和 deterministic diversity flags；
   mock run 中多个 configured member 仍不等同真实异构 provider evidence。
+- Selector policy 是 checkpoint 的一部分：`checkpoint.json` 保存
+  `selector_policy_digest`，resume 时禁止静默切换 selector role config 或 panel
+  config。Selector 真正投票时会保留 latest view 与
+  `reports/selector_votes/selection_*.json` 历史；早期节点数不足、尚未进入 mature
+  selection 阶段时，metadata 用 `selector_voting_exercised=false` 明确表示 panel 只是
+  configured，没有实际投票证据。
 - Analysis Base 会在每个 child mutation 前写出
   `solutions/<solution_id>/analysis_context.json`，把 mutation parent、已有 sibling
   children、uncle nodes 和缺失报告分别结构化记录。Proposer prompt 使用

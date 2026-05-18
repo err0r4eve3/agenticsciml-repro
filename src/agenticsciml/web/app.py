@@ -1310,6 +1310,7 @@ def _read_leaderboard(path: Path) -> list[dict[str, str]]:
 
 def _selector_votes_payload(run_id: str, run_dir: Path) -> dict[str, object]:
     selector_path = run_dir / "reports" / "selector_votes.json"
+    selector_events = _selector_vote_event_count(run_dir)
     payload = _read_optional_json(selector_path) or {}
     votes = payload.get("votes")
     vote_counts = payload.get("vote_counts")
@@ -1320,6 +1321,8 @@ def _selector_votes_payload(run_id: str, run_dir: Path) -> dict[str, object]:
         "run_id": run_id,
         "available": selector_path.exists() and bool(payload),
         "path": "reports/selector_votes.json",
+        "selector_vote_events": selector_events,
+        "selector_voting_exercised": selector_events > 0,
         "schema_version": payload.get("schema_version"),
         "ensemble_mode": payload.get("ensemble_mode"),
         "selector_panel_members": panel_members if isinstance(panel_members, list) else [],
@@ -1329,6 +1332,13 @@ def _selector_votes_payload(run_id: str, run_dir: Path) -> dict[str, object]:
         "votes": votes if isinstance(votes, list) else [],
         "claim_boundary": payload.get("claim_boundary"),
     }
+
+
+def _selector_vote_event_count(run_dir: Path) -> int:
+    selector_dir = run_dir / "reports" / "selector_votes"
+    if not selector_dir.exists():
+        return 0
+    return sum(1 for path in selector_dir.glob("selection_*.json") if path.is_file())
 
 
 def _solutions_payload(run_id: str, run_dir: Path) -> dict[str, object]:
