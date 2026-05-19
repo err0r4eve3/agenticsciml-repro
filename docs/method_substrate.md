@@ -1,11 +1,12 @@
 # Method Substrate 合约
 
-[返回文档树](index.md) · 相关文档：[论文机制笔记](paper_notes.md)、[论文算法 Reference Primitives](paper_algorithm_primitives.md)、[Benchmark 与实验设计](benchmark_plan.md)
+[返回文档树](index.md) · 相关文档：[ATHENA / GRAFT-ATHENA 方法映射](athena_graft_methods.md)、[论文机制笔记](paper_notes.md)、[论文算法 Reference Primitives](paper_algorithm_primitives.md)、[Benchmark 与实验设计](benchmark_plan.md)
 
 ## 范围
 
-`src/agenticsciml/method_substrate.py` 是一个 deterministic local contract，
-用于把 ATHENA / GRAFT-ATHENA 中适合本项目的 workflow 机制落成可测试对象：
+`src/agenticsciml/method_substrate.py` 是底层 deterministic local contract，
+`src/agenticsciml/method_templates.py` 是其上的 inert template layer。两者用于把
+ATHENA / GRAFT-ATHENA 中适合本项目的 workflow 机制落成可测试对象：
 
 - `MethodAction` 表示结构化动作 `A_n`，例如 architecture、PDE constraint、
   optimizer 或 diagnostics。
@@ -15,6 +16,10 @@
 - `ScientificReward` 表示由 trusted evaluator artifact 得到的标量奖励 `R_n`。
 - `ExperienceSubstrate` 用本地 JSON cache 按 fingerprint 保存和检索经验记录；同一
   fingerprint 可以保留多条 reward 记录，避免后续实验覆盖早期证据。
+- `MethodTemplateLibrary` 将 NotebookLM/Pro 复审后的 ATHENA / GRAFT 方法机制保存为
+  source-grounded template，并能在不调用 LLM 的情况下实例化为 `MethodPath`。
+- `asr_trace_record()` 生成 `A_n -> S_n -> R_n` 映射 payload，但不写 run artifact、
+  不修改 orchestrator state。
 
 ## Claim Boundary
 
@@ -28,7 +33,7 @@ run artifacts、trace summary 和 claim gate。
 ## 验证
 
 ```bash
-PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_method_substrate.py -q
+PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_method_substrate.py tests/test_method_templates.py -q
 ```
 
 测试覆盖：
@@ -40,3 +45,4 @@ PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_method_substra
 - method parameters 拒绝非 JSON 值和非有限数值；
 - experience cache 可通过 method fingerprint 稳定 roundtrip，并保留同一
   fingerprint 的多条记录。
+- template library 可稳定实例化 method path，并保持 no-overclaim 边界。

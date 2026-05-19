@@ -74,12 +74,15 @@ space, and the path can be treated as a stable fingerprint for later retrieval
 or experience accumulation.
 
 The local implementation now captures only the safe deterministic subset in
-[Method Substrate 合约](method_substrate.md): blueprint-bounded `MethodAction`
-objects, ordered `MethodPath` fingerprints, finite `ScientificReward` records,
-and a local JSON `ExperienceSubstrate`. This is a workflow traceability
-contract, not a claim that the project implements GRAFT's probabilistic policy
-factorization, cross-domain self-improvement, autonomous action-space
-expansion, or the ATHENA paper's reported performance.
+[Method Substrate 合约](method_substrate.md) and
+[ATHENA / GRAFT-ATHENA 方法映射](athena_graft_methods.md): blueprint-bounded
+`MethodAction` objects, ordered `MethodPath` fingerprints, finite
+`ScientificReward` records, local JSON `ExperienceSubstrate` records,
+source-grounded method templates, and explicit `A_n -> S_n -> R_n` trace
+payloads. This is a workflow traceability contract, not a claim that the
+project implements GRAFT's probabilistic policy factorization, cross-domain
+self-improvement, autonomous action-space expansion, or the ATHENA paper's
+reported performance.
 
 ## Benchmark Coverage
 

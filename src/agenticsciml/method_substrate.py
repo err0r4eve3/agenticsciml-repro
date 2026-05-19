@@ -89,7 +89,13 @@ class ExpertBlueprint:
         forbidden = set(self.forbidden_parameters.get("*", ())) | set(
             self.forbidden_parameters.get(action.family, ())
         )
-        missing = sorted(required - set(action.parameters))
+        missing = sorted(
+            parameter
+            for parameter in required
+            if parameter not in action.parameters
+            or action.parameters[parameter] is None
+            or action.parameters[parameter] == ""
+        )
         if missing:
             raise ValueError(f"action {action.action_id!r} is missing required parameters: {missing}")
         present_forbidden = sorted(forbidden & set(action.parameters))
@@ -161,9 +167,7 @@ class ScientificReward:
             raise ValueError("scientific reward value must be finite")
         if not self.source_artifact.strip():
             raise ValueError("scientific reward requires source_artifact")
-        artifact_path = Path(self.source_artifact)
-        if artifact_path.is_absolute() or ".." in artifact_path.parts or self.source_artifact.startswith("~"):
-            raise ValueError("scientific reward source_artifact must be a repo-relative path")
+        validate_repo_relative_artifact(self.source_artifact, label="scientific reward source_artifact")
         if not self.evidence_mode.strip():
             raise ValueError("scientific reward requires evidence_mode")
 
@@ -254,6 +258,36 @@ class ExperienceSubstrate:
     def get_for_path(self, method_path: MethodPath) -> ExperienceRecord | None:
         return self.get(method_path.fingerprint())
 
+    def best_reward_for_fingerprint(
+        self,
+        method_fingerprint: str,
+        *,
+        metric: str | None = None,
+    ) -> ExperienceRecord | None:
+        records = [
+            record
+            for record in self.records_for_fingerprint(method_fingerprint)
+            if metric is None or record.reward.metric == metric
+        ]
+        if not records:
+            return None
+        metrics = {record.reward.metric for record in records}
+        if metric is None and len(metrics) > 1:
+            raise ValueError("metric is required when records contain multiple metrics")
+        higher_is_better = records[0].reward.higher_is_better
+        if any(record.reward.higher_is_better != higher_is_better for record in records):
+            raise ValueError("cannot rank records with mixed reward directions")
+        key = lambda record: record.reward.value
+        return max(records, key=key) if higher_is_better else min(records, key=key)
+
+    def best_reward_for_path(
+        self,
+        method_path: MethodPath,
+        *,
+        metric: str | None = None,
+    ) -> ExperienceRecord | None:
+        return self.best_reward_for_fingerprint(method_path.fingerprint(), metric=metric)
+
     def records_for_fingerprint(self, method_fingerprint: str) -> list[ExperienceRecord]:
         records = self._load_payload()["records"].get(method_fingerprint, [])
         if not isinstance(records, list):
@@ -273,6 +307,15 @@ class ExperienceSubstrate:
 
 def _canonical_json(payload: Any, *, indent: int | None = None) -> str:
     return json.dumps(payload, allow_nan=False, indent=indent, sort_keys=True, separators=(",", ":"))
+
+
+def validate_repo_relative_artifact(path: str, *, label: str = "artifact") -> str:
+    if not path.strip():
+        raise ValueError(f"{label} must be non-empty")
+    artifact_path = Path(path)
+    if artifact_path.is_absolute() or ".." in artifact_path.parts or path.startswith("~"):
+        raise ValueError(f"{label} must be a repo-relative path")
+    return path
 
 
 def _required_str(payload: dict[str, Any], key: str) -> str:

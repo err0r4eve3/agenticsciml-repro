@@ -200,4 +200,104 @@ def test_experience_substrate_roundtrips_records_by_method_fingerprint(tmp_path)
     assert loaded == better_record
     assert substrate.get(method_path.fingerprint()) == better_record
     assert substrate.records_for_fingerprint(method_path.fingerprint()) == [record, better_record]
+    assert substrate.best_reward_for_path(method_path) == better_record
     assert "corner_weighted_residual" in (tmp_path / "experience_cache.json").read_text()
+
+
+def test_experience_substrate_best_reward_respects_metric_and_direction(tmp_path) -> None:
+    method_path = MethodPath(
+        actions=(MethodAction("ensemble_blend", "postprocess", {"members": 2}),)
+    )
+    substrate = ExperienceSubstrate(tmp_path / "experience_cache.json")
+    substrate.save(
+        ExperienceRecord(
+            method_path=method_path,
+            benchmark_name="function_approx",
+            reward=ScientificReward(
+                metric="validation_mse",
+                value=0.2,
+                higher_is_better=False,
+                source_artifact="solutions/solution_001/eval.json",
+            ),
+        )
+    )
+    substrate.save(
+        ExperienceRecord(
+            method_path=method_path,
+            benchmark_name="function_approx",
+            reward=ScientificReward(
+                metric="validation_mse",
+                value=0.1,
+                higher_is_better=False,
+                source_artifact="solutions/solution_002/eval.json",
+            ),
+        )
+    )
+    substrate.save(
+        ExperienceRecord(
+            method_path=method_path,
+            benchmark_name="function_approx",
+            reward=ScientificReward(
+                metric="accuracy",
+                value=0.7,
+                higher_is_better=True,
+                source_artifact="solutions/solution_003/eval.json",
+            ),
+        )
+    )
+    substrate.save(
+        ExperienceRecord(
+            method_path=method_path,
+            benchmark_name="function_approx",
+            reward=ScientificReward(
+                metric="accuracy",
+                value=0.9,
+                higher_is_better=True,
+                source_artifact="solutions/solution_004/eval.json",
+            ),
+        )
+    )
+
+    best_loss = substrate.best_reward_for_path(method_path, metric="validation_mse")
+    best_accuracy = substrate.best_reward_for_path(method_path, metric="accuracy")
+
+    assert best_loss is not None
+    assert best_loss.reward.value == 0.1
+    assert best_accuracy is not None
+    assert best_accuracy.reward.value == 0.9
+    with pytest.raises(ValueError, match="metric is required"):
+        substrate.best_reward_for_path(method_path)
+
+
+def test_experience_substrate_rejects_best_reward_with_mixed_directions_for_same_metric(tmp_path) -> None:
+    method_path = MethodPath(
+        actions=(MethodAction("selector_vote", "selection", {"votes": 2}),)
+    )
+    substrate = ExperienceSubstrate(tmp_path / "experience_cache.json")
+    substrate.save(
+        ExperienceRecord(
+            method_path=method_path,
+            benchmark_name="function_approx",
+            reward=ScientificReward(
+                metric="score",
+                value=0.2,
+                higher_is_better=False,
+                source_artifact="solutions/solution_001/eval.json",
+            ),
+        )
+    )
+    substrate.save(
+        ExperienceRecord(
+            method_path=method_path,
+            benchmark_name="function_approx",
+            reward=ScientificReward(
+                metric="score",
+                value=0.3,
+                higher_is_better=True,
+                source_artifact="solutions/solution_002/eval.json",
+            ),
+        )
+    )
+
+    with pytest.raises(ValueError, match="mixed reward directions"):
+        substrate.best_reward_for_path(method_path, metric="score")

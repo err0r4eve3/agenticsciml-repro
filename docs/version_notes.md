@@ -2,6 +2,38 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-19 ATHENA / GRAFT Method Template Library
+
+本次在上一轮 `method_substrate` 合约之上，把 NotebookLM / Pro 提炼出的论文方法机制
+落为保守的 source-grounded template library。默认 runtime selector、catalog、
+evaluator 和 orchestrator 行为不变。
+
+已实现：
+
+- 新增 `src/agenticsciml/method_templates.py`，定义 `MethodTemplate`、
+  `MethodTemplateLibrary`、`athena_graft_method_library()` 和 `asr_trace_record()`。
+- 内置 `hena_asr_mapping`、`expert_blueprint_constraint`、
+  `factored_method_path`、`method_fingerprint_cache` 和
+  `local_experience_record_template` 五个模板。
+- 内置模板显式保持 `runtime_enabled=False`、`evaluated_algorithm=False`、
+  `paper_score_claim=False` 和 `autonomous_discovery_claim=False`。
+- 模板实例化会走 `ExpertBlueprint` validation，并生成 deterministic `MethodPath`。
+- `asr_trace_record()` 生成 `A_n -> S_n -> R_n` 结构化 payload，但不写 run artifact。
+- `ExperienceSubstrate` 增加 best-reward 查询 helper，要求混合 metric 显式指定
+  `metric`，并按 `higher_is_better` / lower-is-better 方向选择历史记录。
+- 新增 [ATHENA / GRAFT-ATHENA 方法映射](athena_graft_methods.md)，记录每个方法机制的
+  来源、项目落点和 overclaim boundary。
+
+验证：
+
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_method_substrate.py tests/test_method_templates.py -q`
+
+边界：
+
+- 本轮仍不实现 contextual bandit、GRAFT metric embedding、概率树学习、自动 action-space
+  expansion 或 runtime parent-selection 集成。
+- 模板是 planning / traceability aids，不是 evaluated algorithms。
+
 ## 2026-05-19 ATHENA / GRAFT Method Substrate Contract
 
 本次把两篇新增参考文献中的可安全落地机制纳入 NotebookLM，并将 NotebookLM / Pro
