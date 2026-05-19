@@ -231,6 +231,61 @@ def test_trace_summary_fails_on_claim_gate_overclaim(tmp_path: Path) -> None:
     assert any("paper_level_claim_supported overclaims" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
+def test_trace_summary_reports_data_analysis_specificity_warnings(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "reports").mkdir()
+    (run_dir / "reports" / "data_analysis_structured.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "benchmark_name": "function_approx",
+                "training_array_keys": [],
+                "task_specific_observations": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "run_metadata.json").write_text(
+        json.dumps(
+            {
+                "llm_mode": LLM_MODE_MOCK,
+                "benchmark_fidelity_level": "proxy",
+                "evidence_mode": EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE,
+                "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_events(
+        run_dir / "trace.jsonl",
+        [
+            {
+                "event_type": "workflow_span",
+                "name": "agenticsciml.run.start",
+                "metadata": {
+                    "llm_mode": LLM_MODE_MOCK,
+                    "benchmark_fidelity_level": "proxy",
+                    "evidence_mode": EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE,
+                    "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
+                },
+            },
+            {"event_type": "agent_span", "name": "proposer", "metadata": {}},
+            {"event_type": "generation_span", "name": "proposer", "metadata": {}},
+            {"event_type": "tool_span", "name": "train_and_evaluate", "metadata": {}},
+            {"event_type": "guardrail_span", "name": "guard", "metadata": {"passed": True}},
+        ],
+    )
+
+    summary = summarize_trace(run_dir)
+
+    specificity = summary["artifact_consistency"]["data_analysis_specificity"]
+    assert specificity["checked"] is True
+    assert specificity["passed"] is False
+    assert "training_array_keys is missing" in specificity["warnings"]
+    assert "task_specific_observations is missing" in specificity["warnings"]
+
+
 def test_trace_summary_checks_tree_and_checkpoint_contract_consistency(tmp_path: Path) -> None:
     run_dir = _write_consistent_run_artifacts(tmp_path / "run")
 

@@ -195,6 +195,20 @@ type SolutionSummary = {
     claim_level?: string | null;
     blocking_gap_count?: number;
   };
+  kb_application?: {
+    available: boolean;
+    status?: string | null;
+    retrieved_entry_id?: string | null;
+    warning_count?: number;
+    implemented_count?: number;
+  };
+  mutation_effect?: {
+    available: boolean;
+    status?: string | null;
+    code_changed_from_parent?: boolean | null;
+    duplicate_of?: string | null;
+    diff_line_count?: number | null;
+  };
   workspace: string;
   artifacts: ArtifactEntry[];
 };
@@ -209,6 +223,13 @@ type SolutionsPayload = {
   };
   solutions: SolutionSummary[];
   leaderboard: Array<Record<string, string>>;
+  evolution_health?: {
+    unique_code_count?: number;
+    duplicate_code_count?: number;
+    max_plateau_length?: number;
+    best_improvement?: number | null;
+    warnings?: string[];
+  };
   figures: ArtifactEntry[];
 };
 
@@ -2474,43 +2495,74 @@ function SelectorVotesView({ payload }: { payload: SelectorVotesPayload | null }
 
 function SolutionsTable({ payload }: { payload: SolutionsPayload | null }) {
   const rows = payload?.solutions ?? [];
+  const health = payload?.evolution_health;
   return (
-    <div className="table-wrap solution-table">
-      <table>
-        <thead>
-          <tr>
-            <th>node</th>
-            <th>parent</th>
-            <th>status</th>
-            <th>metric</th>
-            <th>loss/score</th>
-            <th>delta</th>
-            <th>tags</th>
-            <th>emergence</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.slice(0, 12).map((solution) => (
-            <tr key={solution.node_id}>
-              <td>{solution.node_id}</td>
-              <td>{solution.parent_id ?? "root"}</td>
-              <td>{solution.status ?? "unknown"}</td>
-              <td>{solution.metric ?? "metric"}</td>
-              <td>{formatScore(solution.loss ?? solution.score)}</td>
-              <td>{formatScore(solution.score_delta_from_parent)}</td>
-              <td>{solution.method_tags.slice(0, 3).join(", ") || "none"}</td>
-              <td>{formatEmergenceClaim(solution.emergence_audit)}</td>
-            </tr>
+    <div className="solution-table-stack">
+      <div className="compact-metrics">
+        <span>unique code {health?.unique_code_count ?? "n/a"}</span>
+        <span>duplicates {health?.duplicate_code_count ?? "n/a"}</span>
+        <span>plateau {health?.max_plateau_length ?? "n/a"}</span>
+        <span>best improvement {formatScore(health?.best_improvement)}</span>
+      </div>
+      {(health?.warnings ?? []).length ? (
+        <div className="inline-warnings">
+          {(health?.warnings ?? []).map((warning) => (
+            <span key={warning}>{warning}</span>
           ))}
-          {rows.length === 0 ? (
+        </div>
+      ) : null}
+      <div className="table-wrap solution-table">
+        <table>
+          <thead>
             <tr>
-              <td colSpan={8}>选择包含 tree.json 的 run 后显示 solution tree summary。</td>
+              <th>node</th>
+              <th>parent</th>
+              <th>status</th>
+              <th>metric</th>
+              <th>loss/score</th>
+              <th>delta</th>
+              <th>kb</th>
+              <th>mutation</th>
+              <th>emergence</th>
             </tr>
-          ) : null}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.slice(0, 12).map((solution) => (
+              <tr key={solution.node_id}>
+                <td>{solution.node_id}</td>
+                <td>{solution.parent_id ?? "root"}</td>
+                <td>{solution.status ?? "unknown"}</td>
+                <td>{solution.metric ?? "metric"}</td>
+                <td>{formatScore(solution.loss ?? solution.score)}</td>
+                <td>{formatScore(solution.score_delta_from_parent)}</td>
+                <td>{formatKbApplication(solution.kb_application)}</td>
+                <td>{formatMutationEffect(solution.mutation_effect)}</td>
+                <td>{formatEmergenceClaim(solution.emergence_audit)}</td>
+              </tr>
+            ))}
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={9}>选择包含 tree.json 的 run 后显示 solution tree summary。</td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
+}
+
+function formatKbApplication(kb: SolutionSummary["kb_application"]): string {
+  if (!kb?.available) return "none";
+  const warnings = kb.warning_count ? `, ${kb.warning_count} warn` : "";
+  return `${kb.status ?? "unknown"}${warnings}`;
+}
+
+function formatMutationEffect(effect: SolutionSummary["mutation_effect"]): string {
+  if (!effect?.available) return "root";
+  if (effect.duplicate_of) return `${effect.status ?? "duplicate"} -> ${effect.duplicate_of}`;
+  const lines = effect.diff_line_count ?? "n/a";
+  return `${effect.status ?? "unknown"} (${lines})`;
 }
 
 function formatEmergenceClaim(

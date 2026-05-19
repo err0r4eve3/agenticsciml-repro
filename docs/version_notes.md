@@ -2,6 +2,47 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-19 Senior Review Issue Closure
+
+本次按学长审计文档逐项补齐 4 个可信度问题的留档、artifact 和 UI/API 证据展示。所有新增报告都定位为
+workflow evidence，不改变 evaluator score，也不支持论文级科学结论。
+
+已实现：
+
+- 新增 [学长审计 Issue 留档](senior_review_issues.md)，逐项记录原始问题、证据、根因、
+  修复方案、验证命令和可转发答复。
+- Issue 1：child solution 新增 `kb_application_report.json`；`ProposerAgent` 支持可选
+  `kb_application`，`EngineerAgent` 保存 `engineering_response.json` 和
+  `implemented_kb_points`，并对 PINN/KB 关键点做轻量静态证据检查。
+- Issue 2：orchestrator 新 run 使用 `run_inputs/public/` 和
+  `run_inputs/private_eval/`。solution workspace 只通过 symlink/copy fallback 暴露公共输入，
+  private evaluator 不进入 solution workspace；Web artifact browser 拒绝浏览
+  `run_inputs/private_eval/` 原始内容。
+- Issue 3：child solution 新增 `mutation_effect_report.json`，run 级新增
+  `reports/evolution_health.json`，记录 code digest、proposal digest、diff line count、
+  duplicate-of、score delta 和 plateau warning。
+- Issue 4：Data Analyst 新增 `reports/data_analysis_structured.json`，`data_analysis.md`
+  从结构化 JSON 渲染；trace summary 增加 `data_analysis_specificity` warning。
+- Web `/api/runs/{id}/solutions` 返回 `kb_application`、`mutation_effect` 和
+  `evolution_health` 摘要；前端第三页 evidence table 显示 KB usage、mutation status、
+  unique code、duplicate、plateau 和 best improvement。
+
+验证：
+
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_llm_and_agents.py::test_data_analyst_writes_training_observation_artifacts tests/test_llm_and_agents.py::test_data_analyst_structured_output_is_benchmark_specific tests/test_retrieval.py::test_kb_application_report_warns_when_budgeted_pinn_entry_is_not_adopted -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_execution.py::test_run_level_inputs_deduplicate_public_data_and_keep_private_eval_out_of_solution -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trace_summary_reports_data_analysis_specificity_warnings -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_orchestrator_cli.py::test_full_mock_pipeline_generates_tree_and_champion -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_orchestrator_cli.py::test_duplicate_child_code_is_marked_in_mutation_and_evolution_health -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_web_api.py::test_selector_votes_and_solutions_are_read_only_evidence -q`
+
+边界：
+
+- KB static evidence 是轻量信号，不证明算法正确或科学有效。
+- `run_inputs/public` 在 symlink 不可用的平台会 fallback 为 copy，并写入 manifest。
+- `evolution_health` 解释分数停滞原因，不替代 evaluator 区分度改造。
+- structured data analysis 仍只读取 training data，不接触 private validation labels。
+
 ## 2026-05-19 ATHENA / GRAFT Method Template Library
 
 本次在上一轮 `method_substrate` 合约之上，把 NotebookLM / Pro 提炼出的论文方法机制

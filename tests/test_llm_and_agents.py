@@ -130,8 +130,10 @@ def test_data_analyst_writes_training_observation_artifacts(tmp_path: Path) -> N
     svg_path = storage.run_dir / "reports" / "data_overview.svg"
     eda_script_path = storage.run_dir / "reports" / "data_eda.py"
     eda_output_path = storage.run_dir / "reports" / "data_eda.json"
+    structured_path = storage.run_dir / "reports" / "data_analysis_structured.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     eda_output = json.loads(eda_output_path.read_text(encoding="utf-8"))
+    structured = json.loads(structured_path.read_text(encoding="utf-8"))
 
     assert manifest["benchmark_name"] == "function_approx"
     assert manifest["source_mode"] in {"generated_seed0", "repo_existing"}
@@ -146,10 +148,32 @@ def test_data_analyst_writes_training_observation_artifacts(tmp_path: Path) -> N
     assert eda_script_path.exists()
     assert eda_output["privacy_boundary"] == "training_data_only_no_private_labels"
     assert eda_output["array_checks"][0]["status"] in {"ok", "warning"}
+    assert structured["benchmark_name"] == "function_approx"
+    assert structured["benchmark_family"] == "function approximation"
+    assert structured["evaluation_metric"] == "validation_mse"
+    assert structured["training_array_keys"] == ["u_train", "x_train"]
+    assert structured["private_label_boundary"] == "training_data_only_no_validation_labels"
+    assert any("Function approximation" in item for item in structured["task_specific_observations"])
     assert "val_data" not in eda_output_path.read_text(encoding="utf-8")
     assert "Observation manifest:" in llm.last_prompt
     assert "Replayable EDA summary:" in llm.last_prompt
     assert "reports/data_overview.svg" in llm.last_prompt
+
+
+def test_data_analyst_structured_output_is_benchmark_specific(tmp_path: Path) -> None:
+    first_storage = ExperimentStorage.create(tmp_path, "function")
+    second_storage = ExperimentStorage.create(tmp_path, "poisson")
+
+    DataAnalystAgent(RecordingLLM(), first_storage).analyze(Path("examples/function_approx"))
+    DataAnalystAgent(RecordingLLM(), second_storage).analyze(Path("examples/poisson_lshape"))
+
+    first = json.loads((first_storage.run_dir / "reports" / "data_analysis_structured.json").read_text(encoding="utf-8"))
+    second = json.loads((second_storage.run_dir / "reports" / "data_analysis_structured.json").read_text(encoding="utf-8"))
+
+    assert first["benchmark_name"] == "function_approx"
+    assert second["benchmark_name"] == "poisson_lshape"
+    assert first["benchmark_family"] != second["benchmark_family"]
+    assert first["task_specific_observations"] != second["task_specific_observations"]
 
 
 def test_data_eda_script_replays_training_npz_only(tmp_path: Path) -> None:
@@ -329,8 +353,10 @@ def test_agents_save_transcripts_and_structured_outputs(tmp_path: Path) -> None:
     )
 
     assert proposal.title
+    assert proposal.kb_application["proposal_adopted_points"]
     assert selection == ["solution_000"]
     assert (storage.run_dir / "solutions" / "solution_001" / "proposal.md").exists()
+    assert "KB Application" in (storage.run_dir / "solutions" / "solution_001" / "proposal.md").read_text(encoding="utf-8")
     assert (storage.run_dir / "solutions" / "solution_001" / "critic.md").exists()
     assert (storage.run_dir / "transcripts" / "selector.json").exists()
 

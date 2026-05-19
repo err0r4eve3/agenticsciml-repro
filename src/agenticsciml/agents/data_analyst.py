@@ -6,8 +6,10 @@ from agenticsciml.agents.base import AgentBase
 from agenticsciml.observations import (
     build_data_eda_package,
     build_data_observation_package,
+    build_structured_data_analysis,
     prompt_eda_summary,
     prompt_observation_summary,
+    render_structured_data_analysis,
 )
 from agenticsciml.state import AgentMessage
 
@@ -37,13 +39,21 @@ class DataAnalystAgent(AgentBase):
             "Act as the data analyst for an AgenticSciML run. "
             f"Summarize data properties for benchmark at {benchmark_dir}. "
             "Use only training-data observations and do not infer from private validation labels. "
-            "Return a concise text-only report.\n\n"
+            "Return a concise benchmark-specific text-only report that mentions the benchmark name, "
+            "training array keys, and task-specific modeling implications.\n\n"
             "Observation manifest:\n"
             f"{prompt_observation_summary(manifest)}\n\n"
             "Replayable EDA summary:\n"
             f"{prompt_eda_summary(eda_output)}"
         )
         response = self.complete_text(prompt)
-        self.storage.save_text("reports/data_analysis.md", f"# Data Analysis\n\n{response}\n")
+        structured = build_structured_data_analysis(
+            benchmark_dir,
+            manifest,
+            eda_output,
+            llm_report=response,
+        )
+        self.storage.save_json("reports/data_analysis_structured.json", structured)
+        self.storage.save_text("reports/data_analysis.md", render_structured_data_analysis(structured))
         self._save_messages(None, [AgentMessage(self.role, prompt, response)])
         return response

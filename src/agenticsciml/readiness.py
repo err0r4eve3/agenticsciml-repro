@@ -26,9 +26,14 @@ ARTIFACT_CAPTURE_REQUIREMENTS = (
     "tree.json",
     "leaderboard.csv",
     "champion/claim_gate.json",
+    "run_inputs/manifest.json",
     "solutions/",
+    "solutions/*/kb_application_report.json",
+    "solutions/*/mutation_effect_report.json",
     "solutions/*/policy_fidelity_report.json",
     "solutions/*/emergence_report.json",
+    "reports/data_analysis_structured.json",
+    "reports/evolution_health.json",
     "reports/",
 )
 STRATEGY_LOCK_INSPECTION_KEYS = (

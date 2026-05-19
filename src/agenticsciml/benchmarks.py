@@ -229,8 +229,8 @@ class BenchmarkContractFactory:
                 train_path,
             ],
             evaluator_only_files=[
-                "private_eval/{solution_id}/evaluate.py",
-                f"private_eval/{{solution_id}}/{validation_path}",
+                "run_inputs/private_eval/evaluate.py",
+                f"run_inputs/private_eval/{validation_path}",
             ],
             evaluator_digest=_file_digest(problem_bundle.benchmark_dir / "evaluate.py"),
             data_config_digest=_file_digest(problem_bundle.benchmark_dir / "Data_config.json"),

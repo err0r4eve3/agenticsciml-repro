@@ -779,6 +779,47 @@ def test_selector_votes_and_solutions_are_read_only_evidence(tmp_path: Path) -> 
         ),
         encoding="utf-8",
     )
+    (run_dir / "solutions" / "solution_000" / "kb_application_report.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": "implemented",
+                "retrieved_entry_id": "fourier_features",
+                "retrieved_title": "Fourier Features",
+                "actionable_points": [{"id": "feature_expansion"}],
+                "engineer_implemented_points": ["feature_expansion"],
+                "warnings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "solutions" / "solution_000" / "mutation_effect_report.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": "changed_score_moved",
+                "code_changed_from_parent": True,
+                "diff_line_count": 7,
+                "duplicate_of": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "reports" / "evolution_health.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "unique_code_count": 1,
+                "duplicate_code_count": 0,
+                "max_plateau_length": 1,
+                "best_improvement": 0.05,
+                "warnings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "run_inputs" / "private_eval").mkdir(parents=True)
+    (run_dir / "run_inputs" / "private_eval" / "val_data.npz").write_text("private", encoding="utf-8")
     (run_dir / "tree.json").write_text(
         json.dumps(
             {
@@ -870,10 +911,22 @@ def test_selector_votes_and_solutions_are_read_only_evidence(tmp_path: Path) -> 
         "blocking_gap_count": 1,
         "claim_boundary": "candidate only",
     }
+    assert payload["solutions"][0]["kb_application"]["status"] == "implemented"
+    assert payload["solutions"][0]["mutation_effect"]["status"] == "changed_score_moved"
+    assert payload["evolution_health"]["unique_code_count"] == 1
     assert {figure["path"] for figure in payload["figures"]} == {
         "reports/data_overview.svg",
         "solutions/solution_000/prediction_overview.svg",
     }
+
+    artifacts = client.get("/api/runs/paper-run/artifacts/run_inputs", params={"output_dir": str(tmp_path)})
+    assert artifacts.status_code == 200
+    assert "private_eval" not in {entry["path"].split("/")[-1] for entry in artifacts.json()["entries"]}
+    private = client.get(
+        "/api/runs/paper-run/artifacts/run_inputs/private_eval/val_data.npz",
+        params={"output_dir": str(tmp_path)},
+    )
+    assert private.status_code == 403
 
 
 def test_account_scoped_evidence_endpoints_use_account_runs(

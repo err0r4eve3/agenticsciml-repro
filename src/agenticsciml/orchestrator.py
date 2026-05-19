@@ -36,6 +36,11 @@ from agenticsciml.config import (
     ExperimentConfig,
     agent_role_default_model_settings,
 )
+from agenticsciml.audit_reports import (
+    build_evolution_health_report,
+    build_kb_application_report,
+    build_mutation_effect_report,
+)
 from agenticsciml.evidence import claim_gate_for_run, evidence_metadata_for_run
 from agenticsciml.emergence_audit import audit_solution_emergence
 from agenticsciml.execution.runner import RunResult
@@ -711,7 +716,11 @@ class AgenticSciMLOrchestrator:
     def _create_root(self, contract: EvaluationContract, data_report: str | None) -> SolutionNode:
         solution_id = self._next_solution_id()
         workspace = self.storage.create_solution_workspace(solution_id)
-        prepare_solution_workspace(self.config.benchmark_dir, workspace)
+        prepare_solution_workspace(
+            self.config.benchmark_dir,
+            workspace,
+            run_inputs_dir=self._run_inputs_dir(),
+        )
         self.root_engineer.generate(
             solution_id,
             problem_bundle=self.problem_bundle,
@@ -949,7 +958,11 @@ class AgenticSciMLOrchestrator:
     ) -> SolutionNode:
         solution_id = solution_id or self._next_solution_id()
         workspace = self.storage.create_solution_workspace(solution_id)
-        prepare_solution_workspace(self.config.benchmark_dir, workspace)
+        prepare_solution_workspace(
+            self.config.benchmark_dir,
+            workspace,
+            run_inputs_dir=self._run_inputs_dir(),
+        )
         branch_context = branch_context or {}
         self.storage.save_json(Path("solutions") / solution_id / "branch_context.json", branch_context)
 
@@ -998,7 +1011,7 @@ class AgenticSciMLOrchestrator:
         if isinstance(branch_intent, str) and branch_intent:
             method_tags.append(f"branch:{branch_intent}")
         try:
-            self.engineer.mutate(
+            child_code = self.engineer.mutate(
                 solution_id,
                 parent_code,
                 proposal,
@@ -1010,7 +1023,9 @@ class AgenticSciMLOrchestrator:
                 problem_intake_context=self._problem_intake_context(),
                 strategy_seed_context=self._strategy_seed_context(),
             )
+            self._write_kb_application_report(solution_id, kb_entry, proposal, workspace)
         except (PatchApplicationError, StructuredOutputError) as exc:
+            self._write_kb_application_report(solution_id, kb_entry, proposal, workspace)
             self.storage.save_solution_text(
                 solution_id,
                 "engineering_error.md",
@@ -1029,7 +1044,7 @@ class AgenticSciMLOrchestrator:
             report = self.result_analyst.analyze(solution_id, workspace)
             with self._analysis_lock:
                 self.analysis_by_node[solution_id] = report
-            return SolutionNode(
+            failed_node = SolutionNode(
                 node_id=solution_id,
                 parent_id=parent.node_id,
                 workspace=str(workspace),
@@ -1045,7 +1060,9 @@ class AgenticSciMLOrchestrator:
                 score_delta_from_parent=None,
                 num_debug_attempts=0,
             )
-        return self._execute_analyze_node(
+            self._write_mutation_effect_report(failed_node, parent, parent_code, workspace)
+            return failed_node
+        node = self._execute_analyze_node(
             solution_id,
             parent.node_id,
             workspace,
@@ -1053,6 +1070,8 @@ class AgenticSciMLOrchestrator:
             parent_node=parent,
             method_tags=method_tags,
         )
+        self._write_mutation_effect_report(node, parent, parent_code, workspace, child_code=child_code)
+        return node
 
     def _execute_analyze_node(
         self,
@@ -1236,7 +1255,12 @@ class AgenticSciMLOrchestrator:
                     stderr=message,
                     duration_s=0.0,
                 )
-        return train_and_evaluate(workspace, contract, timeout_s=self.config.evolution.timeout_s)
+        return train_and_evaluate(
+            workspace,
+            contract,
+            timeout_s=self.config.evolution.timeout_s,
+            private_eval_dir=self._private_eval_dir(),
+        )
 
     def _select_parents(self) -> list[SolutionNode]:
         available = [
@@ -1613,6 +1637,8 @@ class AgenticSciMLOrchestrator:
         write_tree_json(self.storage.run_dir, self.nodes)
         write_tree_mermaid(self.storage.run_dir, self.nodes)
         write_leaderboard(self.storage.run_dir, self.nodes)
+        evolution_health = build_evolution_health_report(self.nodes, self.storage.run_dir)
+        self.storage.save_json("reports/evolution_health.json", evolution_health)
         best = self._best_node()
         champion_dir = self.storage.run_dir / "champion"
         champion_dir.mkdir(exist_ok=True)
@@ -1644,6 +1670,14 @@ class AgenticSciMLOrchestrator:
                 "branch_context_enabled": self.config.evolution.use_branch_context,
                 "strategy_seed_ids": list(self.config.strategy_seed_ids),
                 "strategy_seed_count": len(self.config.strategy_seed_ids),
+                "input_layout": self._run_inputs_manifest(),
+                "evolution_health": {
+                    "unique_code_count": evolution_health.get("unique_code_count"),
+                    "duplicate_code_count": evolution_health.get("duplicate_code_count"),
+                    "max_plateau_length": evolution_health.get("max_plateau_length"),
+                    "best_improvement": evolution_health.get("best_improvement"),
+                    "warnings": evolution_health.get("warnings", []),
+                },
                 **self._planning_metadata(),
                 **evidence_metadata,
                 **self._llm_runtime_metadata(),
@@ -1656,6 +1690,78 @@ class AgenticSciMLOrchestrator:
             {
                 "champion": best.node_id,
                 "solution_count": len(self.nodes),
+            },
+        )
+
+    def _run_inputs_dir(self) -> Path:
+        return self.storage.run_dir / "run_inputs"
+
+    def _private_eval_dir(self) -> Path:
+        return self._run_inputs_dir() / "private_eval"
+
+    def _run_inputs_manifest(self) -> dict[str, object]:
+        path = self._run_inputs_dir() / "manifest.json"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {"available": False}
+        return payload if isinstance(payload, dict) else {"available": False}
+
+    def _write_kb_application_report(
+        self,
+        solution_id: str,
+        kb_entry: object,
+        proposal: Proposal | None,
+        workspace: Path,
+    ) -> None:
+        report = build_kb_application_report(
+            solution_id=solution_id,
+            kb_entry=kb_entry,
+            proposal=proposal,
+            workspace=workspace,
+        )
+        self.storage.save_json(Path("solutions") / solution_id / "kb_application_report.json", report)
+        self.storage.record_trace(
+            "tool_span",
+            "kb_application_audit",
+            {
+                "solution_id": solution_id,
+                "retrieved_entry_id": report.get("retrieved_entry_id"),
+                "status": report.get("status"),
+                "warning_count": len(report.get("warnings", [])) if isinstance(report.get("warnings"), list) else 0,
+            },
+        )
+
+    def _write_mutation_effect_report(
+        self,
+        node: SolutionNode,
+        parent_node: SolutionNode | None,
+        parent_code: str | None,
+        workspace: Path,
+        *,
+        child_code: str | None = None,
+    ) -> None:
+        code = child_code
+        if code is None:
+            solution_path = workspace / "solution.py"
+            code = solution_path.read_text(encoding="utf-8") if solution_path.exists() else ""
+        report = build_mutation_effect_report(
+            node=node,
+            parent_node=parent_node,
+            parent_code=parent_code,
+            child_code=code,
+            workspace=workspace,
+        )
+        self.storage.save_json(Path("solutions") / node.node_id / "mutation_effect_report.json", report)
+        self.storage.record_trace(
+            "tool_span",
+            "mutation_effect_audit",
+            {
+                "solution_id": node.node_id,
+                "parent_id": node.parent_id,
+                "status": report.get("status"),
+                "code_changed_from_parent": report.get("code_changed_from_parent"),
+                "diff_line_count": report.get("diff_line_count"),
             },
         )
 

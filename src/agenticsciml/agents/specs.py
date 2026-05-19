@@ -88,6 +88,7 @@ AGENT_SPECS: dict[str, AgentSpec] = {
             "reports/data_overview.svg",
             "reports/data_eda.py",
             "reports/data_eda.json",
+            "reports/data_analysis_structured.json",
         ),
         failure_policy="fail the run before solution generation",
     ),
@@ -210,7 +211,7 @@ AGENT_SPECS: dict[str, AgentSpec] = {
         ),
         tools=("llm", "filesystem write"),
         budget={"calls": 1},
-        artifacts=("solution.py", "engineering_summary.md"),
+        artifacts=("solution.py", "engineering_summary.md", "engineering_response.json"),
         failure_policy="send runtime failures to debugger",
     ),
     "debugger": AgentSpec(

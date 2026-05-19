@@ -100,8 +100,10 @@ class ProposerAgent(AgentBase):
                 critic_context = "\n".join(f"- {item}" for item in critic_feedback) or "No critic feedback."
                 prompt = PromptTemplate(
                     "Proposer round 4: return final implementation-ready proposal as JSON "
-                    "with title, diagnosis, mutation_plan, expected_effect, risks. "
-                    "`mutation_plan` and `risks` must be JSON arrays of strings, not strings.\n\n"
+                    "with title, diagnosis, mutation_plan, expected_effect, risks, and optional "
+                    "kb_application. `mutation_plan` and `risks` must be JSON arrays of strings, not strings. "
+                    "If a KB entry is present, include kb_application with actionable_points and "
+                    "proposal_adopted_points so later audit can distinguish retrieved-only from adopted KB.\n\n"
                     "{context}\n\nCritic feedback to address:\n{critic_feedback}"
                 ).render({"context": context, "critic_feedback": critic_context})
                 data = self.complete_json_checked(

@@ -191,6 +191,10 @@ class MockLLMClient(LLMClient):
                 ],
                 "expected_effect": "The child should reduce validation MSE on oscillatory regions and the jump.",
                 "risks": ["The fixed jump location may not generalize to other datasets."],
+                "kb_application": {
+                    "actionable_points": ["feature expansion", "stable low-budget fitting"],
+                    "proposal_adopted_points": ["feature expansion", "stable low-budget fitting"],
+                },
             }
         if name == "root_engineer":
             return {
@@ -211,6 +215,7 @@ class MockLLMClient(LLMClient):
                 ),
                 "files_changed": ["solution.py"],
                 "full_file_map": {"solution.py": FOURIER_RIDGE_SOLUTION + "\n"},
+                "implemented_kb_points": ["feature expansion", "stable low-budget fitting"],
             }
         if name == "analysis":
             return {

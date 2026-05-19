@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -67,6 +68,79 @@ def build_data_eda_package(manifest: dict[str, Any]) -> tuple[dict[str, Any], st
         ),
     }
     return eda_output, DATA_EDA_SCRIPT
+
+
+def build_structured_data_analysis(
+    benchmark_dir: Path,
+    manifest: dict[str, Any],
+    eda_output: dict[str, Any],
+    *,
+    llm_report: str = "",
+) -> dict[str, Any]:
+    benchmark_dir = benchmark_dir.resolve()
+    spec = benchmark_for_path(benchmark_dir)
+    arrays = manifest.get("arrays", {})
+    array_map = arrays if isinstance(arrays, dict) else {}
+    array_names = sorted(str(name) for name in array_map)
+    data_config = _read_json_object(benchmark_dir / "Data_config.json")
+    structured = {
+        "schema_version": 1,
+        "benchmark_name": spec.name if spec else benchmark_dir.name,
+        "benchmark_family": spec.family if spec else "unknown",
+        "paper_section": spec.paper_section if spec else None,
+        "fidelity_level": spec.fidelity_level if spec else "unknown",
+        "problem_summary": _doc_excerpt(benchmark_dir / "Problem.md", fallback=spec.description if spec else ""),
+        "evaluation_metric": spec.metric if spec else _doc_excerpt(benchmark_dir / "Evaluation.md", fallback="unknown"),
+        "training_arrays": {
+            name: summary
+            for name, summary in sorted(array_map.items())
+            if isinstance(summary, dict)
+        },
+        "training_array_keys": array_names,
+        "data_config": data_config,
+        "task_specific_observations": _task_specific_observations(spec, array_names, manifest, eda_output),
+        "modeling_implications": _structured_modeling_implications(spec, array_names, eda_output),
+        "risks": _structured_analysis_risks(spec, manifest, eda_output),
+        "private_label_boundary": "training_data_only_no_validation_labels",
+        "llm_report_summary": llm_report.strip(),
+        "claim_boundary": (
+            "Structured data analysis is workflow context from training artifacts only. "
+            "It is not evaluator truth, paper-score evidence, or scientific support by itself."
+        ),
+    }
+    return structured
+
+
+def render_structured_data_analysis(structured: dict[str, Any]) -> str:
+    observations = _markdown_list(structured.get("task_specific_observations"))
+    implications = _markdown_list(structured.get("modeling_implications"))
+    risks = _markdown_list(structured.get("risks"))
+    array_keys = ", ".join(str(item) for item in structured.get("training_array_keys", [])) or "none"
+    llm_report = str(structured.get("llm_report_summary") or "").strip()
+    if not llm_report:
+        llm_report = "No LLM summary was recorded."
+    return (
+        "# Data Analysis\n\n"
+        "## Structured Summary\n\n"
+        f"- benchmark: {structured.get('benchmark_name')}\n"
+        f"- family: {structured.get('benchmark_family')}\n"
+        f"- fidelity_level: {structured.get('fidelity_level')}\n"
+        f"- metric: {structured.get('evaluation_metric')}\n"
+        f"- training_array_keys: {array_keys}\n"
+        f"- private_label_boundary: {structured.get('private_label_boundary')}\n\n"
+        "## Problem Summary\n\n"
+        f"{structured.get('problem_summary') or 'No problem summary available.'}\n\n"
+        "## Task-Specific Observations\n\n"
+        f"{observations}\n\n"
+        "## Modeling Implications\n\n"
+        f"{implications}\n\n"
+        "## Risks\n\n"
+        f"{risks}\n\n"
+        "## LLM Summary\n\n"
+        f"{llm_report}\n\n"
+        "## Claim Boundary\n\n"
+        f"{structured.get('claim_boundary')}\n"
+    )
 
 
 def build_solution_observation_package(
@@ -316,6 +390,106 @@ def _eda_modeling_notes(manifest: dict[str, Any]) -> list[str]:
     if manifest.get("plots"):
         notes.append("A training-only overview plot is available for qualitative pattern inspection.")
     return notes
+
+
+def _task_specific_observations(
+    spec: Any,
+    array_names: list[str],
+    manifest: dict[str, Any],
+    eda_output: dict[str, Any],
+) -> list[str]:
+    benchmark_name = spec.name if spec else str(manifest.get("benchmark_name", "unknown"))
+    family = spec.family if spec else "unknown"
+    observations = [
+        f"{benchmark_name} is treated as a {family} benchmark with metric {spec.metric if spec else 'unknown'}.",
+        "Training observation uses array keys: " + (", ".join(array_names) if array_names else "none"),
+    ]
+    lowered_keys = " ".join(array_names).lower()
+    lowered_name = benchmark_name.lower()
+    if "function" in lowered_name:
+        observations.append("Function approximation context: inspect x/u train pairs for discontinuity or oscillation.")
+    if "poisson" in lowered_name:
+        observations.append("Poisson PINN context: residual and boundary-related coordinates should shape loss design.")
+    if "burgers" in lowered_name:
+        observations.append("Burgers PINN context: time/space coordinates and shock-like dynamics require stability checks.")
+    if "operator" in lowered_name:
+        observations.append("Operator-learning context: branch/trunk or input-function structure matters more than scalar fitting.")
+    if "reaction" in lowered_name or "diffusion" in lowered_name:
+        observations.append("Reaction-diffusion context: multi-input fields and temporal response arrays require shape-aware models.")
+    if "cylinder" in lowered_name or "wake" in lowered_name:
+        observations.append("Cylinder wake context: sparse sensor history and field reconstruction should preserve spatial layout.")
+    if "x_train" in lowered_keys and ("u_train" in lowered_keys or "y_train" in lowered_keys):
+        observations.append("Supervised train arrays include feature and target-like keys; validation labels remain private.")
+    if isinstance(eda_output.get("array_checks"), list):
+        warnings = [
+            str(check.get("array"))
+            for check in eda_output["array_checks"]
+            if isinstance(check, dict) and check.get("status") == "warning"
+        ]
+        if warnings:
+            observations.append("EDA warnings are associated with arrays: " + ", ".join(warnings[:6]))
+    return observations
+
+
+def _structured_modeling_implications(
+    spec: Any,
+    array_names: list[str],
+    eda_output: dict[str, Any],
+) -> list[str]:
+    notes = list(eda_output.get("modeling_notes", [])) if isinstance(eda_output.get("modeling_notes"), list) else []
+    family = (spec.family if spec else "").lower()
+    if "pinn" in family:
+        notes.append("Favor physics-informed residual or boundary-aware mutations when the local contract exposes those arrays.")
+    elif "operator" in family:
+        notes.append("Favor architectures that respect function-to-function mapping and array dimensionality.")
+    elif "inverse" in family:
+        notes.append("Favor reconstruction strategies that preserve sensor-to-field geometry.")
+    else:
+        notes.append("Favor deterministic baselines that match observed feature/target shapes before adding complexity.")
+    if len(array_names) > 4:
+        notes.append("Multiple training arrays are present; generated code should name required keys explicitly.")
+    return [str(note) for note in notes]
+
+
+def _structured_analysis_risks(
+    spec: Any,
+    manifest: dict[str, Any],
+    eda_output: dict[str, Any],
+) -> list[str]:
+    risks = ["Private validation labels are not visible to data analysis or generated solution code."]
+    if spec and spec.fidelity_level != "paper-like":
+        risks.append(f"{spec.fidelity_level} evidence is not paper-score reproduction evidence.")
+    if not manifest.get("plots"):
+        risks.append("No training-data plot was generated, so qualitative pattern inspection is limited.")
+    if isinstance(eda_output.get("array_checks"), list) and any(
+        isinstance(check, dict) and check.get("status") == "warning"
+        for check in eda_output["array_checks"]
+    ):
+        risks.append("At least one training array has EDA warnings that may affect modeling choices.")
+    return risks
+
+
+def _doc_excerpt(path: Path, *, fallback: str = "", limit: int = 420) -> str:
+    if not path.exists():
+        return fallback
+    text = " ".join(path.read_text(encoding="utf-8").split())
+    return text[:limit].rstrip() if text else fallback
+
+
+def _read_json_object(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _markdown_list(value: Any) -> str:
+    if not isinstance(value, list) or not value:
+        return "- None recorded."
+    return "\n".join(f"- {item}" for item in value)
 
 
 def _int_or_zero(value: Any) -> int:

@@ -350,6 +350,41 @@ def test_trivial_solution_trains_and_evaluates(tmp_path: Path) -> None:
     assert isinstance(eval_data["score"], float)
 
 
+def test_run_level_inputs_deduplicate_public_data_and_keep_private_eval_out_of_solution(
+    tmp_path: Path,
+) -> None:
+    benchmark = Path("examples/function_approx").resolve()
+    run_inputs_dir = tmp_path / "run" / "run_inputs"
+    first_workspace = tmp_path / "run" / "solutions" / "solution_000"
+    second_workspace = tmp_path / "run" / "solutions" / "solution_001"
+
+    first_layout = prepare_solution_workspace(benchmark, first_workspace, run_inputs_dir=run_inputs_dir)
+    second_layout = prepare_solution_workspace(benchmark, second_workspace, run_inputs_dir=run_inputs_dir)
+    (first_workspace / "solution.py").write_text(TRIVIAL_SOLUTION, encoding="utf-8")
+
+    assert first_layout["layout"] == "run_level_inputs_v1"
+    assert second_layout["layout"] == "run_level_inputs_v1"
+    assert (run_inputs_dir / "public" / "train_data.npz").exists()
+    assert (run_inputs_dir / "private_eval" / "val_data.npz").exists()
+    assert not (first_workspace / "private_eval").exists()
+    assert not (first_workspace / "val_data.npz").exists()
+    assert not any(path.name == "val_data.npz" for path in first_workspace.rglob("*.npz"))
+    assert not any(path.name == "val_data.npz" for path in second_workspace.rglob("*.npz"))
+    if first_layout["solution_public_input_mode"] == "symlink":
+        assert (first_workspace / "train_data.npz").is_symlink()
+        assert (second_workspace / "train_data.npz").is_symlink()
+
+    result = train_and_evaluate(
+        first_workspace,
+        EvaluationContract.default_function_approx(),
+        timeout_s=20,
+        private_eval_dir=run_inputs_dir / "private_eval",
+    )
+
+    assert result.exit_code == 0
+    assert json.loads((first_workspace / "eval.json").read_text(encoding="utf-8"))["metric"] == "validation_mse"
+
+
 def test_solution_cannot_load_validation_data_during_train(tmp_path: Path) -> None:
     benchmark = Path("examples/function_approx").resolve()
     workspace = tmp_path / "malicious_load"

@@ -479,6 +479,7 @@ class Proposal:
     mutation_plan: list[str]
     expected_effect: str
     risks: list[str]
+    kb_application: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -487,6 +488,7 @@ class Proposal:
             "mutation_plan": self.mutation_plan,
             "expected_effect": self.expected_effect,
             "risks": self.risks,
+            "kb_application": self.kb_application,
         }
 
     @classmethod
@@ -497,18 +499,35 @@ class Proposal:
             mutation_plan=[str(item) for item in data.get("mutation_plan", [])],
             expected_effect=str(data.get("expected_effect", "")),
             risks=[str(item) for item in data.get("risks", [])],
+            kb_application=dict(data.get("kb_application", {}))
+            if isinstance(data.get("kb_application"), dict)
+            else {},
         )
 
     def to_markdown(self) -> str:
         plan = "\n".join(f"- {item}" for item in self.mutation_plan) or "- No mutation steps."
         risks = "\n".join(f"- {item}" for item in self.risks) or "- No known risks."
+        kb_application = self._kb_application_markdown()
         return (
             f"# {self.title}\n\n"
             f"## Diagnosis\n\n{self.diagnosis}\n\n"
             f"## Mutation Plan\n\n{plan}\n\n"
+            f"## KB Application\n\n{kb_application}\n\n"
             f"## Expected Effect\n\n{self.expected_effect}\n\n"
             f"## Risks\n\n{risks}\n"
         )
+
+    def _kb_application_markdown(self) -> str:
+        if not self.kb_application:
+            return "- No KB application summary provided."
+        lines = []
+        for key, value in sorted(self.kb_application.items()):
+            if isinstance(value, list):
+                formatted = ", ".join(str(item) for item in value) if value else "none"
+            else:
+                formatted = str(value)
+            lines.append(f"- {key}: {formatted}")
+        return "\n".join(lines)
 
 
 @dataclass(slots=True)

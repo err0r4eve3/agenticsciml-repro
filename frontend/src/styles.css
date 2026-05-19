@@ -1535,6 +1535,34 @@ ul {
   border-radius: 8px;
 }
 
+.solution-table-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.compact-metrics,
+.inline-warnings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.compact-metrics span,
+.inline-warnings span {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: #fffaf3;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.inline-warnings span {
+  border-color: #f2c27a;
+  background: #fff7e6;
+  color: #8a5a05;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

@@ -102,6 +102,30 @@ class MalformedEngineerLLM(MockLLMClient):
         return super().complete_json(prompt, schema_name, system=system, temperature=temperature)
 
 
+class DuplicateEngineerLLM(MockLLMClient):
+    def complete_json(
+        self,
+        prompt: str,
+        schema_name: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+    ) -> dict[str, Any]:
+        if schema_name == "engineer":
+            match = re.search(r"parent_digest:\s*([a-f0-9]{64})", prompt)
+            parent_code = prompt.split("Parent code:\n", 1)[1] if "Parent code:\n" in prompt else ""
+            return {
+                "mutation_summary": "Duplicate parent code for plateau audit fixture.",
+                "expected_effect": "No score movement expected.",
+                "risks": ["Deliberately duplicate code"],
+                "parent_digest": match.group(1) if match else "",
+                "patch": "",
+                "files_changed": ["solution.py"],
+                "full_file_map": {"solution.py": parent_code if parent_code.endswith("\n") else parent_code + "\n"},
+                "implemented_kb_points": [],
+            }
+        return super().complete_json(prompt, schema_name, system=system, temperature=temperature)
+
+
 def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     config = ExperimentConfig(
         experiment_id="mock-run",
@@ -135,9 +159,14 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert (run_dir / "reports" / "data_overview.svg").exists()
     assert (run_dir / "reports" / "data_eda.py").exists()
     assert (run_dir / "reports" / "data_eda.json").exists()
+    assert (run_dir / "reports" / "data_analysis_structured.json").exists()
+    assert (run_dir / "reports" / "evolution_health.json").exists()
+    assert (run_dir / "run_inputs" / "manifest.json").exists()
     assert (run_dir / "solutions" / "solution_000" / "solution_observations.json").exists()
     assert (run_dir / "solutions" / "solution_000" / "prediction_overview.svg").exists()
     assert (run_dir / "solutions" / "solution_000" / "emergence_report.json").exists()
+    assert not (run_dir / "solutions" / "solution_000" / "private_eval").exists()
+    assert not (run_dir / "solutions" / "solution_000" / "val_data.npz").exists()
     assert (run_dir / "trace_summary.json").exists()
     assert (run_dir / "openai_sdk_trace.json").exists()
     run_metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
@@ -162,6 +191,38 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     )
     assert child_emergence["auditor_version"] == "emergence_audit.v1"
     assert child_emergence["claim_level"] != "proved_emergent_discovery"
+    child_workspace = run_dir / "solutions" / child_nodes[0]["node_id"]
+    kb_report = json.loads((child_workspace / "kb_application_report.json").read_text(encoding="utf-8"))
+    mutation_report = json.loads((child_workspace / "mutation_effect_report.json").read_text(encoding="utf-8"))
+    evolution_health = json.loads((run_dir / "reports" / "evolution_health.json").read_text(encoding="utf-8"))
+    assert kb_report["status"] in {"retrieved_only", "proposed", "implemented"}
+    assert mutation_report["status"] in {"changed_score_moved", "changed_but_score_plateau", "duplicate_parent"}
+    assert evolution_health["solution_count"] == len(tree["nodes"])
+    assert run_metadata["input_layout"]["layout"] == "run_level_inputs_v1"
+
+
+def test_duplicate_child_code_is_marked_in_mutation_and_evolution_health(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="duplicate-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=1, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, DuplicateEngineerLLM()).run()
+
+    mutation_report = json.loads(
+        (run_dir / "solutions" / "solution_001" / "mutation_effect_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    evolution_health = json.loads((run_dir / "reports" / "evolution_health.json").read_text(encoding="utf-8"))
+
+    assert mutation_report["status"] == "duplicate_parent"
+    assert mutation_report["duplicate_of"] == "solution_000"
+    assert evolution_health["duplicate_code_count"] >= 1
+    assert evolution_health["warnings"]
 
 
 def test_manual_strategy_lock_inspector_blocks_unfaithful_solution(tmp_path: Path) -> None:

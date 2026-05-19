@@ -1501,6 +1501,7 @@ def _solutions_payload(run_id: str, run_dir: Path) -> dict[str, object]:
         },
         "solutions": solutions,
         "leaderboard": leaderboard,
+        "evolution_health": _read_optional_json(run_dir / "reports" / "evolution_health.json") or {},
         "figures": _local_figure_artifacts(run_dir),
     }
 
@@ -1533,6 +1534,8 @@ def _solution_summary(
     children = node.get("children")
     policy_fidelity = _policy_fidelity_summary(workspace / "policy_fidelity_report.json")
     emergence_audit = _emergence_audit_summary(workspace / "emergence_report.json")
+    kb_application = _kb_application_summary(workspace / "kb_application_report.json")
+    mutation_effect = _mutation_effect_summary(workspace / "mutation_effect_report.json")
     return {
         "node_id": node_id,
         "parent_id": node.get("parent_id"),
@@ -1548,6 +1551,8 @@ def _solution_summary(
         "num_debug_attempts": node.get("num_debug_attempts"),
         "policy_fidelity": policy_fidelity,
         "emergence_audit": emergence_audit,
+        "kb_application": kb_application,
+        "mutation_effect": mutation_effect,
         "workspace": f"solutions/{node_id}",
         "artifacts": _solution_artifacts(run_dir, workspace),
     }
@@ -1583,12 +1588,48 @@ def _emergence_audit_summary(path: Path) -> dict[str, object]:
     }
 
 
+def _kb_application_summary(path: Path) -> dict[str, object]:
+    payload = _read_optional_json(path)
+    if not isinstance(payload, dict):
+        return {"available": False}
+    warnings = payload.get("warnings")
+    return {
+        "available": True,
+        "status": payload.get("status"),
+        "retrieved_entry_id": payload.get("retrieved_entry_id"),
+        "retrieved_title": payload.get("retrieved_title"),
+        "actionable_count": len(payload.get("actionable_points", []))
+        if isinstance(payload.get("actionable_points"), list)
+        else 0,
+        "implemented_count": len(payload.get("engineer_implemented_points", []))
+        if isinstance(payload.get("engineer_implemented_points"), list)
+        else 0,
+        "warning_count": len(warnings) if isinstance(warnings, list) else 0,
+    }
+
+
+def _mutation_effect_summary(path: Path) -> dict[str, object]:
+    payload = _read_optional_json(path)
+    if not isinstance(payload, dict):
+        return {"available": False}
+    return {
+        "available": True,
+        "status": payload.get("status"),
+        "code_changed_from_parent": payload.get("code_changed_from_parent"),
+        "duplicate_of": payload.get("duplicate_of"),
+        "diff_line_count": payload.get("diff_line_count"),
+        "score_delta_from_parent": payload.get("score_delta_from_parent"),
+    }
+
+
 def _solution_artifacts(run_dir: Path, workspace: Path) -> list[dict[str, object]]:
     artifact_names = (
         "eval.json",
         "analysis.md",
         "proposal.md",
         "branch_context.json",
+        "kb_application_report.json",
+        "mutation_effect_report.json",
         "policy_fidelity_report.json",
         "emergence_report.json",
         "prediction_overview.svg",
@@ -1659,6 +1700,8 @@ def _artifact_entries(path: Path, run_dir: Path) -> list[dict[str, object]]:
     for child in sorted(path.iterdir()):
         if child.name.startswith("."):
             continue
+        if _is_private_eval_artifact(child, run_dir):
+            continue
         try:
             resolved = child.resolve(strict=True)
         except OSError:
@@ -1679,6 +1722,8 @@ def _safe_run_child(run_dir: Path, artifact_path: str) -> Path:
     requested = Path(artifact_path)
     if requested.is_absolute() or any(part == ".." for part in requested.parts):
         raise HTTPException(status_code=400, detail="Artifact path must stay inside the run directory")
+    if len(requested.parts) >= 2 and requested.parts[0] == "run_inputs" and requested.parts[1] == "private_eval":
+        raise HTTPException(status_code=403, detail="Private evaluator artifacts are not browsable")
     target = (run_dir / requested).resolve(strict=False)
     run_root = run_dir.resolve(strict=True)
     if target != run_root and run_root not in target.parents:
@@ -1688,7 +1733,17 @@ def _safe_run_child(run_dir: Path, artifact_path: str) -> Path:
     real_target = target.resolve(strict=True)
     if real_target != run_root and run_root not in real_target.parents:
         raise HTTPException(status_code=400, detail="Artifact path escapes the run directory")
+    if _is_private_eval_artifact(real_target, run_dir):
+        raise HTTPException(status_code=403, detail="Private evaluator artifacts are not browsable")
     return real_target
+
+
+def _is_private_eval_artifact(path: Path, run_dir: Path) -> bool:
+    try:
+        relative = path.resolve(strict=False).relative_to(run_dir.resolve(strict=False))
+    except ValueError:
+        return False
+    return len(relative.parts) >= 2 and relative.parts[0] == "run_inputs" and relative.parts[1] == "private_eval"
 
 
 def _read_text_artifact(path: Path) -> str:

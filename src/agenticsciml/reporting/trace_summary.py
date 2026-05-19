@@ -178,11 +178,13 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
         checkpoint,
         events,
     )
+    data_analysis_specificity = _check_data_analysis_specificity(run_dir)
 
     return {
         "checked": True,
         "passed": not issues,
         "issues": issues,
+        "data_analysis_specificity": data_analysis_specificity,
         "trace_node_reference_events_checked": trace_node_reference_counts["checked"],
         "trace_node_reference_events_skipped": trace_node_reference_counts["skipped"],
         "trace_node_reference_events_checked_by_name": trace_node_reference_counts["checked_by_name"],
@@ -195,6 +197,36 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
         "trace_node_reference_node_coverage": trace_node_reference_counts["node_coverage"],
         "trace_node_lifecycle_stage_coverage": trace_node_reference_counts["lifecycle_stage_coverage"],
     }
+
+
+def _check_data_analysis_specificity(run_dir: Path) -> dict[str, Any]:
+    path = run_dir / "reports" / "data_analysis_structured.json"
+    if not path.exists():
+        return {
+            "checked": False,
+            "passed": False,
+            "warnings": ["reports/data_analysis_structured.json is missing"],
+        }
+    warnings: list[str] = []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return {"checked": True, "passed": False, "warnings": [f"invalid structured data analysis JSON: {exc}"]}
+    if not isinstance(payload, dict):
+        return {"checked": True, "passed": False, "warnings": ["structured data analysis must be a JSON object"]}
+    benchmark_name = payload.get("benchmark_name")
+    array_keys = payload.get("training_array_keys")
+    task_observations = payload.get("task_specific_observations")
+    text_blob = json.dumps(payload, sort_keys=True, default=str).lower()
+    if not isinstance(benchmark_name, str) or not benchmark_name:
+        warnings.append("benchmark_name is missing")
+    elif benchmark_name.lower() not in text_blob:
+        warnings.append("benchmark_name is not referenced in structured analysis text")
+    if not isinstance(array_keys, list) or not array_keys:
+        warnings.append("training_array_keys is missing")
+    if not isinstance(task_observations, list) or not task_observations:
+        warnings.append("task_specific_observations is missing")
+    return {"checked": True, "passed": not warnings, "warnings": warnings}
 
 
 def _check_claim_gate_consistency(
