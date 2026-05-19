@@ -1,8 +1,11 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from agenticsciml.config import EvaluationContract
 from agenticsciml.execution.runner import run_command
+from agenticsciml.execution import sandbox as sandbox_module
 from agenticsciml.execution.sandbox import prepare_solution_workspace, train_and_evaluate
 
 
@@ -383,6 +386,62 @@ def test_run_level_inputs_deduplicate_public_data_and_keep_private_eval_out_of_s
 
     assert result.exit_code == 0
     assert json.loads((first_workspace / "eval.json").read_text(encoding="utf-8"))["metric"] == "validation_mse"
+
+
+def test_private_eval_dir_is_only_passed_explicitly_to_train_and_evaluate(tmp_path: Path) -> None:
+    benchmark = Path("examples/function_approx").resolve()
+    run_inputs_dir = tmp_path / "run" / "run_inputs"
+    workspace = tmp_path / "run" / "solutions" / "solution_000"
+    prepare_solution_workspace(benchmark, workspace, run_inputs_dir=run_inputs_dir)
+    (workspace / "solution.py").write_text(TRIVIAL_SOLUTION, encoding="utf-8")
+
+    without_private_arg = train_and_evaluate(
+        workspace,
+        EvaluationContract.default_function_approx(),
+        timeout_s=20,
+    )
+
+    assert without_private_arg.exit_code == 125
+    assert "could not prepare prediction input" in without_private_arg.stderr
+    assert "val_data.npz" in without_private_arg.stderr
+
+    with_private_arg = train_and_evaluate(
+        workspace,
+        EvaluationContract.default_function_approx(),
+        timeout_s=20,
+        private_eval_dir=run_inputs_dir / "private_eval",
+    )
+
+    assert with_private_arg.exit_code == 0
+    assert json.loads((workspace / "eval.json").read_text(encoding="utf-8"))["metric"] == "validation_mse"
+    assert not (workspace / "val_data.npz").exists()
+
+
+def test_public_input_copy_fallback_preserves_deduplication_contract_when_symlink_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_symlink(source: Path, target: Path) -> None:
+        raise OSError("symlink disabled for test")
+
+    monkeypatch.setattr(sandbox_module.os, "symlink", fail_symlink)
+    benchmark = Path("examples/function_approx").resolve()
+    run_inputs_dir = tmp_path / "run" / "run_inputs"
+    workspace = tmp_path / "run" / "solutions" / "solution_000"
+
+    layout = prepare_solution_workspace(benchmark, workspace, run_inputs_dir=run_inputs_dir)
+
+    manifest = json.loads((run_inputs_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert layout["layout"] == "run_level_inputs_v1"
+    assert layout["solution_public_input_mode"] == "copy"
+    assert layout["storage_dedup_fallback"] == "copy"
+    assert manifest["storage_dedup_fallback"] == "copy"
+    assert (run_inputs_dir / "public" / "train_data.npz").exists()
+    assert (run_inputs_dir / "private_eval" / "val_data.npz").exists()
+    assert (workspace / "train_data.npz").exists()
+    assert not (workspace / "train_data.npz").is_symlink()
+    assert not (workspace / "private_eval").exists()
+    assert not (workspace / "val_data.npz").exists()
 
 
 def test_solution_cannot_load_validation_data_during_train(tmp_path: Path) -> None:

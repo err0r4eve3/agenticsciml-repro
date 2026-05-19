@@ -73,6 +73,121 @@ def test_kb_application_report_warns_when_budgeted_pinn_entry_is_not_adopted(tmp
     }
 
 
+def test_kb_application_report_marks_claimed_but_unverified_adoption_as_warning(tmp_path: Path) -> None:
+    kb = KnowledgeBase.load(Path("examples/burgers_pinn/kb"))
+    entry = kb.get("budgeted_pinn_mutation")
+    workspace = tmp_path / "solution_001"
+    workspace.mkdir()
+    (workspace / "solution.py").write_text("def predict(x):\n    return x\n", encoding="utf-8")
+    (workspace / "engineering_response.json").write_text(
+        json.dumps(
+            {
+                "implemented_kb_points": [
+                    "sample_count",
+                    "collocation_count",
+                    "depth_width",
+                    "residual_weight",
+                    "training_schedule",
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    proposal = Proposal(
+        title="Budgeted PINN claim without implementation",
+        diagnosis="The proposal claims a PINN mutation.",
+        mutation_plan=["Use collocation sampling and residual weighting."],
+        expected_effect="Should improve residual fitting if implemented.",
+        risks=["Claim may not match code"],
+        kb_application={
+            "proposal_adopted_points": [
+                "sample_count",
+                "collocation_count",
+                "depth_width",
+                "residual_weight",
+                "training_schedule",
+            ]
+        },
+    )
+
+    report = build_kb_application_report(
+        solution_id="solution_001",
+        kb_entry=entry,
+        proposal=proposal,
+        workspace=workspace,
+    )
+
+    assert report["status"] == "unverified"
+    assert report["code_verified_point_ids"] == []
+    assert set(report["unverified_implemented_points"]) == {
+        "sample_count",
+        "collocation_count",
+        "depth_width",
+        "residual_weight",
+        "training_schedule",
+    }
+    assert report["warnings"]
+
+
+def test_kb_application_report_passes_when_budgeted_pinn_signals_are_actually_present(tmp_path: Path) -> None:
+    kb = KnowledgeBase.load(Path("examples/burgers_pinn/kb"))
+    entry = kb.get("budgeted_pinn_mutation")
+    workspace = tmp_path / "solution_001"
+    workspace.mkdir()
+    point_ids = [
+        "sample_count",
+        "collocation_count",
+        "depth_width",
+        "residual_weight",
+        "training_schedule",
+    ]
+    (workspace / "solution.py").write_text(
+        "\n".join(
+            [
+                "SAMPLE_COUNT = 256",
+                "COLLOCATION_COUNT = 1024",
+                "DEPTH = 4",
+                "WIDTH = 64",
+                "RESIDUAL_WEIGHT = 0.1",
+                "TRAINING_SCHEDULE = {'epochs': 2000, 'lr': 1e-3}",
+                "def predict(x):",
+                "    return x",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (workspace / "engineering_summary.md").write_text(
+        "Implemented sample count, collocation count, depth/width, residual weight, and training schedule.",
+        encoding="utf-8",
+    )
+    (workspace / "engineering_response.json").write_text(
+        json.dumps({"implemented_kb_points": point_ids}),
+        encoding="utf-8",
+    )
+    proposal = Proposal(
+        title="Budgeted PINN mutation",
+        diagnosis="Use the retrieved budgeted PINN guidance.",
+        mutation_plan=["Set sample count, collocation count, depth/width, residual weight, and training schedule."],
+        expected_effect="Better low-budget residual fitting.",
+        risks=["Static evidence is not proof of scientific improvement"],
+        kb_application={"proposal_adopted_points": point_ids},
+    )
+
+    report = build_kb_application_report(
+        solution_id="solution_001",
+        kb_entry=entry,
+        proposal=proposal,
+        workspace=workspace,
+    )
+
+    assert report["status"] == "implemented"
+    assert set(report["code_verified_point_ids"]) == set(point_ids)
+    assert report["unverified_implemented_points"] == []
+    assert report["missing_static_evidence"] == []
+    assert report["warnings"] == []
+
+
 def test_lexical_retrieval_is_deterministic() -> None:
     kb = KnowledgeBase.load(Path("examples/function_approx/kb"))
 

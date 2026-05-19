@@ -226,7 +226,52 @@ def _check_data_analysis_specificity(run_dir: Path) -> dict[str, Any]:
         warnings.append("training_array_keys is missing")
     if not isinstance(task_observations, list) or not task_observations:
         warnings.append("task_specific_observations is missing")
+    elif not _task_observations_have_specific_terms(payload, task_observations):
+        warnings.append("task_specific_observations lack benchmark-specific terms")
     return {"checked": True, "passed": not warnings, "warnings": warnings}
+
+
+def _task_observations_have_specific_terms(
+    payload: dict[str, Any],
+    task_observations: list[Any],
+) -> bool:
+    observation_text = " ".join(str(item).lower() for item in task_observations)
+    terms: set[str] = set()
+    for value in (
+        payload.get("benchmark_name"),
+        payload.get("benchmark_family"),
+        payload.get("evaluation_metric"),
+    ):
+        if isinstance(value, str):
+            terms.update(_specificity_tokens(value))
+    array_keys = payload.get("training_array_keys")
+    if isinstance(array_keys, list):
+        for item in array_keys:
+            if isinstance(item, str):
+                terms.add(item.lower())
+                terms.update(_specificity_tokens(item))
+    return bool(terms) and any(term in observation_text for term in terms)
+
+
+def _specificity_tokens(value: str) -> set[str]:
+    return {
+        token
+        for token in value.replace("_", " ").replace("-", " ").lower().split()
+        if len(token) >= 3
+        and token
+        not in {
+            "the",
+            "and",
+            "with",
+            "metric",
+            "data",
+            "fit",
+            "model",
+            "train",
+            "training",
+            "validation",
+        }
+    }
 
 
 def _check_claim_gate_consistency(

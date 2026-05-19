@@ -13,7 +13,8 @@ workflow evidence，不改变 evaluator score，也不支持论文级科学结�
   修复方案、验证命令和可转发答复。
 - Issue 1：child solution 新增 `kb_application_report.json`；`ProposerAgent` 支持可选
   `kb_application`，`EngineerAgent` 保存 `engineering_response.json` 和
-  `implemented_kb_points`，并对 PINN/KB 关键点做轻量静态证据检查。
+  `implemented_kb_points`，并对 PINN/KB 关键点做轻量静态证据检查。若 engineer
+  声称实现但代码没有对应静态信号，报告降级为 `unverified`。
 - Issue 2：orchestrator 新 run 使用 `run_inputs/public/` 和
   `run_inputs/private_eval/`。solution workspace 只通过 symlink/copy fallback 暴露公共输入，
   private evaluator 不进入 solution workspace；Web artifact browser 拒绝浏览
@@ -22,7 +23,8 @@ workflow evidence，不改变 evaluator score，也不支持论文级科学结�
   `reports/evolution_health.json`，记录 code digest、proposal digest、diff line count、
   duplicate-of、score delta 和 plateau warning。
 - Issue 4：Data Analyst 新增 `reports/data_analysis_structured.json`，`data_analysis.md`
-  从结构化 JSON 渲染；trace summary 增加 `data_analysis_specificity` warning。
+  从结构化 JSON 渲染；trace summary 增加 `data_analysis_specificity` warning，并拒绝
+  没有 benchmark-specific terms 的通用模板式 observation。
 - Web `/api/runs/{id}/solutions` 返回 `kb_application`、`mutation_effect` 和
   `evolution_health` 摘要；前端第三页 evidence table 显示 KB usage、mutation status、
   unique code、duplicate、plateau 和 best improvement。
@@ -30,11 +32,15 @@ workflow evidence，不改变 evaluator score，也不支持论文级科学结�
 验证：
 
 - `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_llm_and_agents.py::test_data_analyst_writes_training_observation_artifacts tests/test_llm_and_agents.py::test_data_analyst_structured_output_is_benchmark_specific tests/test_retrieval.py::test_kb_application_report_warns_when_budgeted_pinn_entry_is_not_adopted -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_retrieval.py::test_kb_application_report_marks_claimed_but_unverified_adoption_as_warning tests/test_retrieval.py::test_kb_application_report_passes_when_budgeted_pinn_signals_are_actually_present -q`
 - `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_execution.py::test_run_level_inputs_deduplicate_public_data_and_keep_private_eval_out_of_solution -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_execution.py::test_private_eval_dir_is_only_passed_explicitly_to_train_and_evaluate tests/test_execution.py::test_public_input_copy_fallback_preserves_deduplication_contract_when_symlink_fails -q`
 - `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trace_summary_reports_data_analysis_specificity_warnings -q`
 - `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_orchestrator_cli.py::test_full_mock_pipeline_generates_tree_and_champion -q`
 - `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_orchestrator_cli.py::test_duplicate_child_code_is_marked_in_mutation_and_evolution_health -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_orchestrator_cli.py::test_plateau_without_duplicate_code_is_explained_in_mutation_and_evolution_health -q`
 - `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_web_api.py::test_selector_votes_and_solutions_are_read_only_evidence -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_web_api.py::test_artifact_browser_rejects_private_eval_inputs tests/test_llm_and_agents.py::test_data_analysis_structured_json_schema_rejects_generic_template_output -q`
 
 边界：
 

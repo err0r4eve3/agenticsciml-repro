@@ -929,6 +929,55 @@ def test_selector_votes_and_solutions_are_read_only_evidence(tmp_path: Path) -> 
     assert private.status_code == 403
 
 
+def test_artifact_browser_rejects_private_eval_inputs(tmp_path: Path) -> None:
+    client = TestClient(create_app())
+    run_dir = tmp_path / "private-browser"
+    public_dir = run_dir / "run_inputs" / "public"
+    private_dir = run_dir / "run_inputs" / "private_eval"
+    solution_dir = run_dir / "solutions" / "solution_000"
+    public_dir.mkdir(parents=True)
+    private_dir.mkdir(parents=True)
+    solution_dir.mkdir(parents=True)
+    (public_dir / "Problem.md").write_text("public problem description", encoding="utf-8")
+    (private_dir / "evaluate.py").write_text("print('private evaluator')\n", encoding="utf-8")
+    (private_dir / "val_data.npz").write_text("private labels", encoding="utf-8")
+    os.symlink(private_dir / "evaluate.py", solution_dir / "private_eval_link.py")
+
+    public = client.get(
+        "/api/runs/private-browser/artifacts/run_inputs/public/Problem.md",
+        params={"output_dir": str(tmp_path)},
+    )
+    assert public.status_code == 200
+    assert public.json()["content"] == "public problem description"
+
+    run_inputs = client.get(
+        "/api/runs/private-browser/artifacts/run_inputs",
+        params={"output_dir": str(tmp_path)},
+    )
+    assert run_inputs.status_code == 200
+    assert "private_eval" not in {Path(entry["path"]).name for entry in run_inputs.json()["entries"]}
+
+    solution_listing = client.get(
+        "/api/runs/private-browser/artifacts/solutions/solution_000",
+        params={"output_dir": str(tmp_path)},
+    )
+    assert solution_listing.status_code == 200
+    assert "private_eval_link.py" not in {
+        Path(entry["path"]).name for entry in solution_listing.json()["entries"]
+    }
+
+    direct_private = client.get(
+        "/api/runs/private-browser/artifacts/run_inputs/private_eval/evaluate.py",
+        params={"output_dir": str(tmp_path)},
+    )
+    symlink_private = client.get(
+        "/api/runs/private-browser/artifacts/solutions/solution_000/private_eval_link.py",
+        params={"output_dir": str(tmp_path)},
+    )
+    assert direct_private.status_code == 403
+    assert symlink_private.status_code == 403
+
+
 def test_account_scoped_evidence_endpoints_use_account_runs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

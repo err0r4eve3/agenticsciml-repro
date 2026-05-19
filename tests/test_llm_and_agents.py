@@ -21,6 +21,7 @@ from agenticsciml.agents.specs import AGENT_SPECS, AgentSpec, PromptTemplate
 from agenticsciml.benchmarks import BenchmarkContractFactory, ProblemBundle
 from agenticsciml.llm.base import LLMClient
 from agenticsciml.llm.mock import MockLLMClient
+from agenticsciml.reporting.trace_summary import summarize_trace
 from agenticsciml.storage import ExperimentStorage
 
 
@@ -174,6 +175,36 @@ def test_data_analyst_structured_output_is_benchmark_specific(tmp_path: Path) ->
     assert second["benchmark_name"] == "poisson_lshape"
     assert first["benchmark_family"] != second["benchmark_family"]
     assert first["task_specific_observations"] != second["task_specific_observations"]
+
+
+def test_data_analysis_structured_json_schema_rejects_generic_template_output(tmp_path: Path) -> None:
+    run_dir = tmp_path / "generic-template"
+    reports_dir = run_dir / "reports"
+    reports_dir.mkdir(parents=True)
+    (run_dir / "run_metadata.json").write_text("{}", encoding="utf-8")
+    (reports_dir / "data_analysis_structured.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "benchmark_name": "poisson_lshape",
+                "benchmark_family": "PINN elliptic PDE",
+                "evaluation_metric": "relative_l2",
+                "training_array_keys": ["x_train", "u_train"],
+                "task_specific_observations": [
+                    "The data has numeric arrays.",
+                    "The model should fit the training distribution.",
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = summarize_trace(run_dir)
+
+    specificity = summary["artifact_consistency"]["data_analysis_specificity"]
+    assert specificity["checked"] is True
+    assert specificity["passed"] is False
+    assert "task_specific_observations lack benchmark-specific terms" in specificity["warnings"]
 
 
 def test_data_eda_script_replays_training_npz_only(tmp_path: Path) -> None:

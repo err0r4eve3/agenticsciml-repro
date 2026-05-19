@@ -126,6 +126,32 @@ class DuplicateEngineerLLM(MockLLMClient):
         return super().complete_json(prompt, schema_name, system=system, temperature=temperature)
 
 
+class CommentOnlyEngineerLLM(MockLLMClient):
+    def complete_json(
+        self,
+        prompt: str,
+        schema_name: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+    ) -> dict[str, Any]:
+        if schema_name == "engineer":
+            match = re.search(r"parent_digest:\s*([a-f0-9]{64})", prompt)
+            parent_code = prompt.split("Parent code:\n", 1)[1] if "Parent code:\n" in prompt else ""
+            child_code = parent_code if parent_code.endswith("\n") else parent_code + "\n"
+            child_code += "# plateau audit fixture: code digest changes but behavior does not.\n"
+            return {
+                "mutation_summary": "Comment-only mutation for plateau audit fixture.",
+                "expected_effect": "No score movement expected despite a changed digest.",
+                "risks": ["Deliberately behavior-preserving code change"],
+                "parent_digest": match.group(1) if match else "",
+                "patch": "",
+                "files_changed": ["solution.py"],
+                "full_file_map": {"solution.py": child_code},
+                "implemented_kb_points": [],
+            }
+        return super().complete_json(prompt, schema_name, system=system, temperature=temperature)
+
+
 def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     config = ExperimentConfig(
         experiment_id="mock-run",
@@ -195,7 +221,7 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     kb_report = json.loads((child_workspace / "kb_application_report.json").read_text(encoding="utf-8"))
     mutation_report = json.loads((child_workspace / "mutation_effect_report.json").read_text(encoding="utf-8"))
     evolution_health = json.loads((run_dir / "reports" / "evolution_health.json").read_text(encoding="utf-8"))
-    assert kb_report["status"] in {"retrieved_only", "proposed", "implemented"}
+    assert kb_report["status"] in {"retrieved_only", "proposed", "implemented", "unverified"}
     assert mutation_report["status"] in {"changed_score_moved", "changed_but_score_plateau", "duplicate_parent"}
     assert evolution_health["solution_count"] == len(tree["nodes"])
     assert run_metadata["input_layout"]["layout"] == "run_level_inputs_v1"
@@ -223,6 +249,33 @@ def test_duplicate_child_code_is_marked_in_mutation_and_evolution_health(tmp_pat
     assert mutation_report["duplicate_of"] == "solution_000"
     assert evolution_health["duplicate_code_count"] >= 1
     assert evolution_health["warnings"]
+
+
+def test_plateau_without_duplicate_code_is_explained_in_mutation_and_evolution_health(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="plateau-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=1, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, CommentOnlyEngineerLLM()).run()
+
+    mutation_report = json.loads(
+        (run_dir / "solutions" / "solution_001" / "mutation_effect_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    evolution_health = json.loads((run_dir / "reports" / "evolution_health.json").read_text(encoding="utf-8"))
+
+    assert mutation_report["status"] == "changed_but_score_plateau"
+    assert mutation_report["duplicate_of"] is None
+    assert mutation_report["code_changed_from_parent"] is True
+    assert mutation_report["diff_line_count"] > 0
+    assert "solution_001" in evolution_health["score_plateau_nodes"]
+    assert evolution_health["mutation_status_counts"]["changed_but_score_plateau"] == 1
+    assert any("Score plateau" in warning for warning in evolution_health["warnings"])
 
 
 def test_manual_strategy_lock_inspector_blocks_unfaithful_solution(tmp_path: Path) -> None:

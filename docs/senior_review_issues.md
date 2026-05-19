@@ -24,19 +24,21 @@ KB 只作为 prompt 上下文和 markdown artifact 保存，缺少从“检索 -
 - `ProposerAgent` 输出增加可选 `kb_application` summary。
 - `EngineerAgent` prompt 增加 KB checklist，并保存 `engineering_response.json`，其中可包含 `implemented_kb_points`。
 - 对 PINN / collocation 类 KB 条目做轻量静态检查，覆盖 `sample_count`、`collocation_count`、`depth_width`、`residual_weight`、`training_schedule`。
-- Web `/api/runs/{id}/solutions` 返回 `kb_application` 摘要；前端 solution table 显示 `not_retrieved`、`retrieved_only`、`proposed`、`implemented` 等状态。
+- Web `/api/runs/{id}/solutions` 返回 `kb_application` 摘要；前端 solution table 显示 `not_retrieved`、`retrieved_only`、`proposed`、`implemented`、`unverified` 等状态。
+- 如果 engineer 声称实现 KB 点但 `solution.py` 没有对应静态信号，状态降为 `unverified`，并写入 `unverified_implemented_points` / `missing_static_evidence`。
 
 ### 验证命令
 
 ```bash
 PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_retrieval.py::test_kb_application_report_warns_when_budgeted_pinn_entry_is_not_adopted -q
+PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_retrieval.py::test_kb_application_report_marks_claimed_but_unverified_adoption_as_warning tests/test_retrieval.py::test_kb_application_report_passes_when_budgeted_pinn_signals_are_actually_present -q
 PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_llm_and_agents.py::test_agents_save_transcripts_and_structured_outputs -q
 PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_orchestrator_cli.py::test_full_mock_pipeline_generates_tree_and_champion -q
 ```
 
 ### 修复后答复
 
-这个问题成立。原先系统只证明“检索到了 KB”，不能证明“用上了 KB”。现在每个 child solution 会生成 `kb_application_report.json`，记录 KB 中哪些建议被 proposal 采纳、engineer 声明实现，以及代码中是否有可检查信号。如果只检索但没有采纳，系统会明确标为 `retrieved_only` 并在 UI 中提示。
+这个问题成立。原先系统只证明“检索到了 KB”，不能证明“用上了 KB”。现在每个 child solution 会生成 `kb_application_report.json`，记录 KB 中哪些建议被 proposal 采纳、engineer 声明实现，以及代码中是否有可检查信号。如果只检索但没有采纳，系统会明确标为 `retrieved_only`；如果只声明实现但代码没有静态证据，会标为 `unverified` 并在 UI 中提示。
 
 ## Issue 2：evaluation 和数据不应该每个 solution 重复拷贝
 
@@ -65,7 +67,9 @@ PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_orchestrator_c
 
 ```bash
 PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_execution.py::test_run_level_inputs_deduplicate_public_data_and_keep_private_eval_out_of_solution -q
+PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_execution.py::test_private_eval_dir_is_only_passed_explicitly_to_train_and_evaluate tests/test_execution.py::test_public_input_copy_fallback_preserves_deduplication_contract_when_symlink_fails -q
 PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_web_api.py::test_selector_votes_and_solutions_are_read_only_evidence -q
+PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_web_api.py::test_artifact_browser_rejects_private_eval_inputs -q
 ```
 
 ### 修复后答复
@@ -99,6 +103,7 @@ PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_web_api.py::te
 
 ```bash
 PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_orchestrator_cli.py::test_duplicate_child_code_is_marked_in_mutation_and_evolution_health -q
+PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_orchestrator_cli.py::test_plateau_without_duplicate_code_is_explained_in_mutation_and_evolution_health -q
 PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_orchestrator_cli.py::test_full_mock_pipeline_generates_tree_and_champion -q
 ```
 
@@ -132,6 +137,7 @@ PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_orchestrator_c
 
 ```bash
 PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_llm_and_agents.py::test_data_analyst_structured_output_is_benchmark_specific -q
+PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_llm_and_agents.py::test_data_analysis_structured_json_schema_rejects_generic_template_output -q
 PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trace_summary_reports_data_analysis_specificity_warnings -q
 ```
 
@@ -144,15 +150,14 @@ PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_trace_reportin
 本轮 targeted 验证覆盖：
 
 ```bash
-PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_llm_and_agents.py::test_data_analyst_writes_training_observation_artifacts tests/test_llm_and_agents.py::test_data_analyst_structured_output_is_benchmark_specific tests/test_retrieval.py::test_kb_application_report_warns_when_budgeted_pinn_entry_is_not_adopted -q
-PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_execution.py::test_run_level_inputs_deduplicate_public_data_and_keep_private_eval_out_of_solution -q
+PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_llm_and_agents.py::test_data_analyst_writes_training_observation_artifacts tests/test_llm_and_agents.py::test_data_analyst_structured_output_is_benchmark_specific tests/test_llm_and_agents.py::test_data_analysis_structured_json_schema_rejects_generic_template_output tests/test_retrieval.py::test_kb_application_report_warns_when_budgeted_pinn_entry_is_not_adopted tests/test_retrieval.py::test_kb_application_report_marks_claimed_but_unverified_adoption_as_warning tests/test_retrieval.py::test_kb_application_report_passes_when_budgeted_pinn_signals_are_actually_present -q
+PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_execution.py::test_run_level_inputs_deduplicate_public_data_and_keep_private_eval_out_of_solution tests/test_execution.py::test_private_eval_dir_is_only_passed_explicitly_to_train_and_evaluate tests/test_execution.py::test_public_input_copy_fallback_preserves_deduplication_contract_when_symlink_fails -q
 PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trace_summary_reports_data_analysis_specificity_warnings -q
-PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_orchestrator_cli.py::test_full_mock_pipeline_generates_tree_and_champion -q
-PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_orchestrator_cli.py::test_duplicate_child_code_is_marked_in_mutation_and_evolution_health -q
-PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_web_api.py::test_selector_votes_and_solutions_are_read_only_evidence -q
+PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_orchestrator_cli.py::test_full_mock_pipeline_generates_tree_and_champion tests/test_orchestrator_cli.py::test_duplicate_child_code_is_marked_in_mutation_and_evolution_health tests/test_orchestrator_cli.py::test_plateau_without_duplicate_code_is_explained_in_mutation_and_evolution_health -q
+PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_web_api.py::test_selector_votes_and_solutions_are_read_only_evidence tests/test_web_api.py::test_artifact_browser_rejects_private_eval_inputs -q
 ```
 
-整轮完成前还需要跑：
+整轮回归验证还应包含：
 
 ```bash
 PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_execution.py tests/test_llm_and_agents.py tests/test_orchestrator_cli.py tests/test_trace_reporting.py tests/test_web_api.py -q
@@ -163,7 +168,7 @@ git diff --check
 
 ## 给学长/老师的逐条答复
 
-1. KB 问题成立。已增加 `kb_application_report.json`，能区分 retrieved-only、proposed、implemented，避免把“检索到”误说成“已采用”。
+1. KB 问题成立。已增加 `kb_application_report.json`，能区分 retrieved-only、proposed、implemented、unverified，避免把“检索到”或“口头声明实现”误说成“代码已采用”。
 2. evaluation/data 重复问题成立。已改为 run-level `run_inputs/`，solution workspace 只保留自身代码和输出；private evaluator 继续隔离且 Web 不展示原始 private data。
 3. 分数停滞问题成立。已增加 per-solution `mutation_effect_report.json` 和 run-level `evolution_health.json`，能区分 duplicate、changed-but-plateau 和 score movement。
 4. data analysis 模板化问题成立。已增加 `data_analysis_structured.json`，并从结构化字段渲染 markdown；trace summary 会提示 specificity 不足。

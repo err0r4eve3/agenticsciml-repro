@@ -52,25 +52,44 @@ def build_kb_application_report(
         point["id"]: _static_point_evidence(point, proposal_text, engineering_text, code_text)
         for point in actionable_points
     }
-    implemented_ids = {
+    code_verified_ids = {
         point_id
         for point_id, evidence in static_evidence.items()
-        if evidence.get("code_signal") or evidence.get("engineer_signal")
+        if evidence.get("code_signal")
+    }
+    engineer_signal_ids = {
+        point_id
+        for point_id, evidence in static_evidence.items()
+        if evidence.get("engineer_signal")
     }
     adopted_ids = {
         point_id
         for point_id, evidence in static_evidence.items()
         if evidence.get("proposal_signal")
     }
-    if implemented_ids or engineer_implemented_points:
+    engineer_claimed_ids = _claimed_point_ids(engineer_implemented_points, actionable_points)
+    unverified_claimed_ids = sorted(engineer_claimed_ids - code_verified_ids)
+    missing_static_evidence = sorted(
+        point_id
+        for point_id in engineer_claimed_ids
+        if point_id not in code_verified_ids
+    )
+
+    if unverified_claimed_ids or (engineer_implemented_points and not code_verified_ids):
+        status = "unverified"
+    elif code_verified_ids:
         status = "implemented"
-    elif adopted_ids or proposal_adopted_points:
+    elif adopted_ids or proposal_adopted_points or engineer_signal_ids:
         status = "proposed"
     else:
         status = "retrieved_only"
     warnings: list[str] = []
     if status == "retrieved_only":
         warnings.append("KB was retrieved but no proposal or code adoption evidence was found.")
+    if status == "unverified":
+        warnings.append(
+            "Engineer claimed KB implementation, but lightweight static code evidence did not verify those claims."
+        )
     return {
         "schema_version": KB_APPLICATION_SCHEMA_VERSION,
         "solution_id": solution_id,
@@ -78,7 +97,12 @@ def build_kb_application_report(
         "retrieved_title": kb_entry.title,
         "actionable_points": actionable_points,
         "proposal_adopted_points": proposal_adopted_points or sorted(adopted_ids),
-        "engineer_implemented_points": engineer_implemented_points or sorted(implemented_ids),
+        "engineer_implemented_points": engineer_implemented_points
+        or sorted(code_verified_ids | engineer_signal_ids),
+        "engineer_claimed_point_ids": sorted(engineer_claimed_ids),
+        "code_verified_point_ids": sorted(code_verified_ids),
+        "unverified_implemented_points": unverified_claimed_ids,
+        "missing_static_evidence": missing_static_evidence,
         "static_evidence": static_evidence,
         "status": status,
         "warnings": warnings,
@@ -231,6 +255,24 @@ def _proposal_adopted_points(proposal: Proposal | None, points: list[dict[str, A
         for point in points
         if _has_any_term(proposal_text, [str(term) for term in point.get("terms", [])])
     ]
+
+
+def _claimed_point_ids(claims: list[str], points: list[dict[str, Any]]) -> set[str]:
+    if not claims:
+        return set()
+    claim_text = "\n".join(claims).lower()
+    claimed_ids: set[str] = set()
+    for point in points:
+        point_id = str(point.get("id", ""))
+        candidates = [
+            point_id,
+            point_id.replace("_", " "),
+            str(point.get("description", "")),
+            *[str(term) for term in point.get("terms", [])],
+        ]
+        if _has_any_term(claim_text, candidates):
+            claimed_ids.add(point_id)
+    return claimed_ids
 
 
 def _static_point_evidence(
