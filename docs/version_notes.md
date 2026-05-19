@@ -2,6 +2,39 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-19 ATHENA / GRAFT Method Substrate Contract
+
+本次把两篇新增参考文献中的可安全落地机制纳入 NotebookLM，并将 NotebookLM / Pro
+复审后的最小建议固化为 deterministic local contract，而不是直接改变 selector、
+catalog 或 evaluator 运行行为。
+
+已实现：
+
+- 新增 `src/agenticsciml/method_substrate.py`，定义 `MethodAction`、
+  `ExpertBlueprint`、`MethodPath`、`ScientificReward`、`ExperienceRecord` 和
+  `ExperienceSubstrate`。
+- `MethodPath` 使用 canonical JSON 生成稳定 fingerprint，保留 action 顺序作为方法路径
+  语义，并排除 `source_scope` 等 provenance 字段，避免来源说明改变方法 identity。
+- `ExpertBlueprint` 可验证 allowed family、required parameters 和 forbidden
+  parameters。
+- `ScientificReward` 拒绝非有限数值，避免 `NaN` / `Infinity` 进入经验记录。
+- `ExperienceSubstrate` 使用本地 JSON cache 和 atomic write 保存 method fingerprint
+  到 reward artifact 的映射，并允许同一 fingerprint 保留多条经验记录。
+- 新增 [Method Substrate 合约](method_substrate.md)，并从 docs tree 挂载。
+- 更新 [论文机制笔记](paper_notes.md)，记录 ATHENA / GRAFT-ATHENA 的本地解释和
+  claim boundary。
+
+验证：
+
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_method_substrate.py -q`
+
+边界：
+
+- 本轮不声称已实现 GRAFT 概率树学习、跨领域自改进、自动 action-space expansion、
+  ATHENA/GRAFT-ATHENA 论文分数或 autonomous scientific discovery。
+- 该模块暂不接入运行路径；后续若要让 selector/retriever 使用经验 cache，需要单独补
+  trace schema、resume safety、claim gate 和更广测试。
+
 ## 2026-05-18 Claim Gate And Evidence Boundary Hardening
 
 本次按论文对齐复审优先项补齐 claim gate 和证据边界硬化。默认运行仍是

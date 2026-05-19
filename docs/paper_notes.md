@@ -8,6 +8,10 @@ Sources checked:
 - arXiv HTML v2 methods and supplementary table of contents.
 - npj Artificial Intelligence article page, published 2026-04-30 as an early
   unedited manuscript.
+- arXiv abstract page for `2605.11117v1`, submitted on 2026-05-11:
+  GRAFT-ATHENA.
+- arXiv abstract page for `2512.03476v2`, submitted on 2025-12-03 and revised
+  on 2026-05-08: ATHENA.
 
 ## Workflow Phases
 
@@ -59,6 +63,23 @@ The local implementation uses prediction-only evaluation. `solution.py` sees
 training data during validate/train and only `x_val` during predict. It writes
 `predictions.npz`; trusted evaluator code reads private `u_val` labels and
 computes the metric without importing `solution.py`.
+
+## ATHENA / GRAFT-ATHENA Update
+
+ATHENA describes a HENA loop where structural actions `A_n` are selected from
+expert-blueprint-guided combinatorial spaces, translated into executable code
+`S_n`, and evaluated into scientific rewards `R_n`. GRAFT-ATHENA adds a
+factored-tree framing: a method is an ordered path through a reduced action
+space, and the path can be treated as a stable fingerprint for later retrieval
+or experience accumulation.
+
+The local implementation now captures only the safe deterministic subset in
+[Method Substrate 合约](method_substrate.md): blueprint-bounded `MethodAction`
+objects, ordered `MethodPath` fingerprints, finite `ScientificReward` records,
+and a local JSON `ExperienceSubstrate`. This is a workflow traceability
+contract, not a claim that the project implements GRAFT's probabilistic policy
+factorization, cross-domain self-improvement, autonomous action-space
+expansion, or the ATHENA paper's reported performance.
 
 ## Benchmark Coverage
 

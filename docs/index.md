@@ -17,6 +17,7 @@
 - [AgenticSciML Assistant 规范](agenticsciml_assistant.md)：项目 AI 助手定位、repo-local skill 边界、内部 algorithm tool 和未来 MCP/tool 合约。
 - [Benchmark 与实验设计](benchmark_plan.md)：6 类论文任务家族、本地代理、六项 faithful-small 升级、验证矩阵和真实 LLM 实验顺序。
 - [论文算法 Reference Primitives](paper_algorithm_primitives.md)：论文结果区列出的 6 个 champion strategy 的本地 NumPy reference primitives 和 claim 边界。
+- [Method Substrate 合约](method_substrate.md)：ATHENA / GRAFT-ATHENA 启发的本地 action、blueprint、method fingerprint、reward 和 experience cache 合约。
 - [Benchmark Fidelity Levels](fidelity_levels.md)：`proxy`、`faithful-small`、`paper-like` 的准入标准和 claim 边界。
 - [SciML 论文与代码知识库](sciml_knowledge_base.md)：为 `burgers_pinn` 选取 PINNs 论文和公开代码，并记录本地 KB 写入规则。
 
@@ -30,6 +31,6 @@
 ## 推荐阅读路径
 
 1. 先读 [项目概览](../README.md)，确认本项目只复刻 workflow，不承诺复现论文分数。
-2. 再读 [论文机制笔记](paper_notes.md)、[多 Agent 设计方法](multi_agent_design.md)、[Git 与 Markdown 分层记录方法论](git_markdown_methodology.md)、[OpenAI Agents SDK 升级复盘](openai_agents_sdk_upgrade_review.md) 和 [AgenticSciML Assistant 规范](agenticsciml_assistant.md)，理解为什么采用代码控制的多 Agent 进化搜索、Git/Markdown 分层记录、Assistant 边界以及后续 SDK/tool 对齐路线。
+2. 再读 [论文机制笔记](paper_notes.md)、[多 Agent 设计方法](multi_agent_design.md)、[Git 与 Markdown 分层记录方法论](git_markdown_methodology.md)、[OpenAI Agents SDK 升级复盘](openai_agents_sdk_upgrade_review.md)、[AgenticSciML Assistant 规范](agenticsciml_assistant.md) 和 [Method Substrate 合约](method_substrate.md)，理解为什么采用代码控制的多 Agent 进化搜索、Git/Markdown 分层记录、Assistant 边界、方法路径合约以及后续 SDK/tool 对齐路线。
 3. 开发前读 [项目 Agent 规则](../AGENTS.md) 和 [Codex 实施任务](codex_tasks.md)。
-4. 做实验时读 [Benchmark 与实验设计](benchmark_plan.md)、[论文算法 Reference Primitives](paper_algorithm_primitives.md)、[Benchmark Fidelity Levels](fidelity_levels.md)、[SciML 论文与代码知识库](sciml_knowledge_base.md)、[Real LLM 运行](real_run.md)、[Ablation 说明](ablation.md)、[ChatUI 实验操作台](chatui_console.md)、[AgenticSciML Assistant 规范](agenticsciml_assistant.md) 和 [版本说明](version_notes.md)。
+4. 做实验时读 [Benchmark 与实验设计](benchmark_plan.md)、[论文算法 Reference Primitives](paper_algorithm_primitives.md)、[Method Substrate 合约](method_substrate.md)、[Benchmark Fidelity Levels](fidelity_levels.md)、[SciML 论文与代码知识库](sciml_knowledge_base.md)、[Real LLM 运行](real_run.md)、[Ablation 说明](ablation.md)、[ChatUI 实验操作台](chatui_console.md)、[AgenticSciML Assistant 规范](agenticsciml_assistant.md) 和 [版本说明](version_notes.md)。
