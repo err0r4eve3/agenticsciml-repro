@@ -227,8 +227,38 @@ def test_trace_summary_fails_on_claim_gate_overclaim(tmp_path: Path) -> None:
 
     summary = summarize_trace(run_dir)
 
+    assert summary["claim_gate"] == claim_gate
     assert summary["artifact_consistency"]["passed"] is False
     assert any("paper_level_claim_supported overclaims" in issue for issue in summary["artifact_consistency"]["issues"])
+
+
+def test_trace_summary_exposes_workflow_claim_gate_without_run_metadata(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    claim_gate = claim_gate_for_run(
+        claim_level="workflow_proxy",
+        use_mock=True,
+        fidelity_level="proxy",
+    )
+    _write_events(
+        run_dir / "trace.jsonl",
+        [
+            {
+                "event_type": "workflow_span",
+                "name": "agenticsciml.run.start",
+                "metadata": {"claim_gate": claim_gate},
+            },
+            {"event_type": "agent_span", "name": "proposer", "metadata": {}},
+            {"event_type": "generation_span", "name": "proposer", "metadata": {}},
+            {"event_type": "tool_span", "name": "train_and_evaluate", "metadata": {}},
+            {"event_type": "guardrail_span", "name": "guard", "metadata": {"passed": True}},
+        ],
+    )
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["claim_gate"] == claim_gate
+    assert summary["quality_gate"]["passed"] is True
 
 
 def test_trace_summary_reports_data_analysis_specificity_warnings(tmp_path: Path) -> None:

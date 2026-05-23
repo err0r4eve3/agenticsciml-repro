@@ -97,6 +97,7 @@ def summarize_trace(run_dir: Path) -> dict[str, Any]:
         }
     )
     artifact_consistency = _check_artifact_consistency(run_dir, events)
+    claim_gate = _summary_claim_gate(run_dir, events)
     quality_passed = (
         not missing_event_types
         and not guardrail_failures
@@ -108,12 +109,28 @@ def summarize_trace(run_dir: Path) -> dict[str, Any]:
         "agent_roles": agent_roles,
         "guardrail_failures": guardrail_failures,
         "artifact_consistency": artifact_consistency,
+        "claim_gate": claim_gate,
         "quality_gate": {
             "passed": quality_passed,
             "required_event_types": list(REQUIRED_EVENT_TYPES),
             "missing_event_types": missing_event_types,
         },
     }
+
+
+def _summary_claim_gate(run_dir: Path, events: list[dict[str, Any]]) -> dict[str, Any] | None:
+    metadata_path = run_dir / "run_metadata.json"
+    if metadata_path.exists():
+        try:
+            run_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            run_metadata = None
+        if isinstance(run_metadata, dict) and isinstance(run_metadata.get("claim_gate"), dict):
+            return dict(run_metadata["claim_gate"])
+    workflow_metadata = _workflow_start_metadata(events)
+    if isinstance(workflow_metadata, dict) and isinstance(workflow_metadata.get("claim_gate"), dict):
+        return dict(workflow_metadata["claim_gate"])
+    return None
 
 
 def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> dict[str, Any]:

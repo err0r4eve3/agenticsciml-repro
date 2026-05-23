@@ -43,6 +43,12 @@ benchmark 没有 `kb/index.json`，child mutation 仍会尝试加载 KB 并触�
 并继续 workflow；自定义 proxy benchmark 的回归测试现在会至少跑一个 child，并要求
 trace quality gate 通过。
 
+20 轮 live validation 的 trace 审计发现：已生成的 `trace_summary.json` 质量门通过，
+但顶层没有输出 `claim_gate`，单独查看 trace summary 时无法机器读取 claim boundary。
+已将 `claim_gate` 作为 trace summary 顶层字段输出，优先来自 `run_metadata.json`，
+其次来自 workflow-start trace；这只补齐审计可见性，不改变 evaluator score 或
+quality gate 判定。
+
 ## 2026-05-19 Senior Review Issue Closure
 
 本次按学长审计文档逐项补齐 4 个可信度问题的留档、artifact 和 UI/API 证据展示。所有新增报告都定位为
