@@ -30,6 +30,12 @@ FastAPI 进程返回的 `/api/algorithms` payload 缺少 `features` /
 `out/node/entry`，导致 `/`、`?folder` 和静态资源 404。README 已移除旧的
 `PASSWORD=` 启动示例，统一为 `--auth none` + loopback / 上游账号鉴权边界。
 
+进一步 artifact 审计发现默认 mock engineer 在第二轮迭代会重复输出同一个 Fourier
+ridge 实现，导致 `evolution_health.json` 出现 `duplicate_parent` warning。已将
+engineer prompt 中的 `solution_id` 暴露给 mock LLM，并让 mock engineer 按
+`solution_001`、`solution_002` 等生成不同的确定性 Fourier ridge 参数变体。这样 mock
+run 仍只代表 workflow shape，但演示和 smoke 中的多步迭代不再默认退化为重复代码。
+
 ## 2026-05-19 Senior Review Issue Closure
 
 本次按学长审计文档逐项补齐 4 个可信度问题的留档、artifact 和 UI/API 证据展示。所有新增报告都定位为

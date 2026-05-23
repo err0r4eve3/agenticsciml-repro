@@ -251,6 +251,36 @@ def test_duplicate_child_code_is_marked_in_mutation_and_evolution_health(tmp_pat
     assert evolution_health["warnings"]
 
 
+def test_default_mock_engineer_generates_distinct_sequential_children(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="distinct-mock-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=2, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+
+    first = json.loads(
+        (run_dir / "solutions" / "solution_001" / "mutation_effect_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    second = json.loads(
+        (run_dir / "solutions" / "solution_002" / "mutation_effect_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    evolution_health = json.loads((run_dir / "reports" / "evolution_health.json").read_text(encoding="utf-8"))
+
+    assert first["code_digest"] != second["code_digest"]
+    assert first["status"] != "duplicate_parent"
+    assert second["status"] != "duplicate_parent"
+    assert evolution_health["duplicate_code_count"] == 0
+    assert evolution_health["unique_code_count"] == evolution_health["solution_count"]
+
+
 def test_plateau_without_duplicate_code_is_explained_in_mutation_and_evolution_health(tmp_path: Path) -> None:
     config = ExperimentConfig(
         experiment_id="plateau-run",

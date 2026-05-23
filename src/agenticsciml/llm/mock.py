@@ -146,6 +146,25 @@ if __name__ == "__main__":
 '''.strip()
 
 
+def _solution_id_index(prompt: str) -> int:
+    match = re.search(r"solution_id:\s*solution_(\d+)", prompt)
+    return int(match.group(1)) if match else 1
+
+
+def _fourier_ridge_variant(prompt: str) -> str:
+    index = max(1, _solution_id_index(prompt))
+    order = min(12, 4 + index)
+    ridge = f"{10 ** (-(5 + min(index, 4))):.0e}"
+    jump = 0.10 + 0.03 * (index % 5)
+    code = FOURIER_RIDGE_SOLUTION
+    code = code.replace(
+        "def __init__(self, order=4, ridge=1e-5):",
+        f"def __init__(self, order={order}, ridge={ridge}):",
+    )
+    code = code.replace("z[:, :1] > 0.15", f"z[:, :1] > {jump:.2f}")
+    return code
+
+
 class MockLLMClient(LLMClient):
     def complete_text(
         self,
@@ -204,17 +223,18 @@ class MockLLMClient(LLMClient):
         if name == "engineer":
             match = re.search(r"parent_digest:\s*([a-f0-9]{64})", prompt)
             parent_digest = match.group(1) if match else solution_digest(ROOT_SOLUTION + "\n")
+            target_code = _fourier_ridge_variant(prompt)
             return {
-                "mutation_summary": "Mutated the baseline into Fourier ridge regression.",
-                "expected_effect": "Lower validation error on smooth, oscillatory, and multi-output proxy tasks.",
+                "mutation_summary": "Mutated the parent into a deterministic Fourier ridge variant.",
+                "expected_effect": "Lower or diversified validation error on smooth, oscillatory, and multi-output proxy tasks.",
                 "risks": ["The fixed feature basis may underfit high-dimensional targets."],
                 "parent_digest": parent_digest,
                 "patch": make_unified_patch(
                     prompt.split("Parent code:\n", 1)[1] if "Parent code:\n" in prompt else ROOT_SOLUTION + "\n",
-                    FOURIER_RIDGE_SOLUTION + "\n",
+                    target_code + "\n",
                 ),
                 "files_changed": ["solution.py"],
-                "full_file_map": {"solution.py": FOURIER_RIDGE_SOLUTION + "\n"},
+                "full_file_map": {"solution.py": target_code + "\n"},
                 "implemented_kb_points": ["feature expansion", "stable low-budget fitting"],
             }
         if name == "analysis":

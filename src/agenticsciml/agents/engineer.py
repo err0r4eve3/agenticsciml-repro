@@ -84,6 +84,7 @@ class EngineerAgent(AgentBase):
             "- Do not claim implementation of a KB point unless `solution.py` contains an auditable "
             "signal for it, such as explicit sample counts, collocation logic, depth/width settings, "
             "residual weighting, or training schedule values.\n\n"
+            f"solution_id: {solution_id}\n"
             f"parent_digest: {parent_digest}\n\n"
             f"Proposal:\n{proposal.to_markdown()}\n\nParent code:\n{parent_code[:8000]}"
         )
