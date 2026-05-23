@@ -142,14 +142,14 @@ type AlgorithmSpec = {
   benchmark_examples: string[];
   status: string;
   description: string;
-  description_zh: string;
-  features: string[];
-  features_zh: string[];
-  problem_fit: string[];
-  problem_fit_zh: string[];
+  description_zh?: string;
+  features?: string[];
+  features_zh?: string[];
+  problem_fit?: string[];
+  problem_fit_zh?: string[];
   claim_boundary: string;
   safety_notes: string;
-  safety_notes_zh: string;
+  safety_notes_zh?: string;
   source_scope?: string;
   implementation_path?: string | null;
 };
@@ -2692,10 +2692,22 @@ function AlgorithmCatalog({
     <div className="algorithm-grid">
       {visible.map((algorithm) => {
         const selected = selectedIds.includes(algorithm.id);
-        const description = isChinese ? algorithm.description_zh : algorithm.description;
-        const features = isChinese ? algorithm.features_zh : algorithm.features;
-        const problemFit = isChinese ? algorithm.problem_fit_zh : algorithm.problem_fit;
-        const safetyNotes = isChinese ? algorithm.safety_notes_zh : algorithm.safety_notes;
+        const description = textOrFallback(
+          isChinese ? algorithm.description_zh : algorithm.description,
+          algorithm.description
+        );
+        const features = stringListOrFallback(
+          isChinese ? algorithm.features_zh : algorithm.features,
+          [algorithm.description]
+        );
+        const problemFit = stringListOrFallback(
+          isChinese ? algorithm.problem_fit_zh : algorithm.problem_fit,
+          algorithm.compatible_benchmark_families
+        );
+        const safetyNotes = textOrFallback(
+          isChinese ? algorithm.safety_notes_zh : algorithm.safety_notes,
+          algorithm.safety_notes
+        );
         return (
           <article className={selected ? "algorithm-card selected" : "algorithm-card"} key={algorithm.id}>
             <div>
@@ -2738,6 +2750,18 @@ function AlgorithmCatalog({
   );
   if (embedded) return content;
   return <DataRegion title={isChinese ? "算法目录" : "Algorithm catalog"}>{content}</DataRegion>;
+}
+
+function textOrFallback(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function stringListOrFallback(value: unknown, fallback: string[]): string[] {
+  if (Array.isArray(value)) {
+    const items = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+    if (items.length > 0) return items;
+  }
+  return fallback.filter((item) => item.trim().length > 0);
 }
 
 function DashboardView({

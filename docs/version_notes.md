@@ -2,6 +2,28 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-23 Flow Smoke Iteration
+
+本轮继续对 Web 控制面和浏览器 dispatch 做 live smoke。测试发现当前运行中的旧
+FastAPI 进程返回的 `/api/algorithms` payload 缺少 `features` /
+`features_zh` / `problem_fit` / `problem_fit_zh` 字段时，最新前端会在进入第三页
+算法库时崩溃。已将前端算法卡片改为兼容旧 payload：缺少双语字段时回退到
+`description`、`compatible_benchmark_families` 和 `safety_notes`，避免发布或重启
+不同步导致空白页。
+
+验证：
+
+- `PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python scripts/web_workflow_smoke.py --base-url http://127.0.0.1:8876 --skip-code-server-live`
+- `cd frontend && npm run build`
+- `cd frontend && node ../scripts/web_ui_dispatch_e2e.mjs --base-url http://127.0.0.1:5173 --timeout-ms 45000`
+- `node scripts/web_ui_dispatch_e2e.mjs --base-url http://127.0.0.1:8876 --timeout-ms 45000`
+
+边界：
+
+- `--expect-code-server-websocket` 仍会暴露本机 code-server sidecar 未按当前 workspace
+  成功建立 WebSocket 的问题；本轮先修前端兼容性，code-server live sidecar / 反代路径
+  仍需单独排查。
+
 ## 2026-05-19 Senior Review Issue Closure
 
 本次按学长审计文档逐项补齐 4 个可信度问题的留档、artifact 和 UI/API 证据展示。所有新增报告都定位为
