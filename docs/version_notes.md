@@ -36,6 +36,13 @@ engineer prompt 中的 `solution_id` 暴露给 mock LLM，并让 mock engineer �
 `solution_001`、`solution_002` 等生成不同的确定性 Fourier ridge 参数变体。这样 mock
 run 仍只代表 workflow shape，但演示和 smoke 中的多步迭代不再默认退化为重复代码。
 
+继续跑“新问题 -> custom proxy benchmark -> run”的远端端到端测试时发现：自定义
+benchmark 没有 `kb/index.json`，child mutation 仍会尝试加载 KB 并触发
+`FileNotFoundError`，导致 run exported 但 trace quality gate 失败。已将缺失 KB
+处理为 `coverage_status=missing` 的空 KB，retriever 会写出 `retrieved_kb.json`
+并继续 workflow；自定义 proxy benchmark 的回归测试现在会至少跑一个 child，并要求
+trace quality gate 通过。
+
 ## 2026-05-19 Senior Review Issue Closure
 
 本次按学长审计文档逐项补齐 4 个可信度问题的留档、artifact 和 UI/API 证据展示。所有新增报告都定位为

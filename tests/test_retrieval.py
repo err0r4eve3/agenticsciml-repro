@@ -40,6 +40,17 @@ def test_burgers_kb_loads_source_grounded_entries() -> None:
     assert "guardrail" in budget.description.lower()
 
 
+def test_missing_kb_loads_as_empty_missing_manifest(tmp_path: Path) -> None:
+    kb = KnowledgeBase.load(tmp_path / "missing-kb")
+
+    assert kb.all() == []
+    manifest = kb.manifest()
+    assert manifest["entry_count"] == 0
+    assert manifest["coverage_status"] == "missing"
+    assert manifest["paper_kb_equivalent"] is False
+    assert manifest["provenance_complete"] is False
+
+
 def test_kb_application_report_warns_when_budgeted_pinn_entry_is_not_adopted(tmp_path: Path) -> None:
     kb = KnowledgeBase.load(Path("examples/burgers_pinn/kb"))
     entry = kb.get("budgeted_pinn_mutation")

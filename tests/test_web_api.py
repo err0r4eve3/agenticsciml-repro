@@ -242,8 +242,9 @@ def test_problem_intake_custom_benchmark_generates_runnable_evaluator(tmp_path: 
     run_payload.update(
         {
             "mode": "mock",
-            "max_iterations": 0,
-            "target_solution_count": None,
+            "max_iterations": 1,
+            "target_solution_count": 2,
+            "parallel_mutations": 1,
             "background": False,
             "output_dir": "runs",
         }
@@ -265,6 +266,11 @@ def test_problem_intake_custom_benchmark_generates_runnable_evaluator(tmp_path: 
     assert metadata["claim_gate"]["status"] == "allowed"
     assert metadata["claim_gate"]["evaluator_trust_level"] == "synthetic_proxy"
     assert metadata["claim_gate"]["paper_level_claim_supported"] is False
+    trace_summary = json.loads((run_dir / "trace_summary.json").read_text(encoding="utf-8"))
+    assert trace_summary["quality_gate"]["passed"] is True
+    retrieved_kb = json.loads((run_dir / "solutions" / "solution_001" / "retrieved_kb.json").read_text(encoding="utf-8"))
+    assert retrieved_kb["selected_entry_id"] is None
+    assert retrieved_kb["coverage_status"] == "missing"
 
 
 def test_problem_intake_rejects_unknown_algorithm() -> None:

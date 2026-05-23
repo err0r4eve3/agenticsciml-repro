@@ -33,12 +33,15 @@ class KnowledgeBaseEntry:
 
 
 class KnowledgeBase:
-    def __init__(self, entries: dict[str, KnowledgeBaseEntry]):
+    def __init__(self, entries: dict[str, KnowledgeBaseEntry], *, coverage_status: str | None = None):
         self.entries = entries
+        self.coverage_status = coverage_status
 
     @classmethod
     def load(cls, kb_dir: Path) -> "KnowledgeBase":
         index_path = kb_dir / "index.json"
+        if not index_path.exists():
+            return cls({}, coverage_status="missing")
         records = json.loads(index_path.read_text(encoding="utf-8"))
         entries: dict[str, KnowledgeBaseEntry] = {}
         for record in records:
@@ -73,6 +76,18 @@ class KnowledgeBase:
     def manifest(self) -> dict[str, object]:
         entries = sorted(self.entries.values(), key=lambda entry: entry.entry_id)
         entry_count = len(entries)
+        if entry_count == 0:
+            return {
+                "schema_version": 1,
+                "entry_count": 0,
+                "paper_reference_entry_count": 70,
+                "coverage_status": self.coverage_status or "empty",
+                "paper_kb_equivalent": False,
+                "provenance_complete": False,
+                "provenance_complete_count": 0,
+                "missing_provenance_entry_ids": [],
+                "entries": [],
+            }
         missing_provenance = [
             entry.entry_id
             for entry in entries
@@ -98,13 +113,4 @@ class KnowledgeBase:
 
 
 def kb_manifest_for_dir(kb_dir: Path) -> dict[str, object]:
-    if not (kb_dir / "index.json").exists():
-        return {
-            "schema_version": 1,
-            "entry_count": 0,
-            "paper_reference_entry_count": 70,
-            "coverage_status": "missing",
-            "paper_kb_equivalent": False,
-            "entries": [],
-        }
     return KnowledgeBase.load(kb_dir).manifest()
