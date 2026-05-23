@@ -75,10 +75,10 @@ The Web console keeps the Python orchestrator as the source of truth. It exposes
 benchmark listing, mock/real/dry-run launch, run status, SSE trace events,
 read-only artifact browsing, `/api/solver/chat` as the algorithm tool boundary,
 and a code-server sidecar link. Start code-server separately on loopback with
-auth before opening the VS Code Web link:
+upstream account/auth protection before opening the VS Code Web link:
 
 ```bash
-PASSWORD=<local-token> code-server --bind-addr 127.0.0.1:8080 /path/to/workspace
+code-server --auth none --bind-addr 127.0.0.1:8080 /path/to/workspace
 ```
 
 The Web API hardens deployment-facing defaults:

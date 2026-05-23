@@ -24,6 +24,12 @@ FastAPI 进程返回的 `/api/algorithms` payload 缺少 `features` /
   成功建立 WebSocket 的问题；本轮先修前端兼容性，code-server live sidecar / 反代路径
   仍需单独排查。
 
+后续排查确认远端 `ociChuncheon` 的 code-server 反代和浏览器 WebSocket 能通过
+`scripts/web_ui_dispatch_e2e.mjs --expect-code-server-websocket`；本机失败来自
+`/tmp/agenticsciml-code-server-4.117.0` 不完整，缺少正常 `bin/code-server` /
+`out/node/entry`，导致 `/`、`?folder` 和静态资源 404。README 已移除旧的
+`PASSWORD=` 启动示例，统一为 `--auth none` + loopback / 上游账号鉴权边界。
+
 ## 2026-05-19 Senior Review Issue Closure
 
 本次按学长审计文档逐项补齐 4 个可信度问题的留档、artifact 和 UI/API 证据展示。所有新增报告都定位为

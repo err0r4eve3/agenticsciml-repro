@@ -153,6 +153,12 @@ code-server --auth none --bind-addr 127.0.0.1:8080 /path/to/workspace
 Web API 暴露；本地开发需要打开仓库根目录时，必须显式设置
 `AGENTICSCIML_ALLOW_REPO_WORKSPACE=1`。
 
+如果 `http://127.0.0.1:8080/healthz` 返回 alive，但 `/`、`?folder=<workspace>`、
+`product.json` 或 workbench 静态资源返回 404，通常表示当前 sidecar 不是完整的
+code-server 安装或启动入口不对。应优先检查 `command -v code-server`、
+`code-server --version` 和 systemd / shell 启动命令，避免用不完整的临时解包目录
+冒充 code-server 二进制。
+
 公网部署只能作为显式配置的 hardened sidecar：必须有 TLS、上游账号鉴权
 （例如 ChatUI session、Cloudflare Access 或 nginx auth_request）、受限 workspace、
 最小权限和 secret scanning。不要把 `--auth none` 的 code-server 直接暴露到公网。
