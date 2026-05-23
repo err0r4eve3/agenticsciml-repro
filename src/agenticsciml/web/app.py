@@ -1554,6 +1554,7 @@ def _solution_summary(
     emergence_audit = _emergence_audit_summary(workspace / "emergence_report.json")
     kb_application = _kb_application_summary(workspace / "kb_application_report.json")
     mutation_effect = _mutation_effect_summary(workspace / "mutation_effect_report.json")
+    operator_assignment = _operator_assignment_summary(workspace / "operator_assignment.json")
     return {
         "node_id": node_id,
         "parent_id": node.get("parent_id"),
@@ -1571,6 +1572,7 @@ def _solution_summary(
         "emergence_audit": emergence_audit,
         "kb_application": kb_application,
         "mutation_effect": mutation_effect,
+        "operator_assignment": operator_assignment,
         "workspace": f"solutions/{node_id}",
         "artifacts": _solution_artifacts(run_dir, workspace),
     }
@@ -1637,6 +1639,28 @@ def _mutation_effect_summary(path: Path) -> dict[str, object]:
         "duplicate_of": payload.get("duplicate_of"),
         "diff_line_count": payload.get("diff_line_count"),
         "score_delta_from_parent": payload.get("score_delta_from_parent"),
+        "operator_id": payload.get("operator_id"),
+        "mutation_axis": payload.get("mutation_axis"),
+        "operator_static_evidence": payload.get("operator_static_evidence"),
+    }
+
+
+def _operator_assignment_summary(path: Path) -> dict[str, object]:
+    payload = _read_optional_json(path)
+    if not isinstance(payload, dict):
+        return {"available": False}
+    warnings = payload.get("warnings")
+    return {
+        "available": True,
+        "scheduler_mode": payload.get("scheduler_mode"),
+        "operator_id": payload.get("operator_id"),
+        "operator_name": payload.get("operator_name"),
+        "mutation_axis": payload.get("mutation_axis"),
+        "selection_source": payload.get("selection_source"),
+        "expected_term_count": len(payload.get("operator_expected_terms", []))
+        if isinstance(payload.get("operator_expected_terms"), list)
+        else 0,
+        "warning_count": len(warnings) if isinstance(warnings, list) else 0,
     }
 
 
@@ -1654,6 +1678,7 @@ def _innovation_report_summary(path: Path) -> dict[str, object]:
         "paper_level_discovery_supported": payload.get("paper_level_discovery_supported"),
         "novelty_axis_count": evidence.get("novelty_axis_count", len(axes)),
         "candidate_emergent_count": evidence.get("candidate_emergent_count"),
+        "operator_count": evidence.get("operator_count"),
         "warning_count": evidence.get("warning_count", len(warnings)),
         "top_axes": [axis.get("axis_id") for axis in axes[:4] if isinstance(axis, dict)],
         "claim_boundary": payload.get("claim_boundary"),
@@ -1666,6 +1691,7 @@ def _solution_artifacts(run_dir: Path, workspace: Path) -> list[dict[str, object
         "analysis.md",
         "proposal.md",
         "branch_context.json",
+        "operator_assignment.json",
         "kb_application_report.json",
         "mutation_effect_report.json",
         "policy_fidelity_report.json",

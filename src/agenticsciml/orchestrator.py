@@ -48,6 +48,12 @@ from agenticsciml.emergence_audit import audit_solution_emergence
 from agenticsciml.execution.runner import RunResult
 from agenticsciml.execution.sandbox import prepare_solution_workspace, train_and_evaluate
 from agenticsciml.llm.base import LLMClient
+from agenticsciml.operator_scheduler import (
+    OPERATOR_SCHEDULER_MODE,
+    OperatorAssignment,
+    OperatorScheduler,
+    operator_assignment_context,
+)
 from agenticsciml.patching import PatchApplicationError
 from agenticsciml.readiness import readiness_summary
 from agenticsciml.retrieval.kb_store import KnowledgeBase, kb_manifest_for_dir
@@ -779,10 +785,20 @@ class AgenticSciMLOrchestrator:
             if self.config.evolution.use_branch_context
             else {solution_id: {} for _, solution_id in jobs}
         )
+        operator_assignments = self._operator_assignments(jobs, branch_contexts)
 
         if max_workers == 1:
             children = [
-                (parent, self._run_child_job(parent, contract, solution_id, branch_contexts[solution_id]))
+                (
+                    parent,
+                    self._run_child_job(
+                        parent,
+                        contract,
+                        solution_id,
+                        branch_contexts[solution_id],
+                        operator_assignments[solution_id],
+                    ),
+                )
                 for parent, solution_id in jobs
             ]
         else:
@@ -794,6 +810,7 @@ class AgenticSciMLOrchestrator:
                         contract,
                         solution_id,
                         branch_contexts[solution_id],
+                        operator_assignments[solution_id],
                     )
                     for parent, solution_id in jobs
                 ]
@@ -802,7 +819,13 @@ class AgenticSciMLOrchestrator:
                     try:
                         child = future.result()
                     except Exception as exc:  # pragma: no cover - defensive guard for real LLM/tool failures.
-                        child = self._failed_child_from_exception(parent, solution_id, contract, exc)
+                        child = self._failed_child_from_exception(
+                            parent,
+                            solution_id,
+                            contract,
+                            exc,
+                            operator_assignment=operator_assignments[solution_id],
+                        )
                     children.append((parent, child))
 
         self.storage.record_trace(
@@ -865,12 +888,45 @@ class AgenticSciMLOrchestrator:
             }
         return contexts
 
+    def _operator_assignments(
+        self,
+        jobs: list[tuple[SolutionNode, str]],
+        branch_contexts: dict[str, dict[str, object]],
+    ) -> dict[str, OperatorAssignment]:
+        scheduler = OperatorScheduler(
+            benchmark_name=self.problem_bundle.benchmark_name,
+            benchmark_family=self.problem_bundle.benchmark_spec.family,
+            selected_algorithm_ids=list(self.config.strategy_seed_ids),
+            nodes=list(self.nodes),
+            run_dir=self.storage.run_dir,
+        )
+        assignments: dict[str, OperatorAssignment] = {}
+        used_axes_by_parent: dict[str, set[str]] = {}
+        for parent, solution_id in jobs:
+            used_axes = used_axes_by_parent.setdefault(parent.node_id, set())
+            assignment = scheduler.assign(
+                solution_id=solution_id,
+                parent=parent,
+                branch_context=branch_contexts.get(solution_id, {}),
+                used_axes_for_parent=used_axes,
+            )
+            assignments[solution_id] = assignment
+            used_axes.add(assignment.mutation_axis)
+            if self.config.evolution.use_branch_context:
+                branch_contexts.setdefault(solution_id, {})["operator_focus"] = {
+                    "operator_id": assignment.operator_id,
+                    "mutation_axis": assignment.mutation_axis,
+                    "selection_source": assignment.selection_source,
+                }
+        return assignments
+
     def _run_child_job(
         self,
         parent: SolutionNode,
         contract: EvaluationContract,
         solution_id: str,
         branch_context: dict[str, object] | None = None,
+        operator_assignment: OperatorAssignment | None = None,
     ) -> SolutionNode:
         started = time.monotonic()
         self.storage.record_trace(
@@ -881,12 +937,25 @@ class AgenticSciMLOrchestrator:
                 "parent_id": parent.node_id,
                 "branch_context_enabled": self.config.evolution.use_branch_context,
                 "branch_context": branch_context or {},
+                **self._operator_trace_metadata(operator_assignment),
             },
         )
         try:
-            child = self._create_child(parent, contract, solution_id=solution_id, branch_context=branch_context)
+            child = self._create_child(
+                parent,
+                contract,
+                solution_id=solution_id,
+                branch_context=branch_context,
+                operator_assignment=operator_assignment,
+            )
         except Exception as exc:  # pragma: no cover - defensive guard for real LLM/tool failures.
-            child = self._failed_child_from_exception(parent, solution_id, contract, exc)
+            child = self._failed_child_from_exception(
+                parent,
+                solution_id,
+                contract,
+                exc,
+                operator_assignment=operator_assignment,
+            )
         self.storage.record_trace(
             "workflow_span",
             "agenticsciml.child_mutation.end",
@@ -897,10 +966,26 @@ class AgenticSciMLOrchestrator:
                 "failure_kind": child.failure_kind,
                 "branch_context_enabled": self.config.evolution.use_branch_context,
                 "branch_context": branch_context or {},
+                **self._operator_trace_metadata(operator_assignment),
                 "duration_s": time.monotonic() - started,
             },
         )
         return child
+
+    def _operator_trace_metadata(self, operator_assignment: OperatorAssignment | None) -> dict[str, object]:
+        if operator_assignment is None:
+            return {
+                "operator_scheduler_mode": OPERATOR_SCHEDULER_MODE,
+                "operator_id": None,
+                "mutation_axis": None,
+                "operator_selection_source": None,
+            }
+        return {
+            "operator_scheduler_mode": OPERATOR_SCHEDULER_MODE,
+            "operator_id": operator_assignment.operator_id,
+            "mutation_axis": operator_assignment.mutation_axis,
+            "operator_selection_source": operator_assignment.selection_source,
+        }
 
     def _failed_child_from_exception(
         self,
@@ -908,8 +993,11 @@ class AgenticSciMLOrchestrator:
         solution_id: str,
         contract: EvaluationContract,
         exc: Exception,
+        operator_assignment: OperatorAssignment | None = None,
     ) -> SolutionNode:
         workspace = self.storage.create_solution_workspace(solution_id)
+        if operator_assignment is not None:
+            self.storage.save_json(Path("solutions") / solution_id / "operator_assignment.json", operator_assignment.to_dict())
         self.storage.save_solution_text(
             solution_id,
             "orchestration_error.md",
@@ -957,6 +1045,7 @@ class AgenticSciMLOrchestrator:
         contract: EvaluationContract,
         solution_id: str | None = None,
         branch_context: dict[str, object] | None = None,
+        operator_assignment: OperatorAssignment | None = None,
     ) -> SolutionNode:
         solution_id = solution_id or self._next_solution_id()
         workspace = self.storage.create_solution_workspace(solution_id)
@@ -967,6 +1056,9 @@ class AgenticSciMLOrchestrator:
         )
         branch_context = branch_context or {}
         self.storage.save_json(Path("solutions") / solution_id / "branch_context.json", branch_context)
+        operator_payload = operator_assignment.to_dict() if operator_assignment else {}
+        if operator_payload:
+            self.storage.save_json(Path("solutions") / solution_id / "operator_assignment.json", operator_payload)
 
         parent_workspace = Path(parent.workspace)
         parent_analysis = self.analysis_by_node.get(parent.node_id)
@@ -1006,9 +1098,17 @@ class AgenticSciMLOrchestrator:
             branch_context=branch_context,
             problem_intake_context=self._problem_intake_context(),
             strategy_seed_context=self._strategy_seed_context(),
+            operator_assignment=operator_payload,
         )
         parent_code = self.engineer.read_parent_code(parent_workspace)
         method_tags = self._method_tags(proposal, kb_entry.entry_id if kb_entry else None)
+        if operator_assignment is not None:
+            method_tags.extend(
+                [
+                    f"operator:{operator_assignment.operator_id}",
+                    f"axis:{operator_assignment.mutation_axis}",
+                ]
+            )
         branch_intent = branch_context.get("branch_intent")
         if isinstance(branch_intent, str) and branch_intent:
             method_tags.append(f"branch:{branch_intent}")
@@ -1024,6 +1124,7 @@ class AgenticSciMLOrchestrator:
                 branch_context=branch_context,
                 problem_intake_context=self._problem_intake_context(),
                 strategy_seed_context=self._strategy_seed_context(),
+                operator_assignment=operator_payload,
             )
             self._write_kb_application_report(solution_id, kb_entry, proposal, workspace)
         except (PatchApplicationError, StructuredOutputError) as exc:
@@ -1062,7 +1163,7 @@ class AgenticSciMLOrchestrator:
                 score_delta_from_parent=None,
                 num_debug_attempts=0,
             )
-            self._write_mutation_effect_report(failed_node, parent, parent_code, workspace)
+            self._write_mutation_effect_report(failed_node, parent, parent_code, workspace, operator_payload)
             return failed_node
         node = self._execute_analyze_node(
             solution_id,
@@ -1072,7 +1173,14 @@ class AgenticSciMLOrchestrator:
             parent_node=parent,
             method_tags=method_tags,
         )
-        self._write_mutation_effect_report(node, parent, parent_code, workspace, child_code=child_code)
+        self._write_mutation_effect_report(
+            node,
+            parent,
+            parent_code,
+            workspace,
+            operator_payload,
+            child_code=child_code,
+        )
         return node
 
     def _execute_analyze_node(
@@ -1697,7 +1805,16 @@ class AgenticSciMLOrchestrator:
                     "duplicate_code_count": evolution_health.get("duplicate_code_count"),
                     "max_plateau_length": evolution_health.get("max_plateau_length"),
                     "best_improvement": evolution_health.get("best_improvement"),
+                    "operator_count": len(evolution_health.get("operator_health", {}))
+                    if isinstance(evolution_health.get("operator_health"), dict)
+                    else 0,
                     "warnings": evolution_health.get("warnings", []),
+                },
+                "operator_scheduler": {
+                    "mode": OPERATOR_SCHEDULER_MODE,
+                    "claim_boundary": (
+                        "Operator scheduling is workflow guidance only; evaluator artifacts remain authoritative."
+                    ),
                 },
                 "innovation_report": {
                     "innovation_claim_level": innovation_report.get("innovation_claim_level"),
@@ -1769,6 +1886,7 @@ class AgenticSciMLOrchestrator:
         parent_node: SolutionNode | None,
         parent_code: str | None,
         workspace: Path,
+        operator_assignment: dict[str, object] | None = None,
         *,
         child_code: str | None = None,
     ) -> None:
@@ -1782,6 +1900,7 @@ class AgenticSciMLOrchestrator:
             parent_code=parent_code,
             child_code=code,
             workspace=workspace,
+            operator_assignment=operator_assignment,
         )
         self.storage.save_json(Path("solutions") / node.node_id / "mutation_effect_report.json", report)
         self.storage.record_trace(
@@ -1793,6 +1912,8 @@ class AgenticSciMLOrchestrator:
                 "status": report.get("status"),
                 "code_changed_from_parent": report.get("code_changed_from_parent"),
                 "diff_line_count": report.get("diff_line_count"),
+                "operator_id": report.get("operator_id"),
+                "mutation_axis": report.get("mutation_axis"),
             },
         )
 

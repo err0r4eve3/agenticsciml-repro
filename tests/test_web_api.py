@@ -60,6 +60,9 @@ def test_web_algorithms_expose_professional_catalog() -> None:
         assert algorithm["problem_fit"]
         assert algorithm["problem_fit_zh"]
         assert algorithm["safety_notes_zh"]
+        assert algorithm["operator"]["scheduler_mode"] == "auto-audited"
+        assert algorithm["operator"]["mutation_axes"]
+        assert algorithm["operator"]["expected_static_terms"]
         assert len(algorithm["features"]) == len(algorithm["features_zh"])
         assert len(algorithm["problem_fit"]) == len(algorithm["problem_fit_zh"])
 
@@ -842,9 +845,28 @@ def test_selector_votes_and_solutions_are_read_only_evidence(tmp_path: Path) -> 
             {
                 "schema_version": 1,
                 "status": "changed_score_moved",
+                "operator_id": "fourier_feature_mlp",
+                "mutation_axis": "representation_or_features",
+                "operator_expected_terms": ["fourier", "feature"],
+                "operator_static_evidence": {"fourier": {"code_signal": True}},
                 "code_changed_from_parent": True,
                 "diff_line_count": 7,
                 "duplicate_of": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "solutions" / "solution_000" / "operator_assignment.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "scheduler_mode": "auto-audited",
+                "operator_id": "fourier_feature_mlp",
+                "operator_name": "Fourier Feature MLP",
+                "mutation_axis": "representation_or_features",
+                "selection_source": "manual_selected",
+                "operator_expected_terms": ["fourier", "feature"],
+                "warnings": [],
             }
         ),
         encoding="utf-8",
@@ -857,6 +879,17 @@ def test_selector_votes_and_solutions_are_read_only_evidence(tmp_path: Path) -> 
                 "duplicate_code_count": 0,
                 "max_plateau_length": 1,
                 "best_improvement": 0.05,
+                "operator_health": {
+                    "fourier_feature_mlp": {
+                        "assigned": 1,
+                        "evaluated": 1,
+                        "duplicate": 0,
+                        "plateau": 0,
+                        "improved": 1,
+                        "best_improvement": 0.05,
+                        "axes": {"representation_or_features": 1},
+                    }
+                },
                 "warnings": [],
             }
         ),
@@ -874,8 +907,10 @@ def test_selector_votes_and_solutions_are_read_only_evidence(tmp_path: Path) -> 
                     "unique_method_tag_count": 1,
                     "novelty_axis_count": 1,
                     "candidate_emergent_count": 0,
+                    "operator_count": 1,
                     "warning_count": 1,
                 },
+                "operator_coverage": {"fourier_feature_mlp": {"assigned": 1}},
                 "novelty_axes": [{"axis_id": "representation_or_features", "solution_ids": ["solution_000"]}],
                 "warnings": ["workflow exploration only"],
                 "claim_boundary": "not scientific novelty evidence",
@@ -978,10 +1013,15 @@ def test_selector_votes_and_solutions_are_read_only_evidence(tmp_path: Path) -> 
     }
     assert payload["solutions"][0]["kb_application"]["status"] == "implemented"
     assert payload["solutions"][0]["mutation_effect"]["status"] == "changed_score_moved"
+    assert payload["solutions"][0]["mutation_effect"]["operator_id"] == "fourier_feature_mlp"
+    assert payload["solutions"][0]["operator_assignment"]["operator_id"] == "fourier_feature_mlp"
+    assert payload["solutions"][0]["operator_assignment"]["mutation_axis"] == "representation_or_features"
     assert payload["evolution_health"]["unique_code_count"] == 1
+    assert payload["evolution_health"]["operator_health"]["fourier_feature_mlp"]["assigned"] == 1
     assert payload["innovation_report"]["available"] is True
     assert payload["innovation_report"]["innovation_claim_level"] == "workflow_exploration_only"
     assert payload["innovation_report"]["novelty_axis_count"] == 1
+    assert payload["innovation_report"]["operator_count"] == 1
     assert {figure["path"] for figure in payload["figures"]} == {
         "reports/data_overview.svg",
         "solutions/solution_000/prediction_overview.svg",

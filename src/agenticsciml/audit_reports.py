@@ -155,6 +155,7 @@ def build_mutation_effect_report(
     parent_code: str | None,
     child_code: str,
     workspace: Path,
+    operator_assignment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     parent_digest = _sha256_text(parent_code) if parent_code is not None else None
     child_digest = _sha256_text(child_code)
@@ -171,11 +172,29 @@ def build_mutation_effect_report(
         status = "changed_but_score_plateau" if parent_changed else "duplicate_parent"
     else:
         status = "changed_score_moved" if parent_changed else "unclassified"
+    assignment = operator_assignment if isinstance(operator_assignment, dict) else _read_json_object(
+        workspace / "operator_assignment.json"
+    )
+    operator_expected_terms = [
+        str(item)
+        for item in assignment.get("operator_expected_terms", [])
+        if isinstance(item, str) and item.strip()
+    ]
+    operator_static_evidence = _operator_static_evidence(
+        operator_expected_terms,
+        proposal_text=proposal_text,
+        engineering_text=_read_text(workspace / "engineering_summary.md"),
+        code_text=child_code,
+    )
     return {
         "schema_version": MUTATION_EFFECT_SCHEMA_VERSION,
         "solution_id": node.node_id,
         "parent_id": node.parent_id,
         "status": status,
+        "operator_id": assignment.get("operator_id"),
+        "mutation_axis": assignment.get("mutation_axis"),
+        "operator_expected_terms": operator_expected_terms,
+        "operator_static_evidence": operator_static_evidence,
         "code_digest": child_digest,
         "parent_code_digest": parent_digest,
         "proposal_digest": _sha256_text(proposal_text) if proposal_text else None,
@@ -196,6 +215,7 @@ def build_evolution_health_report(nodes: list[SolutionNode], run_dir: Path) -> d
     duplicate_nodes: list[dict[str, str]] = []
     score_plateau_nodes: list[str] = []
     mutation_status_counts: dict[str, int] = {}
+    operator_health: dict[str, dict[str, Any]] = {}
     best_improvement: float | None = None
 
     for node in nodes:
@@ -209,6 +229,7 @@ def build_evolution_health_report(nodes: list[SolutionNode], run_dir: Path) -> d
         report = _read_json_object(workspace / "mutation_effect_report.json")
         status = str(report.get("status") or ("root" if node.parent_id is None else "missing"))
         mutation_status_counts[status] = mutation_status_counts.get(status, 0) + 1
+        _update_operator_health(operator_health, node, report, workspace)
         if status == "changed_but_score_plateau":
             score_plateau_nodes.append(node.node_id)
         if node.score and node.parent_id and node.score_delta_from_parent is not None:
@@ -226,6 +247,7 @@ def build_evolution_health_report(nodes: list[SolutionNode], run_dir: Path) -> d
         "duplicate_code_count": len(duplicate_nodes),
         "duplicate_nodes": duplicate_nodes,
         "mutation_status_counts": dict(sorted(mutation_status_counts.items())),
+        "operator_health": dict(sorted(operator_health.items())),
         "score_plateau_nodes": score_plateau_nodes,
         "max_plateau_length": max(plateau_lengths, default=0),
         "best_improvement": best_improvement,
@@ -239,6 +261,73 @@ def build_evolution_health_report(nodes: list[SolutionNode], run_dir: Path) -> d
     if score_plateau_nodes or report["max_plateau_length"] >= 3:
         report["warnings"].append("Score plateau detected; mutation may be ineffective or evaluator may lack resolution.")
     return report
+
+
+def _update_operator_health(
+    operator_health: dict[str, dict[str, Any]],
+    node: SolutionNode,
+    mutation_report: dict[str, Any],
+    workspace: Path,
+) -> None:
+    assignment = _read_json_object(workspace / "operator_assignment.json")
+    operator_id = assignment.get("operator_id") or mutation_report.get("operator_id")
+    if not isinstance(operator_id, str) or not operator_id:
+        return
+    entry = operator_health.setdefault(
+        operator_id,
+        {
+            "assigned": 0,
+            "evaluated": 0,
+            "duplicate": 0,
+            "plateau": 0,
+            "improved": 0,
+            "best_improvement": None,
+            "axes": {},
+        },
+    )
+    entry["assigned"] += 1
+    if node.status == "evaluated":
+        entry["evaluated"] += 1
+    status = mutation_report.get("status")
+    if status == "duplicate_parent":
+        entry["duplicate"] += 1
+    if status == "changed_but_score_plateau":
+        entry["plateau"] += 1
+    axis = assignment.get("mutation_axis") or mutation_report.get("mutation_axis")
+    if isinstance(axis, str) and axis:
+        axes = entry["axes"]
+        axes[axis] = int(axes.get(axis, 0)) + 1
+    if node.score and node.parent_id and node.score_delta_from_parent is not None:
+        improvement = (
+            node.score_delta_from_parent
+            if node.score.higher_is_better
+            else -node.score_delta_from_parent
+        )
+        if improvement > 0:
+            entry["improved"] += 1
+            current_best = entry.get("best_improvement")
+            entry["best_improvement"] = (
+                improvement
+                if current_best is None
+                else max(float(current_best), improvement)
+            )
+
+
+def _operator_static_evidence(
+    expected_terms: list[str],
+    *,
+    proposal_text: str,
+    engineering_text: str,
+    code_text: str,
+) -> dict[str, dict[str, bool]]:
+    return {
+        term: {
+            "proposal_signal": _has_any_term(proposal_text, [term]),
+            "engineer_signal": _has_any_term(engineering_text, [term]),
+            "code_signal": _has_any_term(code_text, [term]),
+        }
+        for term in expected_terms
+    }
 
 
 def build_innovation_report(
@@ -283,6 +372,9 @@ def build_innovation_report(
         "unique_code_count": evolution_health.get("unique_code_count"),
         "duplicate_code_count": evolution_health.get("duplicate_code_count"),
         "best_improvement": evolution_health.get("best_improvement"),
+        "operator_count": len(evolution_health.get("operator_health", {}))
+        if isinstance(evolution_health.get("operator_health"), dict)
+        else 0,
         "warning_count": len(warnings),
     }
     return {
@@ -296,6 +388,7 @@ def build_innovation_report(
         "method_tag_counts": dict(sorted(method_tag_counts.items())),
         "problem_summary": _innovation_problem_summary(problem_intake, planner_snapshot),
         "evidence_summary": evidence_summary,
+        "operator_coverage": evolution_health.get("operator_health", {}),
         "novelty_axes": novelty_axes,
         "solution_innovation": solution_innovation,
         "warnings": warnings,
@@ -398,6 +491,7 @@ def _solution_innovation_summary(
     )
     axis_ids = _novelty_axis_ids(text_blob, node.method_tags, strategy_seed_ids)
     mutation = _read_json_object(workspace / "mutation_effect_report.json")
+    operator_assignment = _read_json_object(workspace / "operator_assignment.json")
     kb_application = _read_json_object(workspace / "kb_application_report.json")
     emergence = _read_json_object(workspace / "emergence_report.json")
     return {
@@ -407,6 +501,8 @@ def _solution_innovation_summary(
         "score": node.score.to_dict() if node.score else None,
         "score_delta_from_parent": node.score_delta_from_parent,
         "method_tags": list(node.method_tags),
+        "operator_id": operator_assignment.get("operator_id"),
+        "mutation_axis": operator_assignment.get("mutation_axis"),
         "novelty_axis_ids": axis_ids,
         "innovation_signal_count": len(axis_ids)
         + _truthy_signal_count(
@@ -468,6 +564,7 @@ def _innovation_artifact_refs(workspace: Path, run_dir: Path) -> dict[str, str]:
         "analysis.md",
         "solution.py",
         "mutation_effect_report.json",
+        "operator_assignment.json",
         "kb_application_report.json",
         "emergence_report.json",
     ):

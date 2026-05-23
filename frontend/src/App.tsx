@@ -152,6 +152,13 @@ type AlgorithmSpec = {
   safety_notes_zh?: string;
   source_scope?: string;
   implementation_path?: string | null;
+  operator?: {
+    scheduler_mode?: string;
+    default_axis?: string;
+    mutation_axes?: string[];
+    expected_static_terms?: string[];
+    claim_boundary?: string;
+  };
 };
 
 type LibraryLanguage = "zh" | "en";
@@ -208,6 +215,18 @@ type SolutionSummary = {
     code_changed_from_parent?: boolean | null;
     duplicate_of?: string | null;
     diff_line_count?: number | null;
+    operator_id?: string | null;
+    mutation_axis?: string | null;
+  };
+  operator_assignment?: {
+    available: boolean;
+    scheduler_mode?: string | null;
+    operator_id?: string | null;
+    operator_name?: string | null;
+    mutation_axis?: string | null;
+    selection_source?: string | null;
+    expected_term_count?: number;
+    warning_count?: number;
   };
   workspace: string;
   artifacts: ArtifactEntry[];
@@ -228,6 +247,15 @@ type SolutionsPayload = {
     duplicate_code_count?: number;
     max_plateau_length?: number;
     best_improvement?: number | null;
+    operator_health?: Record<string, {
+      assigned?: number;
+      evaluated?: number;
+      duplicate?: number;
+      plateau?: number;
+      improved?: number;
+      best_improvement?: number | null;
+      axes?: Record<string, number>;
+    }>;
     warnings?: string[];
   };
   innovation_report?: {
@@ -237,6 +265,7 @@ type SolutionsPayload = {
     paper_level_discovery_supported?: boolean | null;
     novelty_axis_count?: number | null;
     candidate_emergent_count?: number | null;
+    operator_count?: number | null;
     warning_count?: number | null;
     top_axes?: Array<string | null>;
     claim_boundary?: string | null;
@@ -2297,6 +2326,10 @@ function RunConfigPanel({
             <span>benchmark</span>
             <strong>{selectedBenchmark}</strong>
           </div>
+          <div>
+            <span>operator scheduler</span>
+            <strong>auto-audited</strong>
+          </div>
         </div>
         <button className="icon-text-button full-width" type="button" onClick={onStartRun}>
           <Play size={15} />
@@ -2508,9 +2541,14 @@ function SolutionsTable({ payload }: { payload: SolutionsPayload | null }) {
   const rows = payload?.solutions ?? [];
   const health = payload?.evolution_health;
   const innovation = payload?.innovation_report;
+  const operatorCount =
+    innovation?.operator_count ??
+    (health?.operator_health ? Object.keys(health.operator_health).length : undefined);
   return (
     <div className="solution-table-stack">
       <div className="compact-metrics">
+        <span>operator scheduler auto-audited</span>
+        <span>operators {operatorCount ?? "n/a"}</span>
         <span>unique code {health?.unique_code_count ?? "n/a"}</span>
         <span>duplicates {health?.duplicate_code_count ?? "n/a"}</span>
         <span>plateau {health?.max_plateau_length ?? "n/a"}</span>
@@ -2544,6 +2582,7 @@ function SolutionsTable({ payload }: { payload: SolutionsPayload | null }) {
               <th>metric</th>
               <th>loss/score</th>
               <th>delta</th>
+              <th>operator</th>
               <th>kb</th>
               <th>mutation</th>
               <th>emergence</th>
@@ -2558,6 +2597,7 @@ function SolutionsTable({ payload }: { payload: SolutionsPayload | null }) {
                 <td>{solution.metric ?? "metric"}</td>
                 <td>{formatScore(solution.loss ?? solution.score)}</td>
                 <td>{formatScore(solution.score_delta_from_parent)}</td>
+                <td>{formatOperatorAssignment(solution.operator_assignment)}</td>
                 <td>{formatKbApplication(solution.kb_application)}</td>
                 <td>{formatMutationEffect(solution.mutation_effect)}</td>
                 <td>{formatEmergenceClaim(solution.emergence_audit)}</td>
@@ -2565,7 +2605,7 @@ function SolutionsTable({ payload }: { payload: SolutionsPayload | null }) {
             ))}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={9}>选择包含 tree.json 的 run 后显示 solution tree summary。</td>
+                <td colSpan={10}>选择包含 tree.json 的 run 后显示 solution tree summary。</td>
               </tr>
             ) : null}
           </tbody>
@@ -2573,6 +2613,12 @@ function SolutionsTable({ payload }: { payload: SolutionsPayload | null }) {
       </div>
     </div>
   );
+}
+
+function formatOperatorAssignment(operator: SolutionSummary["operator_assignment"]): string {
+  if (!operator?.available) return "root";
+  const warning = operator.warning_count ? `, ${operator.warning_count} warn` : "";
+  return `${operator.operator_id ?? "operator"} · ${operator.mutation_axis ?? "axis"}${warning}`;
 }
 
 function formatKbApplication(kb: SolutionSummary["kb_application"]): string {
@@ -2757,6 +2803,8 @@ function AlgorithmCatalog({
             <div className="algorithm-meta">
               <small>{algorithm.status}</small>
               <small>{algorithm.compatible_benchmark_families.join(" / ")}</small>
+              <small>{algorithm.operator?.scheduler_mode ?? "auto-audited"}</small>
+              <small>{algorithm.operator?.default_axis ?? "operator"}</small>
             </div>
             {algorithm.implementation_path ? <code>{algorithm.implementation_path}</code> : null}
             <strong>{safetyNotes}</strong>

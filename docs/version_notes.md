@@ -2,6 +2,41 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-24 Evolution Operator Scheduler
+
+本轮把 evolution 从“algorithm catalog 只作为 prompt seed”升级为默认启用的
+`auto-audited` mutation operator 调度。调度仍是 workflow guidance，不改变 evaluator、
+selector、champion selection 或 artifact 事实来源。
+
+已实现：
+
+- 新增 deterministic `OperatorScheduler`，根据 benchmark family、手选算法、parent、
+  branch context 和历史 mutation health 为每个 child 分配 operator。
+- 每个 child 写入 `operator_assignment.json`，并把 operator guidance 注入
+  Proposer / Engineer prompt；`method_tags` 增加 `operator:<id>` 和 `axis:<axis>`。
+- same-parent fanout 会尽量分配不同 mutation axis，降低 sibling 重复风险。
+- `mutation_effect_report.json` 增加 operator id、mutation axis、expected terms 和
+  static evidence；`evolution_health.json` 增加 per-operator assigned/evaluated/
+  duplicate/plateau/improved/best-improvement 统计。
+- `innovation_report.json` 汇总 operator coverage，但继续固定为
+  `workflow_exploration_only`，不支持 scientific novelty 或 paper-level discovery。
+- Web `/api/algorithms` 暴露 operator metadata；`/api/runs/{id}/solutions` 返回
+  operator assignment 和 operator health；前端第三页显示 `auto-audited` scheduler、
+  operator、axis、mutation status 和 score delta。
+
+验证：
+
+- `PYTHONPATH=src uv run --python 3.11 --extra web --extra dev pytest tests/test_operator_scheduler.py tests/test_search_policy.py tests/test_orchestrator_cli.py tests/test_web_api.py -q`：96 passed。
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest -q`：399 passed。
+- `cd frontend && npm run build`：通过。
+- `git diff --check`：通过。
+
+边界：
+
+- operator 不是已验证实现，也不是算法正确性证明；有效性只能从 evaluator score、
+  mutation effect 和 run artifacts 判断。
+- 本轮不新增真实可执行算法模板库，先把调度与审计链路补齐。
+
 ## 2026-05-23 Flow Smoke Iteration
 
 本轮继续对 Web 控制面和浏览器 dispatch 做 live smoke。测试发现当前运行中的旧

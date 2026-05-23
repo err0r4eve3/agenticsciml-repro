@@ -7,6 +7,7 @@ from typing import Any
 from agenticsciml.agents.base import AgentBase
 from agenticsciml.benchmarks import ProblemBundle
 from agenticsciml.config import EvaluationContract
+from agenticsciml.operator_scheduler import operator_assignment_context
 from agenticsciml.patching import PatchApplicationError, apply_unified_patch, solution_digest
 from agenticsciml.state import AgentMessage, AnalysisReport, Proposal
 
@@ -26,6 +27,7 @@ class EngineerAgent(AgentBase):
         branch_context: dict[str, Any] | None = None,
         problem_intake_context: str | None = None,
         strategy_seed_context: str | None = None,
+        operator_assignment: dict[str, Any] | None = None,
     ) -> str:
         parent_digest = solution_digest(parent_code)
         self.require_inputs(
@@ -40,6 +42,7 @@ class EngineerAgent(AgentBase):
                 "branch_context": branch_context,
                 "problem_intake_context": problem_intake_context,
                 "strategy_seed_context": strategy_seed_context,
+                "operator_assignment": operator_assignment,
                 "parent_digest": parent_digest,
             }
         )
@@ -65,6 +68,8 @@ class EngineerAgent(AgentBase):
             f"{problem_intake_context or 'No user problem-intake context provided.'}\n\n"
             "## Human/Planner Selected Strategy Seeds\n\n"
             f"{strategy_seed_context or 'No strategy seeds selected.'}\n\n"
+            "## Assigned Mutation Operator\n\n"
+            f"{operator_assignment_context(operator_assignment)}\n\n"
             "## Forbidden Actions\n\n"
             "- Do not read validation data.\n"
             "- Predict mode may read only `predict_input.npz` and must write `predictions.npz` "

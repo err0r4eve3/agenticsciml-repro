@@ -6,6 +6,7 @@ from typing import Any
 from agenticsciml.agents.base import AgentBase
 from agenticsciml.agents.critic import CriticAgent
 from agenticsciml.agents.specs import PromptTemplate
+from agenticsciml.operator_scheduler import operator_assignment_context
 from agenticsciml.state import AgentMessage, Proposal
 
 
@@ -42,6 +43,7 @@ class ProposerAgent(AgentBase):
         branch_context: dict[str, Any] | None = None,
         problem_intake_context: str | None = None,
         strategy_seed_context: str | None = None,
+        operator_assignment: dict[str, Any] | None = None,
     ) -> Proposal:
         self.require_inputs(
             {
@@ -52,6 +54,7 @@ class ProposerAgent(AgentBase):
                 "branch_context": branch_context,
                 "problem_intake_context": problem_intake_context,
                 "strategy_seed_context": strategy_seed_context,
+                "operator_assignment": operator_assignment,
             }
         )
         messages: list[AgentMessage] = []
@@ -66,7 +69,9 @@ class ProposerAgent(AgentBase):
             "User problem-intake context (non-contract):\n"
             f"{problem_intake_context or 'none'}\n\n"
             "Strategy seeds:\n"
-            f"{strategy_seed_context or 'none'}"
+            f"{strategy_seed_context or 'none'}\n\n"
+            "Assigned mutation operator:\n"
+            f"{operator_assignment_context(operator_assignment)}"
         )
         critic = (
             CriticAgent(

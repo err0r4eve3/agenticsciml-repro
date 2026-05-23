@@ -222,15 +222,24 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     child_workspace = run_dir / "solutions" / child_nodes[0]["node_id"]
     kb_report = json.loads((child_workspace / "kb_application_report.json").read_text(encoding="utf-8"))
     mutation_report = json.loads((child_workspace / "mutation_effect_report.json").read_text(encoding="utf-8"))
+    operator_assignment = json.loads((child_workspace / "operator_assignment.json").read_text(encoding="utf-8"))
     evolution_health = json.loads((run_dir / "reports" / "evolution_health.json").read_text(encoding="utf-8"))
     innovation_report = json.loads((run_dir / "reports" / "innovation_report.json").read_text(encoding="utf-8"))
     assert kb_report["status"] in {"retrieved_only", "proposed", "implemented", "unverified"}
     assert mutation_report["status"] in {"changed_score_moved", "changed_but_score_plateau", "duplicate_parent"}
+    assert operator_assignment["scheduler_mode"] == "auto-audited"
+    assert mutation_report["operator_id"] == operator_assignment["operator_id"]
+    assert mutation_report["mutation_axis"] == operator_assignment["mutation_axis"]
+    assert any(tag.startswith("operator:") for tag in child_nodes[0]["method_tags"])
+    assert any(tag.startswith("axis:") for tag in child_nodes[0]["method_tags"])
     assert evolution_health["solution_count"] == len(tree["nodes"])
+    assert operator_assignment["operator_id"] in evolution_health["operator_health"]
     assert innovation_report["innovation_claim_level"] == "workflow_exploration_only"
     assert innovation_report["scientific_novelty_supported"] is False
     assert innovation_report["evidence_summary"]["solution_count"] == len(tree["nodes"])
+    assert innovation_report["evidence_summary"]["operator_count"] >= 1
     assert run_metadata["innovation_report"]["innovation_claim_level"] == "workflow_exploration_only"
+    assert run_metadata["operator_scheduler"]["mode"] == "auto-audited"
     assert run_metadata["input_layout"]["layout"] == "run_level_inputs_v1"
 
 
@@ -520,6 +529,8 @@ def test_parallel_fanout_records_branch_context(tmp_path: Path) -> None:
 
     assert contexts["solution_001"]["branch_intent"] == "features_or_architecture"
     assert contexts["solution_002"]["branch_intent"] == "training_stability"
+    assert contexts["solution_001"]["operator_focus"]["operator_id"]
+    assert contexts["solution_001"]["operator_focus"]["mutation_axis"]
     assert contexts["solution_001"]["sibling_branch_ids"] == ["solution_002"]
     assert contexts["solution_002"]["sibling_branch_ids"] == ["solution_001"]
     assert any(
@@ -970,6 +981,7 @@ def test_parallel_child_jobs_respect_parallel_mutation_budget(tmp_path: Path, mo
         contract_arg,
         solution_id: str | None = None,
         branch_context: dict[str, object] | None = None,
+        operator_assignment=None,
     ) -> SolutionNode:
         assert contract_arg.contract_hash == contract.contract_hash
         assert solution_id is not None
@@ -1059,6 +1071,7 @@ def test_parallel_child_jobs_keep_mixed_success_failure_artifacts_stable(
         contract_arg,
         solution_id: str | None = None,
         branch_context: dict[str, object] | None = None,
+        operator_assignment=None,
     ) -> SolutionNode:
         assert solution_id is not None
         if parent.node_id == "solution_000":

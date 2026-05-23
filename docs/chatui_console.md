@@ -127,6 +127,14 @@ evaluator、selector 或 champion selection 实现。
 并作为 strategy seed context 注入 Root Engineer、Proposer 和 Engineer prompt。它们
 只影响候选解法构思，不替代 evaluator 或真实分数。
 
+Evolution 默认启用 `auto-audited` operator scheduling。后端会为每个 child solution
+写入 `operator_assignment.json`，记录 `operator_id`、mutation axis、选择来源、兼容性
+理由、expected static terms 和 warning。该 assignment 会注入 Proposer / Engineer
+prompt，并在 `method_tags` 中体现为 `operator:<id>` 和 `axis:<axis>`；但它仍低于
+`EvaluationContract`、benchmark guidelines、sandbox 规则和 private-label boundary。
+第三页 Evidence table 会显示 operator、axis、mutation status、duplicate/plateau 和
+score delta，便于审计“哪个 operator 有效”，而不是把 catalog 条目误写成已验证算法。
+
 Problem Intake 的完整输入会作为非权威 run context 一起传入 `POST /api/runs`：
 后端写入 `config.json`、`run_metadata.json` 和 `planning/problem_intake.json`，
 并用固定边界文案注入 Root Engineer、Proposer 和 Engineer prompt。该上下文只能

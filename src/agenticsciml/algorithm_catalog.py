@@ -19,6 +19,7 @@ class AlgorithmSpec:
 
     def to_dict(self) -> dict[str, object]:
         detail = _detail_for_algorithm(self.algorithm_id)
+        operator = operator_metadata_for_algorithm(self)
         return {
             "id": self.algorithm_id,
             "name": self.name,
@@ -37,6 +38,7 @@ class AlgorithmSpec:
             "safety_notes_zh": detail.safety_notes_zh,
             "source_scope": self.source_scope,
             "implementation_path": self.implementation_path,
+            "operator": operator,
         }
 
 
@@ -55,6 +57,20 @@ ALGORITHM_CLAIM_BOUNDARY = (
     "champions, and scientific claims still come only from benchmark evaluators "
     "and run artifacts."
 )
+
+OPERATOR_CLAIM_BOUNDARY = (
+    "Mutation operators are deterministic scheduling guidance for proposal and engineering prompts. "
+    "They are not evaluated implementations; score evidence still comes only from run artifacts."
+)
+
+OPERATOR_AXIS_TERMS: dict[str, tuple[str, ...]] = {
+    "representation_or_features": ("feature", "fourier", "basis", "kernel", "spectral", "latent", "embedding"),
+    "physics_or_residual": ("residual", "boundary", "collocation", "pde", "physics", "condition"),
+    "optimization_or_schedule": ("schedule", "weight", "regularization", "ridge", "sampling", "epoch", "lr"),
+    "data_or_sensor_processing": ("sensor", "field", "filter", "smooth", "probe", "denoise", "low_rank"),
+    "algorithm_composition": ("ensemble", "combine", "blend", "mixture", "hybrid", "compose"),
+    "debugging_or_robustness": ("debug", "diagnostic", "probe", "repair", "robust", "stability"),
+}
 
 ALGORITHM_DETAILS: dict[str, AlgorithmBilingualDetail] = {
     "paper_sigmoid_moe_gate": AlgorithmBilingualDetail(
@@ -475,8 +491,76 @@ def list_algorithms(family: str | None = None) -> list[AlgorithmSpec]:
     ]
 
 
+def operator_metadata_for_algorithm(spec: AlgorithmSpec) -> dict[str, object]:
+    axes = _operator_axes_for_algorithm(spec)
+    expected_terms = _operator_expected_terms(spec, axes)
+    return {
+        "schema_version": 1,
+        "scheduler_mode": "auto-audited",
+        "operator_id": spec.algorithm_id,
+        "default_axis": axes[0],
+        "mutation_axes": list(axes),
+        "expected_static_terms": list(expected_terms),
+        "claim_boundary": OPERATOR_CLAIM_BOUNDARY,
+    }
+
+
 def _detail_for_algorithm(algorithm_id: str) -> AlgorithmBilingualDetail:
     try:
         return ALGORITHM_DETAILS[algorithm_id]
     except KeyError as exc:
         raise KeyError(f"missing bilingual algorithm detail for {algorithm_id!r}") from exc
+
+
+def _operator_axes_for_algorithm(spec: AlgorithmSpec) -> tuple[str, ...]:
+    text = " ".join(
+        [
+            spec.algorithm_id,
+            spec.name,
+            spec.family,
+            spec.description,
+            " ".join(spec.compatible_benchmark_families),
+        ]
+    ).lower()
+    axes: list[str] = []
+    axis_rules: tuple[tuple[str, tuple[str, ...]], ...] = (
+        (
+            "representation_or_features",
+            ("fourier", "feature", "basis", "kernel", "deeponet", "fno", "spectral", "low_rank", "mlp"),
+        ),
+        (
+            "physics_or_residual",
+            ("pinn", "residual", "poisson", "burgers", "reaction", "boundary", "collocation", "xpinn"),
+        ),
+        (
+            "optimization_or_schedule",
+            ("schedule", "weight", "weighted", "ridge", "regularization", "sampling", "staged"),
+        ),
+        (
+            "data_or_sensor_processing",
+            ("sensor", "reconstructor", "cylinder", "filter", "field", "probe", "sindy"),
+        ),
+        ("algorithm_composition", ("ensemble", "mixture", "gate", "hybrid", "composition")),
+        ("debugging_or_robustness", ("diagnostic", "probe", "debug", "robust", "stability")),
+    )
+    for axis, terms in axis_rules:
+        if any(term in text for term in terms) and axis not in axes:
+            axes.append(axis)
+    return tuple(axes or ["representation_or_features"])
+
+
+def _operator_expected_terms(spec: AlgorithmSpec, axes: tuple[str, ...]) -> tuple[str, ...]:
+    terms: list[str] = []
+    algorithm_tokens = [
+        token
+        for token in spec.algorithm_id.replace("-", "_").split("_")
+        if len(token) >= 4 and token not in {"paper", "operator", "regression"}
+    ]
+    for token in algorithm_tokens[:4]:
+        if token not in terms:
+            terms.append(token)
+    for axis in axes:
+        for term in OPERATOR_AXIS_TERMS.get(axis, ())[:4]:
+            if term not in terms:
+                terms.append(term)
+    return tuple(terms[:10])
