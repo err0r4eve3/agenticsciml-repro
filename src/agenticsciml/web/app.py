@@ -1519,6 +1519,7 @@ def _solutions_payload(run_id: str, run_dir: Path) -> dict[str, object]:
         "solutions": solutions,
         "leaderboard": leaderboard,
         "evolution_health": _read_optional_json(run_dir / "reports" / "evolution_health.json") or {},
+        "innovation_report": _innovation_report_summary(run_dir / "reports" / "innovation_report.json"),
         "figures": _local_figure_artifacts(run_dir),
     }
 
@@ -1636,6 +1637,26 @@ def _mutation_effect_summary(path: Path) -> dict[str, object]:
         "duplicate_of": payload.get("duplicate_of"),
         "diff_line_count": payload.get("diff_line_count"),
         "score_delta_from_parent": payload.get("score_delta_from_parent"),
+    }
+
+
+def _innovation_report_summary(path: Path) -> dict[str, object]:
+    payload = _read_optional_json(path)
+    if not isinstance(payload, dict):
+        return {"available": False}
+    evidence = payload.get("evidence_summary") if isinstance(payload.get("evidence_summary"), dict) else {}
+    axes = payload.get("novelty_axes") if isinstance(payload.get("novelty_axes"), list) else []
+    warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
+    return {
+        "available": True,
+        "innovation_claim_level": payload.get("innovation_claim_level"),
+        "scientific_novelty_supported": payload.get("scientific_novelty_supported"),
+        "paper_level_discovery_supported": payload.get("paper_level_discovery_supported"),
+        "novelty_axis_count": evidence.get("novelty_axis_count", len(axes)),
+        "candidate_emergent_count": evidence.get("candidate_emergent_count"),
+        "warning_count": evidence.get("warning_count", len(warnings)),
+        "top_axes": [axis.get("axis_id") for axis in axes[:4] if isinstance(axis, dict)],
+        "claim_boundary": payload.get("claim_boundary"),
     }
 
 
@@ -2064,7 +2085,10 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
             )
         except HTTPException as exc:
             warnings.append(str(exc.detail))
-    if any(token in text for token in ("trace", "解释", "summary", "总结", "leaderboard", "artifact")):
+    if any(
+        token in text
+        for token in ("trace", "解释", "summary", "总结", "leaderboard", "artifact", "创新", "novel", "innovation")
+    ):
         if not request.active_run_id:
             warnings.append("Select an active run before asking for artifact or trace summaries.")
         else:
@@ -2238,6 +2262,8 @@ def _important_artifacts(run_dir: Path) -> list[dict[str, object]]:
         "leaderboard.csv",
         "tree.json",
         "reports/data_analysis.md",
+        "reports/innovation_report.json",
+        "reports/innovation_report.md",
         "champion/analysis.md",
     ]
     return [
@@ -2256,6 +2282,13 @@ def _solver_ask_reply(
 ) -> str:
     text = request.message.lower()
     if trace_refs:
+        if _contains_any(text, ("创新", "novel", "innovation")):
+            has_innovation = any(artifact.get("path") == "reports/innovation_report.json" for artifact in artifacts)
+            return (
+                "已读取创新性相关 artifact。"
+                f"innovation_report={'available' if has_innovation else 'missing'}，"
+                "该报告只表示 workflow exploration，不支持科学创新或论文级发现声明。"
+            )
         gate = trace_refs[0].get("quality_gate")
         return f"已读取 trace summary。quality_gate={gate}，相关 artifacts={len(artifacts)}。"
     if _contains_any(text, ("你是谁", "who are you", "身份", "自我介绍", "介绍一下你")):

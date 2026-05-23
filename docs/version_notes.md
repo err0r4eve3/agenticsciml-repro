@@ -56,6 +56,32 @@ quality gate 判定。
 和空 actions；同时 ChatUI Agent 对“求解/benchmark/解法”也会进入 planner，并在用户明确
 说明 `not in catalog` / `新问题` / `自定义` 时生成 custom proxy benchmark action。
 
+## 2026-05-23 Innovation Audit Iteration
+
+40 轮创新性迭代发现：已有 `emergence_report.json` 和 `evolution_health.json` 能分别说明
+单个 solution 的 candidate emergence 与代码/分数健康，但缺少 run-level “这轮探索到底
+有哪些创新轴、证据来自哪里、哪些声明被禁止”的总览。已新增保守的 innovation audit：
+
+- 每次导出 run 时写入 `reports/innovation_report.json` 和
+  `reports/innovation_report.md`。
+- 报告只输出 `innovation_claim_level=workflow_exploration_only`，并固定
+  `scientific_novelty_supported=false`、`paper_level_discovery_supported=false`。
+- 报告汇总 novelty axes：representation/features、physics/residual、
+  optimization/schedule、sensor/field processing、algorithm composition 和
+  debugging/robustness。
+- 报告记录 per-solution innovation signals、method tags、mutation status、KB usage
+  和 emergence claim level，给后续人工复核提供证据入口。
+- Web `/api/runs/{id}/solutions` 增加 `innovation_report` 摘要；第三页 evidence
+  区显示 innovation axes、candidate emergence 与 claim boundary。
+- ChatUI Ask 模式现在能回答“总结这个 run 的创新性”，并明确提醒该报告不支持科学创新或
+  论文级发现声明。
+
+边界：
+
+- innovation audit 是 workflow exploration evidence，不是科学新发现证明。
+- candidate emergence 仍只来自保守静态/结构化审计；需要真实多模型、多 seed、权威
+  evaluator 和领域专家复核后，才能讨论科学意义。
+
 ## 2026-05-19 Senior Review Issue Closure
 
 本次按学长审计文档逐项补齐 4 个可信度问题的留档、artifact 和 UI/API 证据展示。所有新增报告都定位为

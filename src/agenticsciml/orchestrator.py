@@ -38,8 +38,10 @@ from agenticsciml.config import (
 )
 from agenticsciml.audit_reports import (
     build_evolution_health_report,
+    build_innovation_report,
     build_kb_application_report,
     build_mutation_effect_report,
+    render_innovation_report_markdown,
 )
 from agenticsciml.evidence import claim_gate_for_run, evidence_metadata_for_run
 from agenticsciml.emergence_audit import audit_solution_emergence
@@ -1639,6 +1641,26 @@ class AgenticSciMLOrchestrator:
         write_leaderboard(self.storage.run_dir, self.nodes)
         evolution_health = build_evolution_health_report(self.nodes, self.storage.run_dir)
         self.storage.save_json("reports/evolution_health.json", evolution_health)
+        evidence_metadata = self._evidence_metadata()
+        innovation_report = build_innovation_report(
+            nodes=self.nodes,
+            run_dir=self.storage.run_dir,
+            benchmark_name=self.problem_bundle.benchmark_name,
+            strategy_seed_ids=list(self.config.strategy_seed_ids),
+            problem_intake=dict(self.config.problem_intake),
+            planner_snapshot=dict(self.config.planner_snapshot),
+            evolution_health=evolution_health,
+            claim_gate=(
+                evidence_metadata.get("claim_gate")
+                if isinstance(evidence_metadata.get("claim_gate"), dict)
+                else None
+            ),
+        )
+        self.storage.save_json("reports/innovation_report.json", innovation_report)
+        self.storage.save_text(
+            "reports/innovation_report.md",
+            render_innovation_report_markdown(innovation_report),
+        )
         best = self._best_node()
         champion_dir = self.storage.run_dir / "champion"
         champion_dir.mkdir(exist_ok=True)
@@ -1647,7 +1669,6 @@ class AgenticSciMLOrchestrator:
             source = best_workspace / filename
             if source.exists():
                 shutil.copy2(source, champion_dir / filename)
-        evidence_metadata = self._evidence_metadata()
         self.storage.save_json(
             "champion/claim_gate.json",
             {
@@ -1677,6 +1698,16 @@ class AgenticSciMLOrchestrator:
                     "max_plateau_length": evolution_health.get("max_plateau_length"),
                     "best_improvement": evolution_health.get("best_improvement"),
                     "warnings": evolution_health.get("warnings", []),
+                },
+                "innovation_report": {
+                    "innovation_claim_level": innovation_report.get("innovation_claim_level"),
+                    "novelty_axis_count": innovation_report.get("evidence_summary", {}).get(
+                        "novelty_axis_count"
+                    ),
+                    "candidate_emergent_count": innovation_report.get("evidence_summary", {}).get(
+                        "candidate_emergent_count"
+                    ),
+                    "warning_count": innovation_report.get("evidence_summary", {}).get("warning_count"),
                 },
                 **self._planning_metadata(),
                 **evidence_metadata,

@@ -4,6 +4,7 @@ import difflib
 import hashlib
 import json
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,40 @@ from agenticsciml.state import Proposal, SolutionNode
 KB_APPLICATION_SCHEMA_VERSION = 1
 MUTATION_EFFECT_SCHEMA_VERSION = 1
 EVOLUTION_HEALTH_SCHEMA_VERSION = 1
+INNOVATION_REPORT_SCHEMA_VERSION = 1
+
+NOVELTY_AXIS_TERMS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    (
+        "representation_or_features",
+        "Representation / feature construction",
+        ("fourier", "feature", "spectral", "basis", "kernel", "latent", "embedding", "deeponet", "fno"),
+    ),
+    (
+        "physics_or_residual",
+        "Physics, residual, or constraint structure",
+        ("pinn", "physics", "residual", "collocation", "boundary", "initial condition", "pde", "poisson", "burgers"),
+    ),
+    (
+        "optimization_or_schedule",
+        "Optimization, schedule, or loss weighting",
+        ("schedule", "epoch", "learning rate", "lr", "weight", "regularization", "ridge", "sampling"),
+    ),
+    (
+        "data_or_sensor_processing",
+        "Data, sensor, or field-processing strategy",
+        ("sensor", "lagged", "history", "filter", "bandlimit", "smooth", "denoise", "probe", "field"),
+    ),
+    (
+        "algorithm_composition",
+        "Composition of multiple strategy seeds or method tags",
+        ("combine", "hybrid", "compose", "ensemble", "mixture", "stack", "plus", "multi"),
+    ),
+    (
+        "debugging_or_robustness",
+        "Debugging, guardrail, or robustness adaptation",
+        ("debug", "repair", "retry", "guardrail", "failure", "robust", "fallback", "stability"),
+    ),
+)
 
 
 def build_kb_application_report(
@@ -206,6 +241,122 @@ def build_evolution_health_report(nodes: list[SolutionNode], run_dir: Path) -> d
     return report
 
 
+def build_innovation_report(
+    *,
+    nodes: list[SolutionNode],
+    run_dir: Path,
+    benchmark_name: str,
+    strategy_seed_ids: list[str],
+    problem_intake: dict[str, Any],
+    planner_snapshot: dict[str, Any],
+    evolution_health: dict[str, Any],
+    claim_gate: dict[str, Any] | None,
+) -> dict[str, Any]:
+    method_tag_counts = Counter(
+        tag
+        for node in nodes
+        for tag in node.method_tags
+        if isinstance(tag, str) and tag.strip()
+    )
+    solution_innovation = [
+        _solution_innovation_summary(node, run_dir=run_dir, strategy_seed_ids=strategy_seed_ids)
+        for node in nodes
+    ]
+    novelty_axes = _run_novelty_axes(solution_innovation)
+    candidate_emergent_count = sum(
+        1 for item in solution_innovation if item.get("emergence_claim_level") == "candidate_emergent"
+    )
+    warnings = _innovation_warnings(
+        solution_count=len(nodes),
+        method_tag_counts=method_tag_counts,
+        novelty_axis_count=len(novelty_axes),
+        candidate_emergent_count=candidate_emergent_count,
+        evolution_health=evolution_health,
+        claim_gate=claim_gate,
+    )
+    evidence_summary = {
+        "solution_count": len(nodes),
+        "strategy_seed_count": len(strategy_seed_ids),
+        "unique_method_tag_count": len(method_tag_counts),
+        "novelty_axis_count": len(novelty_axes),
+        "candidate_emergent_count": candidate_emergent_count,
+        "unique_code_count": evolution_health.get("unique_code_count"),
+        "duplicate_code_count": evolution_health.get("duplicate_code_count"),
+        "best_improvement": evolution_health.get("best_improvement"),
+        "warning_count": len(warnings),
+    }
+    return {
+        "schema_version": INNOVATION_REPORT_SCHEMA_VERSION,
+        "report_type": "agenticsciml_run_innovation_audit",
+        "benchmark_name": benchmark_name,
+        "innovation_claim_level": "workflow_exploration_only",
+        "scientific_novelty_supported": False,
+        "paper_level_discovery_supported": False,
+        "strategy_seed_ids": list(strategy_seed_ids),
+        "method_tag_counts": dict(sorted(method_tag_counts.items())),
+        "problem_summary": _innovation_problem_summary(problem_intake, planner_snapshot),
+        "evidence_summary": evidence_summary,
+        "novelty_axes": novelty_axes,
+        "solution_innovation": solution_innovation,
+        "warnings": warnings,
+        "next_experiment_suggestions": _innovation_next_steps(
+            novelty_axis_count=len(novelty_axes),
+            method_tag_counts=method_tag_counts,
+            candidate_emergent_count=candidate_emergent_count,
+            claim_gate=claim_gate,
+        ),
+        "claim_gate": claim_gate or {},
+        "claim_boundary": (
+            "Innovation audit records workflow exploration signals only. It is not scientific novelty evidence, "
+            "not paper-level emergent discovery evidence, and not a substitute for trusted domain evaluation."
+        ),
+    }
+
+
+def render_innovation_report_markdown(report: dict[str, Any]) -> str:
+    evidence = report.get("evidence_summary") if isinstance(report.get("evidence_summary"), dict) else {}
+    axes = report.get("novelty_axes") if isinstance(report.get("novelty_axes"), list) else []
+    warnings = report.get("warnings") if isinstance(report.get("warnings"), list) else []
+    suggestions = (
+        report.get("next_experiment_suggestions")
+        if isinstance(report.get("next_experiment_suggestions"), list)
+        else []
+    )
+    lines = [
+        "# Innovation Report",
+        "",
+        f"- benchmark: {report.get('benchmark_name')}",
+        f"- claim level: {report.get('innovation_claim_level')}",
+        f"- scientific novelty supported: {report.get('scientific_novelty_supported')}",
+        f"- paper-level discovery supported: {report.get('paper_level_discovery_supported')}",
+        f"- solution count: {evidence.get('solution_count')}",
+        f"- novelty axes: {evidence.get('novelty_axis_count')}",
+        f"- candidate emergent count: {evidence.get('candidate_emergent_count')}",
+        "",
+        "## Novelty Axes",
+    ]
+    if axes:
+        for axis in axes:
+            lines.append(
+                f"- {axis.get('axis_id')}: {axis.get('label')} "
+                f"(solutions: {', '.join(str(item) for item in axis.get('solution_ids', []))})"
+            )
+    else:
+        lines.append("- none detected")
+    lines.extend(["", "## Warnings"])
+    if warnings:
+        lines.extend(f"- {warning}" for warning in warnings)
+    else:
+        lines.append("- none")
+    lines.extend(["", "## Next Experiment Suggestions"])
+    if suggestions:
+        lines.extend(f"- {suggestion}" for suggestion in suggestions)
+    else:
+        lines.append("- none")
+    lines.extend(["", "## Claim Boundary", str(report.get("claim_boundary", "")), ""])
+    return "\n".join(lines)
+
+
 def _actionable_kb_points(entry: KnowledgeBaseEntry) -> list[dict[str, Any]]:
     text = f"{entry.entry_id}\n{entry.title}\n{entry.description}\n{entry.content}".lower()
     if "pinn" in text or "collocation" in text:
@@ -226,6 +377,185 @@ def _actionable_kb_points(entry: KnowledgeBaseEntry) -> list[dict[str, Any]]:
         words = re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", line.lower())
         points.append(_point(f"kb_point_{index}", line[:140], words[:6] or [line[:40].lower()]))
     return points
+
+
+def _solution_innovation_summary(
+    node: SolutionNode,
+    *,
+    run_dir: Path,
+    strategy_seed_ids: list[str],
+) -> dict[str, Any]:
+    workspace = Path(node.workspace)
+    text_blob = "\n".join(
+        [
+            _read_text(workspace / "proposal.md"),
+            _read_text(workspace / "engineering_summary.md"),
+            _read_text(workspace / "analysis.md"),
+            _read_text(workspace / "solution.py"),
+            " ".join(node.method_tags),
+            " ".join(strategy_seed_ids),
+        ]
+    )
+    axis_ids = _novelty_axis_ids(text_blob, node.method_tags, strategy_seed_ids)
+    mutation = _read_json_object(workspace / "mutation_effect_report.json")
+    kb_application = _read_json_object(workspace / "kb_application_report.json")
+    emergence = _read_json_object(workspace / "emergence_report.json")
+    return {
+        "node_id": node.node_id,
+        "parent_id": node.parent_id,
+        "status": node.status,
+        "score": node.score.to_dict() if node.score else None,
+        "score_delta_from_parent": node.score_delta_from_parent,
+        "method_tags": list(node.method_tags),
+        "novelty_axis_ids": axis_ids,
+        "innovation_signal_count": len(axis_ids)
+        + _truthy_signal_count(
+            [
+                mutation.get("status") in {"changed_score_moved", "changed_but_score_plateau"},
+                kb_application.get("status") in {"proposed", "implemented", "unverified"},
+                emergence.get("claim_level") == "candidate_emergent",
+                bool(node.score_delta_from_parent),
+            ]
+        ),
+        "mutation_status": mutation.get("status"),
+        "kb_application_status": kb_application.get("status"),
+        "emergence_claim_level": emergence.get("claim_level"),
+        "artifact_refs": _innovation_artifact_refs(workspace, run_dir),
+    }
+
+
+def _run_novelty_axes(solution_innovation: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    axes: list[dict[str, Any]] = []
+    for axis_id, label, _terms in NOVELTY_AXIS_TERMS:
+        solution_ids = [
+            str(item["node_id"])
+            for item in solution_innovation
+            if axis_id in item.get("novelty_axis_ids", [])
+        ]
+        if solution_ids:
+            axes.append(
+                {
+                    "axis_id": axis_id,
+                    "label": label,
+                    "solution_ids": solution_ids,
+                    "evidence": "Detected from proposal, engineering summary, code text, method tags, or strategy seed ids.",
+                }
+            )
+    return axes
+
+
+def _novelty_axis_ids(
+    text: str,
+    method_tags: list[str],
+    strategy_seed_ids: list[str],
+) -> list[str]:
+    lowered = text.lower()
+    axis_ids: list[str] = []
+    for axis_id, _label, terms in NOVELTY_AXIS_TERMS:
+        if any(term in lowered for term in terms):
+            axis_ids.append(axis_id)
+    if len({tag for tag in method_tags if tag}) >= 2 or len(strategy_seed_ids) >= 2:
+        if "algorithm_composition" not in axis_ids:
+            axis_ids.append("algorithm_composition")
+    return axis_ids
+
+
+def _innovation_artifact_refs(workspace: Path, run_dir: Path) -> dict[str, str]:
+    refs: dict[str, str] = {}
+    for name in (
+        "proposal.md",
+        "engineering_summary.md",
+        "analysis.md",
+        "solution.py",
+        "mutation_effect_report.json",
+        "kb_application_report.json",
+        "emergence_report.json",
+    ):
+        path = workspace / name
+        if path.exists():
+            refs[name] = _relative_artifact_path(path, run_dir)
+    return refs
+
+
+def _relative_artifact_path(path: Path, run_dir: Path) -> str:
+    try:
+        return path.relative_to(run_dir).as_posix()
+    except ValueError:
+        return path.name
+
+
+def _truthy_signal_count(values: list[bool]) -> int:
+    return sum(1 for value in values if value)
+
+
+def _innovation_problem_summary(
+    problem_intake: dict[str, Any],
+    planner_snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    generated = planner_snapshot.get("generated_custom_benchmark")
+    return {
+        "problem_statement": _compact_text(str(problem_intake.get("problem_statement", "")), 360),
+        "benchmark_mapping_status": (
+            "custom_proxy_benchmark_scaffolded"
+            if isinstance(generated, dict)
+            else "catalog_benchmark"
+        ),
+        "custom_proxy_benchmark": generated if isinstance(generated, dict) else None,
+    }
+
+
+def _innovation_warnings(
+    *,
+    solution_count: int,
+    method_tag_counts: Counter[str],
+    novelty_axis_count: int,
+    candidate_emergent_count: int,
+    evolution_health: dict[str, Any],
+    claim_gate: dict[str, Any] | None,
+) -> list[str]:
+    warnings = [
+        "This report is not scientific novelty evidence; it is workflow exploration evidence only."
+    ]
+    if solution_count < 3:
+        warnings.append("Search breadth is small; novelty signals may reflect prompt variation rather than robust discovery.")
+    if len(method_tag_counts) <= 1:
+        warnings.append("Low method-tag diversity; consider increasing target_solution_count or strategy seed breadth.")
+    if novelty_axis_count == 0:
+        warnings.append("No novelty axis was detected from available proposal/code/report text.")
+    if candidate_emergent_count == 0:
+        warnings.append("No per-solution emergence audit reached candidate_emergent.")
+    if int(evolution_health.get("duplicate_code_count") or 0) > 0:
+        warnings.append("Duplicate code was detected; innovation evidence is weakened.")
+    if claim_gate and claim_gate.get("scientific_claim_supported") is not True:
+        warnings.append("Claim gate does not support scientific claims for this run.")
+    return warnings
+
+
+def _innovation_next_steps(
+    *,
+    novelty_axis_count: int,
+    method_tag_counts: Counter[str],
+    candidate_emergent_count: int,
+    claim_gate: dict[str, Any] | None,
+) -> list[str]:
+    suggestions = [
+        "Run at least three seeds and compare innovation axes against score movement.",
+        "Ask a domain reviewer to replace or approve any synthetic/custom evaluator before scientific claims.",
+    ]
+    if novelty_axis_count < 2:
+        suggestions.append("Broaden selected algorithm seeds to force representation, physics, and optimization contrasts.")
+    if len(method_tag_counts) < 3:
+        suggestions.append("Increase target_solution_count or parallel_mutations to improve method-tag diversity.")
+    if candidate_emergent_count == 0:
+        suggestions.append("Inspect proposal, policy_fidelity, and emergence reports to identify missing prior-result adaptation evidence.")
+    if claim_gate and claim_gate.get("paper_level_claim_supported") is not True:
+        suggestions.append("Keep reporting as workflow_proxy unless paper_workflow claim gate requirements are satisfied.")
+    return suggestions
+
+
+def _compact_text(text: str, limit: int) -> str:
+    compact = " ".join(text.split())
+    return compact if len(compact) <= limit else compact[: limit - 1].rstrip() + "…"
 
 
 def _point(point_id: str, description: str, terms: list[str]) -> dict[str, Any]:

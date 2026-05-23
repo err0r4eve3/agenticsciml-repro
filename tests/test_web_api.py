@@ -271,6 +271,13 @@ def test_problem_intake_custom_benchmark_generates_runnable_evaluator(tmp_path: 
     assert metadata["claim_gate"]["paper_level_claim_supported"] is False
     trace_summary = json.loads((run_dir / "trace_summary.json").read_text(encoding="utf-8"))
     assert trace_summary["quality_gate"]["passed"] is True
+    innovation_report = json.loads((run_dir / "reports" / "innovation_report.json").read_text(encoding="utf-8"))
+    assert innovation_report["innovation_claim_level"] == "workflow_exploration_only"
+    assert innovation_report["scientific_novelty_supported"] is False
+    assert innovation_report["problem_summary"]["benchmark_mapping_status"] == "custom_proxy_benchmark_scaffolded"
+    assert innovation_report["problem_summary"]["custom_proxy_benchmark"]["status"] == (
+        "custom_proxy_benchmark_scaffolded"
+    )
     retrieved_kb = json.loads((run_dir / "solutions" / "solution_001" / "retrieved_kb.json").read_text(encoding="utf-8"))
     assert retrieved_kb["selected_entry_id"] is None
     assert retrieved_kb["coverage_status"] == "missing"
@@ -855,6 +862,27 @@ def test_selector_votes_and_solutions_are_read_only_evidence(tmp_path: Path) -> 
         ),
         encoding="utf-8",
     )
+    (run_dir / "reports" / "innovation_report.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "innovation_claim_level": "workflow_exploration_only",
+                "scientific_novelty_supported": False,
+                "paper_level_discovery_supported": False,
+                "evidence_summary": {
+                    "solution_count": 1,
+                    "unique_method_tag_count": 1,
+                    "novelty_axis_count": 1,
+                    "candidate_emergent_count": 0,
+                    "warning_count": 1,
+                },
+                "novelty_axes": [{"axis_id": "representation_or_features", "solution_ids": ["solution_000"]}],
+                "warnings": ["workflow exploration only"],
+                "claim_boundary": "not scientific novelty evidence",
+            }
+        ),
+        encoding="utf-8",
+    )
     (run_dir / "run_inputs" / "private_eval").mkdir(parents=True)
     (run_dir / "run_inputs" / "private_eval" / "val_data.npz").write_text("private", encoding="utf-8")
     (run_dir / "tree.json").write_text(
@@ -951,6 +979,9 @@ def test_selector_votes_and_solutions_are_read_only_evidence(tmp_path: Path) -> 
     assert payload["solutions"][0]["kb_application"]["status"] == "implemented"
     assert payload["solutions"][0]["mutation_effect"]["status"] == "changed_score_moved"
     assert payload["evolution_health"]["unique_code_count"] == 1
+    assert payload["innovation_report"]["available"] is True
+    assert payload["innovation_report"]["innovation_claim_level"] == "workflow_exploration_only"
+    assert payload["innovation_report"]["novelty_axis_count"] == 1
     assert {figure["path"] for figure in payload["figures"]} == {
         "reports/data_overview.svg",
         "solutions/solution_000/prediction_overview.svg",
@@ -1298,6 +1329,46 @@ def test_solver_chat_mode_model_settings_are_distinct(tmp_path: Path) -> None:
         "temperature": 0.45,
         "source": "request_override",
     }
+
+
+def test_solver_chat_can_summarize_innovation_report(tmp_path: Path) -> None:
+    client = TestClient(create_app())
+    run_dir = tmp_path / "innovation-run"
+    (run_dir / "reports").mkdir(parents=True)
+    (run_dir / "trace_summary.json").write_text(
+        json.dumps({"event_count": 5, "quality_gate": {"passed": True}}),
+        encoding="utf-8",
+    )
+    (run_dir / "reports" / "innovation_report.json").write_text(
+        json.dumps(
+            {
+                "innovation_claim_level": "workflow_exploration_only",
+                "scientific_novelty_supported": False,
+                "paper_level_discovery_supported": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        "/api/solver/chat",
+        json={
+            "message": "总结这个 run 的创新性",
+            "active_run_id": "innovation-run",
+            "selected_benchmark": "function_approx",
+            "mode": "mock",
+            "assistant_mode": "ask",
+            "workspace_scope": "account",
+            "output_dir": str(tmp_path),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["actions"] == []
+    assert any(artifact["path"] == "reports/innovation_report.json" for artifact in payload["artifacts"])
+    assert "workflow exploration" in payload["reply"]
+    assert "不支持科学创新" in payload["reply"] or "不支持科学" in payload["reply"]
 
 
 def test_solver_chat_plan_and_agent_modes_return_structured_actions(tmp_path: Path) -> None:

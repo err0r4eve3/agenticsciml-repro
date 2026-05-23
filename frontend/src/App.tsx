@@ -230,6 +230,17 @@ type SolutionsPayload = {
     best_improvement?: number | null;
     warnings?: string[];
   };
+  innovation_report?: {
+    available: boolean;
+    innovation_claim_level?: string | null;
+    scientific_novelty_supported?: boolean | null;
+    paper_level_discovery_supported?: boolean | null;
+    novelty_axis_count?: number | null;
+    candidate_emergent_count?: number | null;
+    warning_count?: number | null;
+    top_axes?: Array<string | null>;
+    claim_boundary?: string | null;
+  };
   figures: ArtifactEntry[];
 };
 
@@ -2496,6 +2507,7 @@ function SelectorVotesView({ payload }: { payload: SelectorVotesPayload | null }
 function SolutionsTable({ payload }: { payload: SolutionsPayload | null }) {
   const rows = payload?.solutions ?? [];
   const health = payload?.evolution_health;
+  const innovation = payload?.innovation_report;
   return (
     <div className="solution-table-stack">
       <div className="compact-metrics">
@@ -2503,11 +2515,22 @@ function SolutionsTable({ payload }: { payload: SolutionsPayload | null }) {
         <span>duplicates {health?.duplicate_code_count ?? "n/a"}</span>
         <span>plateau {health?.max_plateau_length ?? "n/a"}</span>
         <span>best improvement {formatScore(health?.best_improvement)}</span>
+        <span>innovation axes {innovation?.novelty_axis_count ?? "n/a"}</span>
+        <span>candidate emergence {innovation?.candidate_emergent_count ?? "n/a"}</span>
       </div>
       {(health?.warnings ?? []).length ? (
         <div className="inline-warnings">
           {(health?.warnings ?? []).map((warning) => (
             <span key={warning}>{warning}</span>
+          ))}
+        </div>
+      ) : null}
+      {innovation?.available ? (
+        <div className="inline-warnings muted">
+          <span>{innovation.innovation_claim_level ?? "workflow_exploration_only"}</span>
+          <span>scientific novelty {String(innovation.scientific_novelty_supported ?? false)}</span>
+          {(innovation.top_axes ?? []).filter(Boolean).map((axis) => (
+            <span key={axis ?? "axis"}>{axis}</span>
           ))}
         </div>
       ) : null}

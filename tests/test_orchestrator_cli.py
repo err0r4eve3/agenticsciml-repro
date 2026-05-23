@@ -187,6 +187,8 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert (run_dir / "reports" / "data_eda.json").exists()
     assert (run_dir / "reports" / "data_analysis_structured.json").exists()
     assert (run_dir / "reports" / "evolution_health.json").exists()
+    assert (run_dir / "reports" / "innovation_report.json").exists()
+    assert (run_dir / "reports" / "innovation_report.md").exists()
     assert (run_dir / "run_inputs" / "manifest.json").exists()
     assert (run_dir / "solutions" / "solution_000" / "solution_observations.json").exists()
     assert (run_dir / "solutions" / "solution_000" / "prediction_overview.svg").exists()
@@ -221,9 +223,14 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     kb_report = json.loads((child_workspace / "kb_application_report.json").read_text(encoding="utf-8"))
     mutation_report = json.loads((child_workspace / "mutation_effect_report.json").read_text(encoding="utf-8"))
     evolution_health = json.loads((run_dir / "reports" / "evolution_health.json").read_text(encoding="utf-8"))
+    innovation_report = json.loads((run_dir / "reports" / "innovation_report.json").read_text(encoding="utf-8"))
     assert kb_report["status"] in {"retrieved_only", "proposed", "implemented", "unverified"}
     assert mutation_report["status"] in {"changed_score_moved", "changed_but_score_plateau", "duplicate_parent"}
     assert evolution_health["solution_count"] == len(tree["nodes"])
+    assert innovation_report["innovation_claim_level"] == "workflow_exploration_only"
+    assert innovation_report["scientific_novelty_supported"] is False
+    assert innovation_report["evidence_summary"]["solution_count"] == len(tree["nodes"])
+    assert run_metadata["innovation_report"]["innovation_claim_level"] == "workflow_exploration_only"
     assert run_metadata["input_layout"]["layout"] == "run_level_inputs_v1"
 
 
