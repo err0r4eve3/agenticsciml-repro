@@ -148,6 +148,7 @@ def test_problem_intake_plans_benchmark_and_strategy_seeds() -> None:
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["status"] == "catalog_benchmark_planned"
     assert payload["recommended_benchmark"]["name"] == "cylinder_wake_reconstruction_faithful_small"
     assert payload["problem_intake"]["problem_statement"].startswith("Reconstruct two-dimensional")
     assert payload["planner_snapshot"]["planner_version"] == "problem_intake_keyword_planner.v1"
@@ -188,6 +189,8 @@ def test_problem_intake_custom_benchmark_generates_runnable_evaluator(tmp_path: 
     assert response.status_code == 200
     payload = response.json()
     scaffold = payload["custom_problem_package"]
+    assert payload["status"] == "custom_proxy_benchmark_scaffolded"
+    assert payload["synthesis_level"] == "autonomous_workflow_proxy_evaluator_synthesis"
     assert payload["run_allowed"] is True
     assert payload["actions"][0]["type"] == "start_run"
     assert payload["actions"][0]["payload"]["account_id"] == "custom-user"
@@ -271,6 +274,34 @@ def test_problem_intake_custom_benchmark_generates_runnable_evaluator(tmp_path: 
     retrieved_kb = json.loads((run_dir / "solutions" / "solution_001" / "retrieved_kb.json").read_text(encoding="utf-8"))
     assert retrieved_kb["selected_entry_id"] is None
     assert retrieved_kb["coverage_status"] == "missing"
+
+
+def test_problem_intake_low_confidence_catalog_match_needs_manual_benchmark() -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/problem-intake/plan",
+        json={
+            "problem_statement": (
+                "Solve an unlisted SciML task for coupled electrochemical dendrite morphology "
+                "prediction from impedance spectra and phase-field image descriptors."
+            ),
+            "requirements": "Do not map it to an existing benchmark unless genuinely suitable.",
+            "evaluation_criteria": "Proxy hidden morphology and impedance rollout error.",
+            "data_description": "Synthetic impedance spectra plus image-derived descriptors.",
+            "allow_custom_benchmark": False,
+            "mode": "mock",
+            "target_solution_count": 2,
+            "parallel_mutations": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "needs_manual_benchmark"
+    assert payload["run_allowed"] is False
+    assert payload["actions"] == []
+    assert any("No high-confidence catalog benchmark match" in warning for warning in payload["warnings"])
 
 
 def test_problem_intake_rejects_unknown_algorithm() -> None:
@@ -1369,6 +1400,45 @@ def test_solver_chat_agent_can_plan_benchmark_and_seeded_run(
     describe_response = client.get("/api/runs/agent-planned-run", params={"account_id": "alice"})
     assert describe_response.status_code == 200
     assert describe_response.json()["metadata"]["champion_node_id"] == metadata["champion"]
+
+
+def test_solver_chat_agent_can_scaffold_custom_proxy_for_unlisted_problem(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENTICSCIML_ACCOUNTS_ROOT", str(tmp_path / "accounts"))
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/solver/chat",
+        json={
+            "message": (
+                "请用 Agent 模式求解一个新问题：coupled electrochemical dendrite morphology prediction "
+                "from impedance spectra and phase-field image descriptors. This is not in the catalog; "
+                "please create a custom proxy benchmark only."
+            ),
+            "selected_benchmark": "function_approx",
+            "mode": "mock",
+            "assistant_mode": "agent",
+            "account_id": "alice",
+            "workspace_scope": "account",
+            "target_solution_count": 2,
+            "parallel_mutations": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["assistant_mode"] == "agent"
+    assert payload["actions"][0]["type"] == "start_run"
+    action_payload = payload["actions"][0]["payload"]
+    assert action_payload["account_id"] == "alice"
+    assert action_payload["benchmark"].startswith("custom_")
+    assert action_payload["planner_snapshot"]["generated_custom_benchmark"]["status"] == (
+        "custom_proxy_benchmark_scaffolded"
+    )
+    assert payload["artifacts"][0]["status"] == "custom_proxy_benchmark_scaffolded"
+    assert any("workflow-proxy evaluator scaffold" in warning for warning in payload["warnings"])
 
 
 def test_solver_chat_agent_does_not_open_code_for_solution_loss_request(

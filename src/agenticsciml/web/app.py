@@ -51,6 +51,7 @@ REASONING_EFFORTS: tuple[ReasoningEffort, ...] = ("low", "medium", "high", "xhig
 DEFAULT_ACCOUNT_ID = "local"
 ACCOUNT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$")
 PLANNER_VERSION = "problem_intake_keyword_planner.v1"
+MIN_PROBLEM_INTAKE_BENCHMARK_SCORE = 10
 
 PLANNED_AGENT_CALLS = (
     "data_analyst",
@@ -618,6 +619,8 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
     if request.mode == "real":
         warnings.append("Real mode still requires Web API real_confirmed=true and server-side real-mode enablement.")
     problem_intake = _problem_intake_snapshot(request)
+    top_benchmark_score = int(benchmark_candidates[0]["score"])
+    low_confidence_catalog_match = top_benchmark_score < MIN_PROBLEM_INTAKE_BENCHMARK_SCORE
     planner_snapshot = _planner_snapshot(
         request,
         recommended=recommended,
@@ -627,6 +630,13 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
         run_budget={**run_budget, "mode": request.mode},
     )
     custom_problem_package = None
+    status = "catalog_benchmark_planned"
+    synthesis_level = None
+    if low_confidence_catalog_match and not request.allow_custom_benchmark:
+        status = "needs_manual_benchmark"
+        warnings.append(
+            "No high-confidence catalog benchmark match was found. Select a benchmark manually or enable custom proxy benchmark scaffolding."
+        )
     action_payload: dict[str, object] = {
         "benchmark": recommended_name,
         "mode": request.mode,
@@ -652,13 +662,16 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
     }
     if request.account_id:
         action_payload["account_id"] = _resolve_account_id(request.account_id)
-    run_allowed = True
+    run_allowed = status != "needs_manual_benchmark"
     if request.allow_custom_benchmark:
         custom_problem_package = _custom_problem_package(
             request,
             benchmark_candidates=benchmark_candidates,
             algorithm_rankings=algorithm_rankings,
         )
+        status = str(custom_problem_package["status"])
+        synthesis_level = str(custom_problem_package["synthesis_level"])
+        run_allowed = True
         action_payload["benchmark"] = str(custom_problem_package["benchmark"])
         action_payload["auto_approve_evaluation"] = True
         planner_snapshot["generated_custom_benchmark"] = {
@@ -689,13 +702,17 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
         warnings.append(
             "Created a workflow-proxy evaluator scaffold for workflow testing; domain review is required before scientific claims."
         )
-    actions: list[dict[str, object]] = [
-        {
-            "type": "start_run",
-            "payload": action_payload,
-        }
-    ]
+    actions: list[dict[str, object]] = []
+    if run_allowed:
+        actions.append(
+            {
+                "type": "start_run",
+                "payload": action_payload,
+            }
+        )
     return {
+        "status": status,
+        "synthesis_level": synthesis_level,
         "problem_summary": _compact_summary(request.problem_statement),
         "problem_intake": problem_intake,
         "planner_snapshot": planner_snapshot,
@@ -1990,21 +2007,24 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
             agent_scope_allowed = False
             warnings.append("Agent mode cannot operate the shared repo workspace; use account, run, or solution scope.")
 
-    if any(token in text for token in ("跑", "run", "start", "mock", "实验")):
+    if any(token in text for token in ("跑", "run", "start", "mock", "实验", "求解", "benchmark", "解法")):
         if request.assistant_mode in {"plan", "agent"} and _should_plan_problem_from_chat(request.message):
             try:
                 _validate_agent_model_roles(request.agent_models)
                 _validate_algorithm_ids(request.selected_algorithm_ids)
                 plan = _problem_intake_plan_payload(_problem_intake_request_from_chat(request))
-                action = dict(plan["actions"][0])
-                payload = dict(action["payload"])
-                payload["account_id"] = resolved_account_id
-                payload["background"] = True
-                action["payload"] = payload
-                proposed_actions.append(action)
+                plan_actions = plan.get("actions", [])
+                if plan_actions:
+                    action = dict(plan_actions[0])
+                    payload = dict(action["payload"])
+                    payload["account_id"] = resolved_account_id
+                    payload["background"] = True
+                    action["payload"] = payload
+                    proposed_actions.append(action)
                 artifacts.append(
                     {
                         "kind": "problem_intake_plan",
+                        "status": plan.get("status"),
                         "recommended_benchmark": plan["recommended_benchmark"],
                         "selected_algorithm_ids": plan["selected_algorithm_ids"],
                         "run_config": plan["run_config"],
@@ -2156,8 +2176,32 @@ def _problem_intake_request_from_chat(request: SolverChatRequest) -> ProblemInta
         selected_algorithm_ids=request.selected_algorithm_ids,
         agent_models=request.agent_models,
         selector_panel=request.selector_panel,
-        allow_custom_benchmark=False,
+        allow_custom_benchmark=_should_allow_custom_benchmark_from_chat(request.message),
         claim_level=request.claim_level,
+    )
+
+
+def _should_allow_custom_benchmark_from_chat(message: str) -> bool:
+    text = message.lower()
+    return any(
+        token in text
+        for token in (
+            "不在库",
+            "不在 benchmark",
+            "不在benchmark",
+            "新的 benchmark",
+            "新 benchmark",
+            "新问题",
+            "未收录",
+            "自定义",
+            "custom benchmark",
+            "custom proxy",
+            "not in the catalog",
+            "not in catalog",
+            "unlisted",
+            "new benchmark",
+            "new problem",
+        )
     )
 
 

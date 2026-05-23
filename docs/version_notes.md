@@ -49,6 +49,13 @@ trace quality gate 通过。
 其次来自 workflow-start trace；这只补齐审计可见性，不改变 evaluator score 或
 quality gate 判定。
 
+同一轮 problem-intake 测试还发现：明显不在 catalog 的问题在未启用 custom scaffold
+时会被低置信度 fallback 到某个 faithful-small benchmark；ChatUI Agent 中“求解一个新问题”
+也可能因为没有出现“run/mock/实验”等触发词而不进入规划。已收紧 problem-intake：
+低置信度 catalog match 会返回 `status=needs_manual_benchmark`、`run_allowed=false`
+和空 actions；同时 ChatUI Agent 对“求解/benchmark/解法”也会进入 planner，并在用户明确
+说明 `not in catalog` / `新问题` / `自定义` 时生成 custom proxy benchmark action。
+
 ## 2026-05-19 Senior Review Issue Closure
 
 本次按学长审计文档逐项补齐 4 个可信度问题的留档、artifact 和 UI/API 证据展示。所有新增报告都定位为
