@@ -8,6 +8,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from agenticsciml.operator_scheduler import OPERATOR_SCHEDULER_MODE
 from agenticsciml.retrieval.kb_store import KnowledgeBaseEntry
 from agenticsciml.state import Proposal, SolutionNode
 
@@ -216,6 +217,10 @@ def build_evolution_health_report(nodes: list[SolutionNode], run_dir: Path) -> d
     score_plateau_nodes: list[str] = []
     mutation_status_counts: dict[str, int] = {}
     operator_health: dict[str, dict[str, Any]] = {}
+    missing_operator_assignment_nodes: list[str] = []
+    operator_method_tag_mismatch_nodes: list[str] = []
+    operator_assignment_warnings: list[dict[str, Any]] = []
+    operator_assignment_count = 0
     best_improvement: float | None = None
 
     for node in nodes:
@@ -229,6 +234,23 @@ def build_evolution_health_report(nodes: list[SolutionNode], run_dir: Path) -> d
         report = _read_json_object(workspace / "mutation_effect_report.json")
         status = str(report.get("status") or ("root" if node.parent_id is None else "missing"))
         mutation_status_counts[status] = mutation_status_counts.get(status, 0) + 1
+        assignment = _read_json_object(workspace / "operator_assignment.json")
+        if node.parent_id is not None:
+            if assignment:
+                operator_assignment_count += 1
+                if _operator_method_tag_mismatch(node, assignment):
+                    operator_method_tag_mismatch_nodes.append(node.node_id)
+                warnings = assignment.get("warnings")
+                if isinstance(warnings, list) and warnings:
+                    operator_assignment_warnings.append(
+                        {
+                            "node_id": node.node_id,
+                            "operator_id": assignment.get("operator_id"),
+                            "warnings": [str(warning) for warning in warnings],
+                        }
+                    )
+            else:
+                missing_operator_assignment_nodes.append(node.node_id)
         _update_operator_health(operator_health, node, report, workspace)
         if status == "changed_but_score_plateau":
             score_plateau_nodes.append(node.node_id)
@@ -247,6 +269,13 @@ def build_evolution_health_report(nodes: list[SolutionNode], run_dir: Path) -> d
         "duplicate_code_count": len(duplicate_nodes),
         "duplicate_nodes": duplicate_nodes,
         "mutation_status_counts": dict(sorted(mutation_status_counts.items())),
+        "operator_scheduler_mode": OPERATOR_SCHEDULER_MODE,
+        "operator_assignment_count": operator_assignment_count,
+        "operator_assignment_expected_count": sum(1 for node in nodes if node.parent_id is not None),
+        "missing_operator_assignment_nodes": missing_operator_assignment_nodes,
+        "operator_method_tag_mismatch_nodes": operator_method_tag_mismatch_nodes,
+        "operator_assignment_warning_count": len(operator_assignment_warnings),
+        "operator_assignment_warnings": operator_assignment_warnings,
         "operator_health": dict(sorted(operator_health.items())),
         "score_plateau_nodes": score_plateau_nodes,
         "max_plateau_length": max(plateau_lengths, default=0),
@@ -260,7 +289,24 @@ def build_evolution_health_report(nodes: list[SolutionNode], run_dir: Path) -> d
         report["warnings"].append("Duplicate solution code detected; mutation may not be changing effective code.")
     if score_plateau_nodes or report["max_plateau_length"] >= 3:
         report["warnings"].append("Score plateau detected; mutation may be ineffective or evaluator may lack resolution.")
+    if missing_operator_assignment_nodes:
+        report["warnings"].append("Operator assignment missing for one or more child nodes.")
+    if operator_method_tag_mismatch_nodes:
+        report["warnings"].append("Operator assignment and solution method_tags are inconsistent.")
+    if operator_assignment_warnings:
+        report["warnings"].append("Operator scheduler warnings were recorded for one or more child nodes.")
     return report
+
+
+def _operator_method_tag_mismatch(node: SolutionNode, assignment: dict[str, Any]) -> bool:
+    operator_id = assignment.get("operator_id")
+    mutation_axis = assignment.get("mutation_axis")
+    tags = {tag for tag in node.method_tags if isinstance(tag, str)}
+    if isinstance(operator_id, str) and operator_id and f"operator:{operator_id}" not in tags:
+        return True
+    if isinstance(mutation_axis, str) and mutation_axis and f"axis:{mutation_axis}" not in tags:
+        return True
+    return False
 
 
 def _update_operator_health(

@@ -23,10 +23,12 @@ selector、champion selection 或 artifact 事实来源。
 - Web `/api/algorithms` 暴露 operator metadata；`/api/runs/{id}/solutions` 返回
   operator assignment 和 operator health；前端第三页显示 `auto-audited` scheduler、
   operator、axis、mutation status 和 score delta。
+- `evolution_health.json` 追加 operator assignment consistency audit：记录 child 覆盖率、
+  缺失 assignment、method tag 不一致和 assignment warning，避免调度证据链静默断裂。
 
 验证：
 
-- `PYTHONPATH=src uv run --python 3.11 --extra web --extra dev pytest tests/test_operator_scheduler.py tests/test_search_policy.py tests/test_orchestrator_cli.py tests/test_web_api.py -q`：96 passed。
+- `PYTHONPATH=src uv run --python 3.11 --extra web --extra dev pytest tests/test_operator_scheduler.py tests/test_search_policy.py tests/test_orchestrator_cli.py tests/test_web_api.py -q`：97 passed。
 - `PYTHONPATH=src uv run --python 3.11 --extra dev pytest -q`：399 passed。
 - `cd frontend && npm run build`：通过。
 - `git diff --check`：通过。

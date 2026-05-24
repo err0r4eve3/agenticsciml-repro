@@ -1808,6 +1808,15 @@ class AgenticSciMLOrchestrator:
                     "operator_count": len(evolution_health.get("operator_health", {}))
                     if isinstance(evolution_health.get("operator_health"), dict)
                     else 0,
+                    "operator_assignment_count": evolution_health.get("operator_assignment_count"),
+                    "operator_assignment_expected_count": evolution_health.get(
+                        "operator_assignment_expected_count"
+                    ),
+                    "missing_operator_assignment_count": len(
+                        evolution_health.get("missing_operator_assignment_nodes", [])
+                    )
+                    if isinstance(evolution_health.get("missing_operator_assignment_nodes"), list)
+                    else 0,
                     "warnings": evolution_health.get("warnings", []),
                 },
                 "operator_scheduler": {

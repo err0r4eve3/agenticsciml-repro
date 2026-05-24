@@ -134,6 +134,9 @@ prompt，并在 `method_tags` 中体现为 `operator:<id>` 和 `axis:<axis>`；�
 `EvaluationContract`、benchmark guidelines、sandbox 规则和 private-label boundary。
 第三页 Evidence table 会显示 operator、axis、mutation status、duplicate/plateau 和
 score delta，便于审计“哪个 operator 有效”，而不是把 catalog 条目误写成已验证算法。
+`reports/evolution_health.json` 还会记录 operator assignment 覆盖率、缺失 child、
+method tag 不一致和 assignment warning 数量；这些字段用于发现调度证据链断裂，不改变
+任何 evaluator 分数。
 
 Problem Intake 的完整输入会作为非权威 run context 一起传入 `POST /api/runs`：
 后端写入 `config.json`、`run_metadata.json` 和 `planning/problem_intake.json`，

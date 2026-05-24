@@ -247,6 +247,12 @@ type SolutionsPayload = {
     duplicate_code_count?: number;
     max_plateau_length?: number;
     best_improvement?: number | null;
+    operator_scheduler_mode?: string;
+    operator_assignment_count?: number;
+    operator_assignment_expected_count?: number;
+    missing_operator_assignment_nodes?: string[];
+    operator_method_tag_mismatch_nodes?: string[];
+    operator_assignment_warning_count?: number;
     operator_health?: Record<string, {
       assigned?: number;
       evaluated?: number;
@@ -2547,8 +2553,13 @@ function SolutionsTable({ payload }: { payload: SolutionsPayload | null }) {
   return (
     <div className="solution-table-stack">
       <div className="compact-metrics">
-        <span>operator scheduler auto-audited</span>
+        <span>operator scheduler {health?.operator_scheduler_mode ?? "auto-audited"}</span>
         <span>operators {operatorCount ?? "n/a"}</span>
+        <span>
+          assignments {health?.operator_assignment_count ?? "n/a"}/
+          {health?.operator_assignment_expected_count ?? "n/a"}
+        </span>
+        <span>missing assignments {(health?.missing_operator_assignment_nodes ?? []).length}</span>
         <span>unique code {health?.unique_code_count ?? "n/a"}</span>
         <span>duplicates {health?.duplicate_code_count ?? "n/a"}</span>
         <span>plateau {health?.max_plateau_length ?? "n/a"}</span>

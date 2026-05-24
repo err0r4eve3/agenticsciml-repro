@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from agenticsciml.audit_reports import build_evolution_health_report
 from agenticsciml.operator_scheduler import OperatorScheduler
 from agenticsciml.state import SolutionNode, SolutionScore
 
@@ -13,17 +14,19 @@ def _node(
     workspace: Path,
     score: float = 1.0,
     delta: float | None = None,
+    parent_id: str | None = None,
     children: list[str] | None = None,
+    method_tags: list[str] | None = None,
 ) -> SolutionNode:
     workspace.mkdir(parents=True, exist_ok=True)
     return SolutionNode(
         node_id=node_id,
-        parent_id=None,
+        parent_id=parent_id,
         workspace=str(workspace),
         score=SolutionScore(metric="validation_mse", value=score, higher_is_better=False),
         children=children or [],
         status="evaluated",
-        method_tags=[],
+        method_tags=method_tags or [],
         score_delta_from_parent=delta,
     )
 
@@ -122,3 +125,42 @@ def test_operator_scheduler_penalizes_plateaued_operator_history(tmp_path: Path)
 
     assert assignment["operator_id"] == "piecewise_local_basis"
     assert assignment["penalized_operator_ids"] == ["fourier_feature_mlp"]
+
+
+def test_evolution_health_audits_operator_assignment_consistency(tmp_path: Path) -> None:
+    root = _node("solution_000", workspace=tmp_path / "solutions" / "solution_000", children=["solution_001"])
+    child_missing = _node(
+        "solution_001",
+        workspace=tmp_path / "solutions" / "solution_001",
+        parent_id="solution_000",
+        method_tags=[],
+    )
+    child_mismatch = _node(
+        "solution_002",
+        workspace=tmp_path / "solutions" / "solution_002",
+        parent_id="solution_000",
+        method_tags=["operator:wrong", "axis:wrong"],
+    )
+    for node in (root, child_missing, child_mismatch):
+        Path(node.workspace, "solution.py").write_text(f"# {node.node_id}\n", encoding="utf-8")
+    Path(child_mismatch.workspace, "operator_assignment.json").write_text(
+        json.dumps(
+            {
+                "operator_id": "fourier_feature_mlp",
+                "mutation_axis": "representation_or_features",
+                "warnings": ["fixture warning"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = build_evolution_health_report([root, child_missing, child_mismatch], tmp_path)
+
+    assert report["operator_scheduler_mode"] == "auto-audited"
+    assert report["operator_assignment_expected_count"] == 2
+    assert report["operator_assignment_count"] == 1
+    assert report["missing_operator_assignment_nodes"] == ["solution_001"]
+    assert report["operator_method_tag_mismatch_nodes"] == ["solution_002"]
+    assert report["operator_assignment_warning_count"] == 1
+    assert any("Operator assignment missing" in warning for warning in report["warnings"])
+    assert any("method_tags are inconsistent" in warning for warning in report["warnings"])

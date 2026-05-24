@@ -234,12 +234,19 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert any(tag.startswith("axis:") for tag in child_nodes[0]["method_tags"])
     assert evolution_health["solution_count"] == len(tree["nodes"])
     assert operator_assignment["operator_id"] in evolution_health["operator_health"]
+    assert evolution_health["operator_scheduler_mode"] == "auto-audited"
+    assert evolution_health["operator_assignment_count"] == len(child_nodes)
+    assert evolution_health["operator_assignment_expected_count"] == len(child_nodes)
+    assert evolution_health["missing_operator_assignment_nodes"] == []
+    assert evolution_health["operator_method_tag_mismatch_nodes"] == []
     assert innovation_report["innovation_claim_level"] == "workflow_exploration_only"
     assert innovation_report["scientific_novelty_supported"] is False
     assert innovation_report["evidence_summary"]["solution_count"] == len(tree["nodes"])
     assert innovation_report["evidence_summary"]["operator_count"] >= 1
     assert run_metadata["innovation_report"]["innovation_claim_level"] == "workflow_exploration_only"
     assert run_metadata["operator_scheduler"]["mode"] == "auto-audited"
+    assert run_metadata["evolution_health"]["operator_assignment_count"] == len(child_nodes)
+    assert run_metadata["evolution_health"]["missing_operator_assignment_count"] == 0
     assert run_metadata["input_layout"]["layout"] == "run_level_inputs_v1"
 
 
