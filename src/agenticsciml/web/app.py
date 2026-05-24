@@ -2219,6 +2219,7 @@ def _problem_intake_request_from_chat(request: SolverChatRequest) -> ProblemInta
         evaluation_criteria="",
         data_description="",
         mode=request.mode,
+        account_id=request.account_id,
         target_solution_count=request.target_solution_count,
         parallel_mutations=request.parallel_mutations,
         selector_vote_count=request.selector_vote_count,

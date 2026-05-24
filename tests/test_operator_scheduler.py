@@ -72,6 +72,30 @@ def test_operator_scheduler_auto_selects_benchmark_compatible_operator(tmp_path:
     ]
 
 
+def test_operator_scheduler_keeps_selected_seeds_for_custom_ks_proxy(tmp_path: Path) -> None:
+    parent = _node("solution_000", workspace=tmp_path / "solutions" / "solution_000")
+    selected = [
+        "finite_difference_residual_probe",
+        "deeponet_operator",
+        "fno_lite_operator",
+        "paper_reaction_diffusion_fno_helpers",
+    ]
+    scheduler = OperatorScheduler(
+        benchmark_name="custom_benchmark_custom_proxy_kuramoto_sivashinsky_893c0a7f2e",
+        benchmark_family="custom operator learning",
+        selected_algorithm_ids=selected,
+        nodes=[parent],
+        run_dir=tmp_path,
+    )
+
+    assignment = scheduler.assign(solution_id="solution_001", parent=parent, branch_context={}).to_dict()
+
+    assert assignment["selection_source"] == "manual_selected"
+    assert assignment["operator_id"] in selected
+    assert "baseline_mlp_regressor" not in assignment["candidate_operator_ids"]
+    assert assignment["warnings"] == []
+
+
 def test_operator_scheduler_diversifies_same_parent_fanout_axes(tmp_path: Path) -> None:
     parent = _node("solution_000", workspace=tmp_path / "solutions" / "solution_000")
     scheduler = OperatorScheduler(

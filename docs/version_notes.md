@@ -2,6 +2,42 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-24 KS Custom Proxy Goal Smoke
+
+本轮用一维 Kuramoto-Sivashinsky 短时预测 surrogate 作为 Goal 级新问题，跑通
+`solver/chat -> custom proxy benchmark scaffold -> account-scoped mock run -> operator evidence`
+链路，并修复两个 smoke 暴露的问题。
+
+已修复：
+
+- `solver/chat` 的 Problem Intake planner 现在会把 `account_id` 传入 custom benchmark
+  scaffold，避免 Agent 模式返回的 `start_run` action 指向账号目录中不存在的 benchmark。
+- `OperatorScheduler` 现在把 `custom operator learning`、`custom temporal regression`
+  等 custom family 归一到已有兼容键；包含 `kuramoto` / `sivashinsky` 的 custom proxy
+  benchmark 会保留 planner 选出的 finite-difference residual、DeepONet/FNO 和
+  reaction-diffusion helper seeds，而不是退回 baseline fallback。
+
+Goal smoke 结果：
+
+- account: `goal-ks`
+- run: `mock-20260524-154613`
+- run_dir: `.agenticsciml/accounts/goal-ks/runs/mock-20260524-154613`
+- solution_count: 7
+- operator_assignment_count: 6 / 6
+- operators: `finite_difference_residual_probe`, `deeponet_operator`,
+  `fno_lite_operator`, `paper_reaction_diffusion_fno_helpers`
+- mutation_status_counts: `changed_score_moved=6`, `root=1`
+- innovation_claim_level: `workflow_exploration_only`
+- scientific_novelty_supported: `false`
+
+边界：该 KS run 使用自动生成的 deterministic custom proxy evaluator scaffold，只证明
+workflow 能处理新问题并产生可审计 artifacts，不支持科学结论或论文分数复现。
+
+验证：
+
+- `PYTHONPATH=src uv run --python 3.11 --extra web --extra dev pytest tests/test_operator_scheduler.py tests/test_search_policy.py tests/test_orchestrator_cli.py tests/test_web_api.py -q`：98 passed。
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest -q`：401 passed。
+
 ## 2026-05-24 Evolution Operator Scheduler
 
 本轮把 evolution 从“algorithm catalog 只作为 prompt seed”升级为默认启用的

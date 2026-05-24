@@ -24,8 +24,13 @@ _FAMILY_ALIASES: dict[str, tuple[str, ...]] = {
     "pinn": ("poisson", "burgers_pinn", "reaction_diffusion"),
     "physics_informed": ("poisson", "burgers_pinn", "reaction_diffusion"),
     "operator_learning": ("operator_learning", "reaction_diffusion"),
+    "custom_operator_learning": ("operator_learning", "reaction_diffusion"),
     "inverse_reconstruction": ("sensor_reconstruction",),
+    "custom_inverse_reconstruction": ("sensor_reconstruction",),
     "sensor_reconstruction": ("sensor_reconstruction",),
+    "custom_pinn": ("poisson", "burgers_pinn", "reaction_diffusion"),
+    "custom_temporal_regression": ("operator_learning", "reaction_diffusion", "function_approx"),
+    "custom_regression": ("function_approx",),
 }
 
 
@@ -285,11 +290,16 @@ def _benchmark_keys(benchmark_name: str, benchmark_family: str) -> set[str]:
     keys = {_normalize_key(benchmark_name), _normalize_key(benchmark_family)}
     for key in list(keys):
         keys.update(_FAMILY_ALIASES.get(key, ()))
+        if key.startswith("custom_"):
+            keys.add(key.removeprefix("custom_"))
+            keys.update(_FAMILY_ALIASES.get(key.removeprefix("custom_"), ()))
     lowered_name = benchmark_name.lower()
     if "poisson" in lowered_name:
         keys.add("poisson")
     if "burgers" in lowered_name:
         keys.add("burgers_pinn")
+    if "kuramoto" in lowered_name or "sivashinsky" in lowered_name:
+        keys.update({"burgers_pinn", "reaction_diffusion", "operator_learning"})
     if "reaction_diffusion" in lowered_name or "reaction-diffusion" in lowered_name:
         keys.add("reaction_diffusion")
     if "operator" in lowered_name:

@@ -1545,11 +1545,19 @@ def test_solver_chat_agent_can_scaffold_custom_proxy_for_unlisted_problem(
     action_payload = payload["actions"][0]["payload"]
     assert action_payload["account_id"] == "alice"
     assert action_payload["benchmark"].startswith("custom_")
+    generated = action_payload["planner_snapshot"]["generated_custom_benchmark"]
+    assert Path(generated["benchmark_dir"]).is_relative_to(tmp_path / "accounts" / "alice" / "benchmarks")
     assert action_payload["planner_snapshot"]["generated_custom_benchmark"]["status"] == (
         "custom_proxy_benchmark_scaffolded"
     )
     assert payload["artifacts"][0]["status"] == "custom_proxy_benchmark_scaffolded"
     assert any("workflow-proxy evaluator scaffold" in warning for warning in payload["warnings"])
+
+    start_response = client.post("/api/runs", json={**action_payload, "background": False})
+    assert start_response.status_code == 200
+    run_payload = start_response.json()
+    assert run_payload["status"] == "completed"
+    assert Path(run_payload["run_dir"]).is_relative_to(tmp_path / "accounts" / "alice" / "runs")
 
 
 def test_solver_chat_agent_does_not_open_code_for_solution_loss_request(
