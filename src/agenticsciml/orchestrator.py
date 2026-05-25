@@ -48,6 +48,12 @@ from agenticsciml.emergence_audit import audit_solution_emergence
 from agenticsciml.execution.runner import RunResult
 from agenticsciml.execution.sandbox import prepare_solution_workspace, train_and_evaluate
 from agenticsciml.llm.base import LLMClient
+from agenticsciml.method_experience import (
+    build_method_experience_record,
+    method_experience_context,
+)
+from agenticsciml.method_substrate import ExperienceSubstrate
+from agenticsciml.observations import build_visual_audit_package
 from agenticsciml.operator_scheduler import (
     OPERATOR_SCHEDULER_MODE,
     OperatorAssignment,
@@ -64,6 +70,10 @@ from agenticsciml.reporting import (
     write_trace_summary,
     write_tree_json,
     write_tree_mermaid,
+)
+from agenticsciml.scientific_readiness import (
+    build_scientific_discovery_readiness_report,
+    render_scientific_discovery_readiness_markdown,
 )
 from agenticsciml.search_policy import SearchPolicy
 from agenticsciml.state import (
@@ -113,6 +123,7 @@ class AgenticSciMLOrchestrator:
         self.nodes: list[SolutionNode] = []
         self.analysis_by_node: dict[str, AnalysisReport] = {}
         self._analysis_lock = threading.RLock()
+        self._method_experience_lock = threading.RLock()
         self._role_llms: dict[str, LLMClient] = {}
 
         self.data_analyst = DataAnalystAgent(
@@ -1074,6 +1085,9 @@ class AgenticSciMLOrchestrator:
             parent_analysis=parent_analysis,
             leaderboard=self.nodes,
         )
+        experience_query_context = self._method_experience_context()
+        if experience_query_context:
+            query = query + "\nmethod_experience_context:\n" + experience_query_context
         if self.config.evolution.use_kb:
             kb_dir = self.config.benchmark_dir / "kb"
             kb = KnowledgeBase.load(kb_dir)
@@ -1163,7 +1177,9 @@ class AgenticSciMLOrchestrator:
                 score_delta_from_parent=None,
                 num_debug_attempts=0,
             )
+            self._write_visual_audit_report(failed_node, workspace)
             self._write_mutation_effect_report(failed_node, parent, parent_code, workspace, operator_payload)
+            self._write_method_experience_record(failed_node)
             return failed_node
         node = self._execute_analyze_node(
             solution_id,
@@ -1181,6 +1197,7 @@ class AgenticSciMLOrchestrator:
             operator_payload,
             child_code=child_code,
         )
+        self._write_method_experience_record(node)
         return node
 
     def _execute_analyze_node(
@@ -1292,7 +1309,10 @@ class AgenticSciMLOrchestrator:
             score_delta_from_parent=score_delta,
             num_debug_attempts=debug_attempts,
         )
+        self._write_visual_audit_report(node, workspace)
         self._write_emergence_report(node, parent_node)
+        if parent_node is None:
+            self._write_method_experience_record(node)
         return node
 
     def _write_emergence_report(
@@ -1547,12 +1567,25 @@ class AgenticSciMLOrchestrator:
         *,
         source: str,
     ) -> dict[str, object]:
+        capabilities = getattr(llm, "provider_capabilities", None)
+        if hasattr(capabilities, "to_dict"):
+            provider_capabilities = capabilities.to_dict()
+        elif isinstance(capabilities, dict):
+            provider_capabilities = dict(capabilities)
+        else:
+            provider_capabilities = {}
         return {
             "member_id": member_id,
             "role": "selector",
             "configured_model": agent_config.model,
             "actual_model": getattr(llm, "model", "mock" if self.config.use_mock else llm.__class__.__name__),
-            "provider": llm.__class__.__name__,
+            "provider": (
+                getattr(llm, "provider", None)
+                or getattr(llm, "provider_name", None)
+                or llm.__class__.__name__
+            ),
+            "adapter_type": getattr(llm, "adapter_type", llm.__class__.__name__),
+            "provider_capabilities": provider_capabilities,
             "source": source,
         }
 
@@ -1749,6 +1782,8 @@ class AgenticSciMLOrchestrator:
         write_leaderboard(self.storage.run_dir, self.nodes)
         evolution_health = build_evolution_health_report(self.nodes, self.storage.run_dir)
         self.storage.save_json("reports/evolution_health.json", evolution_health)
+        visual_audit_manifest = self._write_visual_audit_manifest()
+        method_experience_manifest = self._method_experience_summary()
         evidence_metadata = self._evidence_metadata()
         innovation_report = build_innovation_report(
             nodes=self.nodes,
@@ -1768,6 +1803,11 @@ class AgenticSciMLOrchestrator:
         self.storage.save_text(
             "reports/innovation_report.md",
             render_innovation_report_markdown(innovation_report),
+        )
+        scientific_readiness = self._write_scientific_discovery_readiness_report(
+            evidence_metadata=evidence_metadata,
+            visual_audit_manifest=visual_audit_manifest,
+            method_experience_manifest=method_experience_manifest,
         )
         best = self._best_node()
         champion_dir = self.storage.run_dir / "champion"
@@ -1834,6 +1874,19 @@ class AgenticSciMLOrchestrator:
                         "candidate_emergent_count"
                     ),
                     "warning_count": innovation_report.get("evidence_summary", {}).get("warning_count"),
+                },
+                "visual_audit": {
+                    "mode": visual_audit_manifest.get("visual_audit_mode"),
+                    "audited_solution_count": visual_audit_manifest.get("audited_solution_count"),
+                    "actual_image_inputs_used": visual_audit_manifest.get("actual_image_inputs_used"),
+                },
+                "method_experience": method_experience_manifest,
+                "scientific_discovery_readiness": {
+                    "status": scientific_readiness.get("status"),
+                    "scientific_claim_supported": scientific_readiness.get("scientific_claim_supported"),
+                    "blocker_count": len(scientific_readiness.get("blockers", []))
+                    if isinstance(scientific_readiness.get("blockers"), list)
+                    else 0,
                 },
                 **self._planning_metadata(),
                 **evidence_metadata,
@@ -1926,6 +1979,198 @@ class AgenticSciMLOrchestrator:
             },
         )
 
+    def _write_visual_audit_report(self, node: SolutionNode, workspace: Path) -> None:
+        report, plots = build_visual_audit_package(
+            node.node_id,
+            workspace,
+            run_dir=self.storage.run_dir,
+            mode=self.config.visual_audit_mode,
+            provider_capabilities=self._provider_capabilities_dict(self.llm),
+        )
+        self.storage.save_json(Path("solutions") / node.node_id / "visual_audit_report.json", report)
+        for filename, svg in plots.items():
+            self.storage.save_solution_text(node.node_id, filename, svg)
+        self.storage.record_trace(
+            "tool_span",
+            "visual_audit",
+            {
+                "solution_id": node.node_id,
+                "visual_audit_mode": report.get("visual_audit_mode"),
+                "analysis_mode": report.get("analysis_mode"),
+                "actual_image_inputs_used": report.get("actual_image_inputs_used"),
+                "artifact_count": len(report.get("visual_artifacts", []))
+                if isinstance(report.get("visual_artifacts"), list)
+                else 0,
+            },
+        )
+
+    def _write_method_experience_record(self, node: SolutionNode) -> None:
+        evidence = self._evidence_metadata()
+        record, payload = build_method_experience_record(
+            node=node,
+            run_dir=self.storage.run_dir,
+            benchmark_name=self.problem_bundle.benchmark_name,
+            benchmark_family=self.problem_bundle.benchmark_spec.family,
+            evidence_mode=str(evidence.get("evidence_mode", "workflow_proxy")),
+        )
+        self.storage.save_json(Path("solutions") / node.node_id / "method_experience_record.json", payload)
+        with self._method_experience_lock:
+            substrate = ExperienceSubstrate(self.storage.run_dir / "reports" / "method_experience_substrate.json")
+            substrate.save(record)
+            cache = self._load_method_experience_cache()
+            records = cache["records"].setdefault(record.method_fingerprint, [])
+            if not isinstance(records, list):
+                raise ValueError("method experience cache fingerprint records must be a list")
+            records.append(payload)
+            self.storage.save_json("reports/method_experience_cache.json", cache)
+        self.storage.record_trace(
+            "tool_span",
+            "method_experience_record",
+            {
+                "solution_id": node.node_id,
+                "method_fingerprint": record.method_fingerprint,
+                "benchmark_family": self.problem_bundle.benchmark_spec.family,
+                "classification": payload.get("failure_attribution", {}).get("classification")
+                if isinstance(payload.get("failure_attribution"), dict)
+                else None,
+            },
+        )
+
+    def _load_method_experience_cache(self) -> dict[str, object]:
+        path = self.storage.run_dir / "reports" / "method_experience_cache.json"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            payload = {"schema_version": 1, "records": {}}
+        if not isinstance(payload, dict) or not isinstance(payload.get("records"), dict):
+            return {"schema_version": 1, "records": {}}
+        payload.setdefault("schema_version", 1)
+        return payload
+
+    def _method_experience_context(self) -> str:
+        return method_experience_context(
+            cache_path=self.storage.run_dir / "reports" / "method_experience_cache.json",
+            benchmark_family=self.problem_bundle.benchmark_spec.family,
+        )
+
+    def _method_experience_summary(self) -> dict[str, object]:
+        cache = self._load_method_experience_cache()
+        records_by_fingerprint = cache.get("records")
+        classification_counts: dict[str, int] = {}
+        record_count = 0
+        failure_attribution_present = False
+        if isinstance(records_by_fingerprint, dict):
+            for records in records_by_fingerprint.values():
+                if not isinstance(records, list):
+                    continue
+                for item in records:
+                    if not isinstance(item, dict):
+                        continue
+                    record_count += 1
+                    attribution = item.get("failure_attribution")
+                    if isinstance(attribution, dict):
+                        failure_attribution_present = True
+                        classification = str(attribution.get("classification") or "unknown")
+                        classification_counts[classification] = classification_counts.get(classification, 0) + 1
+        return {
+            "schema_version": 1,
+            "record_count": record_count,
+            "cache_path": "reports/method_experience_cache.json",
+            "substrate_path": "reports/method_experience_substrate.json",
+            "benchmark_family": self.problem_bundle.benchmark_spec.family,
+            "failure_attribution_present": failure_attribution_present,
+            "classification_counts": dict(sorted(classification_counts.items())),
+            "exact_fingerprint_retrieval": True,
+            "benchmark_family_retrieval": True,
+            "metric_space_self_improvement_claimed": False,
+            "autonomous_action_space_expansion_claimed": False,
+        }
+
+    def _write_visual_audit_manifest(self) -> dict[str, object]:
+        reports = []
+        actual_image_inputs_used = False
+        if self.storage.solutions_dir.exists():
+            for path in sorted(self.storage.solutions_dir.glob("solution_*/visual_audit_report.json")):
+                try:
+                    payload = json.loads(path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                reports.append(
+                    {
+                        "solution_id": payload.get("solution_id"),
+                        "path": str(path.relative_to(self.storage.run_dir)),
+                        "visual_audit_mode": payload.get("visual_audit_mode"),
+                        "analysis_mode": payload.get("analysis_mode"),
+                        "actual_image_inputs_used": payload.get("actual_image_inputs_used") is True,
+                        "visual_artifact_count": len(payload.get("visual_artifacts", []))
+                        if isinstance(payload.get("visual_artifacts"), list)
+                        else 0,
+                    }
+                )
+                actual_image_inputs_used = actual_image_inputs_used or payload.get("actual_image_inputs_used") is True
+        manifest = {
+            "schema_version": 1,
+            "visual_audit_mode": self.config.visual_audit_mode,
+            "audited_solution_count": len(reports),
+            "actual_image_inputs_used": actual_image_inputs_used,
+            "reports": reports,
+            "claim_boundary": (
+                "visual_audit_manifest is an artifact inventory. actual_image_inputs_used is true only when "
+                "a real provider path records actual image input use."
+            ),
+        }
+        self.storage.save_json("reports/visual_audit_manifest.json", manifest)
+        return manifest
+
+    def _write_scientific_discovery_readiness_report(
+        self,
+        *,
+        evidence_metadata: dict[str, object],
+        visual_audit_manifest: dict[str, object],
+        method_experience_manifest: dict[str, object],
+    ) -> dict[str, object]:
+        claim_gate = (
+            evidence_metadata.get("claim_gate")
+            if isinstance(evidence_metadata.get("claim_gate"), dict)
+            else {}
+        )
+        report = build_scientific_discovery_readiness_report(
+            benchmark=self.problem_bundle.benchmark_spec,
+            use_mock=self.config.use_mock,
+            claim_level=self.config.claim_level,
+            claim_gate=claim_gate,
+            selector_diversity=self._selector_panel_runtime_diversity(),
+            kb_manifest=evidence_metadata.get("kb_manifest")
+            if isinstance(evidence_metadata.get("kb_manifest"), dict)
+            else {},
+            visual_audit_manifest=visual_audit_manifest,
+            method_experience_manifest=method_experience_manifest,
+            domain_evaluator_approved=self.config.domain_evaluator_approved,
+            domain_reviewer=self.config.domain_reviewer,
+            domain_review_notes=self.config.domain_review_notes,
+            paper_benchmark_approved=self.config.paper_benchmark_approved,
+            resource_constraints=dict(self.config.resource_constraints),
+            expert_blueprint_id=self.config.expert_blueprint_id,
+            problem_intake=dict(self.config.problem_intake),
+            planner_snapshot=dict(self.config.planner_snapshot),
+        )
+        self.storage.save_json("reports/scientific_discovery_readiness.json", report)
+        self.storage.save_text(
+            "reports/scientific_discovery_readiness.md",
+            render_scientific_discovery_readiness_markdown(report),
+        )
+        return report
+
+    def _provider_capabilities_dict(self, llm: LLMClient) -> dict[str, object]:
+        capabilities = getattr(llm, "provider_capabilities", None)
+        if hasattr(capabilities, "to_dict"):
+            return capabilities.to_dict()
+        if isinstance(capabilities, dict):
+            return dict(capabilities)
+        return {}
+
     def _llm_call_summary(self) -> dict[str, object]:
         trace_path = self.storage.run_dir / "trace.jsonl"
         by_role: dict[str, int] = {}
@@ -2003,11 +2248,14 @@ class AgenticSciMLOrchestrator:
         manifests = [self.storage.run_dir / "reports" / "data_observations.json"]
         if self.storage.solutions_dir.exists():
             manifests.extend(self.storage.solutions_dir.glob("solution_*/solution_observations.json"))
+            manifests.extend(self.storage.solutions_dir.glob("solution_*/visual_audit_report.json"))
         for path in manifests:
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
             except (FileNotFoundError, json.JSONDecodeError):
                 continue
+            if payload.get("actual_image_inputs_used") is True:
+                return True
             multimodal = payload.get("multimodal_evidence")
             if isinstance(multimodal, dict) and multimodal.get("actual_image_inputs_used") is True:
                 return True

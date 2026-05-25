@@ -6,6 +6,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+VISUAL_AUDIT_MODES = {"off", "mock", "real"}
+EXPERT_BLUEPRINT_IDS = {
+    "piml",
+    "operator_learning",
+    "inverse_reconstruction",
+    "fluid_pde",
+    "numerical_methods",
+}
+
 
 def _path_or_none(value: str | Path | None) -> Path | None:
     if value is None:
@@ -25,6 +34,20 @@ def _validate_hex_digest(name: str, value: Any) -> None:
         int(value, 16)
     except ValueError as exc:
         raise ValueError(f"BenchmarkSourceManifest artifact has non-hex digest: {name}") from exc
+
+
+def _validate_visual_audit_mode(value: str) -> str:
+    if value not in VISUAL_AUDIT_MODES:
+        raise ValueError("visual_audit_mode must be one of: " + ", ".join(sorted(VISUAL_AUDIT_MODES)))
+    return value
+
+
+def _validate_expert_blueprint_id(value: str | None) -> str | None:
+    if value is None or value == "":
+        return None
+    if value not in EXPERT_BLUEPRINT_IDS:
+        raise ValueError("expert_blueprint_id must be one of: " + ", ".join(sorted(EXPERT_BLUEPRINT_IDS)))
+    return value
 
 
 def _manifest_artifact_name(path: str) -> str:
@@ -491,8 +514,17 @@ class ExperimentConfig:
     domain_reviewer: str | None = None
     domain_review_notes: str | None = None
     paper_benchmark_approved: bool = False
+    visual_audit_mode: str = "off"
+    resource_constraints: dict[str, Any] = field(default_factory=dict)
+    expert_blueprint_id: str | None = None
     auto_approve_evaluation: bool = True
     resume: bool = False
+
+    def __post_init__(self) -> None:
+        self.visual_audit_mode = _validate_visual_audit_mode(str(self.visual_audit_mode))
+        self.expert_blueprint_id = _validate_expert_blueprint_id(self.expert_blueprint_id)
+        if not isinstance(self.resource_constraints, dict):
+            raise ValueError("resource_constraints must be a JSON object")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -512,6 +544,9 @@ class ExperimentConfig:
             "domain_reviewer": self.domain_reviewer,
             "domain_review_notes": self.domain_review_notes,
             "paper_benchmark_approved": self.paper_benchmark_approved,
+            "visual_audit_mode": self.visual_audit_mode,
+            "resource_constraints": dict(self.resource_constraints),
+            "expert_blueprint_id": self.expert_blueprint_id,
             "auto_approve_evaluation": self.auto_approve_evaluation,
             "resume": self.resume,
         }
@@ -561,6 +596,17 @@ class ExperimentConfig:
                 else None
             ),
             paper_benchmark_approved=bool(data.get("paper_benchmark_approved", False)),
+            visual_audit_mode=str(data.get("visual_audit_mode", "off")),
+            resource_constraints=(
+                dict(data["resource_constraints"])
+                if isinstance(data.get("resource_constraints"), dict)
+                else {}
+            ),
+            expert_blueprint_id=(
+                str(data["expert_blueprint_id"])
+                if data.get("expert_blueprint_id") is not None
+                else None
+            ),
             auto_approve_evaluation=bool(data.get("auto_approve_evaluation", True)),
             resume=bool(data.get("resume", False)),
         )

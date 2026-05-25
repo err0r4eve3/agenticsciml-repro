@@ -71,6 +71,15 @@ class RetrievalOutput(StrictOutputModel):
     entry_id: str | None = None
 
 
+class VisualAuditOutput(StrictOutputModel):
+    summary: str
+    physical_consistency_checks: list[str]
+    visual_artifacts_reviewed: list[str]
+    warnings: list[str]
+    actual_image_inputs_used: bool = False
+    analysis_mode: str
+
+
 OUTPUT_MODELS: dict[str, type[StrictOutputModel]] = {
     "analysis": ResultAnalysisOutput,
     "data_analyst": DataAnalysisOutput,
@@ -83,6 +92,7 @@ OUTPUT_MODELS: dict[str, type[StrictOutputModel]] = {
     "retriever": RetrievalOutput,
     "root_engineer": RootEngineerOutput,
     "selector": SelectorOutput,
+    "visual_audit": VisualAuditOutput,
 }
 
 

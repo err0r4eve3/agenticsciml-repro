@@ -189,8 +189,14 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert (run_dir / "reports" / "evolution_health.json").exists()
     assert (run_dir / "reports" / "innovation_report.json").exists()
     assert (run_dir / "reports" / "innovation_report.md").exists()
+    assert (run_dir / "reports" / "scientific_discovery_readiness.json").exists()
+    assert (run_dir / "reports" / "scientific_discovery_readiness.md").exists()
+    assert (run_dir / "reports" / "visual_audit_manifest.json").exists()
+    assert (run_dir / "reports" / "method_experience_cache.json").exists()
     assert (run_dir / "run_inputs" / "manifest.json").exists()
     assert (run_dir / "solutions" / "solution_000" / "solution_observations.json").exists()
+    assert (run_dir / "solutions" / "solution_000" / "visual_audit_report.json").exists()
+    assert (run_dir / "solutions" / "solution_000" / "method_experience_record.json").exists()
     assert (run_dir / "solutions" / "solution_000" / "prediction_overview.svg").exists()
     assert (run_dir / "solutions" / "solution_000" / "emergence_report.json").exists()
     assert not (run_dir / "solutions" / "solution_000" / "private_eval").exists()
@@ -248,6 +254,21 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert run_metadata["evolution_health"]["operator_assignment_count"] == len(child_nodes)
     assert run_metadata["evolution_health"]["missing_operator_assignment_count"] == 0
     assert run_metadata["input_layout"]["layout"] == "run_level_inputs_v1"
+    readiness = json.loads((run_dir / "reports" / "scientific_discovery_readiness.json").read_text(encoding="utf-8"))
+    visual_manifest = json.loads((run_dir / "reports" / "visual_audit_manifest.json").read_text(encoding="utf-8"))
+    method_record = json.loads(
+        (run_dir / "solutions" / "solution_000" / "method_experience_record.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert readiness["status"] == "blocked"
+    assert readiness["scientific_claim_supported"] is False
+    assert any(blocker["check_id"] == "real_llm" for blocker in readiness["blockers"])
+    assert visual_manifest["actual_image_inputs_used"] is False
+    assert visual_manifest["audited_solution_count"] == len(tree["nodes"])
+    assert method_record["experience_scope"]["exact_fingerprint_retrieval"] is True
+    assert method_record["experience_scope"]["metric_space_self_improvement_claimed"] is False
+    assert method_record["failure_attribution"]["classification"] in {"success", "failure"}
 
 
 def test_duplicate_child_code_is_marked_in_mutation_and_evolution_health(tmp_path: Path) -> None:
@@ -272,6 +293,42 @@ def test_duplicate_child_code_is_marked_in_mutation_and_evolution_health(tmp_pat
     assert mutation_report["duplicate_of"] == "solution_000"
     assert evolution_health["duplicate_code_count"] >= 1
     assert evolution_health["warnings"]
+
+
+def test_cylinder_faithful_small_mock_run_writes_scientific_readiness_artifacts(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="cylinder-readiness-run",
+        benchmark_dir=Path("examples/cylinder_wake_reconstruction_faithful_small").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+        visual_audit_mode="mock",
+        resource_constraints={"cpu": "local", "timeout_s": 60, "gpu": False},
+        expert_blueprint_id="fluid_pde",
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+
+    readiness = json.loads((run_dir / "reports" / "scientific_discovery_readiness.json").read_text(encoding="utf-8"))
+    visual_report = json.loads(
+        (run_dir / "solutions" / "solution_000" / "visual_audit_report.json").read_text(encoding="utf-8")
+    )
+    method_record = json.loads(
+        (run_dir / "solutions" / "solution_000" / "method_experience_record.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert readiness["benchmark"]["name"] == "cylinder_wake_reconstruction_faithful_small"
+    assert readiness["status"] == "blocked"
+    assert readiness["scientific_claim_supported"] is False
+    assert visual_report["visual_audit_mode"] == "mock"
+    assert visual_report["actual_image_inputs_used"] is False
+    assert visual_report["privacy_boundary"] == "prediction_only_no_validation_labels"
+    assert "private_validation_labels_not_loaded" in visual_report["physical_consistency_checks"]
+    assert (run_dir / "solutions" / "solution_000" / "visual_field_diagnostic.svg").exists()
+    assert method_record["benchmark_family"] == "inverse reconstruction"
+    assert method_record["experience_scope"]["benchmark_family_retrieval"] is True
 
 
 def test_default_mock_engineer_generates_distinct_sequential_children(tmp_path: Path) -> None:
@@ -329,6 +386,12 @@ def test_plateau_without_duplicate_code_is_explained_in_mutation_and_evolution_h
     assert "solution_001" in evolution_health["score_plateau_nodes"]
     assert evolution_health["mutation_status_counts"]["changed_but_score_plateau"] == 1
     assert any("Score plateau" in warning for warning in evolution_health["warnings"])
+    method_record = json.loads(
+        (run_dir / "solutions" / "solution_001" / "method_experience_record.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert method_record["failure_attribution"]["classification"] == "plateau"
 
 
 def test_manual_strategy_lock_inspector_blocks_unfaithful_solution(tmp_path: Path) -> None:
@@ -367,6 +430,12 @@ def test_manual_strategy_lock_inspector_blocks_unfaithful_solution(tmp_path: Pat
     assert "Required strategy term not found" in report["checks"][0]["message"]
     assert tree["nodes"][0]["status"] == "failed"
     assert tree["nodes"][0]["failure_kind"] == "guardrail_error"
+    method_record = json.loads(
+        (run_dir / "solutions" / "solution_000" / "method_experience_record.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert method_record["failure_attribution"]["classification"] == "policy_fidelity_mismatch"
     assert any(
         event["name"] == "strategy_fidelity_inspector"
         and event["metadata"]["passed"] is False
@@ -652,6 +721,8 @@ def test_configured_selector_panel_records_member_provenance(tmp_path: Path) -> 
     ]
     assert len(artifact["votes"]) == 2
     assert all(vote["actual_model"] == "mock" for vote in artifact["votes"])
+    assert all(vote["adapter_type"] == "mock_local" for vote in artifact["votes"])
+    assert all(vote["provider_capabilities"]["supports_image_inputs"] is False for vote in artifact["votes"])
     assert artifact["selector_diversity"]["actual_vote_count"] == 2
     assert artifact["selector_diversity"]["panel_member_count"] == 2
     assert artifact["selector_diversity"]["mock_evidence"] is True
@@ -1686,6 +1757,12 @@ def test_debugger_patch_error_is_recorded_without_aborting_run(tmp_path: Path) -
         run_dir / "solutions" / "solution_000" / "transcripts" / "debugger.json"
     ).read_text(encoding="utf-8")
     assert "debugger:patch_application" in trace_text
+    method_record = json.loads(
+        (run_dir / "solutions" / "solution_000" / "method_experience_record.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert method_record["failure_attribution"]["classification"] == "failure"
 
 
 def test_engineer_patch_error_creates_failed_child_without_aborting_run(tmp_path: Path) -> None:
@@ -1708,3 +1785,9 @@ def test_engineer_patch_error_creates_failed_child_without_aborting_run(tmp_path
     assert engineering_error.exists()
     assert "PatchApplicationError" in engineering_error.read_text(encoding="utf-8")
     assert "engineer:patch_application" in trace_text
+    method_record = json.loads(
+        (run_dir / "solutions" / child["node_id"] / "method_experience_record.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert method_record["failure_attribution"]["classification"] == "failure"

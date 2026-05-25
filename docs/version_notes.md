@@ -2,6 +2,54 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-25 Scientific Discovery Evidence Chain
+
+本轮根据 NotebookLM notebook `Agentic AI for Scientific Computing and Finite Element Methods`
+中的 AgenticSciML、ATHENA、GRAFT-ATHENA、ALL-FEM、AI Fluid Scientist、
+agent-systems scaling 与材料发现资料，先升级科学证据链。默认不启动 real LLM，
+不跑昂贵多 seed 训练，也不把 mock/custom-proxy/faithful-small 结果写成新科学发现。
+
+已实现：
+
+- 新增 `reports/scientific_discovery_readiness.json/md`。报告 fail-closed 检查
+  paper-like benchmark、real LLM、异构 selector、paper-equivalent KB、真实图像输入、
+  领域专家审批、多 seed/ablation、失败归因、专家蓝图和资源约束；只有全部满足且
+  claim gate 允许时，`scientific_claim_supported` 才能为 `true`。
+- 新增 prediction-only 视觉审计层。每个 solution 写入
+  `visual_audit_report.json`，并生成 field / residual proxy / boundary proxy SVG；
+  `actual_image_inputs_used=true` 只允许真实 vision provider 实际接收图像后记录。
+- 新增 method experience artifact。每个 solution 写入
+  `method_experience_record.json`，run 级写入 `method_experience_cache.json` 和
+  `method_experience_substrate.json`，使用 `MethodPath`、`ScientificReward` 和
+  `ExperienceSubstrate` 记录 exact fingerprint 与 benchmark-family 经验。
+- selector vote provenance 增加 `adapter_type` 和 `provider_capabilities`；
+  `ProviderCapabilities` 增加 `supports_image_inputs`。OpenAI native Responses 记录为
+  支持 image input，OpenAI-compatible chat 和 mock 默认不支持。
+- CLI / Web / Problem Intake 增加 `visual_audit_mode`、`resource_constraints` 和
+  `expert_blueprint_id`。custom benchmark 仍只能生成 `workflow_proxy` scaffold。
+- `trace_summary.json` 增加 scientific readiness consistency check，防止
+  `run_metadata.json` 夸大 readiness 或 scientific claim。
+- 新增 [Scientific Discovery Evidence Digest](scientific_discovery_evidence.md)，记录
+  NotebookLM 来源、工程映射和明确不做项。
+
+验证：
+
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_evidence.py tests/test_trace_reporting.py -q`：63 passed。
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_llm_and_agents.py tests/test_method_substrate.py tests/test_retrieval.py -q`：40 passed。
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_web_api.py tests/test_orchestrator_cli.py -q`：89 passed。
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest -q`：403 passed。
+
+边界：
+
+- 本轮没有启动 real LLM、没有 fine-tune、没有真实实验闭环、没有 paper-like benchmark
+  升级，也没有多 seed/ablation 结论。
+- `visual_audit_report.json` 默认是 prediction-only artifact，不读取 private labels；
+  mock 或纯文本分析不支持 scientific claim。
+- `method_experience_cache.json` 只支持 exact fingerprint 和 benchmark-family 复用；
+  不声明 metric-space self-improvement 或自主扩展 action space。
+- `cylinder_wake_reconstruction_faithful_small` 可作为主 pilot，`burgers_pinn_faithful_small`
+  可作为低成本 smoke；二者仍是 `faithful-small`，不能写成 paper-like 或 paper-score evidence。
+
 ## 2026-05-24 KS Custom Proxy Goal Smoke
 
 本轮用一维 Kuramoto-Sivashinsky 短时预测 surrogate 作为 Goal 级新问题，跑通

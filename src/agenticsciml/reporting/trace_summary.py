@@ -186,6 +186,7 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
     _check_workflow_lifecycle_sequence(issues, events)
     _check_run_state_consistency(issues, run_metadata, workflow_metadata, workflow_end_metadata)
     _check_claim_gate_consistency(issues, run_metadata, workflow_metadata)
+    scientific_readiness = _check_scientific_discovery_readiness_consistency(issues, run_dir, run_metadata)
     trace_node_reference_counts = _check_solution_artifact_consistency(
         issues,
         run_dir,
@@ -201,6 +202,7 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
         "checked": True,
         "passed": not issues,
         "issues": issues,
+        "scientific_discovery_readiness": scientific_readiness,
         "data_analysis_specificity": data_analysis_specificity,
         "trace_node_reference_events_checked": trace_node_reference_counts["checked"],
         "trace_node_reference_events_skipped": trace_node_reference_counts["skipped"],
@@ -339,6 +341,39 @@ def _check_claim_gate_consistency(
                 "run_metadata.json",
                 "trace workflow start",
             )
+
+
+def _check_scientific_discovery_readiness_consistency(
+    issues: list[str],
+    run_dir: Path,
+    run_metadata: dict[str, Any] | None,
+) -> dict[str, Any]:
+    path = run_dir / "reports" / "scientific_discovery_readiness.json"
+    if not path.exists():
+        return {"checked": False, "passed": True, "path": "reports/scientific_discovery_readiness.json"}
+    readiness = _read_optional_json_file(path, issues)
+    if not isinstance(readiness, dict):
+        issues.append("reports/scientific_discovery_readiness.json is invalid")
+        return {"checked": True, "passed": False, "path": "reports/scientific_discovery_readiness.json"}
+    supported = readiness.get("scientific_claim_supported") is True
+    if run_metadata is not None and run_metadata.get("scientific_claim_supported") is True and not supported:
+        issues.append("run_metadata.json scientific_claim_supported overclaims scientific discovery readiness")
+    metadata_readiness = run_metadata.get("scientific_discovery_readiness") if run_metadata else None
+    if isinstance(metadata_readiness, dict):
+        if metadata_readiness.get("scientific_claim_supported") is True and not supported:
+            issues.append("run_metadata.json scientific_discovery_readiness overclaims readiness report")
+    return {
+        "checked": True,
+        "passed": supported or not (
+            run_metadata is not None and run_metadata.get("scientific_claim_supported") is True
+        ),
+        "path": "reports/scientific_discovery_readiness.json",
+        "status": readiness.get("status"),
+        "scientific_claim_supported": supported,
+        "blocker_count": len(readiness.get("blockers", []))
+        if isinstance(readiness.get("blockers"), list)
+        else 0,
+    }
 
 
 def _read_json_file(path: Path, issues: list[str]) -> dict[str, Any] | None:

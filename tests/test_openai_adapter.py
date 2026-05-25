@@ -76,6 +76,7 @@ def test_openai_adapter_supports_base_url_env(monkeypatch) -> None:
     }
     assert adapter.provider_capabilities.adapter_type == "openai_compatible_chat"
     assert adapter.provider_capabilities.supports_structured_outputs is False
+    assert adapter.provider_capabilities.supports_image_inputs is False
 
 
 def test_openai_adapter_omits_base_url_when_unset(monkeypatch) -> None:
@@ -92,6 +93,7 @@ def test_openai_adapter_omits_base_url_when_unset(monkeypatch) -> None:
     assert FakeOpenAI.last_kwargs == {"api_key": "test-key", "timeout": 60.0}
     assert adapter.provider_capabilities.adapter_type == "openai_native_responses"
     assert adapter.provider_capabilities.supports_structured_outputs is True
+    assert adapter.provider_capabilities.supports_image_inputs is True
 
 
 def test_openai_adapter_rejects_invalid_timeout_env(monkeypatch) -> None:

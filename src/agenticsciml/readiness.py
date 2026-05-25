@@ -32,8 +32,14 @@ ARTIFACT_CAPTURE_REQUIREMENTS = (
     "solutions/*/mutation_effect_report.json",
     "solutions/*/policy_fidelity_report.json",
     "solutions/*/emergence_report.json",
+    "solutions/*/visual_audit_report.json",
+    "solutions/*/method_experience_record.json",
     "reports/data_analysis_structured.json",
     "reports/evolution_health.json",
+    "reports/visual_audit_manifest.json",
+    "reports/scientific_discovery_readiness.json",
+    "reports/scientific_discovery_readiness.md",
+    "reports/method_experience_cache.json",
     "reports/",
 )
 STRATEGY_LOCK_INSPECTION_KEYS = (
@@ -65,6 +71,9 @@ def build_readiness_report(
     paper_benchmark_approved: bool = False,
     real_confirmed: bool = False,
     real_mode_enabled: bool = False,
+    visual_audit_mode: str = "off",
+    resource_constraints: dict[str, Any] | None = None,
+    expert_blueprint_id: str | None = None,
 ) -> dict[str, object]:
     normalized_ids = _dedupe_strings(selected_algorithm_ids)
     locks = [_normalize_strategy_lock(item, index) for index, item in enumerate(manual_strategy_locks or [])]
@@ -92,6 +101,12 @@ def build_readiness_report(
     _append_algorithm_checks(checks, algorithms, normalized_ids)
     _append_strategy_lock_checks(checks, locks, branch)
     _append_real_mode_checks(checks, mode=mode, real_confirmed=real_confirmed, real_mode_enabled=real_mode_enabled)
+    _append_scientific_readiness_intake_checks(
+        checks,
+        visual_audit_mode=visual_audit_mode,
+        resource_constraints=resource_constraints or {},
+        expert_blueprint_id=expert_blueprint_id,
+    )
     checks.append(
         _check(
             "artifact-capture.required",
@@ -133,6 +148,9 @@ def build_readiness_report(
         "domain_reviewer": claim_gate.get("domain_reviewer"),
         "domain_review_notes": claim_gate.get("domain_review_notes"),
         "paper_benchmark_approved": paper_benchmark_approved,
+        "visual_audit_mode": visual_audit_mode,
+        "resource_constraints": dict(resource_constraints or {}),
+        "expert_blueprint_id": expert_blueprint_id,
     }
     report_id = "readiness_" + hashlib.sha256(
         json.dumps(report_payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
@@ -165,6 +183,18 @@ def build_readiness_report(
             "blocked_reasons": [str(check["check_id"]) for check in blockers if check["category"] == "real_mode"],
         },
         "artifact_capture_requirements": list(ARTIFACT_CAPTURE_REQUIREMENTS),
+        "scientific_discovery_readiness_preview": {
+            "expected_artifacts": [
+                "reports/scientific_discovery_readiness.json",
+                "reports/visual_audit_manifest.json",
+                "solutions/*/visual_audit_report.json",
+                "solutions/*/method_experience_record.json",
+            ],
+            "claim_boundary": (
+                "The completed run must still pass its fail-closed readiness report before any "
+                "scientific discovery claim is supported."
+            ),
+        },
         "claim_boundary": (
             "Run readiness is a pre-run audit of catalog alignment, launch gates, and artifact expectations. "
             "It is not scientific validation, not evaluator synthesis, and not paper-score evidence."
@@ -339,6 +369,49 @@ def _append_real_mode_checks(
                 "Real LLM mode is disabled on the Web API server.",
             )
         )
+
+
+def _append_scientific_readiness_intake_checks(
+    checks: list[dict[str, object]],
+    *,
+    visual_audit_mode: str,
+    resource_constraints: dict[str, Any],
+    expert_blueprint_id: str | None,
+) -> None:
+    checks.append(
+        _check(
+            "visual-audit.mode",
+            "scientific_readiness",
+            "info" if visual_audit_mode != "off" else "warning",
+            True,
+            (
+                f"visual_audit_mode={visual_audit_mode}; completed runs will record visual readiness artifacts. "
+                "Only actual real image-provider use can satisfy the paper_workflow multimodal gate."
+            ),
+        )
+    )
+    checks.append(
+        _check(
+            "resource-constraints.present",
+            "scientific_readiness",
+            "info" if resource_constraints else "warning",
+            True,
+            "Resource constraints are recorded for scientific readiness review."
+            if resource_constraints
+            else "Resource constraints are missing; readiness will remain blocked for real scientific claims.",
+        )
+    )
+    checks.append(
+        _check(
+            "expert-blueprint.present",
+            "scientific_readiness",
+            "info" if expert_blueprint_id else "warning",
+            True,
+            "Expert blueprint is recorded for controlled method search."
+            if expert_blueprint_id
+            else "Expert blueprint is missing; fluid/PDE readiness will remain blocked for real scientific claims.",
+        )
+    )
 
 
 def _benchmark_fidelity_preview(benchmark: BenchmarkSpec) -> list[dict[str, object]]:

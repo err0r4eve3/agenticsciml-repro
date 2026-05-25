@@ -9,7 +9,13 @@ from pathlib import Path
 
 from agenticsciml.ablation import DEFAULT_VARIANTS, run_ablation
 from agenticsciml.benchmarks import list_benchmarks
-from agenticsciml.config import AgentConfig, EvolutionConfig, ExperimentConfig
+from agenticsciml.config import (
+    EXPERT_BLUEPRINT_IDS,
+    VISUAL_AUDIT_MODES,
+    AgentConfig,
+    EvolutionConfig,
+    ExperimentConfig,
+)
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.llm_smoke import DEFAULT_SMOKE_VARIANTS, run_llm_smoke, verify_llm_smoke_output
@@ -80,6 +86,9 @@ def cmd_run(args: argparse.Namespace) -> int:
             AgentConfig(role=f"selector_{index:03d}", model=model, temperature=0.05, reasoning_effort="high")
             for index, model in enumerate(_split_csv(args.selector_panel_models), start=1)
         ],
+        visual_audit_mode=args.visual_audit_mode,
+        resource_constraints=_json_object_arg(args.resource_constraints_json, "--resource-constraints-json"),
+        expert_blueprint_id=args.expert_blueprint_id,
         auto_approve_evaluation=not args.require_evaluation_approval,
         resume=args.resume,
     )
@@ -208,6 +217,13 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--random-seed", type=int, default=0)
     run.add_argument("--no-branch-context", action="store_true")
     run.add_argument("--selector-vote-count", type=int, default=3)
+    run.add_argument("--visual-audit-mode", choices=sorted(VISUAL_AUDIT_MODES), default="off")
+    run.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
+    run.add_argument(
+        "--resource-constraints-json",
+        default="{}",
+        help="JSON object describing CPU/GPU/time/dependency/data limits for readiness artifacts",
+    )
     run.add_argument(
         "--selector-panel-models",
         default="",
@@ -276,6 +292,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _json_object_arg(value: str, label: str) -> dict[str, object]:
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{label} must be a JSON object: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} must be a JSON object")
+    return payload
 
 
 def main(argv: list[str] | None = None) -> int:

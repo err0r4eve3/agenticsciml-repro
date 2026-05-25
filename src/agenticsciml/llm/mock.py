@@ -4,6 +4,7 @@ import json
 import re
 from typing import Any
 
+from agenticsciml.llm.capabilities import ProviderCapabilities
 from agenticsciml.llm.base import LLMClient
 from agenticsciml.patching import make_unified_patch, solution_digest
 
@@ -166,6 +167,20 @@ def _fourier_ridge_variant(prompt: str) -> str:
 
 
 class MockLLMClient(LLMClient):
+    model = "mock"
+    provider_name = "MockLLMClient"
+    adapter_type = "mock_local"
+    provider_capabilities = ProviderCapabilities(
+        provider="MockLLMClient",
+        adapter_type="mock_local",
+        supports_responses=False,
+        supports_structured_outputs=True,
+        supports_image_inputs=False,
+        supports_usage=False,
+        supports_trace_export=False,
+        supports_prompt_cache=False,
+    )
+
     def complete_text(
         self,
         prompt: str,

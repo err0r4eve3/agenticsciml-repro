@@ -319,6 +319,9 @@ def test_selector_votes_always_include_best_and_tie_break_by_loss(tmp_path: Path
     assert artifact["schema_version"] == 2
     assert artifact["ensemble_mode"] == "single_provider_multi_vote"
     assert artifact["selector_panel_members"][0]["member_id"] == "selector"
+    assert "adapter_type" in artifact["selector_panel_members"][0]
+    assert "provider_capabilities" in artifact["selector_panel_members"][0]
+    assert artifact["votes"][0]["provider_capabilities"] == {}
     assert artifact["selector_diversity"]["panel_repeated_members"] is True
     assert artifact["selector_diversity"]["heterogeneous_selector_evidence"] is False
     assert "not heterogeneous selector ensemble evidence" in artifact["claim_boundary"]

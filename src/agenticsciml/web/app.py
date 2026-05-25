@@ -44,6 +44,8 @@ from agenticsciml.readiness import build_readiness_report
 
 RunMode = Literal["mock", "real", "dry_run"]
 ClaimLevel = Literal["workflow_proxy", "paper_workflow"]
+VisualAuditMode = Literal["off", "mock", "real"]
+ExpertBlueprintId = Literal["piml", "operator_learning", "inverse_reconstruction", "fluid_pde", "numerical_methods"]
 WorkspaceScope = Literal["repo", "account", "run", "solution"]
 AssistantMode = Literal["ask", "plan", "agent"]
 ReasoningEffort = Literal["low", "medium", "high", "xhigh"]
@@ -130,6 +132,9 @@ class RunStartRequest(BaseModel):
     domain_reviewer: str | None = Field(default=None, max_length=120)
     domain_review_notes: str | None = Field(default=None, max_length=2000)
     paper_benchmark_approved: bool = False
+    visual_audit_mode: VisualAuditMode = "off"
+    resource_constraints: dict[str, Any] = Field(default_factory=dict)
+    expert_blueprint_id: ExpertBlueprintId | None = None
     auto_approve_evaluation: bool = True
     resume: bool = False
     background: bool = False
@@ -156,6 +161,9 @@ class ProblemIntakeRequest(BaseModel):
     domain_reviewer: str | None = Field(default=None, max_length=120)
     domain_review_notes: str | None = Field(default=None, max_length=2000)
     paper_benchmark_approved: bool = False
+    visual_audit_mode: VisualAuditMode = "off"
+    resource_constraints: dict[str, Any] = Field(default_factory=dict)
+    expert_blueprint_id: ExpertBlueprintId | None = None
 
 
 class RunReadinessRequest(BaseModel):
@@ -179,6 +187,9 @@ class RunReadinessRequest(BaseModel):
     domain_reviewer: str | None = Field(default=None, max_length=120)
     domain_review_notes: str | None = Field(default=None, max_length=2000)
     paper_benchmark_approved: bool = False
+    visual_audit_mode: VisualAuditMode = "off"
+    resource_constraints: dict[str, Any] = Field(default_factory=dict)
+    expert_blueprint_id: ExpertBlueprintId | None = None
     real_confirmed: bool = False
 
 
@@ -201,6 +212,9 @@ class SolverChatRequest(BaseModel):
     agent_models: dict[str, AgentModelRequest] = Field(default_factory=dict)
     selector_panel: list[AgentModelRequest] = Field(default_factory=list, max_length=16)
     claim_level: ClaimLevel = "workflow_proxy"
+    visual_audit_mode: VisualAuditMode = "off"
+    resource_constraints: dict[str, Any] = Field(default_factory=dict)
+    expert_blueprint_id: ExpertBlueprintId | None = None
 
 
 class AccountCreateRequest(BaseModel):
@@ -519,6 +533,9 @@ def _run_orchestrator(
             domain_reviewer=request.domain_reviewer,
             domain_review_notes=request.domain_review_notes,
             paper_benchmark_approved=request.paper_benchmark_approved,
+            visual_audit_mode=request.visual_audit_mode,
+            resource_constraints=_normalized_mapping(request.resource_constraints),
+            expert_blueprint_id=request.expert_blueprint_id,
             auto_approve_evaluation=request.auto_approve_evaluation,
             resume=request.resume,
         )
@@ -578,6 +595,9 @@ def _readiness_report_for_request(
         paper_benchmark_approved=request.paper_benchmark_approved,
         real_confirmed=request.real_confirmed,
         real_mode_enabled=_real_web_runs_enabled(),
+        visual_audit_mode=request.visual_audit_mode,
+        resource_constraints=_normalized_mapping(request.resource_constraints),
+        expert_blueprint_id=request.expert_blueprint_id,
     )
 
 
@@ -653,6 +673,9 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
         "domain_reviewer": request.domain_reviewer,
         "domain_review_notes": request.domain_review_notes,
         "paper_benchmark_approved": request.paper_benchmark_approved,
+        "visual_audit_mode": request.visual_audit_mode,
+        "resource_constraints": _normalized_mapping(request.resource_constraints),
+        "expert_blueprint_id": request.expert_blueprint_id,
         "agent_models": {
             role: config.to_dict()
             for role, config in _agent_configs_from_problem_request(request).items()
@@ -723,6 +746,9 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
         "run_config": {
             **run_budget,
             "mode": request.mode,
+            "visual_audit_mode": request.visual_audit_mode,
+            "resource_constraints": _normalized_mapping(request.resource_constraints),
+            "expert_blueprint_id": request.expert_blueprint_id,
         },
         "agent_models": {
             role: config.to_dict()
@@ -748,6 +774,12 @@ def _problem_intake_snapshot(request: ProblemIntakeRequest) -> dict[str, object]
         "evaluation_criteria": request.evaluation_criteria,
         "data_description": request.data_description,
         "problem_summary": _compact_summary(request.problem_statement),
+        "data_source": request.data_description,
+        "visual_audit_mode": request.visual_audit_mode,
+        "visualization_requirements": _visualization_requirements(request),
+        "domain_review_required": True,
+        "resource_constraints": _normalized_mapping(request.resource_constraints),
+        "expert_blueprint_id": request.expert_blueprint_id,
     }
 
 
@@ -770,6 +802,9 @@ def _planner_snapshot(
         "selected_algorithm_ids": list(selected_algorithm_ids),
         "selected_seed_snapshot": _algorithm_seed_snapshot(selected_algorithm_ids),
         "run_config": dict(run_budget),
+        "resource_constraints": _normalized_mapping(request.resource_constraints),
+        "expert_blueprint_id": request.expert_blueprint_id,
+        "visual_audit_mode": request.visual_audit_mode,
         "claim_boundary": (
             "Problem-intake planning is a controlled mapping to local benchmark and strategy seed catalogs. "
             "It is not evaluator synthesis and is not scientific evidence."
@@ -903,6 +938,16 @@ def _intake_text(request: ProblemIntakeRequest) -> str:
             request.data_description,
         ]
     ).lower()
+
+
+def _visualization_requirements(request: ProblemIntakeRequest) -> list[str]:
+    text = _intake_text(request)
+    requirements = ["prediction field diagnostic", "residual proxy diagnostic", "boundary proxy diagnostic"]
+    if any(keyword in text for keyword in ("vorticity", "wake", "fluid", "pde", "burgers")):
+        requirements.append("fluid/PDE visual consistency audit")
+    if request.visual_audit_mode == "real":
+        requirements.append("real provider image-input audit")
+    return list(dict.fromkeys(requirements))
 
 
 def _compact_summary(text: str, limit: int = 360) -> str:
@@ -1174,6 +1219,12 @@ def _merge_resume_request(run_id: str, request: RunStartRequest) -> RunStartRequ
             updates["domain_review_notes"] = existing_config.domain_review_notes
         if "paper_benchmark_approved" not in explicitly_set:
             updates["paper_benchmark_approved"] = existing_config.paper_benchmark_approved
+        if "visual_audit_mode" not in explicitly_set:
+            updates["visual_audit_mode"] = existing_config.visual_audit_mode
+        if "resource_constraints" not in explicitly_set:
+            updates["resource_constraints"] = dict(existing_config.resource_constraints)
+        if "expert_blueprint_id" not in explicitly_set:
+            updates["expert_blueprint_id"] = existing_config.expert_blueprint_id
         if "auto_approve_evaluation" not in explicitly_set:
             updates["auto_approve_evaluation"] = existing_config.auto_approve_evaluation
 
@@ -2089,6 +2140,9 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
                         "mode": request.mode,
                         "account_id": resolved_account_id,
                         "claim_level": request.claim_level,
+                        "visual_audit_mode": request.visual_audit_mode,
+                        "resource_constraints": _normalized_mapping(request.resource_constraints),
+                        "expert_blueprint_id": request.expert_blueprint_id,
                         "background": True,
                     },
                 }
@@ -2229,6 +2283,9 @@ def _problem_intake_request_from_chat(request: SolverChatRequest) -> ProblemInta
         selector_panel=request.selector_panel,
         allow_custom_benchmark=_should_allow_custom_benchmark_from_chat(request.message),
         claim_level=request.claim_level,
+        visual_audit_mode=request.visual_audit_mode,
+        resource_constraints=_normalized_mapping(request.resource_constraints),
+        expert_blueprint_id=request.expert_blueprint_id,
     )
 
 

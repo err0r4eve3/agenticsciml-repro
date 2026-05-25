@@ -35,6 +35,13 @@ PAPER_WORKFLOW_REQUIREMENTS = (
     "paper_equivalent_kb",
     "actual_multimodal_evidence",
 )
+SCIENTIFIC_DISCOVERY_READINESS_REQUIREMENTS = (
+    *PAPER_WORKFLOW_REQUIREMENTS,
+    "multi_seed_ablation",
+    "failure_attribution",
+    "expert_blueprint",
+    "resource_constraints",
+)
 
 
 def evidence_metadata_for_run(*, use_mock: bool, fidelity_level: str) -> dict[str, object]:

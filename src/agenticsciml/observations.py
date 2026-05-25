@@ -184,6 +184,119 @@ def build_solution_observation_package(
     return manifest, svg
 
 
+def build_visual_audit_package(
+    solution_id: str,
+    workspace: Path,
+    *,
+    run_dir: Path,
+    mode: str,
+    provider_capabilities: dict[str, object] | None = None,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    mode = mode if mode in {"off", "mock", "real"} else "off"
+    arrays = _load_solution_arrays(workspace)
+    capabilities = dict(provider_capabilities or {})
+    plots: dict[str, str] = {}
+    artifacts: list[dict[str, object]] = []
+    prediction_key = _first_matching_key(
+        arrays,
+        ("predictions.predictions", "predictions.y", "predictions.u"),
+    )
+    x_key = _first_matching_key(arrays, ("predict_input.x", "predict_input.t", "predict_input.sensor"))
+    if mode == "off":
+        pass
+    elif prediction_key is None:
+        plots["visual_field_diagnostic.svg"] = _empty_svg(
+            "Visual field diagnostic",
+            "No prediction array was produced.",
+        )
+    else:
+        y = _first_series(arrays[prediction_key])
+        x = _first_series(arrays[x_key]) if x_key else np.arange(len(y), dtype=float)
+        plots["visual_field_diagnostic.svg"] = _scatter_svg(
+            x,
+            y,
+            title="Visual field diagnostic",
+            x_label=x_key or "sample_index",
+            y_label=prediction_key,
+        )
+        artifacts.append(
+            {
+                "path": str((workspace / "visual_field_diagnostic.svg").relative_to(run_dir)),
+                "kind": "prediction_field_proxy",
+                "privacy_boundary": "prediction_only_no_validation_labels",
+            }
+        )
+        residual = _finite_difference_proxy(y)
+        plots["visual_residual_diagnostic.svg"] = _scatter_svg(
+            np.arange(len(residual), dtype=float),
+            residual,
+            title="Residual proxy diagnostic",
+            x_label="sample_index",
+            y_label="absolute_prediction_step",
+        )
+        artifacts.append(
+            {
+                "path": str((workspace / "visual_residual_diagnostic.svg").relative_to(run_dir)),
+                "kind": "prediction_smoothness_proxy",
+                "privacy_boundary": "prediction_only_no_validation_labels",
+            }
+        )
+        boundary = _boundary_proxy(y)
+        plots["visual_boundary_diagnostic.svg"] = _scatter_svg(
+            np.arange(len(boundary), dtype=float),
+            boundary,
+            title="Boundary proxy diagnostic",
+            x_label="boundary_sample_index",
+            y_label=prediction_key,
+        )
+        artifacts.append(
+            {
+                "path": str((workspace / "visual_boundary_diagnostic.svg").relative_to(run_dir)),
+                "kind": "prediction_boundary_proxy",
+                "privacy_boundary": "prediction_only_no_validation_labels",
+            }
+        )
+    actual_image_inputs_used = False
+    if mode == "real" and capabilities.get("supports_image_inputs") is True:
+        analysis_mode = "real_visual_provider_not_invoked"
+        warnings = [
+            "visual_audit_mode=real was requested and the provider advertises image input support, "
+            "but this local audit did not send image bytes to a real vision provider.",
+        ]
+    elif mode == "real":
+        analysis_mode = "real_requested_provider_text_only"
+        warnings = ["visual_audit_mode=real requires a provider with supports_image_inputs=true."]
+    elif mode == "mock":
+        analysis_mode = "mock_visual_audit_no_real_image_input"
+        warnings = ["Mock visual audit generated deterministic artifacts only; no scientific claim is supported."]
+    else:
+        analysis_mode = "visual_audit_disabled"
+        warnings = ["Visual audit is disabled for this run."]
+    report = {
+        "schema_version": 1,
+        "solution_id": solution_id,
+        "visual_audit_mode": mode,
+        "analysis_mode": analysis_mode,
+        "actual_image_inputs_used": actual_image_inputs_used,
+        "provider_capabilities": capabilities,
+        "privacy_boundary": "prediction_only_no_validation_labels",
+        "visual_artifacts": artifacts,
+        "physical_consistency_checks": _physical_consistency_checks(arrays, prediction_key),
+        "warnings": warnings,
+        "summary": (
+            "Deterministic prediction-only visual audit artifacts were generated."
+            if artifacts
+            else "No prediction-only visual artifact could be generated."
+        ),
+        "claim_boundary": (
+            "Visual audit artifacts inspect predictions and public run metadata only. They do not read private "
+            "validation labels and do not support scientific claims without real image-provider evidence and "
+            "domain review."
+        ),
+    }
+    return report, plots
+
+
 DATA_EDA_SCRIPT = r'''from __future__ import annotations
 
 import argparse
@@ -594,6 +707,37 @@ def _first_series(value: np.ndarray) -> np.ndarray:
     if array.ndim == 1:
         return array
     return array.reshape(array.shape[0], -1)[:, 0]
+
+
+def _finite_difference_proxy(values: np.ndarray) -> np.ndarray:
+    series = np.asarray(values, dtype=float).reshape(-1)
+    if series.size <= 1:
+        return np.asarray([0.0], dtype=float)
+    diffs = np.diff(series)
+    return np.abs(diffs[np.isfinite(diffs)]) if np.isfinite(diffs).any() else np.asarray([0.0])
+
+
+def _boundary_proxy(values: np.ndarray) -> np.ndarray:
+    series = np.asarray(values, dtype=float).reshape(-1)
+    if series.size <= 8:
+        return series
+    edge_count = min(16, max(4, series.size // 20))
+    return np.concatenate([series[:edge_count], series[-edge_count:]])
+
+
+def _physical_consistency_checks(
+    arrays: dict[str, np.ndarray],
+    prediction_key: str | None,
+) -> list[str]:
+    checks = ["private_validation_labels_not_loaded"]
+    if prediction_key is None:
+        checks.append("prediction_array_missing")
+        return checks
+    summary = _array_summary(arrays[prediction_key])
+    checks.append(f"prediction_finite_count={summary['finite_count']}")
+    checks.append(f"prediction_nan_count={summary['nan_count']}")
+    checks.append("field_residual_boundary_proxy_artifacts_prediction_only")
+    return checks
 
 
 def _scatter_svg(

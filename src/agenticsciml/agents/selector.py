@@ -137,6 +137,8 @@ class SelectorAgent(AgentBase):
             "configured_model": member["configured_model"],
             "actual_model": member["actual_model"],
             "provider": member["provider"],
+            "adapter_type": member["adapter_type"],
+            "provider_capabilities": member["provider_capabilities"],
             "source": member["source"],
             "selected_parent_ids": selected,
             "rationale": str(response.get("rationale", "")),
@@ -263,6 +265,13 @@ def _selector_diversity(
             if member.get("provider")
         }
     )
+    adapter_types = sorted(
+        {
+            str(member.get("adapter_type"))
+            for member in panel_members
+            if member.get("adapter_type")
+        }
+    )
     member_vote_counts: dict[str, int] = {}
     for vote in votes:
         member_id = str(vote.get("member_id", "unknown"))
@@ -292,6 +301,7 @@ def _selector_diversity(
         "provider_diversity": provider_diversity,
         "unique_actual_models": actual_models,
         "unique_providers": providers,
+        "unique_adapter_types": adapter_types,
         "panel_member_count": panel_member_count,
         "actual_vote_count": actual_vote_count,
         "member_vote_counts": dict(sorted(member_vote_counts.items())),
@@ -309,17 +319,31 @@ def _default_panel_member(llm: object) -> dict[str, object]:
         "role": "selector",
         "configured_model": getattr(llm, "model", "default"),
         "actual_model": actual_model or llm.__class__.__name__,
-        "provider": llm.__class__.__name__,
+        "provider": getattr(llm, "provider", None) or getattr(llm, "provider_name", None) or llm.__class__.__name__,
+        "adapter_type": getattr(llm, "adapter_type", llm.__class__.__name__),
+        "provider_capabilities": _provider_capabilities_dict(llm),
         "source": "single_selector",
     }
 
 
 def _normalized_panel_member(member: dict[str, object]) -> dict[str, object]:
+    capabilities = member.get("provider_capabilities")
     return {
         "member_id": str(member.get("member_id", "selector")),
         "role": str(member.get("role", "selector")),
         "configured_model": str(member.get("configured_model", "default")),
         "actual_model": str(member.get("actual_model", member.get("configured_model", "default"))),
         "provider": str(member.get("provider", "unknown")),
+        "adapter_type": str(member.get("adapter_type", "unknown")),
+        "provider_capabilities": dict(capabilities) if isinstance(capabilities, dict) else {},
         "source": str(member.get("source", "unknown")),
     }
+
+
+def _provider_capabilities_dict(llm: object) -> dict[str, object]:
+    capabilities = getattr(llm, "provider_capabilities", None)
+    if hasattr(capabilities, "to_dict"):
+        return capabilities.to_dict()
+    if isinstance(capabilities, dict):
+        return dict(capabilities)
+    return {}
