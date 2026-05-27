@@ -135,6 +135,7 @@ class SelectorAgent(AgentBase):
             "member_id": member["member_id"],
             "member_role": member["role"],
             "configured_model": member["configured_model"],
+            "configured_base_url": member["configured_base_url"],
             "actual_model": member["actual_model"],
             "provider": member["provider"],
             "adapter_type": member["adapter_type"],
@@ -318,6 +319,7 @@ def _default_panel_member(llm: object) -> dict[str, object]:
         "member_id": "selector",
         "role": "selector",
         "configured_model": getattr(llm, "model", "default"),
+        "configured_base_url": getattr(llm, "base_url", None),
         "actual_model": actual_model or llm.__class__.__name__,
         "provider": getattr(llm, "provider", None) or getattr(llm, "provider_name", None) or llm.__class__.__name__,
         "adapter_type": getattr(llm, "adapter_type", llm.__class__.__name__),
@@ -332,6 +334,11 @@ def _normalized_panel_member(member: dict[str, object]) -> dict[str, object]:
         "member_id": str(member.get("member_id", "selector")),
         "role": str(member.get("role", "selector")),
         "configured_model": str(member.get("configured_model", "default")),
+        "configured_base_url": (
+            str(member["configured_base_url"])
+            if member.get("configured_base_url") is not None
+            else None
+        ),
         "actual_model": str(member.get("actual_model", member.get("configured_model", "default"))),
         "provider": str(member.get("provider", "unknown")),
         "adapter_type": str(member.get("adapter_type", "unknown")),

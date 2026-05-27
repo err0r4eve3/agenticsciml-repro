@@ -7,6 +7,20 @@
 本轮继续推进科学证据链，但仍不默认启动 real LLM、不跑昂贵 paper-scale 训练，也不把
 `faithful-small` 或 mock run 写成科学发现。
 
+追加迭代：
+
+- `AgentConfig` / Web `AgentModelRequest` 支持 per-member `base_url`。selector panel
+  可以在不记录 API key 的前提下，为不同 selector member 指定不同 OpenAI-compatible
+  provider endpoint。
+- CLI 新增 `--selector-panel-json`，用于声明带 `model`、`base_url`、`temperature` 和
+  `reasoning_effort` 的 selector panel；旧的 `--selector-panel-models` 仍可用于简单模型列表。
+- selector vote provenance 新增 `configured_base_url`，`selector_heterogeneity.json`
+  会基于 runtime votes 中的实际 provider/model 判断异构 evidence。
+- 新增回归测试用本地 fake provider 验证 per-member `base_url` 会产生
+  `unique_providers=["api.deepseek.com", "openai"]`，并让
+  `heterogeneous_selector_evidence=true`。该测试不调用外部模型，不代表真实 provider
+  已完成科学运行。
+
 已实现：
 
 - OpenAI native Responses adapter 新增 `complete_json_with_images(...)`，真实 visual audit

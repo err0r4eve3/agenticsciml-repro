@@ -38,7 +38,9 @@ NotebookLM summary 当作 evaluator 事实。
   `reports/method_experience_cache.json`：把 operator assignment、policy fidelity、
   mutation status、score/failure kind 和 method fingerprint 写入本地经验层。
 - `selector_votes.json`：记录每票的 provider、model、adapter 和 capabilities；
-  `paper_workflow` 仍要求非 mock 的异构 selector 证据。
+  `paper_workflow` 仍要求非 mock 的异构 selector 证据。selector panel member 可记录
+  `configured_base_url`，用于审计不同 OpenAI-compatible provider endpoint；API key
+  不写入 config 或 artifact。
 - `reports/domain_approval.json`：记录 reviewer、review notes、审批状态和 claim boundary；
   只证明人工审批记录存在，不覆盖其他 readiness gate。
 - `reports/paper_like_benchmark_dossier.json`：把 benchmark fidelity、fidelity matrix、

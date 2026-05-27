@@ -15,7 +15,7 @@ from agenticsciml.evidence import (
     SCIENTIFIC_CLAIM_NOT_SUPPORTED,
 )
 from agenticsciml.llm.mock import MockLLMClient
-from agenticsciml.llm.capabilities import ProviderCapabilities
+from agenticsciml.llm.capabilities import ProviderCapabilities, capabilities_for_openai_compatible
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator, EvaluationApprovalRequired
 from agenticsciml.state import AnalysisReport, SolutionNode, SolutionScore
 
@@ -201,6 +201,23 @@ class VisionAuditLLM(MockLLMClient):
             "actual_image_inputs_used": True,
             "analysis_mode": "real_visual_provider_image_input",
         }
+
+
+class ProviderAwareMockLLM(MockLLMClient):
+    def __init__(
+        self,
+        model: str = "gpt-5-mini",
+        api_key: str = "test-key",
+        base_url: str | None = None,
+        timeout_s: float = 60.0,
+    ) -> None:
+        self.model = model
+        self.api_key = api_key
+        self.base_url = base_url
+        self.timeout_s = timeout_s
+        self.provider_capabilities = capabilities_for_openai_compatible(base_url)
+        self.provider_name = self.provider_capabilities.provider
+        self.adapter_type = self.provider_capabilities.adapter_type
 
 
 def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
@@ -897,6 +914,47 @@ def test_configured_selector_panel_records_member_provenance(tmp_path: Path) -> 
     assert artifact["selector_diversity"]["panel_repeated_members"] is False
     assert artifact["selector_diversity"]["heterogeneous_selector_evidence"] is False
     assert "only heterogeneous provider evidence" in artifact["claim_boundary"]
+
+
+def test_real_selector_panel_uses_per_member_base_url_for_heterogeneous_evidence(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="real-selector-panel-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(
+            max_iterations=2,
+            parallel_mutations=1,
+            selector_vote_count=3,
+            max_debug_retries=0,
+        ),
+        use_mock=False,
+        selector_panel=[
+            AgentConfig(role="selector_openai", model="gpt-5-mini", temperature=0.05),
+            AgentConfig(
+                role="selector_compatible",
+                model="deepseek-v4-pro",
+                temperature=0.05,
+                base_url="https://api.deepseek.com",
+            ),
+        ],
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, ProviderAwareMockLLM()).run()
+
+    votes = json.loads((run_dir / "reports" / "selector_votes.json").read_text(encoding="utf-8"))
+    selector_report = json.loads((run_dir / "reports" / "selector_heterogeneity.json").read_text(encoding="utf-8"))
+    metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+
+    assert votes["selector_diversity"]["heterogeneous_selector_evidence"] is True
+    assert votes["selector_diversity"]["mock_evidence"] is False
+    assert votes["selector_diversity"]["unique_providers"] == ["api.deepseek.com", "openai"]
+    assert [member["configured_base_url"] for member in votes["selector_panel_members"]] == [
+        None,
+        "https://api.deepseek.com",
+    ]
+    assert selector_report["heterogeneous_selector_evidence"] is True
+    assert selector_report["status"] == "ready"
+    assert metadata["selector_heterogeneity"]["heterogeneous_selector_evidence"] is True
 
 
 def test_selector_vote_history_keeps_each_selection_artifact(tmp_path: Path) -> None:

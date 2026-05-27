@@ -171,14 +171,18 @@ class AgentConfig:
     model: str = "mock"
     temperature: float = 0.0
     reasoning_effort: str | None = None
+    base_url: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "role": self.role,
             "model": self.model,
             "temperature": self.temperature,
             "reasoning_effort": self.reasoning_effort,
         }
+        if self.base_url is not None:
+            payload["base_url"] = self.base_url
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AgentConfig":
@@ -189,6 +193,11 @@ class AgentConfig:
             reasoning_effort=(
                 str(data["reasoning_effort"])
                 if data.get("reasoning_effort") is not None
+                else None
+            ),
+            base_url=(
+                str(data["base_url"]).strip()
+                if data.get("base_url") is not None and str(data["base_url"]).strip()
                 else None
             ),
         )

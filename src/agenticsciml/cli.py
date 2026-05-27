@@ -83,8 +83,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         evolution=evolution,
         use_mock=args.mock,
         selector_panel=[
-            AgentConfig(role=f"selector_{index:03d}", model=model, temperature=0.05, reasoning_effort="high")
-            for index, model in enumerate(_split_csv(args.selector_panel_models), start=1)
+            _agent_config_from_selector_payload(index, payload)
+            for index, payload in enumerate(_selector_panel_payloads(args), start=1)
         ],
         visual_audit_mode=args.visual_audit_mode,
         resource_constraints=_json_object_arg(args.resource_constraints_json, "--resource-constraints-json"),
@@ -236,6 +236,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="comma-separated selector panel model names; records per-member selector vote provenance",
     )
     run.add_argument(
+        "--selector-panel-json",
+        default="[]",
+        help="JSON array of selector member objects with model, optional base_url, temperature, and reasoning_effort",
+    )
+    run.add_argument(
         "--require-evaluation-approval",
         action="store_true",
         help="write evaluation_approval.json and pause before root generation until status is approved",
@@ -298,6 +303,39 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _selector_panel_payloads(args: argparse.Namespace) -> list[dict[str, object]]:
+    payload = json.loads(args.selector_panel_json)
+    if not isinstance(payload, list):
+        raise ValueError("--selector-panel-json must be a JSON array")
+    if payload:
+        result: list[dict[str, object]] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                raise ValueError("--selector-panel-json items must be JSON objects")
+            result.append(dict(item))
+        return result
+    return [{"model": model} for model in _split_csv(args.selector_panel_models)]
+
+
+def _agent_config_from_selector_payload(index: int, payload: dict[str, object]) -> AgentConfig:
+    model = str(payload.get("model", "")).strip()
+    if not model:
+        raise ValueError("--selector-panel-json selector member model is required")
+    base_url_value = payload.get("base_url")
+    base_url = str(base_url_value).strip() if base_url_value is not None else None
+    return AgentConfig(
+        role=str(payload.get("role") or f"selector_{index:03d}"),
+        model=model,
+        temperature=float(payload.get("temperature", 0.05)),
+        reasoning_effort=(
+            str(payload["reasoning_effort"])
+            if payload.get("reasoning_effort") is not None
+            else "high"
+        ),
+        base_url=base_url or None,
+    )
 
 
 def _json_object_arg(value: str, label: str) -> dict[str, object]:

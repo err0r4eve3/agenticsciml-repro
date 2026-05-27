@@ -212,18 +212,18 @@ class AgenticSciMLOrchestrator:
         agent_config = self._agent_config_for_role(role)
         role_llm = self.llm
         requested_model = agent_config.model if agent_config else None
+        requested_base_url = agent_config.base_url if agent_config else None
         base_model = getattr(self.llm, "model", None)
+        base_url = getattr(self.llm, "base_url", None)
         if (
-            requested_model
-            and requested_model != "mock"
-            and requested_model != base_model
+            _agent_config_requests_distinct_llm(requested_model, requested_base_url, base_model, base_url)
             and not self.config.use_mock
             and all(hasattr(self.llm, attr) for attr in ("api_key", "base_url", "timeout_s"))
         ):
             role_llm = self.llm.__class__(
-                model=requested_model,
+                model=requested_model or base_model,
                 api_key=getattr(self.llm, "api_key"),
-                base_url=getattr(self.llm, "base_url"),
+                base_url=requested_base_url if requested_base_url is not None else base_url,
                 timeout_s=getattr(self.llm, "timeout_s"),
             )
         self._role_llms[role] = role_llm
@@ -231,18 +231,18 @@ class AgenticSciMLOrchestrator:
 
     def _llm_for_agent_config(self, agent_config: AgentConfig) -> LLMClient:
         requested_model = agent_config.model
+        requested_base_url = agent_config.base_url
         base_model = getattr(self.llm, "model", None)
+        base_url = getattr(self.llm, "base_url", None)
         if (
-            requested_model
-            and requested_model != "mock"
-            and requested_model != base_model
+            _agent_config_requests_distinct_llm(requested_model, requested_base_url, base_model, base_url)
             and not self.config.use_mock
             and all(hasattr(self.llm, attr) for attr in ("api_key", "base_url", "timeout_s"))
         ):
             return self.llm.__class__(
-                model=requested_model,
+                model=requested_model or base_model,
                 api_key=getattr(self.llm, "api_key"),
-                base_url=getattr(self.llm, "base_url"),
+                base_url=requested_base_url if requested_base_url is not None else base_url,
                 timeout_s=getattr(self.llm, "timeout_s"),
             )
         return self.llm
@@ -1578,6 +1578,7 @@ class AgenticSciMLOrchestrator:
             "member_id": member_id,
             "role": "selector",
             "configured_model": agent_config.model,
+            "configured_base_url": agent_config.base_url,
             "actual_model": getattr(llm, "model", "mock" if self.config.use_mock else llm.__class__.__name__),
             "provider": (
                 getattr(llm, "provider", None)
@@ -2729,6 +2730,17 @@ def _selector_member_is_mock(member: object) -> bool:
     provider = str(member.get("provider", ""))
     adapter_type = str(member.get("adapter_type", ""))
     return actual_model == "mock" or provider == "MockLLMClient" or adapter_type == "MockLLMClient"
+
+
+def _agent_config_requests_distinct_llm(
+    requested_model: str | None,
+    requested_base_url: str | None,
+    base_model: object,
+    base_url: object,
+) -> bool:
+    model_differs = bool(requested_model and requested_model != "mock" and requested_model != base_model)
+    base_url_differs = requested_base_url is not None and requested_base_url != base_url
+    return model_differs or base_url_differs
 
 
 def _manifest_count(manifest: dict[str, object], count_key: str, list_key: str) -> int:

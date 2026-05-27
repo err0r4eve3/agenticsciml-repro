@@ -101,6 +101,7 @@ class AgentModelRequest(BaseModel):
     model: str = Field(min_length=1, max_length=120)
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     reasoning_effort: ReasoningEffort | None = None
+    base_url: str | None = Field(default=None, max_length=500)
 
 
 class RunStartRequest(BaseModel):
@@ -927,20 +928,25 @@ def _agent_configs_from_problem_request(request: ProblemIntakeRequest) -> dict[s
             model=agent_model.model.strip(),
             temperature=agent_model.temperature,
             reasoning_effort=agent_model.reasoning_effort,
+            base_url=_normalized_base_url(agent_model.base_url),
         )
         for role, agent_model in request.agent_models.items()
     }
 
 
 def _selector_panel_payload_from_models(models: list[AgentModelRequest]) -> list[dict[str, object]]:
-    return [
-        {
+    payloads: list[dict[str, object]] = []
+    for model in models:
+        payload: dict[str, object] = {
             "model": model.model.strip(),
             "temperature": model.temperature,
             "reasoning_effort": model.reasoning_effort,
         }
-        for model in models
-    ]
+        base_url = _normalized_base_url(model.base_url)
+        if base_url is not None:
+            payload["base_url"] = base_url
+        payloads.append(payload)
+    return payloads
 
 
 def _intake_text(request: ProblemIntakeRequest) -> str:
@@ -1178,6 +1184,7 @@ def _agent_configs_from_request(request: RunStartRequest) -> dict[str, AgentConf
             model=agent_model.model.strip(),
             temperature=agent_model.temperature,
             reasoning_effort=agent_model.reasoning_effort,
+            base_url=_normalized_base_url(agent_model.base_url),
         )
         for role, agent_model in request.agent_models.items()
     }
@@ -1192,6 +1199,7 @@ def _selector_panel_from_request(
             model=agent_model.model.strip(),
             temperature=agent_model.temperature,
             reasoning_effort=agent_model.reasoning_effort,
+            base_url=_normalized_base_url(agent_model.base_url),
         )
         for index, agent_model in enumerate(request.selector_panel, start=1)
     ]
@@ -1269,6 +1277,7 @@ def _agent_requests_from_configs(agents: dict[str, AgentConfig]) -> dict[str, Ag
             model=config.model,
             temperature=config.temperature,
             reasoning_effort=reasoning_effort,
+            base_url=config.base_url,
         )
     return requests
 
@@ -1283,9 +1292,17 @@ def _agent_requests_from_config_list(agents: list[AgentConfig]) -> list[AgentMod
                 if config.reasoning_effort in REASONING_EFFORTS
                 else None
             ),
+            base_url=config.base_url,
         )
         for config in agents
     ]
+
+
+def _normalized_base_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 def _normalized_mapping(value: dict[str, Any] | None) -> dict[str, Any]:

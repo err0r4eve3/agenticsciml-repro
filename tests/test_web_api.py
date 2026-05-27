@@ -569,6 +569,7 @@ def test_web_mock_run_persists_agent_model_overrides(tmp_path: Path) -> None:
                     "model": "deepseek-v4-pro",
                     "temperature": 0.1,
                     "reasoning_effort": "xhigh",
+                    "base_url": "https://api.deepseek.com",
                 },
             ],
             "selected_algorithm_ids": ["fourier_feature_mlp", "piecewise_local_basis"],
@@ -588,11 +589,13 @@ def test_web_mock_run_persists_agent_model_overrides(tmp_path: Path) -> None:
     assert metadata["agent_models"]["engineer"]["model"] == "deepseek-v4-pro"
     assert metadata["agent_models"]["engineer"]["actual_model"] == "mock"
     assert [item["model"] for item in config["selector_panel"]] == ["gpt-5-mini", "deepseek-v4-pro"]
+    assert config["selector_panel"][1]["base_url"] == "https://api.deepseek.com"
     assert metadata["selector_panel"]["ensemble_mode"] == "configured_selector_panel"
     assert [item["configured_model"] for item in metadata["selector_panel"]["members"]] == [
         "gpt-5-mini",
         "deepseek-v4-pro",
     ]
+    assert metadata["selector_panel"]["members"][1]["configured_base_url"] == "https://api.deepseek.com"
     assert config["strategy_seed_ids"] == ["fourier_feature_mlp", "piecewise_local_basis"]
     assert metadata["strategy_seed_ids"] == ["fourier_feature_mlp", "piecewise_local_basis"]
 
