@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import types
+from pathlib import Path
 from typing import Any
 
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
@@ -20,14 +21,25 @@ class FakeResponses:
     def parse(self, **kwargs: Any) -> object:
         FakeResponses.last_kwargs = kwargs
         model = kwargs["text_format"]
-        return types.SimpleNamespace(
-            output_parsed=model(
+        if model.__name__ == "VisualAuditOutput":
+            parsed = model(
+                summary="Vision audit saw the diagnostic plots.",
+                physical_consistency_checks=["image_input_received", "prediction_only"],
+                visual_artifacts_reviewed=["visual_field_diagnostic.svg"],
+                warnings=[],
+                actual_image_inputs_used=True,
+                analysis_mode="real_visual_provider_image_input",
+            )
+        else:
+            parsed = model(
                 title="Native proposal",
                 diagnosis="Root underfits.",
                 mutation_plan=["Add features."],
                 expected_effect="Lower validation MSE.",
                 risks=["May overfit."],
-            ),
+            )
+        return types.SimpleNamespace(
+            output_parsed=parsed,
             usage=types.SimpleNamespace(input_tokens=10, output_tokens=5, total_tokens=15),
         )
 
@@ -138,6 +150,35 @@ def test_openai_adapter_passes_reasoning_effort_to_native_responses(monkeypatch)
     assert FakeResponses.last_kwargs["reasoning"] == {"effort": "xhigh"}
     assert adapter.last_call_metadata is not None
     assert adapter.last_call_metadata["reasoning_effort"] == "xhigh"
+
+
+def test_openai_adapter_sends_image_inputs_to_native_responses(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeNativeOpenAI))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    FakeResponses.last_kwargs = None
+    image_path = tmp_path / "visual_field_diagnostic.svg"
+    image_path.write_text("<svg xmlns='http://www.w3.org/2000/svg'></svg>", encoding="utf-8")
+
+    adapter = OpenAIAdapter(model="gpt-5-mini")
+    payload = adapter.complete_json_with_images(
+        "audit image",
+        "visual_audit",
+        [image_path],
+        reasoning_effort="high",
+    )
+
+    assert payload["actual_image_inputs_used"] is True
+    assert FakeResponses.last_kwargs is not None
+    user_message = FakeResponses.last_kwargs["input"][-1]
+    assert user_message["role"] == "user"
+    assert user_message["content"][0] == {"type": "input_text", "text": "audit image"}
+    assert user_message["content"][1]["type"] == "input_image"
+    assert user_message["content"][1]["image_url"].startswith("data:image/svg+xml;base64,")
+    assert user_message["content"][1]["detail"] == "auto"
+    assert adapter.last_call_metadata is not None
+    assert adapter.last_call_metadata["method"] == "complete_json_with_images"
+    assert adapter.last_call_metadata["image_input_count"] == 1
 
 
 def test_openai_adapter_compatible_json_fallback_still_rejects_schema_drift(monkeypatch) -> None:

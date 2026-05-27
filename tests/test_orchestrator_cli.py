@@ -15,6 +15,7 @@ from agenticsciml.evidence import (
     SCIENTIFIC_CLAIM_NOT_SUPPORTED,
 )
 from agenticsciml.llm.mock import MockLLMClient
+from agenticsciml.llm.capabilities import ProviderCapabilities
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator, EvaluationApprovalRequired
 from agenticsciml.state import AnalysisReport, SolutionNode, SolutionScore
 
@@ -152,6 +153,56 @@ class CommentOnlyEngineerLLM(MockLLMClient):
         return super().complete_json(prompt, schema_name, system=system, temperature=temperature)
 
 
+class VisionAuditLLM(MockLLMClient):
+    model = "fake-vision-real"
+    provider_name = "FakeVisionProvider"
+    adapter_type = "openai_native_responses"
+    provider_capabilities = ProviderCapabilities(
+        provider="FakeVisionProvider",
+        adapter_type="openai_native_responses",
+        supports_responses=True,
+        supports_structured_outputs=True,
+        supports_image_inputs=True,
+        supports_usage=True,
+        supports_trace_export=True,
+        supports_prompt_cache=False,
+    )
+
+    def __init__(self) -> None:
+        self.image_calls: list[list[Path]] = []
+        self.last_call_metadata: dict[str, Any] | None = None
+
+    def complete_json_with_images(
+        self,
+        prompt: str,
+        schema_name: str,
+        image_paths: list[Path],
+        system: str | None = None,
+        temperature: float = 0.0,
+        reasoning_effort: str | None = None,
+    ) -> dict[str, Any]:
+        assert schema_name == "visual_audit"
+        self.image_calls.append(list(image_paths))
+        self.last_call_metadata = {
+            "provider": self.provider_name,
+            "model": self.model,
+            "method": "complete_json_with_images",
+            "schema_name": schema_name,
+            "adapter_type": self.adapter_type,
+            "provider_capabilities": self.provider_capabilities.to_dict(),
+            "image_input_count": len(image_paths),
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+        return {
+            "summary": "Fake vision provider reviewed the diagnostic image artifacts.",
+            "physical_consistency_checks": ["image_input_received", "prediction_only_no_private_labels"],
+            "visual_artifacts_reviewed": [path.name for path in image_paths],
+            "warnings": [],
+            "actual_image_inputs_used": True,
+            "analysis_mode": "real_visual_provider_image_input",
+        }
+
+
 def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     config = ExperimentConfig(
         experiment_id="mock-run",
@@ -192,6 +243,10 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert (run_dir / "reports" / "scientific_discovery_readiness.json").exists()
     assert (run_dir / "reports" / "scientific_discovery_readiness.md").exists()
     assert (run_dir / "reports" / "visual_audit_manifest.json").exists()
+    assert (run_dir / "reports" / "domain_approval.json").exists()
+    assert (run_dir / "reports" / "paper_like_benchmark_dossier.json").exists()
+    assert (run_dir / "reports" / "selector_heterogeneity.json").exists()
+    assert (run_dir / "reports" / "multi_seed_ablation_evidence.json").exists()
     assert (run_dir / "reports" / "method_experience_cache.json").exists()
     assert (run_dir / "run_inputs" / "manifest.json").exists()
     assert (run_dir / "solutions" / "solution_000" / "solution_observations.json").exists()
@@ -256,6 +311,14 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert run_metadata["input_layout"]["layout"] == "run_level_inputs_v1"
     readiness = json.loads((run_dir / "reports" / "scientific_discovery_readiness.json").read_text(encoding="utf-8"))
     visual_manifest = json.loads((run_dir / "reports" / "visual_audit_manifest.json").read_text(encoding="utf-8"))
+    domain_approval = json.loads((run_dir / "reports" / "domain_approval.json").read_text(encoding="utf-8"))
+    paper_dossier = json.loads((run_dir / "reports" / "paper_like_benchmark_dossier.json").read_text(encoding="utf-8"))
+    selector_heterogeneity = json.loads(
+        (run_dir / "reports" / "selector_heterogeneity.json").read_text(encoding="utf-8")
+    )
+    multi_seed_evidence = json.loads(
+        (run_dir / "reports" / "multi_seed_ablation_evidence.json").read_text(encoding="utf-8")
+    )
     method_record = json.loads(
         (run_dir / "solutions" / "solution_000" / "method_experience_record.json").read_text(
             encoding="utf-8"
@@ -266,6 +329,10 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert any(blocker["check_id"] == "real_llm" for blocker in readiness["blockers"])
     assert visual_manifest["actual_image_inputs_used"] is False
     assert visual_manifest["audited_solution_count"] == len(tree["nodes"])
+    assert domain_approval["approved"] is False
+    assert paper_dossier["paper_like_ready"] is False
+    assert selector_heterogeneity["heterogeneous_selector_evidence"] is False
+    assert multi_seed_evidence["verified_multi_seed_ablation"] is False
     assert method_record["experience_scope"]["exact_fingerprint_retrieval"] is True
     assert method_record["experience_scope"]["metric_space_self_improvement_claimed"] is False
     assert method_record["failure_attribution"]["classification"] in {"success", "failure"}
@@ -329,6 +396,106 @@ def test_cylinder_faithful_small_mock_run_writes_scientific_readiness_artifacts(
     assert (run_dir / "solutions" / "solution_000" / "visual_field_diagnostic.svg").exists()
     assert method_record["benchmark_family"] == "inverse reconstruction"
     assert method_record["experience_scope"]["benchmark_family_retrieval"] is True
+
+
+def test_real_visual_audit_records_actual_image_input_with_capable_provider(tmp_path: Path) -> None:
+    llm = VisionAuditLLM()
+    config = ExperimentConfig(
+        experiment_id="real-visual-audit-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+        visual_audit_mode="real",
+        resource_constraints={"cpu": "local", "timeout_s": 60},
+        expert_blueprint_id="piml",
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, llm).run()
+
+    visual_report = json.loads(
+        (run_dir / "solutions" / "solution_000" / "visual_audit_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    visual_manifest = json.loads((run_dir / "reports" / "visual_audit_manifest.json").read_text(encoding="utf-8"))
+    readiness = json.loads((run_dir / "reports" / "scientific_discovery_readiness.json").read_text(encoding="utf-8"))
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert llm.image_calls
+    assert visual_report["actual_image_inputs_used"] is True
+    assert visual_report["analysis_mode"] == "real_visual_provider_image_input"
+    assert visual_report["visual_provider_output"]["actual_image_inputs_used"] is True
+    assert visual_manifest["actual_image_inputs_used"] is True
+    actual_image_check = next(check for check in readiness["checks"] if check["check_id"] == "actual_image_inputs")
+    assert actual_image_check["passed"] is True
+    assert readiness["scientific_claim_supported"] is False
+    assert any(
+        event["name"] == "visual_audit"
+        and event["event_type"] == "generation_span"
+        and event["metadata"].get("actual_image_inputs_used") is True
+        for event in trace_events
+    )
+
+
+def test_run_writes_domain_selector_paper_and_multiseed_readiness_artifacts(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="readiness-modules-run",
+        benchmark_dir=Path("examples/cylinder_wake_reconstruction_faithful_small").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+        domain_evaluator_approved=True,
+        domain_reviewer="fluid-reviewer",
+        domain_review_notes="Approved evaluator boundary for local faithful-small smoke only.",
+        paper_benchmark_approved=True,
+        visual_audit_mode="mock",
+        resource_constraints={"cpu": "local", "gpu": False, "timeout_s": 60},
+        expert_blueprint_id="fluid_pde",
+        multi_seed_ablation={
+            "seed_count": 2,
+            "ablation_count": 1,
+            "verified": True,
+            "verified_by": "ablation-reviewer",
+            "seeds": [0, 1],
+            "variants": ["branch_context"],
+        },
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+
+    domain_report = json.loads((run_dir / "reports" / "domain_approval.json").read_text(encoding="utf-8"))
+    paper_dossier = json.loads(
+        (run_dir / "reports" / "paper_like_benchmark_dossier.json").read_text(encoding="utf-8")
+    )
+    selector_report = json.loads((run_dir / "reports" / "selector_heterogeneity.json").read_text(encoding="utf-8"))
+    multi_seed_report = json.loads(
+        (run_dir / "reports" / "multi_seed_ablation_evidence.json").read_text(encoding="utf-8")
+    )
+    readiness = json.loads((run_dir / "reports" / "scientific_discovery_readiness.json").read_text(encoding="utf-8"))
+    run_metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+
+    assert domain_report["approved"] is True
+    assert domain_report["domain_review_notes_sha256"]
+    assert paper_dossier["paper_like_ready"] is False
+    assert paper_dossier["fidelity_level"] == "faithful-small"
+    assert selector_report["heterogeneous_selector_evidence"] is False
+    assert multi_seed_report["verified_multi_seed_ablation"] is True
+    assert multi_seed_report["verifier"] == "ablation-reviewer"
+    assert multi_seed_report["attached_artifact_paths"] == [
+        "reports/multi_seed_ablation_declared_manifest.json"
+    ]
+    assert (run_dir / "reports" / "multi_seed_ablation_declared_manifest.json").exists()
+    checks = {check["check_id"]: check for check in readiness["checks"]}
+    assert checks["domain_review"]["passed"] is True
+    assert checks["multi_seed_ablation"]["passed"] is True
+    assert checks["paper_like_benchmark"]["passed"] is False
+    assert readiness["scientific_claim_supported"] is False
+    assert run_metadata["domain_approval"]["approved"] is True
+    assert run_metadata["multi_seed_ablation"]["verified_multi_seed_ablation"] is True
 
 
 def test_default_mock_engineer_generates_distinct_sequential_children(tmp_path: Path) -> None:

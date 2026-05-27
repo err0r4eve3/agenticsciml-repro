@@ -1785,6 +1785,10 @@ class AgenticSciMLOrchestrator:
         visual_audit_manifest = self._write_visual_audit_manifest()
         method_experience_manifest = self._method_experience_summary()
         evidence_metadata = self._evidence_metadata()
+        domain_approval_report = self._write_domain_approval_report()
+        paper_like_benchmark_dossier = self._write_paper_like_benchmark_dossier()
+        selector_heterogeneity_report = self._write_selector_heterogeneity_report()
+        multi_seed_ablation_evidence = self._write_multi_seed_ablation_evidence()
         innovation_report = build_innovation_report(
             nodes=self.nodes,
             run_dir=self.storage.run_dir,
@@ -1808,6 +1812,10 @@ class AgenticSciMLOrchestrator:
             evidence_metadata=evidence_metadata,
             visual_audit_manifest=visual_audit_manifest,
             method_experience_manifest=method_experience_manifest,
+            domain_approval_report=domain_approval_report,
+            paper_like_benchmark_dossier=paper_like_benchmark_dossier,
+            selector_heterogeneity_report=selector_heterogeneity_report,
+            multi_seed_ablation_evidence=multi_seed_ablation_evidence,
         )
         best = self._best_node()
         champion_dir = self.storage.run_dir / "champion"
@@ -1881,6 +1889,34 @@ class AgenticSciMLOrchestrator:
                     "actual_image_inputs_used": visual_audit_manifest.get("actual_image_inputs_used"),
                 },
                 "method_experience": method_experience_manifest,
+                "domain_approval": {
+                    "approved": domain_approval_report.get("approved"),
+                    "status": domain_approval_report.get("status"),
+                    "domain_reviewer": domain_approval_report.get("domain_reviewer"),
+                },
+                "paper_like_benchmark": {
+                    "paper_like_ready": paper_like_benchmark_dossier.get("paper_like_ready"),
+                    "fidelity_level": paper_like_benchmark_dossier.get("fidelity_level"),
+                    "paper_benchmark_approved": paper_like_benchmark_dossier.get(
+                        "paper_benchmark_approved"
+                    ),
+                },
+                "selector_heterogeneity": {
+                    "heterogeneous_selector_evidence": selector_heterogeneity_report.get(
+                        "heterogeneous_selector_evidence"
+                    ),
+                    "selector_voting_exercised": selector_heterogeneity_report.get(
+                        "selector_voting_exercised"
+                    ),
+                    "member_count": selector_heterogeneity_report.get("member_count"),
+                },
+                "multi_seed_ablation": {
+                    "verified_multi_seed_ablation": multi_seed_ablation_evidence.get(
+                        "verified_multi_seed_ablation"
+                    ),
+                    "seed_count": multi_seed_ablation_evidence.get("seed_count"),
+                    "ablation_count": multi_seed_ablation_evidence.get("ablation_count"),
+                },
                 "scientific_discovery_readiness": {
                     "status": scientific_readiness.get("status"),
                     "scientific_claim_supported": scientific_readiness.get("scientific_claim_supported"),
@@ -1987,9 +2023,11 @@ class AgenticSciMLOrchestrator:
             mode=self.config.visual_audit_mode,
             provider_capabilities=self._provider_capabilities_dict(self.llm),
         )
-        self.storage.save_json(Path("solutions") / node.node_id / "visual_audit_report.json", report)
+        saved_plot_paths: list[Path] = []
         for filename, svg in plots.items():
-            self.storage.save_solution_text(node.node_id, filename, svg)
+            saved_plot_paths.append(self.storage.save_solution_text(node.node_id, filename, svg))
+        self._try_real_visual_provider_audit(node, report, saved_plot_paths)
+        self.storage.save_json(Path("solutions") / node.node_id / "visual_audit_report.json", report)
         self.storage.record_trace(
             "tool_span",
             "visual_audit",
@@ -2003,6 +2041,89 @@ class AgenticSciMLOrchestrator:
                 else 0,
             },
         )
+
+    def _try_real_visual_provider_audit(
+        self,
+        node: SolutionNode,
+        report: dict[str, object],
+        image_paths: list[Path],
+    ) -> None:
+        if self.config.visual_audit_mode != "real":
+            return
+        capabilities = self._provider_capabilities_dict(self.llm)
+        if capabilities.get("supports_image_inputs") is not True:
+            return
+        if not image_paths:
+            warnings = report.get("warnings")
+            if isinstance(warnings, list):
+                warnings.append("Real visual audit skipped because no image artifact was generated.")
+            return
+        prompt = (
+            "Audit these prediction-only scientific visualization artifacts. "
+            "Do not infer from private validation labels. Return JSON matching the visual_audit schema with "
+            "a concise summary, physical_consistency_checks, visual_artifacts_reviewed, warnings, "
+            "actual_image_inputs_used, and analysis_mode. Mark actual_image_inputs_used=true only because "
+            "the image artifacts were provided in this request."
+            f"\n\nSolution: {node.node_id}\n"
+            f"Benchmark: {self.problem_bundle.benchmark_name}\n"
+            f"Existing deterministic checks: {report.get('physical_consistency_checks')}\n"
+        )
+        try:
+            response = self.llm.complete_json_with_images(
+                prompt,
+                "visual_audit",
+                image_paths,
+                system="You are a conservative scientific visualization auditor.",
+                temperature=0.0,
+                reasoning_effort=self._reasoning_effort_for_role("result_analyst"),
+            )
+        except Exception as exc:
+            report["analysis_mode"] = "real_visual_provider_failed"
+            warnings = report.get("warnings")
+            if isinstance(warnings, list):
+                warnings.append(f"Real visual provider audit failed: {type(exc).__name__}: {exc}")
+            self.storage.record_trace(
+                "guardrail_span",
+                "visual_audit:image_input",
+                {
+                    "solution_id": node.node_id,
+                    "passed": False,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
+            return
+        report["actual_image_inputs_used"] = True
+        report["analysis_mode"] = "real_visual_provider_image_input"
+        report["visual_provider_output"] = response
+        report["summary"] = str(response.get("summary", report.get("summary", "")))
+        checks = response.get("physical_consistency_checks")
+        if isinstance(checks, list):
+            report["physical_consistency_checks"] = [str(item) for item in checks]
+        reviewed = response.get("visual_artifacts_reviewed")
+        if isinstance(reviewed, list):
+            report["visual_artifacts_reviewed"] = [str(item) for item in reviewed]
+        warnings = report.get("warnings")
+        response_warnings = response.get("warnings")
+        if isinstance(warnings, list):
+            warnings[:] = [
+                item
+                for item in warnings
+                if "did not send image bytes" not in str(item)
+                and "requires a provider with supports_image_inputs=true" not in str(item)
+            ]
+            if isinstance(response_warnings, list):
+                warnings.extend(str(item) for item in response_warnings)
+        metadata = getattr(self.llm, "last_call_metadata", None)
+        trace_metadata = {
+            "solution_id": node.node_id,
+            "passed": True,
+            "image_input_count": len(image_paths),
+            "actual_image_inputs_used": True,
+        }
+        if isinstance(metadata, dict):
+            trace_metadata.update(metadata)
+        self.storage.record_trace("generation_span", "visual_audit", trace_metadata)
 
     def _write_method_experience_record(self, node: SolutionNode) -> None:
         evidence = self._evidence_metadata()
@@ -2124,12 +2245,240 @@ class AgenticSciMLOrchestrator:
         self.storage.save_json("reports/visual_audit_manifest.json", manifest)
         return manifest
 
+    def _write_domain_approval_report(self) -> dict[str, object]:
+        reviewer = (self.config.domain_reviewer or "").strip()
+        notes = (self.config.domain_review_notes or "").strip()
+        approved = bool(self.config.domain_evaluator_approved and reviewer and notes)
+        blockers: list[str] = []
+        if not self.config.domain_evaluator_approved:
+            blockers.append("domain_evaluator_approved is false")
+        if not reviewer:
+            blockers.append("domain_reviewer is missing")
+        if not notes:
+            blockers.append("domain_review_notes is missing")
+        report = {
+            "schema_version": 1,
+            "status": "approved" if approved else "incomplete",
+            "approved": approved,
+            "benchmark_name": self.problem_bundle.benchmark_name,
+            "benchmark_family": self.problem_bundle.benchmark_spec.family,
+            "expert_blueprint_id": self.config.expert_blueprint_id,
+            "domain_evaluator_approved": self.config.domain_evaluator_approved,
+            "domain_reviewer": reviewer or None,
+            "domain_review_notes": notes or None,
+            "domain_review_notes_sha256": (
+                hashlib.sha256(notes.encode("utf-8")).hexdigest() if notes else None
+            ),
+            "domain_review_notes_present": bool(notes),
+            "blockers": blockers,
+            "claim_boundary": (
+                "domain_approval records human review metadata only. It does not override evaluator, "
+                "benchmark, selector, multimodal, or multi-seed readiness gates."
+            ),
+        }
+        self.storage.save_json("reports/domain_approval.json", report)
+        return report
+
+    def _write_paper_like_benchmark_dossier(self) -> dict[str, object]:
+        benchmark = self.problem_bundle.benchmark_spec
+        fidelity_matrix = benchmark.fidelity_matrix()
+        contract_payload = self.contract.to_dict() if self.contract is not None else {}
+        paper_like_ready = (
+            benchmark.fidelity_level == "paper-like"
+            and self.config.paper_benchmark_approved
+            and bool(contract_payload)
+            and fidelity_matrix.get("paper_benchmark_equivalent") is True
+        )
+        blockers: list[str] = []
+        if benchmark.fidelity_level != "paper-like":
+            blockers.append(f"benchmark fidelity is {benchmark.fidelity_level}, not paper-like")
+        if not self.config.paper_benchmark_approved:
+            blockers.append("paper_benchmark_approved is false")
+        if not contract_payload:
+            blockers.append("evaluation contract is not available")
+        if fidelity_matrix.get("paper_benchmark_equivalent") is not True:
+            blockers.append("benchmark fidelity matrix is not paper-equivalent")
+        report = {
+            "schema_version": 1,
+            "status": "ready" if paper_like_ready else "blocked",
+            "paper_like_ready": paper_like_ready,
+            "benchmark": benchmark.to_dict(),
+            "fidelity_level": benchmark.fidelity_level,
+            "paper_benchmark_approved": self.config.paper_benchmark_approved,
+            "paper_benchmark_equivalent": fidelity_matrix.get("paper_benchmark_equivalent") is True,
+            "fidelity_matrix": fidelity_matrix,
+            "contract_hash": contract_payload.get("contract_hash"),
+            "benchmark_source_manifest_digest": contract_payload.get("benchmark_source_manifest_digest"),
+            "blockers": blockers,
+            "claim_boundary": (
+                "paper_like_benchmark_dossier is a benchmark/evaluator audit. It cannot make a faithful-small "
+                "or proxy benchmark paper-like, and it does not run expensive paper-scale training."
+            ),
+        }
+        self.storage.save_json("reports/paper_like_benchmark_dossier.json", report)
+        return report
+
+    def _write_selector_heterogeneity_report(self) -> dict[str, object]:
+        selector_metadata = self._selector_panel_metadata()
+        members = selector_metadata.get("members") if isinstance(selector_metadata.get("members"), list) else []
+        runtime_diversity = self._selector_panel_runtime_diversity()
+        vote_events = self._selector_vote_event_count()
+        real_members = [
+            member
+            for member in members
+            if not _selector_member_is_mock(member)
+        ]
+        unique_models = sorted(
+            {
+                str(member.get("actual_model"))
+                for member in real_members
+                if member.get("actual_model")
+            }
+        )
+        unique_providers = sorted(
+            {
+                str(member.get("provider"))
+                for member in real_members
+                if member.get("provider")
+            }
+        )
+        configured_heterogeneous = len(real_members) >= 2 and (
+            len(unique_models) > 1 or len(unique_providers) > 1
+        )
+        heterogeneous_selector_evidence = bool(runtime_diversity.get("heterogeneous_selector_evidence"))
+        blockers: list[str] = []
+        if vote_events <= 0:
+            blockers.append("selector voting has not been exercised in this run")
+        if len(real_members) < 2:
+            blockers.append("fewer than two non-mock selector members are recorded")
+        if not configured_heterogeneous:
+            blockers.append("selector members are not heterogeneous by actual provider/model")
+        if not heterogeneous_selector_evidence:
+            blockers.append("runtime selector_votes.json does not prove heterogeneous selector evidence")
+        report = {
+            "schema_version": 1,
+            "status": "ready" if heterogeneous_selector_evidence else "blocked",
+            "heterogeneous_selector_evidence": heterogeneous_selector_evidence,
+            "configured_heterogeneous_selector_candidates": configured_heterogeneous,
+            "selector_voting_exercised": vote_events > 0,
+            "selector_vote_events": vote_events,
+            "ensemble_mode": selector_metadata.get("ensemble_mode"),
+            "member_count": len(members),
+            "real_member_count": len(real_members),
+            "unique_actual_models": unique_models,
+            "unique_providers": unique_providers,
+            "runtime_diversity": runtime_diversity,
+            "members": members,
+            "blockers": blockers,
+            "claim_boundary": (
+                "Configured selector panels are only evidence after runtime votes are recorded. Mock members, "
+                "repeated single-provider votes, or text-only selector summaries do not satisfy paper_workflow."
+            ),
+        }
+        self.storage.save_json("reports/selector_heterogeneity.json", report)
+        return report
+
+    def _write_multi_seed_ablation_evidence(self) -> dict[str, object]:
+        configured = dict(self.config.multi_seed_ablation)
+        planner_value = self.config.planner_snapshot.get("multi_seed_ablation")
+        planner_manifest = dict(planner_value) if isinstance(planner_value, dict) else {}
+        ablation_manifest = self.config.planner_snapshot.get("ablation_manifest")
+        ablation_manifest_payload = dict(ablation_manifest) if isinstance(ablation_manifest, dict) else {}
+        source = configured or planner_manifest or ablation_manifest_payload
+        seed_count = _manifest_count(source, "seed_count", "seeds")
+        ablation_count = _manifest_count(source, "ablation_count", "variants")
+        verifier = str(
+            source.get("verified_by")
+            or source.get("reviewer")
+            or source.get("verification_source")
+            or ""
+        ).strip()
+        verified = bool(source.get("verified") and verifier)
+        if ablation_manifest_payload.get("verified") is True and verifier:
+            verified = True
+        declared_manifest_path: str | None = None
+        if source:
+            declared_manifest_path = "reports/multi_seed_ablation_declared_manifest.json"
+            self.storage.save_json(declared_manifest_path, source)
+        attached_paths, missing_paths = self._multi_seed_ablation_artifact_paths(source)
+        if declared_manifest_path:
+            attached_paths = [declared_manifest_path, *attached_paths]
+        artifacts_attached = bool(attached_paths) and not missing_paths
+        verified_multi_seed_ablation = bool(
+            seed_count >= 2
+            and ablation_count >= 1
+            and verified
+            and artifacts_attached
+        )
+        blockers: list[str] = []
+        if seed_count < 2:
+            blockers.append("at least two seeds are required")
+        if ablation_count < 1:
+            blockers.append("at least one ablation variant is required")
+        if not verified:
+            blockers.append("multi-seed/ablation manifest is not marked verified with a verifier")
+        if not artifacts_attached:
+            blockers.append("verified multi-seed/ablation evidence must reference an existing run artifact")
+        report = {
+            "schema_version": 1,
+            "status": "ready" if verified_multi_seed_ablation else "blocked",
+            "verified_multi_seed_ablation": verified_multi_seed_ablation,
+            "seed_count": seed_count,
+            "ablation_count": ablation_count,
+            "verified": verified,
+            "verifier": verifier or None,
+            "artifacts_attached": artifacts_attached,
+            "attached_artifact_paths": attached_paths,
+            "missing_artifact_paths": missing_paths,
+            "configured_multi_seed_ablation": configured,
+            "planner_multi_seed_ablation": planner_manifest,
+            "planner_ablation_manifest": ablation_manifest_payload,
+            "blockers": blockers,
+            "claim_boundary": (
+                "This manifest records attached multi-seed/ablation evidence. It is not a substitute for "
+                "running the corresponding experiments or reviewing failed samples."
+            ),
+        }
+        self.storage.save_json("reports/multi_seed_ablation_evidence.json", report)
+        return report
+
+    def _multi_seed_ablation_artifact_paths(self, manifest: dict[str, object]) -> tuple[list[str], list[str]]:
+        raw_paths: list[str] = []
+        for key in ("report_path", "summary_path", "manifest_path"):
+            value = manifest.get(key)
+            if isinstance(value, str) and value.strip():
+                raw_paths.append(value.strip())
+        artifact_paths = manifest.get("artifact_paths")
+        if isinstance(artifact_paths, list):
+            raw_paths.extend(str(value).strip() for value in artifact_paths if str(value).strip())
+        attached: list[str] = []
+        missing: list[str] = []
+        for raw_path in dict.fromkeys(raw_paths):
+            candidate = Path(raw_path)
+            if candidate.is_absolute() or ".." in candidate.parts:
+                missing.append(raw_path)
+                continue
+            resolved = (self.storage.run_dir / candidate).resolve(strict=False)
+            run_root = self.storage.run_dir.resolve(strict=False)
+            if resolved != run_root and run_root not in resolved.parents:
+                missing.append(raw_path)
+                continue
+            if resolved.is_file():
+                attached.append(str(resolved.relative_to(run_root)))
+            else:
+                missing.append(raw_path)
+        return attached, missing
+
     def _write_scientific_discovery_readiness_report(
         self,
         *,
         evidence_metadata: dict[str, object],
         visual_audit_manifest: dict[str, object],
         method_experience_manifest: dict[str, object],
+        domain_approval_report: dict[str, object],
+        paper_like_benchmark_dossier: dict[str, object],
+        selector_heterogeneity_report: dict[str, object],
+        multi_seed_ablation_evidence: dict[str, object],
     ) -> dict[str, object]:
         claim_gate = (
             evidence_metadata.get("claim_gate")
@@ -2155,6 +2504,11 @@ class AgenticSciMLOrchestrator:
             expert_blueprint_id=self.config.expert_blueprint_id,
             problem_intake=dict(self.config.problem_intake),
             planner_snapshot=dict(self.config.planner_snapshot),
+            multi_seed_ablation=dict(self.config.multi_seed_ablation),
+            domain_approval_report=domain_approval_report,
+            paper_like_benchmark_dossier=paper_like_benchmark_dossier,
+            selector_heterogeneity_report=selector_heterogeneity_report,
+            multi_seed_ablation_evidence=multi_seed_ablation_evidence,
         )
         self.storage.save_json("reports/scientific_discovery_readiness.json", report)
         self.storage.save_text(
@@ -2366,6 +2720,25 @@ class AgenticSciMLOrchestrator:
             temperature=float(settings["temperature"]),
             reasoning_effort=str(settings["reasoning_effort"]),
         )
+
+
+def _selector_member_is_mock(member: object) -> bool:
+    if not isinstance(member, dict):
+        return True
+    actual_model = str(member.get("actual_model", ""))
+    provider = str(member.get("provider", ""))
+    adapter_type = str(member.get("adapter_type", ""))
+    return actual_model == "mock" or provider == "MockLLMClient" or adapter_type == "MockLLMClient"
+
+
+def _manifest_count(manifest: dict[str, object], count_key: str, list_key: str) -> int:
+    count = manifest.get(count_key)
+    if isinstance(count, int) and not isinstance(count, bool):
+        return count
+    values = manifest.get(list_key)
+    if isinstance(values, list):
+        return len(values)
+    return 0
 
 
 def _failure_phase(command: list[str]) -> str:

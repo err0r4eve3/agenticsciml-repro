@@ -37,6 +37,10 @@ ARTIFACT_CAPTURE_REQUIREMENTS = (
     "reports/data_analysis_structured.json",
     "reports/evolution_health.json",
     "reports/visual_audit_manifest.json",
+    "reports/domain_approval.json",
+    "reports/paper_like_benchmark_dossier.json",
+    "reports/selector_heterogeneity.json",
+    "reports/multi_seed_ablation_evidence.json",
     "reports/scientific_discovery_readiness.json",
     "reports/scientific_discovery_readiness.md",
     "reports/method_experience_cache.json",
@@ -74,6 +78,7 @@ def build_readiness_report(
     visual_audit_mode: str = "off",
     resource_constraints: dict[str, Any] | None = None,
     expert_blueprint_id: str | None = None,
+    multi_seed_ablation: dict[str, Any] | None = None,
 ) -> dict[str, object]:
     normalized_ids = _dedupe_strings(selected_algorithm_ids)
     locks = [_normalize_strategy_lock(item, index) for index, item in enumerate(manual_strategy_locks or [])]
@@ -106,6 +111,7 @@ def build_readiness_report(
         visual_audit_mode=visual_audit_mode,
         resource_constraints=resource_constraints or {},
         expert_blueprint_id=expert_blueprint_id,
+        multi_seed_ablation=multi_seed_ablation or {},
     )
     checks.append(
         _check(
@@ -151,6 +157,7 @@ def build_readiness_report(
         "visual_audit_mode": visual_audit_mode,
         "resource_constraints": dict(resource_constraints or {}),
         "expert_blueprint_id": expert_blueprint_id,
+        "multi_seed_ablation": dict(multi_seed_ablation or {}),
     }
     report_id = "readiness_" + hashlib.sha256(
         json.dumps(report_payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
@@ -187,6 +194,10 @@ def build_readiness_report(
             "expected_artifacts": [
                 "reports/scientific_discovery_readiness.json",
                 "reports/visual_audit_manifest.json",
+                "reports/domain_approval.json",
+                "reports/paper_like_benchmark_dossier.json",
+                "reports/selector_heterogeneity.json",
+                "reports/multi_seed_ablation_evidence.json",
                 "solutions/*/visual_audit_report.json",
                 "solutions/*/method_experience_record.json",
             ],
@@ -377,6 +388,7 @@ def _append_scientific_readiness_intake_checks(
     visual_audit_mode: str,
     resource_constraints: dict[str, Any],
     expert_blueprint_id: str | None,
+    multi_seed_ablation: dict[str, Any],
 ) -> None:
     checks.append(
         _check(
@@ -410,6 +422,17 @@ def _append_scientific_readiness_intake_checks(
             "Expert blueprint is recorded for controlled method search."
             if expert_blueprint_id
             else "Expert blueprint is missing; fluid/PDE readiness will remain blocked for real scientific claims.",
+        )
+    )
+    checks.append(
+        _check(
+            "multi-seed-ablation.present",
+            "scientific_readiness",
+            "info" if multi_seed_ablation else "warning",
+            True,
+            "Multi-seed/ablation evidence manifest is recorded for post-run readiness review."
+            if multi_seed_ablation
+            else "Multi-seed/ablation evidence is missing; paper_workflow readiness will remain blocked.",
         )
     )
 

@@ -89,6 +89,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         visual_audit_mode=args.visual_audit_mode,
         resource_constraints=_json_object_arg(args.resource_constraints_json, "--resource-constraints-json"),
         expert_blueprint_id=args.expert_blueprint_id,
+        multi_seed_ablation=_json_object_arg(args.multi_seed_ablation_json, "--multi-seed-ablation-json"),
         auto_approve_evaluation=not args.require_evaluation_approval,
         resume=args.resume,
     )
@@ -223,6 +224,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--resource-constraints-json",
         default="{}",
         help="JSON object describing CPU/GPU/time/dependency/data limits for readiness artifacts",
+    )
+    run.add_argument(
+        "--multi-seed-ablation-json",
+        default="{}",
+        help="JSON object describing verified multi-seed or ablation evidence for readiness artifacts",
     )
     run.add_argument(
         "--selector-panel-models",

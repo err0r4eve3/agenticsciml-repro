@@ -26,15 +26,29 @@ def build_scientific_discovery_readiness_report(
     expert_blueprint_id: str | None,
     problem_intake: dict[str, Any],
     planner_snapshot: dict[str, Any],
+    multi_seed_ablation: dict[str, Any] | None = None,
+    domain_approval_report: dict[str, Any] | None = None,
+    paper_like_benchmark_dossier: dict[str, Any] | None = None,
+    selector_heterogeneity_report: dict[str, Any] | None = None,
+    multi_seed_ablation_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    domain_report = domain_approval_report or {}
+    paper_dossier = paper_like_benchmark_dossier or {}
+    selector_report = selector_heterogeneity_report or {}
+    multi_seed_manifest = multi_seed_ablation_evidence or {}
     checks = [
         _check(
             "paper_like_benchmark",
             "paper-like benchmark is selected and explicitly approved",
-            benchmark.fidelity_level == "paper-like" and paper_benchmark_approved,
+            (
+                benchmark.fidelity_level == "paper-like"
+                and paper_benchmark_approved
+                and paper_dossier.get("paper_like_ready", True) is True
+            ),
             {
                 "fidelity_level": benchmark.fidelity_level,
                 "paper_benchmark_approved": paper_benchmark_approved,
+                "paper_like_benchmark_dossier": paper_dossier,
             },
         ),
         _check(
@@ -46,8 +60,12 @@ def build_scientific_discovery_readiness_report(
         _check(
             "heterogeneous_selector",
             "selector evidence comes from at least two non-mock heterogeneous provider/model paths",
-            bool(selector_diversity.get("heterogeneous_selector_evidence")),
-            selector_diversity,
+            bool(
+                selector_report.get("heterogeneous_selector_evidence")
+                if selector_report
+                else selector_diversity.get("heterogeneous_selector_evidence")
+            ),
+            selector_report or selector_diversity,
         ),
         _check(
             "paper_equivalent_kb",
@@ -68,21 +86,32 @@ def build_scientific_discovery_readiness_report(
         _check(
             "domain_review",
             "human domain evaluator approved evaluator and claim boundary",
-            bool(domain_evaluator_approved and domain_reviewer and domain_review_notes),
+            bool(
+                domain_report.get("approved")
+                if domain_report
+                else domain_evaluator_approved and domain_reviewer and domain_review_notes
+            ),
             {
                 "domain_evaluator_approved": domain_evaluator_approved,
                 "domain_reviewer": domain_reviewer,
                 "domain_review_notes_present": bool(domain_review_notes),
+                "domain_approval_report": domain_report,
             },
         ),
         _check(
             "multi_seed_ablation",
             "multi-seed or ablation evidence is attached to the run",
-            _multi_seed_or_ablation_present(planner_snapshot),
+            _multi_seed_or_ablation_present(
+                planner_snapshot,
+                multi_seed_ablation or {},
+                multi_seed_manifest,
+            ),
             {
                 "planner_snapshot_keys": sorted(planner_snapshot),
                 "multi_seed_ablation": planner_snapshot.get("multi_seed_ablation"),
                 "ablation_manifest": planner_snapshot.get("ablation_manifest"),
+                "configured_multi_seed_ablation": multi_seed_ablation or {},
+                "multi_seed_ablation_evidence": multi_seed_manifest,
             },
         ),
         _check(
@@ -131,6 +160,10 @@ def build_scientific_discovery_readiness_report(
         "claim_gate": claim_gate,
         "visual_audit_manifest": visual_audit_manifest,
         "method_experience_manifest": method_experience_manifest,
+        "domain_approval_report": domain_report,
+        "paper_like_benchmark_dossier": paper_dossier,
+        "selector_heterogeneity_report": selector_report,
+        "multi_seed_ablation_evidence": multi_seed_manifest,
         "resource_constraints": dict(resource_constraints),
         "expert_blueprint_id": expert_blueprint_id,
         "claim_boundary": (
@@ -183,18 +216,34 @@ def _check(
     }
 
 
-def _multi_seed_or_ablation_present(planner_snapshot: dict[str, Any]) -> bool:
-    multi_seed = planner_snapshot.get("multi_seed_ablation")
-    if isinstance(multi_seed, dict):
-        seed_count = multi_seed.get("seed_count")
-        ablation_count = multi_seed.get("ablation_count")
-        return (
-            isinstance(seed_count, int)
-            and not isinstance(seed_count, bool)
-            and seed_count >= 2
-            and isinstance(ablation_count, int)
-            and not isinstance(ablation_count, bool)
-            and ablation_count >= 1
-        )
+def _multi_seed_or_ablation_present(
+    planner_snapshot: dict[str, Any],
+    configured_multi_seed: dict[str, Any],
+    evidence_manifest: dict[str, Any],
+) -> bool:
+    if evidence_manifest:
+        return evidence_manifest.get("verified_multi_seed_ablation") is True
+    for multi_seed in (
+        configured_multi_seed,
+        planner_snapshot.get("multi_seed_ablation"),
+    ):
+        if isinstance(multi_seed, dict) and _multi_seed_manifest_satisfies_minimum(multi_seed):
+            return True
     ablation_manifest = planner_snapshot.get("ablation_manifest")
     return isinstance(ablation_manifest, dict) and bool(ablation_manifest.get("verified"))
+
+
+def _multi_seed_manifest_satisfies_minimum(manifest: dict[str, Any]) -> bool:
+    seed_count = _count_from_manifest(manifest, "seed_count", "seeds")
+    ablation_count = _count_from_manifest(manifest, "ablation_count", "variants")
+    return seed_count >= 2 and ablation_count >= 1 and manifest.get("verified") is True
+
+
+def _count_from_manifest(manifest: dict[str, Any], count_key: str, list_key: str) -> int:
+    count = manifest.get(count_key)
+    if isinstance(count, int) and not isinstance(count, bool):
+        return count
+    values = manifest.get(list_key)
+    if isinstance(values, list):
+        return len(values)
+    return 0

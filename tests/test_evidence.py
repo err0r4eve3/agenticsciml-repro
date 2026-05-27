@@ -80,6 +80,7 @@ def test_paper_workflow_claim_gate_blocks_missing_paper_evidence() -> None:
     assert gate["paper_level_claim_supported"] is False
     assert "paper_workflow requires real LLM mode" in gate["reasons"]
     assert "paper_workflow requires paper-like benchmark fidelity, got faithful-small" in gate["reasons"]
+    assert "paper_workflow requires domain reviewer and review notes" in gate["reasons"]
 
 
 def test_scientific_discovery_readiness_fails_closed_for_mock_runs() -> None:

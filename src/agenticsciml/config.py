@@ -517,6 +517,7 @@ class ExperimentConfig:
     visual_audit_mode: str = "off"
     resource_constraints: dict[str, Any] = field(default_factory=dict)
     expert_blueprint_id: str | None = None
+    multi_seed_ablation: dict[str, Any] = field(default_factory=dict)
     auto_approve_evaluation: bool = True
     resume: bool = False
 
@@ -525,6 +526,8 @@ class ExperimentConfig:
         self.expert_blueprint_id = _validate_expert_blueprint_id(self.expert_blueprint_id)
         if not isinstance(self.resource_constraints, dict):
             raise ValueError("resource_constraints must be a JSON object")
+        if not isinstance(self.multi_seed_ablation, dict):
+            raise ValueError("multi_seed_ablation must be a JSON object")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -547,6 +550,7 @@ class ExperimentConfig:
             "visual_audit_mode": self.visual_audit_mode,
             "resource_constraints": dict(self.resource_constraints),
             "expert_blueprint_id": self.expert_blueprint_id,
+            "multi_seed_ablation": dict(self.multi_seed_ablation),
             "auto_approve_evaluation": self.auto_approve_evaluation,
             "resume": self.resume,
         }
@@ -606,6 +610,11 @@ class ExperimentConfig:
                 str(data["expert_blueprint_id"])
                 if data.get("expert_blueprint_id") is not None
                 else None
+            ),
+            multi_seed_ablation=(
+                dict(data["multi_seed_ablation"])
+                if isinstance(data.get("multi_seed_ablation"), dict)
+                else {}
             ),
             auto_approve_evaluation=bool(data.get("auto_approve_evaluation", True)),
             resume=bool(data.get("resume", False)),

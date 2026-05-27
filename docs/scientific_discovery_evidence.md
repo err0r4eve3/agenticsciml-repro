@@ -31,14 +31,28 @@ NotebookLM summary 当作 evaluator 事实。
   领域审核、多 seed/ablation、失败归因、专家蓝图和资源约束。
 - `solutions/<id>/visual_audit_report.json` 与 `reports/visual_audit_manifest.json`：
   记录 field / residual proxy / boundary proxy SVG artifact，并固定
-  `privacy_boundary=prediction_only_no_validation_labels`。
+  `privacy_boundary=prediction_only_no_validation_labels`。`visual_audit_mode=real`
+  只有在真实 provider capability 支持图像输入且图像请求成功时，才允许记录
+  `actual_image_inputs_used=true`。
 - `solutions/<id>/method_experience_record.json` 与
   `reports/method_experience_cache.json`：把 operator assignment、policy fidelity、
   mutation status、score/failure kind 和 method fingerprint 写入本地经验层。
 - `selector_votes.json`：记录每票的 provider、model、adapter 和 capabilities；
   `paper_workflow` 仍要求非 mock 的异构 selector 证据。
+- `reports/domain_approval.json`：记录 reviewer、review notes、审批状态和 claim boundary；
+  只证明人工审批记录存在，不覆盖其他 readiness gate。
+- `reports/paper_like_benchmark_dossier.json`：把 benchmark fidelity、fidelity matrix、
+  contract hash 和 paper benchmark approval 放入独立 dossier；不能把 `faithful-small`
+  提升成 `paper-like`。
+- `reports/selector_heterogeneity.json`：汇总 selector runtime votes、真实非 mock 成员、
+  provider/model diversity 和 blocker；配置了 panel 但没有 runtime votes 时仍 blocked。
+- `reports/multi_seed_ablation_evidence.json`：记录外部或 planner 附带的多 seed/ablation
+  manifest。必须 `verified=true`、记录 `verified_by`/reviewer、至少两个 seed、至少一个
+  ablation variant；orchestrator 会把声明 manifest 固化为 run artifact 后，才通过
+  scientific readiness 的对应检查。
 - Problem Intake / Web / CLI：新增 `visual_audit_mode`、`resource_constraints` 和
-  `expert_blueprint_id`，但 custom benchmark 仍只能生成 `workflow_proxy` scaffold。
+  `expert_blueprint_id` / `multi_seed_ablation`，但 custom benchmark 仍只能生成
+  `workflow_proxy` scaffold。
 
 ## Claim Gate
 
@@ -51,7 +65,7 @@ NotebookLM summary 当作 evaluator 事实。
 - paper-equivalent KB provenance。
 - real vision provider 实际接收 image input，并在 artifact 中记录
   `actual_image_inputs_used=true`。
-- 多 seed 或 ablation evidence 已写入 planner/run 证据。
+- 多 seed 或 ablation evidence 已写入 planner/run 证据，并带有已验证 manifest。
 - method experience 记录覆盖成功、失败、plateau 或 policy-fidelity mismatch 等归因。
 
 否则 readiness report 必须 `status=blocked`，并且 `trace_summary.json` 不允许

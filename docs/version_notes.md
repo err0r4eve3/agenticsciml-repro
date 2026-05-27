@@ -2,6 +2,40 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-27 Paper Workflow Evidence Modules
+
+本轮继续推进科学证据链，但仍不默认启动 real LLM、不跑昂贵 paper-scale 训练，也不把
+`faithful-small` 或 mock run 写成科学发现。
+
+已实现：
+
+- OpenAI native Responses adapter 新增 `complete_json_with_images(...)`，真实 visual audit
+  可以把已生成的 SVG 诊断图作为 image input 发送给支持图像输入的 provider；OpenAI-compatible
+  chat 和 mock 路径仍默认不支持。
+- `visual_audit_mode=real` 现在只有在 provider capability 明确
+  `supports_image_inputs=true` 且图像请求成功时才记录 `actual_image_inputs_used=true`。
+- 新增 run-level evidence artifacts：
+  `reports/domain_approval.json`、`reports/paper_like_benchmark_dossier.json`、
+  `reports/selector_heterogeneity.json` 和 `reports/multi_seed_ablation_evidence.json`。
+- `reports/scientific_discovery_readiness.json` 现在会纳入上述 artifacts，而不是只看配置字段；
+  domain approval、paper-like benchmark、异构 selector、多 seed/ablation 都有独立 blocker。
+- CLI/Web/Problem Intake 继续传播 `multi_seed_ablation`；ChatUI solver request 也能携带
+  domain reviewer/notes 与 paper benchmark approval。
+
+验证：
+
+- `PYTHONPATH=src uv run --python 3.11 --extra dev python -m compileall -q src/agenticsciml`：通过。
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_evidence.py tests/test_openai_adapter.py::test_openai_adapter_sends_image_inputs_to_native_responses tests/test_orchestrator_cli.py::test_real_visual_audit_records_actual_image_input_with_capable_provider tests/test_orchestrator_cli.py::test_run_writes_domain_selector_paper_and_multiseed_readiness_artifacts -q`：12 passed。
+
+边界：
+
+- 这些模块是证据入口和 fail-closed gate，不等于已经具备真实科学发现。
+- paper-like benchmark 仍需要真实 paper-equivalent 数据、预算、evaluator 和审批；当前
+  `cylinder_wake_reconstruction_faithful_small` 仍是 `faithful-small` pilot。
+- 多 seed/ablation manifest 必须标记 `verified=true`、记录 `verified_by`/reviewer、
+  满足至少 2 个 seed 和至少 1 个 ablation variant；orchestrator 会把声明 manifest
+  固化为 run artifact 后再让 readiness 对应检查通过。它仍不替代实际实验和失败样本复核。
+
 ## 2026-05-25 Scientific Discovery Evidence Chain
 
 本轮根据 NotebookLM notebook `Agentic AI for Scientific Computing and Finite Element Methods`

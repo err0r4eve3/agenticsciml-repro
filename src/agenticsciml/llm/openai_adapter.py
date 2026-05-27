@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import base64
 import json
+import mimetypes
 import os
+from pathlib import Path
 from typing import Any
 
 from agenticsciml.agents.output_schemas import (
@@ -107,6 +110,54 @@ class OpenAIAdapter(LLMClient):
             reasoning_effort=reasoning_effort,
         )
 
+    def complete_json_with_images(
+        self,
+        prompt: str,
+        schema_name: str,
+        image_paths: list[Path],
+        system: str | None = None,
+        temperature: float = 0.0,
+        reasoning_effort: str | None = None,
+    ) -> dict[str, Any]:
+        if not image_paths:
+            raise ValueError("complete_json_with_images requires at least one image path.")
+        if not (
+            self.provider_capabilities.supports_responses
+            and self.provider_capabilities.supports_structured_outputs
+            and self.provider_capabilities.supports_image_inputs
+        ):
+            raise RuntimeError("Image JSON calls require OpenAI native Responses with image input support.")
+        model = output_model_for(schema_name)
+        if model is None:
+            raise RuntimeError(f"No structured output schema registered for {schema_name}.")
+        request_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "input": _response_multimodal_input(prompt, system, image_paths),
+            "temperature": temperature,
+            "text_format": model,
+        }
+        if reasoning_effort is not None:
+            request_kwargs["reasoning"] = {"effort": reasoning_effort}
+        response = self.client.responses.parse(**request_kwargs)
+        self.last_call_metadata = self._metadata(
+            method="complete_json_with_images",
+            schema_name=schema_name,
+            response=response,
+            reasoning_effort=reasoning_effort,
+        )
+        self.last_call_metadata["image_input_count"] = len(image_paths)
+        self.last_call_metadata["image_input_filenames"] = [path.name for path in image_paths]
+        parsed = _extract_parsed_response(response)
+        if parsed is None:
+            raise RuntimeError(f"Model did not return parsed structured output for {schema_name}.")
+        if hasattr(parsed, "model_dump"):
+            payload = parsed.model_dump(exclude_none=True)
+        elif isinstance(parsed, dict):
+            payload = parsed
+        else:
+            raise RuntimeError(f"Parsed structured output for {schema_name} has unsupported type.")
+        return validate_output_payload(payload, schema_name=schema_name)
+
     def _complete_json_responses(
         self,
         prompt: str,
@@ -202,6 +253,39 @@ def _response_input(prompt: str, system: str | None) -> list[dict[str, str]]:
         items.append({"role": "system", "content": system})
     items.append({"role": "user", "content": prompt})
     return items
+
+
+def _response_multimodal_input(
+    prompt: str,
+    system: str | None,
+    image_paths: list[Path],
+) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    if system:
+        items.append({"role": "system", "content": system})
+    content: list[dict[str, object]] = [{"type": "input_text", "text": prompt}]
+    for image_path in image_paths:
+        content.append(
+            {
+                "type": "input_image",
+                "image_url": _image_data_url(image_path),
+                "detail": "auto",
+            }
+        )
+    items.append({"role": "user", "content": content})
+    return items
+
+
+def _image_data_url(path: Path) -> str:
+    if not path.exists() or not path.is_file():
+        raise FileNotFoundError(f"Image input artifact not found: {path}")
+    mime_type = mimetypes.guess_type(path.name)[0]
+    if mime_type is None and path.suffix.lower() == ".svg":
+        mime_type = "image/svg+xml"
+    if mime_type is None or not mime_type.startswith("image/"):
+        raise ValueError(f"Image input artifact must have an image MIME type: {path.name}")
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
 
 
 def _normalize_model_name(model: str, base_url: str | None) -> str:

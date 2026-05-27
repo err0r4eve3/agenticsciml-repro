@@ -119,6 +119,8 @@ def claim_gate_for_run(
         reasons.append(f"paper_workflow requires paper-like benchmark fidelity, got {fidelity_level}")
     if not domain_evaluator_approved:
         reasons.append("paper_workflow requires human domain evaluator approval")
+    if not ((domain_reviewer or "").strip() and (domain_review_notes or "").strip()):
+        reasons.append("paper_workflow requires domain reviewer and review notes")
     if not paper_benchmark_approved:
         reasons.append("paper_workflow requires explicit paper benchmark approval")
     if not selector_heterogeneous:

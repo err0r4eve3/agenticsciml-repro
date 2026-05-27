@@ -135,6 +135,7 @@ class RunStartRequest(BaseModel):
     visual_audit_mode: VisualAuditMode = "off"
     resource_constraints: dict[str, Any] = Field(default_factory=dict)
     expert_blueprint_id: ExpertBlueprintId | None = None
+    multi_seed_ablation: dict[str, Any] = Field(default_factory=dict)
     auto_approve_evaluation: bool = True
     resume: bool = False
     background: bool = False
@@ -164,6 +165,7 @@ class ProblemIntakeRequest(BaseModel):
     visual_audit_mode: VisualAuditMode = "off"
     resource_constraints: dict[str, Any] = Field(default_factory=dict)
     expert_blueprint_id: ExpertBlueprintId | None = None
+    multi_seed_ablation: dict[str, Any] = Field(default_factory=dict)
 
 
 class RunReadinessRequest(BaseModel):
@@ -190,6 +192,7 @@ class RunReadinessRequest(BaseModel):
     visual_audit_mode: VisualAuditMode = "off"
     resource_constraints: dict[str, Any] = Field(default_factory=dict)
     expert_blueprint_id: ExpertBlueprintId | None = None
+    multi_seed_ablation: dict[str, Any] = Field(default_factory=dict)
     real_confirmed: bool = False
 
 
@@ -212,9 +215,14 @@ class SolverChatRequest(BaseModel):
     agent_models: dict[str, AgentModelRequest] = Field(default_factory=dict)
     selector_panel: list[AgentModelRequest] = Field(default_factory=list, max_length=16)
     claim_level: ClaimLevel = "workflow_proxy"
+    domain_evaluator_approved: bool = False
+    domain_reviewer: str | None = Field(default=None, max_length=120)
+    domain_review_notes: str | None = Field(default=None, max_length=2000)
+    paper_benchmark_approved: bool = False
     visual_audit_mode: VisualAuditMode = "off"
     resource_constraints: dict[str, Any] = Field(default_factory=dict)
     expert_blueprint_id: ExpertBlueprintId | None = None
+    multi_seed_ablation: dict[str, Any] = Field(default_factory=dict)
 
 
 class AccountCreateRequest(BaseModel):
@@ -536,6 +544,7 @@ def _run_orchestrator(
             visual_audit_mode=request.visual_audit_mode,
             resource_constraints=_normalized_mapping(request.resource_constraints),
             expert_blueprint_id=request.expert_blueprint_id,
+            multi_seed_ablation=_normalized_mapping(request.multi_seed_ablation),
             auto_approve_evaluation=request.auto_approve_evaluation,
             resume=request.resume,
         )
@@ -598,6 +607,7 @@ def _readiness_report_for_request(
         visual_audit_mode=request.visual_audit_mode,
         resource_constraints=_normalized_mapping(request.resource_constraints),
         expert_blueprint_id=request.expert_blueprint_id,
+        multi_seed_ablation=_normalized_mapping(request.multi_seed_ablation),
     )
 
 
@@ -676,6 +686,7 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
         "visual_audit_mode": request.visual_audit_mode,
         "resource_constraints": _normalized_mapping(request.resource_constraints),
         "expert_blueprint_id": request.expert_blueprint_id,
+        "multi_seed_ablation": _normalized_mapping(request.multi_seed_ablation),
         "agent_models": {
             role: config.to_dict()
             for role, config in _agent_configs_from_problem_request(request).items()
@@ -749,6 +760,7 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
             "visual_audit_mode": request.visual_audit_mode,
             "resource_constraints": _normalized_mapping(request.resource_constraints),
             "expert_blueprint_id": request.expert_blueprint_id,
+            "multi_seed_ablation": _normalized_mapping(request.multi_seed_ablation),
         },
         "agent_models": {
             role: config.to_dict()
@@ -780,6 +792,7 @@ def _problem_intake_snapshot(request: ProblemIntakeRequest) -> dict[str, object]
         "domain_review_required": True,
         "resource_constraints": _normalized_mapping(request.resource_constraints),
         "expert_blueprint_id": request.expert_blueprint_id,
+        "multi_seed_ablation": _normalized_mapping(request.multi_seed_ablation),
     }
 
 
@@ -805,6 +818,7 @@ def _planner_snapshot(
         "resource_constraints": _normalized_mapping(request.resource_constraints),
         "expert_blueprint_id": request.expert_blueprint_id,
         "visual_audit_mode": request.visual_audit_mode,
+        "multi_seed_ablation": _normalized_mapping(request.multi_seed_ablation),
         "claim_boundary": (
             "Problem-intake planning is a controlled mapping to local benchmark and strategy seed catalogs. "
             "It is not evaluator synthesis and is not scientific evidence."
@@ -1225,6 +1239,8 @@ def _merge_resume_request(run_id: str, request: RunStartRequest) -> RunStartRequ
             updates["resource_constraints"] = dict(existing_config.resource_constraints)
         if "expert_blueprint_id" not in explicitly_set:
             updates["expert_blueprint_id"] = existing_config.expert_blueprint_id
+        if "multi_seed_ablation" not in explicitly_set:
+            updates["multi_seed_ablation"] = dict(existing_config.multi_seed_ablation)
         if "auto_approve_evaluation" not in explicitly_set:
             updates["auto_approve_evaluation"] = existing_config.auto_approve_evaluation
 
@@ -2140,9 +2156,14 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
                         "mode": request.mode,
                         "account_id": resolved_account_id,
                         "claim_level": request.claim_level,
+                        "domain_evaluator_approved": request.domain_evaluator_approved,
+                        "domain_reviewer": request.domain_reviewer,
+                        "domain_review_notes": request.domain_review_notes,
+                        "paper_benchmark_approved": request.paper_benchmark_approved,
                         "visual_audit_mode": request.visual_audit_mode,
                         "resource_constraints": _normalized_mapping(request.resource_constraints),
                         "expert_blueprint_id": request.expert_blueprint_id,
+                        "multi_seed_ablation": _normalized_mapping(request.multi_seed_ablation),
                         "background": True,
                     },
                 }
@@ -2283,9 +2304,14 @@ def _problem_intake_request_from_chat(request: SolverChatRequest) -> ProblemInta
         selector_panel=request.selector_panel,
         allow_custom_benchmark=_should_allow_custom_benchmark_from_chat(request.message),
         claim_level=request.claim_level,
+        domain_evaluator_approved=request.domain_evaluator_approved,
+        domain_reviewer=request.domain_reviewer,
+        domain_review_notes=request.domain_review_notes,
+        paper_benchmark_approved=request.paper_benchmark_approved,
         visual_audit_mode=request.visual_audit_mode,
         resource_constraints=_normalized_mapping(request.resource_constraints),
         expert_blueprint_id=request.expert_blueprint_id,
+        multi_seed_ablation=_normalized_mapping(request.multi_seed_ablation),
     )
 
 
