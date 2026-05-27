@@ -9,6 +9,13 @@
 
 追加迭代：
 
+- 新增 `agenticsciml.ablation_evidence` 和 CLI `verify-ablation-evidence`，可以读取
+  `ablation_runs.csv` / `ablation_summary.csv`，验证至少两个 seed、至少一个 non-baseline
+  ablation variant、每个 ablation variant 的 seed 覆盖、verifier 和 artifact digest。
+- `multi_seed_ablation.ablation_output_dir` 现在会让 orchestrator 重新生成
+  `reports/multi_seed_ablation_verified_manifest.json`，再纳入
+  `reports/multi_seed_ablation_evidence.json` 和 scientific readiness；手写 manifest
+  仍只是外部声明路径，不替代原始 ablation 输出。
 - `AgentConfig` / Web `AgentModelRequest` 支持 per-member `base_url`。selector panel
   可以在不记录 API key 的前提下，为不同 selector member 指定不同 OpenAI-compatible
   provider endpoint。

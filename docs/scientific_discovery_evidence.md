@@ -51,7 +51,10 @@ NotebookLM summary 当作 evaluator 事实。
 - `reports/multi_seed_ablation_evidence.json`：记录外部或 planner 附带的多 seed/ablation
   manifest。必须 `verified=true`、记录 `verified_by`/reviewer、至少两个 seed、至少一个
   ablation variant；orchestrator 会把声明 manifest 固化为 run artifact 后，才通过
-  scientific readiness 的对应检查。
+  scientific readiness 的对应检查。若提供 `ablation_output_dir`，orchestrator 会读取
+  `ablation_runs.csv` / `ablation_summary.csv`，重新生成
+  `reports/multi_seed_ablation_verified_manifest.json`，并要求 non-baseline ablation
+  variant 覆盖至少两个 seed。
 - Problem Intake / Web / CLI：新增 `visual_audit_mode`、`resource_constraints` 和
   `expert_blueprint_id` / `multi_seed_ablation`，但 custom benchmark 仍只能生成
   `workflow_proxy` scaffold。

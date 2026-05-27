@@ -27,6 +27,10 @@ from agenticsciml.agents.selector import (
     SelectorVoteResult,
     build_selector_vote_result,
 )
+from agenticsciml.ablation_evidence import (
+    build_multi_seed_ablation_verified_manifest,
+    has_ablation_output_source,
+)
 from agenticsciml.algorithm_catalog import list_algorithms
 from agenticsciml.benchmarks import BenchmarkContractFactory, ProblemBundle
 from agenticsciml.config import (
@@ -2386,15 +2390,23 @@ class AgenticSciMLOrchestrator:
         ablation_manifest = self.config.planner_snapshot.get("ablation_manifest")
         ablation_manifest_payload = dict(ablation_manifest) if isinstance(ablation_manifest, dict) else {}
         source = configured or planner_manifest or ablation_manifest_payload
-        seed_count = _manifest_count(source, "seed_count", "seeds")
-        ablation_count = _manifest_count(source, "ablation_count", "variants")
+        verified_output_manifest: dict[str, object] = {}
+        verified_output_manifest_path: str | None = None
+        if source and has_ablation_output_source(source):
+            verified_output_manifest = build_multi_seed_ablation_verified_manifest(source)
+            verified_output_manifest_path = "reports/multi_seed_ablation_verified_manifest.json"
+            self.storage.save_json(verified_output_manifest_path, verified_output_manifest)
+        counting_source = verified_output_manifest or source
+        seed_count = _manifest_count(counting_source, "seed_count", "seeds")
+        ablation_list_key = "ablation_variants" if verified_output_manifest else "variants"
+        ablation_count = _manifest_count(counting_source, "ablation_count", ablation_list_key)
         verifier = str(
-            source.get("verified_by")
-            or source.get("reviewer")
-            or source.get("verification_source")
+            counting_source.get("verified_by")
+            or counting_source.get("reviewer")
+            or counting_source.get("verification_source")
             or ""
         ).strip()
-        verified = bool(source.get("verified") and verifier)
+        verified = bool(counting_source.get("verified") and verifier)
         if ablation_manifest_payload.get("verified") is True and verifier:
             verified = True
         declared_manifest_path: str | None = None
@@ -2402,6 +2414,8 @@ class AgenticSciMLOrchestrator:
             declared_manifest_path = "reports/multi_seed_ablation_declared_manifest.json"
             self.storage.save_json(declared_manifest_path, source)
         attached_paths, missing_paths = self._multi_seed_ablation_artifact_paths(source)
+        if verified_output_manifest_path:
+            attached_paths = [verified_output_manifest_path, *attached_paths]
         if declared_manifest_path:
             attached_paths = [declared_manifest_path, *attached_paths]
         artifacts_attached = bool(attached_paths) and not missing_paths
@@ -2420,6 +2434,9 @@ class AgenticSciMLOrchestrator:
             blockers.append("multi-seed/ablation manifest is not marked verified with a verifier")
         if not artifacts_attached:
             blockers.append("verified multi-seed/ablation evidence must reference an existing run artifact")
+        for blocker in verified_output_manifest.get("blockers", []):
+            if isinstance(blocker, str) and blocker not in blockers:
+                blockers.append(blocker)
         report = {
             "schema_version": 1,
             "status": "ready" if verified_multi_seed_ablation else "blocked",
@@ -2434,6 +2451,7 @@ class AgenticSciMLOrchestrator:
             "configured_multi_seed_ablation": configured,
             "planner_multi_seed_ablation": planner_manifest,
             "planner_ablation_manifest": ablation_manifest_payload,
+            "verified_ablation_output_manifest": verified_output_manifest,
             "blockers": blockers,
             "claim_boundary": (
                 "This manifest records attached multi-seed/ablation evidence. It is not a substitute for "

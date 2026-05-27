@@ -7,6 +7,7 @@ import time
 import json
 from pathlib import Path
 
+from agenticsciml.ablation_evidence import build_multi_seed_ablation_verified_manifest
 from agenticsciml.ablation import DEFAULT_VARIANTS, run_ablation
 from agenticsciml.benchmarks import list_benchmarks
 from agenticsciml.config import (
@@ -21,6 +22,7 @@ from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.llm_smoke import DEFAULT_SMOKE_VARIANTS, run_llm_smoke, verify_llm_smoke_output
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 from agenticsciml.reporting import write_sdk_trace_export, write_trace_summary
+from agenticsciml.storage import _atomic_write_text
 
 
 def _default_experiment_id(mock: bool) -> str:
@@ -138,6 +140,27 @@ def cmd_ablate(args: argparse.Namespace) -> int:
     )
     print(result.summary_csv.resolve())
     return 0
+
+
+def cmd_verify_ablation_evidence(args: argparse.Namespace) -> int:
+    source = {
+        "ablation_output_dir": str(Path(args.output_dir).resolve()),
+        "verified_by": args.verified_by,
+        "expected_seeds": args.expected_seeds,
+        "expected_variants": _split_csv(args.expected_variants),
+    }
+    manifest = build_multi_seed_ablation_verified_manifest(source)
+    output_json = (
+        Path(args.output_json).resolve()
+        if args.output_json
+        else Path(args.output_dir).resolve() / "multi_seed_ablation_verified_manifest.json"
+    )
+    _atomic_write_text(
+        output_json,
+        json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False),
+    )
+    print(output_json)
+    return 0 if manifest["verified"] is True else 1
 
 
 def cmd_smoke_llm(args: argparse.Namespace) -> int:
@@ -271,6 +294,14 @@ def build_parser() -> argparse.ArgumentParser:
     ablate.add_argument("--variants", default=",".join(DEFAULT_VARIANTS))
     ablate.add_argument("--output-dir", default="runs/ablation")
     ablate.set_defaults(func=cmd_ablate)
+
+    verify_ablation = sub.add_parser("verify-ablation-evidence")
+    verify_ablation.add_argument("output_dir")
+    verify_ablation.add_argument("--verified-by", required=True)
+    verify_ablation.add_argument("--expected-seeds", nargs="+", type=int, default=[])
+    verify_ablation.add_argument("--expected-variants", default="")
+    verify_ablation.add_argument("--output-json")
+    verify_ablation.set_defaults(func=cmd_verify_ablation_evidence)
 
     smoke_llm = sub.add_parser("smoke-llm")
     smoke_llm.add_argument("benchmark_dir")
