@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
 import time
@@ -21,6 +22,7 @@ from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.llm_smoke import DEFAULT_SMOKE_VARIANTS, run_llm_smoke, verify_llm_smoke_output
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
+from agenticsciml.paper_workflow_readiness import write_paper_workflow_readiness_bundle
 from agenticsciml.reporting import write_sdk_trace_export, write_trace_summary
 from agenticsciml.storage import _atomic_write_text
 
@@ -163,6 +165,30 @@ def cmd_verify_ablation_evidence(args: argparse.Namespace) -> int:
     return 0 if manifest["verified"] is True else 1
 
 
+def cmd_plan_paper_workflow(args: argparse.Namespace) -> int:
+    selector_panel = _json_array_arg(args.selector_panel_json, "--selector-panel-json")
+    result = write_paper_workflow_readiness_bundle(
+        benchmark_dir=Path(args.benchmark_dir).resolve(),
+        output_dir=Path(args.output_dir).resolve(),
+        selector_panel=selector_panel,
+        resource_constraints=_json_object_arg(args.resource_constraints_json, "--resource-constraints-json"),
+        expert_blueprint_id=args.expert_blueprint_id,
+        domain_approval_path=Path(args.domain_approval_json).resolve()
+        if args.domain_approval_json
+        else None,
+        ablation_output_dir=Path(args.ablation_output_dir).resolve()
+        if args.ablation_output_dir
+        else None,
+        expected_seeds=args.expected_seeds,
+        expected_variants=_split_csv(args.expected_variants),
+        env=os.environ,
+    )
+    print(result["paths"]["plan_json"])
+    if args.fail_on_blockers and result["bundle"]["status"] == "blocked":
+        return 1
+    return 0
+
+
 def cmd_smoke_llm(args: argparse.Namespace) -> int:
     variants = [item.strip() for item in args.variants.split(",") if item.strip()]
     result = run_llm_smoke(
@@ -303,6 +329,27 @@ def build_parser() -> argparse.ArgumentParser:
     verify_ablation.add_argument("--output-json")
     verify_ablation.set_defaults(func=cmd_verify_ablation_evidence)
 
+    paper_workflow = sub.add_parser("plan-paper-workflow")
+    paper_workflow.add_argument("benchmark_dir")
+    paper_workflow.add_argument("--output-dir", default="runs/paper-workflow-readiness")
+    paper_workflow.add_argument(
+        "--selector-panel-json",
+        default="[]",
+        help="JSON array of selector member objects with model and optional base_url",
+    )
+    paper_workflow.add_argument(
+        "--resource-constraints-json",
+        default="{}",
+        help="JSON object with cpu, gpu, timeout_s, dependency_limits, and data_limits",
+    )
+    paper_workflow.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
+    paper_workflow.add_argument("--domain-approval-json")
+    paper_workflow.add_argument("--ablation-output-dir")
+    paper_workflow.add_argument("--expected-seeds", nargs="+", type=int, default=[])
+    paper_workflow.add_argument("--expected-variants", default="")
+    paper_workflow.add_argument("--fail-on-blockers", action="store_true")
+    paper_workflow.set_defaults(func=cmd_plan_paper_workflow)
+
     smoke_llm = sub.add_parser("smoke-llm")
     smoke_llm.add_argument("benchmark_dir")
     smoke_llm.add_argument("--variants", default=",".join(DEFAULT_SMOKE_VARIANTS))
@@ -377,6 +424,21 @@ def _json_object_arg(value: str, label: str) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise ValueError(f"{label} must be a JSON object")
     return payload
+
+
+def _json_array_arg(value: str, label: str) -> list[dict[str, object]]:
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{label} must be a JSON array: {exc}") from exc
+    if not isinstance(payload, list):
+        raise ValueError(f"{label} must be a JSON array")
+    result: list[dict[str, object]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            raise ValueError(f"{label} items must be JSON objects")
+        result.append(dict(item))
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:

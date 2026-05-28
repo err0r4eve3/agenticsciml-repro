@@ -16,6 +16,10 @@
   `reports/multi_seed_ablation_verified_manifest.json`，再纳入
   `reports/multi_seed_ablation_evidence.json` 和 scientific readiness；手写 manifest
   仍只是外部声明路径，不替代原始 ablation 输出。
+- 新增 `agenticsciml.paper_workflow_readiness` 和 CLI `plan-paper-workflow`，把真实多模态
+  provider、异构 real selector、paper-like benchmark manifest、领域审批 packet、
+  paper-equivalent KB、multi-seed ablation、资源约束和专家蓝图统一成预执行门禁包。
+  当前环境缺真实 provider 凭证时，该命令会生成 blocked artifact，而不会伪造 real run。
 - `AgentConfig` / Web `AgentModelRequest` 支持 per-member `base_url`。selector panel
   可以在不记录 API key 的前提下，为不同 selector member 指定不同 OpenAI-compatible
   provider endpoint。
@@ -42,6 +46,8 @@
   domain approval、paper-like benchmark、异构 selector、多 seed/ablation 都有独立 blocker。
 - CLI/Web/Problem Intake 继续传播 `multi_seed_ablation`；ChatUI solver request 也能携带
   domain reviewer/notes 与 paper benchmark approval。
+- `docs/paper_workflow_readiness.md` 记录真实运行前的统一 gate、模板 artifact 和 claim
+  boundary。
 
 验证：
 

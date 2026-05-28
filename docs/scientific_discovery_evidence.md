@@ -58,6 +58,11 @@ NotebookLM summary 当作 evaluator 事实。
 - Problem Intake / Web / CLI：新增 `visual_audit_mode`、`resource_constraints` 和
   `expert_blueprint_id` / `multi_seed_ablation`，但 custom benchmark 仍只能生成
   `workflow_proxy` scaffold。
+- `plan-paper-workflow`：在真实运行前生成
+  `paper_workflow_readiness.json/md`、`domain_approval_template.json`、
+  `paper_benchmark_manifest_template.json` 和 `paper_workflow_commands.md`。它只检查
+  provider/vision/selector/benchmark/domain/ablation/KB/resource 是否具备进入
+  `paper_workflow` 的条件；缺凭证或缺真实数据时保持 blocked。
 
 ## Claim Gate
 
