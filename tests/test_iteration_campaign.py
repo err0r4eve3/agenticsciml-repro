@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -490,6 +491,67 @@ def test_verify_iteration_campaign_detects_record_claim_boundary_tampering(tmp_p
         "actual": "This record proves a real scientific discovery.",
     } in verification["records"][0]["record_metadata_mismatches"]
     assert "record claim_boundary mismatch for round 6" in verification["issues"]
+
+
+def test_verify_iteration_campaign_rejects_completed_round_with_readiness_blocker(tmp_path: Path) -> None:
+    result = write_iteration_campaign(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        rounds=12,
+        batch_size=5,
+        env={},
+    )
+    campaign_path = Path(result["paths"]["campaign_json"])
+    evidence_path = tmp_path / "round_001_evidence.json"
+    evidence_path.write_text('{"validated": true}\n', encoding="utf-8")
+    validation_output = tmp_path / "round_001_validation.log"
+    validation_output.write_text("1 passed\n", encoding="utf-8")
+    evidence_digest = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+    validation_digest = hashlib.sha256(validation_output.read_bytes()).hexdigest()
+    campaign = json.loads(campaign_path.read_text(encoding="utf-8"))
+    round_one = campaign["rounds"][0]
+    round_one["status"] = "completed"
+    round_one["evidence_record_path"] = "iteration_round_001_record.json"
+    round_one["evidence_sha256"] = evidence_digest
+    campaign["completed_rounds"] = 1
+    campaign["remaining_rounds"] = 11
+    campaign["batches"][0]["blocked_round_count"] = 4
+    campaign["batches"][0]["completed_round_count"] = 1
+    campaign["batches"][0]["remaining_round_count"] = 4
+    record = {
+        "schema_version": 1,
+        "record_version": "iteration_round_record.v1",
+        "round_index": 1,
+        "batch_index": 1,
+        "target_id": "real_provider_budget",
+        "readiness_check_id": "real_llm_credentials",
+        "previous_status": "planned",
+        "validation_command": "pytest tests/test_iteration_campaign.py -q",
+        "validation_result": {
+            "command": "pytest tests/test_iteration_campaign.py -q",
+            "exit_code": 0,
+            "output": {
+                "path": "round_001_validation.log",
+                "sha256": validation_digest,
+                "size_bytes": validation_output.stat().st_size,
+            },
+        },
+        "notes": "",
+        "evidence": {
+            "path": "round_001_evidence.json",
+            "sha256": evidence_digest,
+            "size_bytes": evidence_path.stat().st_size,
+        },
+        "claim_boundary": "This record proves an engineering iteration artifact exists; it is not scientific discovery evidence.",
+    }
+    (tmp_path / "iteration_round_001_record.json").write_text(json.dumps(record), encoding="utf-8")
+    campaign_path.write_text(json.dumps(campaign), encoding="utf-8")
+
+    verification = verify_iteration_campaign(campaign_path)
+
+    assert verification["passed"] is False
+    assert verification["round_integrity"]["completed_rounds_with_blockers"] == [1]
+    assert "round 1 is completed but still has readiness blocker real_llm_credentials" in verification["issues"]
 
 
 def test_verify_iteration_campaign_requires_canonical_record_path(tmp_path: Path) -> None:

@@ -84,6 +84,8 @@ NotebookLM summary 当作 evaluator 事实。
   `status` 也会按 blocker 状态重新对账，避免把 blocked campaign 手工改成 ready。
   每个 completed round 的 record 也必须保留固定 claim boundary，防止把工程迭代证据
   手工改写成科学发现声明。
+  `requires_external_asset=true` 的 round 若仍携带 `blocked_by`，不能通过手工 record
+  或 digest 被验收为 completed。
   默认只审计已完成轮次；`--require-complete` 会额外要求 campaign 的全部轮次完成，
   供 60 轮最终验收使用。它仍只验证工程证据完整性。
 

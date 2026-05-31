@@ -681,6 +681,7 @@ def _validate_round_integrity(
     unsupported_statuses: list[dict[str, Any]] = []
     round_target_mismatches: list[dict[str, Any]] = []
     batch_index_mismatches: list[dict[str, Any]] = []
+    completed_rounds_with_blockers: list[int] = []
     schema_target_sequence = [dict(target) for target in CAMPAIGN_TARGETS]
     target_sequence_valid = campaign.get("target_sequence") == schema_target_sequence
     if not target_sequence_valid:
@@ -747,6 +748,14 @@ def _validate_round_integrity(
         if status not in SUPPORTED_ROUND_STATUSES:
             unsupported_statuses.append({"round_index": round_index, "status": status})
             issues.append(f"round {round_index} has unsupported status: {status}")
+        if status == "completed" and item.get("requires_external_asset") is True and item.get("blocked_by"):
+            completed_rounds_with_blockers.append(round_index)
+            issues.append(
+                "round {round_index} is completed but still has readiness blocker {check_id}".format(
+                    round_index=round_index,
+                    check_id=item.get("readiness_check_id"),
+                )
+            )
     rounds_requested = campaign.get("rounds_requested")
     rounds_requested_valid = isinstance(rounds_requested, int) and rounds_requested > 0
     expected_indices = set(range(1, rounds_requested + 1)) if rounds_requested_valid else set()
@@ -774,6 +783,7 @@ def _validate_round_integrity(
             or not target_sequence_valid
             or round_target_mismatches
             or batch_index_mismatches
+            or completed_rounds_with_blockers
         ),
         "invalid_round_entry_count": invalid_round_entries,
         "duplicate_round_indices": duplicate_indices,
@@ -783,6 +793,7 @@ def _validate_round_integrity(
         "target_sequence_valid": target_sequence_valid,
         "round_target_mismatches": round_target_mismatches,
         "batch_index_mismatches": batch_index_mismatches,
+        "completed_rounds_with_blockers": completed_rounds_with_blockers,
     }
 
 
