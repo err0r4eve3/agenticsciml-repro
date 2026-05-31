@@ -210,16 +210,16 @@ def record_iteration_round_evidence(
         raise ValueError("validation_command is required")
     campaign = _load_campaign(campaign_path)
     campaign_dir = campaign_path.parent
-    evidence_file = evidence_path if evidence_path.is_absolute() else campaign_dir / evidence_path
-    if not evidence_file.is_file():
-        raise ValueError(f"evidence_path does not exist: {evidence_path}")
-    validation_output_file = (
-        validation_output_path
-        if validation_output_path.is_absolute()
-        else campaign_dir / validation_output_path
+    evidence_file = _input_file_inside_campaign(
+        evidence_path,
+        campaign_dir,
+        field_name="evidence_path",
     )
-    if not validation_output_file.is_file():
-        raise ValueError(f"validation_output_path does not exist: {validation_output_path}")
+    validation_output_file = _input_file_inside_campaign(
+        validation_output_path,
+        campaign_dir,
+        field_name="validation_output_path",
+    )
     rounds = campaign.get("rounds")
     if not isinstance(rounds, list):
         raise ValueError("campaign rounds must be a list")
@@ -278,9 +278,14 @@ def verify_iteration_campaign(campaign_path: Path, *, require_complete: bool = F
         if not record_path_value:
             issues.append(f"completed round {round_index} is missing evidence_record_path")
             continue
-        record_path = campaign_dir / record_path_value
-        if not record_path.is_file():
-            issues.append(f"record file missing for round {round_index}: {record_path_value}")
+        record_path = _campaign_reference_file(
+            record_path_value,
+            campaign_dir,
+            kind="record",
+            round_index=round_index,
+            issues=issues,
+        )
+        if record_path is None:
             continue
         try:
             record = json.loads(record_path.read_text(encoding="utf-8"))
@@ -313,11 +318,14 @@ def verify_iteration_campaign(campaign_path: Path, *, require_complete: bool = F
                     }
                 )
                 issues.append(f"campaign evidence_sha256 mismatch for round {round_index}")
-            evidence_path = Path(evidence_path_value)
-            evidence_file = evidence_path if evidence_path.is_absolute() else campaign_dir / evidence_path
-            if not evidence_file.is_file():
-                issues.append(f"evidence file missing for round {round_index}: {evidence_path_value}")
-            else:
+            evidence_file = _campaign_reference_file(
+                evidence_path_value,
+                campaign_dir,
+                kind="evidence",
+                round_index=round_index,
+                issues=issues,
+            )
+            if evidence_file is not None:
                 actual_digest = _sha256(evidence_file)
                 digest_match = actual_digest == expected_digest
                 if not digest_match:
@@ -335,17 +343,14 @@ def verify_iteration_campaign(campaign_path: Path, *, require_complete: bool = F
         elif not expected_validation_digest:
             issues.append(f"validation output sha256 missing for round {round_index}")
         else:
-            validation_output_path = Path(validation_output_path_value)
-            validation_output_file = (
-                validation_output_path
-                if validation_output_path.is_absolute()
-                else campaign_dir / validation_output_path
+            validation_output_file = _campaign_reference_file(
+                validation_output_path_value,
+                campaign_dir,
+                kind="validation output",
+                round_index=round_index,
+                issues=issues,
             )
-            if not validation_output_file.is_file():
-                issues.append(
-                    f"validation output file missing for round {round_index}: {validation_output_path_value}"
-                )
-            else:
+            if validation_output_file is not None:
                 actual_validation_digest = _sha256(validation_output_file)
                 validation_digest_match = actual_validation_digest == expected_validation_digest
                 if not validation_digest_match:
@@ -452,6 +457,46 @@ def _record_metadata_mismatches(
         )
         issues.append(f"record validation command mismatch for round {round_index}")
     return mismatches
+
+
+def _input_file_inside_campaign(path: Path, campaign_dir: Path, *, field_name: str) -> Path:
+    candidate = path if path.is_absolute() else campaign_dir / path
+    if not candidate.is_file():
+        raise ValueError(f"{field_name} does not exist: {path}")
+    resolved = candidate.resolve(strict=True)
+    root = campaign_dir.resolve(strict=False)
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must resolve inside campaign directory: {path}") from exc
+    return resolved
+
+
+def _campaign_reference_file(
+    path_value: str,
+    campaign_dir: Path,
+    *,
+    kind: str,
+    round_index: int,
+    issues: list[str],
+) -> Path | None:
+    path = Path(path_value)
+    if path.is_absolute():
+        issues.append(f"{kind} path for round {round_index} must be relative to campaign directory")
+        return None
+    candidate = campaign_dir / path
+    try:
+        resolved = candidate.resolve(strict=True)
+    except FileNotFoundError:
+        issues.append(f"{kind} file missing for round {round_index}: {path_value}")
+        return None
+    root = campaign_dir.resolve(strict=False)
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        issues.append(f"{kind} path for round {round_index} escapes campaign directory")
+        return None
+    return resolved
 
 
 def _validate_round_integrity(

@@ -392,6 +392,74 @@ def test_verify_iteration_campaign_detects_record_metadata_tampering(tmp_path: P
     assert "campaign evidence_sha256 mismatch for round 6" in verification["issues"]
 
 
+def test_record_iteration_round_rejects_external_evidence_paths(tmp_path: Path) -> None:
+    campaign_dir = tmp_path / "campaign"
+    external_dir = tmp_path / "external"
+    external_dir.mkdir()
+    result = write_iteration_campaign(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=campaign_dir,
+        rounds=12,
+        batch_size=5,
+        env={},
+    )
+    evidence_path = external_dir / "round_006_evidence.json"
+    evidence_path.write_text('{"validated": true}\n', encoding="utf-8")
+    validation_output = campaign_dir / "round_006_validation.log"
+    validation_output.write_text("1 passed\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="evidence_path must resolve inside campaign directory"):
+        record_iteration_round_evidence(
+            Path(result["paths"]["campaign_json"]),
+            round_index=6,
+            evidence_path=evidence_path,
+            validation_command="pytest tests/test_iteration_campaign.py -q",
+            validation_exit_code=0,
+            validation_output_path=validation_output,
+        )
+
+
+def test_verify_iteration_campaign_detects_artifact_path_escapes(tmp_path: Path) -> None:
+    campaign_dir = tmp_path / "campaign"
+    external_dir = tmp_path / "external"
+    external_dir.mkdir()
+    result = write_iteration_campaign(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=campaign_dir,
+        rounds=12,
+        batch_size=5,
+        env={},
+    )
+    campaign_path = Path(result["paths"]["campaign_json"])
+    evidence_path = campaign_dir / "round_006_evidence.json"
+    evidence_path.write_text('{"validated": true}\n', encoding="utf-8")
+    validation_output = campaign_dir / "round_006_validation.log"
+    validation_output.write_text("1 passed\n", encoding="utf-8")
+    record_iteration_round_evidence(
+        campaign_path,
+        round_index=6,
+        evidence_path=evidence_path,
+        validation_command="pytest tests/test_iteration_campaign.py -q",
+        validation_exit_code=0,
+        validation_output_path=validation_output,
+    )
+    external_evidence = external_dir / "external_evidence.json"
+    external_evidence.write_text('{"validated": true}\n', encoding="utf-8")
+    external_validation = external_dir / "external_validation.log"
+    external_validation.write_text("1 passed\n", encoding="utf-8")
+    record_path = campaign_dir / "iteration_round_006_record.json"
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["evidence"]["path"] = str(external_evidence)
+    record["validation_result"]["output"]["path"] = "../external/external_validation.log"
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    verification = verify_iteration_campaign(campaign_path)
+
+    assert verification["passed"] is False
+    assert "evidence path for round 6 must be relative to campaign directory" in verification["issues"]
+    assert "validation output path for round 6 escapes campaign directory" in verification["issues"]
+
+
 def test_verify_iteration_campaign_detects_tampered_evidence(tmp_path: Path) -> None:
     result = write_iteration_campaign(
         benchmark_dir=Path("examples/function_approx").resolve(),
