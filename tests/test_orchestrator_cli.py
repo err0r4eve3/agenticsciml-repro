@@ -259,6 +259,8 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert (run_dir / "reports" / "innovation_report.md").exists()
     assert (run_dir / "reports" / "scientific_discovery_readiness.json").exists()
     assert (run_dir / "reports" / "scientific_discovery_readiness.md").exists()
+    assert (run_dir / "reports" / "scientific_result_card.json").exists()
+    assert (run_dir / "reports" / "scientific_result_card.md").exists()
     assert (run_dir / "reports" / "visual_audit_manifest.json").exists()
     assert (run_dir / "reports" / "domain_approval.json").exists()
     assert (run_dir / "reports" / "paper_like_benchmark_dossier.json").exists()
@@ -303,6 +305,9 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     operator_assignment = json.loads((child_workspace / "operator_assignment.json").read_text(encoding="utf-8"))
     evolution_health = json.loads((run_dir / "reports" / "evolution_health.json").read_text(encoding="utf-8"))
     innovation_report = json.loads((run_dir / "reports" / "innovation_report.json").read_text(encoding="utf-8"))
+    scientific_result_card = json.loads(
+        (run_dir / "reports" / "scientific_result_card.json").read_text(encoding="utf-8")
+    )
     assert kb_report["status"] in {"retrieved_only", "proposed", "implemented", "unverified"}
     assert mutation_report["status"] in {"changed_score_moved", "changed_but_score_plateau", "duplicate_parent"}
     assert operator_assignment["scheduler_mode"] == "auto-audited"
@@ -321,7 +326,14 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert innovation_report["scientific_novelty_supported"] is False
     assert innovation_report["evidence_summary"]["solution_count"] == len(tree["nodes"])
     assert innovation_report["evidence_summary"]["operator_count"] >= 1
+    assert scientific_result_card["evidence_grade"] == "workflow_evidence_only"
+    assert scientific_result_card["claim_support"]["scientific_claim_supported"] is False
+    assert scientific_result_card["champion"]["node_id"] == run_metadata["champion"]
+    assert scientific_result_card["score"]["score_source"] == "benchmark evaluator artifact"
+    assert scientific_result_card["uncertainty_flags"]
     assert run_metadata["innovation_report"]["innovation_claim_level"] == "workflow_exploration_only"
+    assert run_metadata["scientific_result_card"]["evidence_grade"] == "workflow_evidence_only"
+    assert run_metadata["scientific_result_card"]["scientific_claim_supported"] is False
     assert run_metadata["operator_scheduler"]["mode"] == "auto-audited"
     assert run_metadata["evolution_health"]["operator_assignment_count"] == len(child_nodes)
     assert run_metadata["evolution_health"]["missing_operator_assignment_count"] == 0

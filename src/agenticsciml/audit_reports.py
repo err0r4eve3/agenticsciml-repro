@@ -8,6 +8,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from agenticsciml.evidence import CLAIM_GATE_ALLOWED, LLM_MODE_MOCK
 from agenticsciml.operator_scheduler import OPERATOR_SCHEDULER_MODE
 from agenticsciml.retrieval.kb_store import KnowledgeBaseEntry
 from agenticsciml.state import Proposal, SolutionNode
@@ -17,6 +18,7 @@ KB_APPLICATION_SCHEMA_VERSION = 1
 MUTATION_EFFECT_SCHEMA_VERSION = 1
 EVOLUTION_HEALTH_SCHEMA_VERSION = 1
 INNOVATION_REPORT_SCHEMA_VERSION = 1
+SCIENTIFIC_RESULT_CARD_SCHEMA_VERSION = 1
 
 NOVELTY_AXIS_TERMS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     (
@@ -494,6 +496,211 @@ def render_innovation_report_markdown(report: dict[str, Any]) -> str:
         lines.append("- none")
     lines.extend(["", "## Claim Boundary", str(report.get("claim_boundary", "")), ""])
     return "\n".join(lines)
+
+
+def build_scientific_result_card(
+    *,
+    nodes: list[SolutionNode],
+    champion: SolutionNode,
+    run_dir: Path,
+    benchmark_name: str,
+    evidence_metadata: dict[str, Any],
+    evolution_health: dict[str, Any],
+    innovation_report: dict[str, Any],
+    scientific_readiness: dict[str, Any],
+) -> dict[str, Any]:
+    claim_gate = (
+        evidence_metadata.get("claim_gate") if isinstance(evidence_metadata.get("claim_gate"), dict) else {}
+    )
+    root = next((node for node in nodes if node.parent_id is None), None)
+    score_summary = _scientific_score_summary(champion, root)
+    evidence_grade = _scientific_evidence_grade(
+        claim_gate=claim_gate,
+        scientific_readiness=scientific_readiness,
+    )
+    uncertainty_flags = _scientific_uncertainty_flags(
+        nodes=nodes,
+        evidence_metadata=evidence_metadata,
+        evolution_health=evolution_health,
+        innovation_report=innovation_report,
+        scientific_readiness=scientific_readiness,
+        claim_gate=claim_gate,
+    )
+    return {
+        "schema_version": SCIENTIFIC_RESULT_CARD_SCHEMA_VERSION,
+        "card_version": "scientific_result_card.v1",
+        "benchmark_name": benchmark_name,
+        "champion": {
+            "node_id": champion.node_id,
+            "status": champion.status,
+            "workspace": _relative_artifact_path(Path(champion.workspace), run_dir),
+            "method_tags": list(champion.method_tags),
+        },
+        "score": score_summary,
+        "evidence_grade": evidence_grade,
+        "claim_support": {
+            "scientific_claim_supported": scientific_readiness.get("scientific_claim_supported") is True,
+            "paper_level_claim_supported": claim_gate.get("paper_level_claim_supported") is True,
+            "claim_gate_status": claim_gate.get("status"),
+            "readiness_status": scientific_readiness.get("status"),
+            "evidence_mode": evidence_metadata.get("evidence_mode"),
+            "llm_mode": evidence_metadata.get("llm_mode"),
+            "benchmark_fidelity_level": evidence_metadata.get("benchmark_fidelity_level"),
+            "evaluator_trust_level": claim_gate.get("evaluator_trust_level"),
+        },
+        "run_evidence": {
+            "solution_count": len(nodes),
+            "unique_code_count": evolution_health.get("unique_code_count"),
+            "duplicate_code_count": evolution_health.get("duplicate_code_count"),
+            "best_improvement": evolution_health.get("best_improvement"),
+            "novelty_axis_count": _nested_int(innovation_report, "evidence_summary", "novelty_axis_count"),
+            "candidate_emergent_count": _nested_int(
+                innovation_report,
+                "evidence_summary",
+                "candidate_emergent_count",
+            ),
+            "readiness_blocker_count": len(scientific_readiness.get("blockers", []))
+            if isinstance(scientific_readiness.get("blockers"), list)
+            else 0,
+        },
+        "uncertainty_flags": uncertainty_flags,
+        "minimum_next_validation": _minimum_next_validation(scientific_readiness, uncertainty_flags),
+        "source_artifacts": {
+            "leaderboard": "leaderboard.csv",
+            "tree": "tree.json",
+            "evolution_health": "reports/evolution_health.json",
+            "innovation_report": "reports/innovation_report.json",
+            "scientific_discovery_readiness": "reports/scientific_discovery_readiness.json",
+            "claim_gate": "champion/claim_gate.json",
+        },
+        "claim_boundary": (
+            "This card summarizes run evidence and uncertainty. It does not make a scientific claim unless "
+            "scientific_claim_supported and the fail-closed readiness gate are both true."
+        ),
+    }
+
+
+def render_scientific_result_card_markdown(card: dict[str, Any]) -> str:
+    score = card.get("score") if isinstance(card.get("score"), dict) else {}
+    support = card.get("claim_support") if isinstance(card.get("claim_support"), dict) else {}
+    evidence = card.get("run_evidence") if isinstance(card.get("run_evidence"), dict) else {}
+    flags = card.get("uncertainty_flags") if isinstance(card.get("uncertainty_flags"), list) else []
+    next_validation = (
+        card.get("minimum_next_validation")
+        if isinstance(card.get("minimum_next_validation"), list)
+        else []
+    )
+    lines = [
+        "# Scientific Result Card",
+        "",
+        f"- benchmark: {card.get('benchmark_name')}",
+        f"- champion: {card.get('champion', {}).get('node_id') if isinstance(card.get('champion'), dict) else None}",
+        f"- evidence grade: {card.get('evidence_grade')}",
+        f"- scientific claim supported: {support.get('scientific_claim_supported')}",
+        f"- readiness status: {support.get('readiness_status')}",
+        f"- claim gate: {support.get('claim_gate_status')}",
+        f"- metric: {score.get('metric')}",
+        f"- champion score: {score.get('champion_value')}",
+        f"- improvement over root: {score.get('improvement_over_root')}",
+        f"- solution count: {evidence.get('solution_count')}",
+        f"- unique code count: {evidence.get('unique_code_count')}",
+        "",
+        "## Uncertainty Flags",
+    ]
+    lines.extend(f"- {flag}" for flag in flags) if flags else lines.append("- none")
+    lines.extend(["", "## Minimum Next Validation"])
+    lines.extend(f"- {item}" for item in next_validation) if next_validation else lines.append("- none")
+    lines.extend(["", "## Claim Boundary", str(card.get("claim_boundary", "")), ""])
+    return "\n".join(lines)
+
+
+def _scientific_score_summary(champion: SolutionNode, root: SolutionNode | None) -> dict[str, Any]:
+    champion_score = champion.score
+    root_score = root.score if root else None
+    improvement: float | None = None
+    if champion_score and root_score and champion_score.metric == root_score.metric:
+        raw_delta = champion_score.value - root_score.value
+        improvement = raw_delta if champion_score.higher_is_better else -raw_delta
+    return {
+        "metric": champion_score.metric if champion_score else None,
+        "higher_is_better": champion_score.higher_is_better if champion_score else None,
+        "champion_value": champion_score.value if champion_score else None,
+        "root_value": root_score.value if root_score else None,
+        "score_delta_from_parent": champion.score_delta_from_parent,
+        "improvement_over_root": improvement,
+        "score_source": "benchmark evaluator artifact",
+        "score_claim_boundary": "A single run score is not a scientific conclusion without validated replication evidence.",
+    }
+
+
+def _scientific_evidence_grade(
+    *,
+    claim_gate: dict[str, Any],
+    scientific_readiness: dict[str, Any],
+) -> str:
+    if (
+        claim_gate.get("status") == CLAIM_GATE_ALLOWED
+        and claim_gate.get("scientific_claim_supported") is True
+        and scientific_readiness.get("scientific_claim_supported") is True
+    ):
+        return "scientific_claim_ready"
+    if claim_gate.get("status") == CLAIM_GATE_ALLOWED:
+        return "workflow_evidence_only"
+    return "blocked_or_unverified"
+
+
+def _scientific_uncertainty_flags(
+    *,
+    nodes: list[SolutionNode],
+    evidence_metadata: dict[str, Any],
+    evolution_health: dict[str, Any],
+    innovation_report: dict[str, Any],
+    scientific_readiness: dict[str, Any],
+    claim_gate: dict[str, Any],
+) -> list[str]:
+    flags: list[str] = []
+    if evidence_metadata.get("llm_mode") == LLM_MODE_MOCK:
+        flags.append("mock LLM mode validates workflow shape only")
+    if scientific_readiness.get("scientific_claim_supported") is not True:
+        flags.append("scientific discovery readiness is not satisfied")
+    if claim_gate.get("scientific_claim_supported") is not True:
+        flags.append("claim gate does not support scientific claims")
+    if len(nodes) < 3:
+        flags.append("too few evaluated candidates for robust comparison")
+    if int(evolution_health.get("duplicate_code_count") or 0) > 0:
+        flags.append("duplicate solution code weakens evolution evidence")
+    if int(evolution_health.get("max_plateau_length") or 0) >= 3:
+        flags.append("score plateau suggests low evaluator resolution or ineffective mutations")
+    if _nested_int(innovation_report, "evidence_summary", "candidate_emergent_count") == 0:
+        flags.append("no candidate emergence audit passed")
+    if not any(node.score for node in nodes):
+        flags.append("no evaluator score was available")
+    return flags
+
+
+def _minimum_next_validation(scientific_readiness: dict[str, Any], flags: list[str]) -> list[str]:
+    next_steps: list[str] = []
+    blockers = scientific_readiness.get("blockers")
+    if isinstance(blockers, list):
+        for blocker in blockers[:6]:
+            if not isinstance(blocker, dict):
+                continue
+            check_id = blocker.get("check_id")
+            message = blocker.get("message")
+            next_steps.append(f"resolve {check_id}: {message}")
+    if not next_steps:
+        next_steps.append("rerun with independent seeds and compare confidence intervals before external claims")
+    if flags:
+        next_steps.append("keep external reporting at workflow evidence level until uncertainty flags are cleared")
+    return next_steps
+
+
+def _nested_int(payload: dict[str, Any], key: str, nested_key: str) -> int:
+    nested = payload.get(key)
+    if not isinstance(nested, dict):
+        return 0
+    value = nested.get(nested_key)
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
 def _actionable_kb_points(entry: KnowledgeBaseEntry) -> list[dict[str, Any]]:

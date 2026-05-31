@@ -1,7 +1,12 @@
 import json
 from pathlib import Path
 
-from agenticsciml.audit_reports import build_innovation_report, render_innovation_report_markdown
+from agenticsciml.audit_reports import (
+    build_innovation_report,
+    build_scientific_result_card,
+    render_innovation_report_markdown,
+    render_scientific_result_card_markdown,
+)
 from agenticsciml.state import SolutionNode, SolutionScore
 
 
@@ -103,3 +108,44 @@ def test_innovation_report_records_workflow_exploration_without_scientific_claim
     assert any("not scientific novelty evidence" in warning for warning in report["warnings"])
     assert "workflow_exploration_only" in markdown
     assert "not scientific novelty evidence" in markdown
+
+    scientific_card = build_scientific_result_card(
+        nodes=nodes,
+        champion=nodes[1],
+        run_dir=run_dir,
+        benchmark_name="cylinder_wake_reconstruction_faithful_small",
+        evidence_metadata={
+            "llm_mode": "mock",
+            "evidence_mode": "mock_workflow_shape",
+            "benchmark_fidelity_level": "faithful-small",
+            "claim_gate": {
+                "status": "allowed",
+                "scientific_claim_supported": False,
+                "paper_level_claim_supported": False,
+                "evaluator_trust_level": "trusted_local_proxy",
+            },
+        },
+        evolution_health={
+            "solution_count": 2,
+            "unique_code_count": 2,
+            "duplicate_code_count": 0,
+            "max_plateau_length": 1,
+            "best_improvement": 0.3,
+        },
+        innovation_report=report,
+        scientific_readiness={
+            "status": "blocked",
+            "scientific_claim_supported": False,
+            "blockers": [{"check_id": "real_llm", "message": "run used real LLM mode"}],
+        },
+    )
+    card_markdown = render_scientific_result_card_markdown(scientific_card)
+
+    assert scientific_card["evidence_grade"] == "workflow_evidence_only"
+    assert scientific_card["score"]["metric"] == "relative_l2"
+    assert round(scientific_card["score"]["improvement_over_root"], 6) == 0.3
+    assert scientific_card["claim_support"]["scientific_claim_supported"] is False
+    assert "mock LLM mode validates workflow shape only" in scientific_card["uncertainty_flags"]
+    assert any(item.startswith("resolve real_llm") for item in scientific_card["minimum_next_validation"])
+    assert "Scientific Result Card" in card_markdown
+    assert "scientific claim supported: False" in card_markdown

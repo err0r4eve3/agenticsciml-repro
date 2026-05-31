@@ -45,7 +45,9 @@ from agenticsciml.audit_reports import (
     build_innovation_report,
     build_kb_application_report,
     build_mutation_effect_report,
+    build_scientific_result_card,
     render_innovation_report_markdown,
+    render_scientific_result_card_markdown,
 )
 from agenticsciml.evidence import claim_gate_for_run, evidence_metadata_for_run
 from agenticsciml.emergence_audit import audit_solution_emergence
@@ -1823,6 +1825,21 @@ class AgenticSciMLOrchestrator:
             multi_seed_ablation_evidence=multi_seed_ablation_evidence,
         )
         best = self._best_node()
+        scientific_result_card = build_scientific_result_card(
+            nodes=self.nodes,
+            champion=best,
+            run_dir=self.storage.run_dir,
+            benchmark_name=self.problem_bundle.benchmark_name,
+            evidence_metadata=evidence_metadata,
+            evolution_health=evolution_health,
+            innovation_report=innovation_report,
+            scientific_readiness=scientific_readiness,
+        )
+        self.storage.save_json("reports/scientific_result_card.json", scientific_result_card)
+        self.storage.save_text(
+            "reports/scientific_result_card.md",
+            render_scientific_result_card_markdown(scientific_result_card),
+        )
         champion_dir = self.storage.run_dir / "champion"
         champion_dir.mkdir(exist_ok=True)
         best_workspace = Path(best.workspace)
@@ -1927,6 +1944,17 @@ class AgenticSciMLOrchestrator:
                     "scientific_claim_supported": scientific_readiness.get("scientific_claim_supported"),
                     "blocker_count": len(scientific_readiness.get("blockers", []))
                     if isinstance(scientific_readiness.get("blockers"), list)
+                    else 0,
+                },
+                "scientific_result_card": {
+                    "evidence_grade": scientific_result_card.get("evidence_grade"),
+                    "scientific_claim_supported": scientific_result_card.get("claim_support", {}).get(
+                        "scientific_claim_supported"
+                    )
+                    if isinstance(scientific_result_card.get("claim_support"), dict)
+                    else False,
+                    "uncertainty_flag_count": len(scientific_result_card.get("uncertainty_flags", []))
+                    if isinstance(scientific_result_card.get("uncertainty_flags"), list)
                     else 0,
                 },
                 **self._planning_metadata(),
