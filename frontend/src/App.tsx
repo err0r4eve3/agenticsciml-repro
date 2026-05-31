@@ -688,7 +688,7 @@ export function App() {
     {
       id: 1,
       role: "assistant",
-      text: "可以直接提问或描述任务。需要更多工具时，请使用左侧分页切换。"
+      text: "我是 AgenticSciML 助手。Ask 只回答，Plan 给出步骤，Agent 可执行受控动作。"
     }
   ]);
   const [mode, setMode] = useState<RunMode>("mock");
@@ -1673,7 +1673,7 @@ function PureChatUI({
               <Sparkles size={18} />
             </div>
             <h2>今天要做什么？</h2>
-            <p>输入问题或任务；需要更多工具时，使用左侧分页切换。</p>
+            <p>直接提问；需要代码或算法证据时，使用左侧分页切换。</p>
             <div className="prompt-pills">
               <button type="button" onClick={() => onQuickPrompt("介绍一下这个项目当前能做什么")}>
                 介绍项目
