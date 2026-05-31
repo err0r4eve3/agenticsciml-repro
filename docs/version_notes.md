@@ -48,6 +48,8 @@
 - Campaign verifier 现在也会校验顶层 metadata：`campaign_version`、`claim_boundary`、
   `paper_workflow_readiness_status` 和 `status` 必须与 blocker 状态一致，防止把仍 blocked
   的 campaign 手工改成 ready 或科学发现证据。
+- Completed round record 的 `claim_boundary` 也会被 verifier 对账；单轮工程证据不能被
+  手工改写成真实科学发现声明。
 - `AgentConfig` / Web `AgentModelRequest` 支持 per-member `base_url`。selector panel
   可以在不记录 API key 的前提下，为不同 selector member 指定不同 OpenAI-compatible
   provider endpoint。

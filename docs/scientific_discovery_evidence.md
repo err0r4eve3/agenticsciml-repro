@@ -82,6 +82,8 @@ NotebookLM summary 当作 evaluator 事实。
   计数不一致时 fail closed。
   顶层 `campaign_version`、`claim_boundary`、`paper_workflow_readiness_status` 和
   `status` 也会按 blocker 状态重新对账，避免把 blocked campaign 手工改成 ready。
+  每个 completed round 的 record 也必须保留固定 claim boundary，防止把工程迭代证据
+  手工改写成科学发现声明。
   默认只审计已完成轮次；`--require-complete` 会额外要求 campaign 的全部轮次完成，
   供 60 轮最终验收使用。它仍只验证工程证据完整性。
 

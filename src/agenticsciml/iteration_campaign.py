@@ -15,6 +15,9 @@ ITERATION_CAMPAIGN_CLAIM_BOUNDARY = (
     "This campaign is an execution plan for iterative engineering evidence. Planned or blocked rounds "
     "do not count as scientific discovery evidence until validated run artifacts exist."
 )
+ITERATION_ROUND_RECORD_CLAIM_BOUNDARY = (
+    "This record proves an engineering iteration artifact exists; it is not scientific discovery evidence."
+)
 DEFAULT_CAMPAIGN_ROUNDS = 60
 DEFAULT_BATCH_SIZE = 10
 SUPPORTED_CAMPAIGN_STATUSES = frozenset({"blocked", "ready"})
@@ -250,7 +253,7 @@ def record_iteration_round_evidence(
         },
         "notes": notes.strip(),
         "evidence": _evidence_descriptor(evidence_file, campaign_dir),
-        "claim_boundary": "This record proves an engineering iteration artifact exists; it is not scientific discovery evidence.",
+        "claim_boundary": ITERATION_ROUND_RECORD_CLAIM_BOUNDARY,
     }
     _atomic_write_text(record_path, json.dumps(record, indent=2, sort_keys=True, allow_nan=False))
     round_item["status"] = "completed"
@@ -585,6 +588,15 @@ def _record_metadata_mismatches(
             }
         )
         issues.append(f"record_version mismatch for round {round_index}: got {record.get('record_version')}")
+    if record.get("claim_boundary") != ITERATION_ROUND_RECORD_CLAIM_BOUNDARY:
+        mismatches.append(
+            {
+                "field": "claim_boundary",
+                "expected": ITERATION_ROUND_RECORD_CLAIM_BOUNDARY,
+                "actual": record.get("claim_boundary"),
+            }
+        )
+        issues.append(f"record claim_boundary mismatch for round {round_index}")
     for field in ("batch_index", "target_id", "readiness_check_id"):
         expected_value = round_item.get(field)
         actual_value = record.get(field)

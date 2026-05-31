@@ -109,7 +109,8 @@ visual audit、domain approval、ablation evidence 和 paper-like benchmark doss
 output 路径逃逸、record 文件名不规范、round 编号重复/缺失、未知状态、target/batch 篡改、
 batch 摘要篡改和进度计数不一致。它还会校验 campaign 顶层 metadata：`campaign_version`、
 `claim_boundary`、`paper_workflow_readiness_status` 和 `status` 必须与当前 blocker 状态一致，
-防止把仍 blocked 的计划手工改成 ready 或科学发现证据。
+防止把仍 blocked 的计划手工改成 ready 或科学发现证据。每个 completed round 的 record
+也必须保留固定 claim boundary，不能把单轮工程证据改写成科学发现声明。
 它只验证工程证据完整性，不会把 blocked 的外部资产或科学 claim 判为已完成。默认模式允许校验部分完成的 campaign；
 `--require-complete` 会额外要求所有轮次都已完成，用于最终 60 轮验收，不能用来绕过任何
 readiness blocker。
