@@ -24,6 +24,9 @@
   后续迭代拆成 batch/round artifact。每轮绑定 readiness check、目标 artifact、
   validation command 和 claim boundary；被真实凭证、paper-like 数据或领域审批阻塞的轮次
   会显式标记 `blocked_by_readiness`。
+- 新增 CLI `record-iteration-round`，用于把某一 planned 轮次绑定到实际 evidence artifact、
+  SHA-256 digest 和验证命令，写出 `iteration_round_XXX_record.json` 并更新 campaign
+  进度。被 readiness blocker 卡住的轮次不能被记录为完成。
 - `AgentConfig` / Web `AgentModelRequest` 支持 per-member `base_url`。selector panel
   可以在不记录 API key 的前提下，为不同 selector member 指定不同 OpenAI-compatible
   provider endpoint。

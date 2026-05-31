@@ -27,6 +27,16 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli plan-
   --output-dir runs/iteration-campaign
 ```
 
+记录某一轮已经由具体 artifact 验证：
+
+```bash
+PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli record-iteration-round \
+  runs/iteration-campaign/iteration_campaign.json \
+  --round 6 \
+  --evidence-path runs/iteration-campaign/round_006_evidence.json \
+  --validation-command "PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_iteration_campaign.py -q"
+```
+
 可选输入：
 
 - `--domain-approval-json <path>`：领域审核 packet。
@@ -44,6 +54,7 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli plan-
 - `paper_workflow_commands.md`
 - `iteration_campaign.json`
 - `iteration_campaign.md`
+- `iteration_round_XXX_record.json`
 
 ## Gate
 
@@ -69,3 +80,6 @@ visual audit、domain approval、ablation evidence 和 paper-like benchmark doss
 
 `plan-iteration-campaign` 只规划轮次和 blocker，不把计划本身计入证据。每一轮仍必须
 落到代码、文档、测试、run artifact 或外部审批材料，才能改变 readiness。
+`record-iteration-round` 只允许记录未被 readiness blocker 卡住的 planned 轮次；它会
+写入证据文件 digest、验证命令和轮次 record，并更新 campaign 的
+`completed_rounds` / `remaining_rounds`。该记录仍是工程进度证据，不是科学发现证据。

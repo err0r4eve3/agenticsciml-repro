@@ -65,6 +65,9 @@ NotebookLM summary 当作 evaluator 事实。
   `paper_workflow` 的条件；缺凭证或缺真实数据时保持 blocked。
 - `plan-iteration-campaign`：把后续 60 轮工程迭代拆成可审计 batch/round，每轮都绑定
   readiness gate、预期 artifact、验证命令和 claim boundary。campaign 计划不是科学证据。
+- `record-iteration-round`：只有某轮已有实际 evidence artifact 和验证命令时，才写入
+  `iteration_round_XXX_record.json` 并更新 campaign 进度。它拒绝完成被 readiness blocker
+  卡住的轮次，避免把外部缺口伪装成已完成。
 
 ## Claim Gate
 

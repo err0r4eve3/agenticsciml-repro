@@ -18,7 +18,7 @@ from agenticsciml.config import (
     EvolutionConfig,
     ExperimentConfig,
 )
-from agenticsciml.iteration_campaign import write_iteration_campaign
+from agenticsciml.iteration_campaign import record_iteration_round_evidence, write_iteration_campaign
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.llm_smoke import DEFAULT_SMOKE_VARIANTS, run_llm_smoke, verify_llm_smoke_output
@@ -214,6 +214,19 @@ def cmd_plan_iteration_campaign(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_record_iteration_round(args: argparse.Namespace) -> int:
+    record = record_iteration_round_evidence(
+        Path(args.campaign_json).resolve(),
+        round_index=args.round_index,
+        evidence_path=Path(args.evidence_path),
+        validation_command=args.validation_command,
+        notes=args.notes,
+    )
+    campaign_dir = Path(args.campaign_json).resolve().parent
+    print(campaign_dir / f"iteration_round_{record['round_index']:03d}_record.json")
+    return 0
+
+
 def cmd_smoke_llm(args: argparse.Namespace) -> int:
     variants = [item.strip() for item in args.variants.split(",") if item.strip()]
     result = run_llm_smoke(
@@ -396,6 +409,14 @@ def build_parser() -> argparse.ArgumentParser:
     campaign.add_argument("--expected-seeds", nargs="+", type=int, default=[])
     campaign.add_argument("--expected-variants", default="")
     campaign.set_defaults(func=cmd_plan_iteration_campaign)
+
+    record_round = sub.add_parser("record-iteration-round")
+    record_round.add_argument("campaign_json")
+    record_round.add_argument("--round", dest="round_index", type=int, required=True)
+    record_round.add_argument("--evidence-path", required=True)
+    record_round.add_argument("--validation-command", required=True)
+    record_round.add_argument("--notes", default="")
+    record_round.set_defaults(func=cmd_record_iteration_round)
 
     smoke_llm = sub.add_parser("smoke-llm")
     smoke_llm.add_argument("benchmark_dir")
