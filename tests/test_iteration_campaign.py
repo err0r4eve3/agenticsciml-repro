@@ -187,6 +187,38 @@ def test_record_iteration_round_evidence_rejects_tampered_external_blocker_remov
         )
 
 
+def test_record_iteration_round_evidence_rejects_removed_top_level_readiness_blockers(tmp_path: Path) -> None:
+    result = write_iteration_campaign(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        rounds=12,
+        batch_size=5,
+        env={},
+    )
+    campaign_path = Path(result["paths"]["campaign_json"])
+    campaign = json.loads(campaign_path.read_text(encoding="utf-8"))
+    campaign["readiness_blockers"] = []
+    campaign["paper_workflow_readiness_status"] = "ready"
+    campaign["status"] = "ready"
+    campaign["rounds"][0]["status"] = "planned"
+    campaign["rounds"][0]["blocked_by"] = None
+    campaign["batches"][0]["blocked_round_count"] = 4
+    campaign["batches"][0]["planned_round_count"] = 1
+    campaign_path.write_text(json.dumps(campaign), encoding="utf-8")
+    evidence_path = tmp_path / "round_001_evidence.json"
+    evidence_path.write_text('{"validated": true}\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="round 1 still has readiness blocker real_llm_credentials"):
+        record_iteration_round_evidence(
+            campaign_path,
+            round_index=1,
+            evidence_path=evidence_path,
+            validation_command="pytest tests/test_iteration_campaign.py -q",
+            validation_exit_code=0,
+            validation_output_path=evidence_path,
+        )
+
+
 def test_cli_record_iteration_round_updates_campaign(
     tmp_path: Path,
     cli_env: dict[str, str],
@@ -616,6 +648,44 @@ def test_verify_iteration_campaign_detects_removed_external_round_blocker(tmp_pa
     assert "round 1 status mismatch: expected blocked_by_readiness while blocker remains, got planned" in verification[
         "issues"
     ]
+
+
+def test_verify_iteration_campaign_detects_removed_top_level_readiness_blockers(tmp_path: Path) -> None:
+    result = write_iteration_campaign(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        rounds=12,
+        batch_size=5,
+        env={},
+    )
+    campaign_path = Path(result["paths"]["campaign_json"])
+    campaign = json.loads(campaign_path.read_text(encoding="utf-8"))
+    campaign["readiness_blockers"] = []
+    campaign["paper_workflow_readiness_status"] = "ready"
+    campaign["status"] = "ready"
+    for round_item in campaign["rounds"]:
+        if round_item["requires_external_asset"]:
+            round_item["status"] = "planned"
+            round_item["blocked_by"] = None
+    for batch in campaign["batches"]:
+        items = [
+            item
+            for item in campaign["rounds"]
+            if batch["round_start"] <= item["round_index"] <= batch["round_end"]
+        ]
+        batch["blocked_round_count"] = sum(1 for item in items if item["status"] == "blocked_by_readiness")
+        batch["planned_round_count"] = sum(1 for item in items if item["status"] == "planned")
+        batch["completed_round_count"] = sum(1 for item in items if item["status"] == "completed")
+        batch["remaining_round_count"] = sum(1 for item in items if item["status"] != "completed")
+    campaign_path.write_text(json.dumps(campaign), encoding="utf-8")
+
+    verification = verify_iteration_campaign(campaign_path)
+
+    assert verification["passed"] is False
+    assert verification["campaign_metadata_integrity"]["readiness_blockers_match_failed_checks"] is False
+    assert "readiness_blockers do not match failed paper_workflow_readiness_checks" in verification["issues"]
+    assert "paper_workflow_readiness_status mismatch: expected blocked, got ready" in verification["issues"]
+    assert "round 1 blocked_by mismatch for readiness blocker real_llm_credentials" in verification["issues"]
 
 
 def test_verify_iteration_campaign_requires_canonical_record_path(tmp_path: Path) -> None:

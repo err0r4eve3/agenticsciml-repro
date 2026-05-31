@@ -157,6 +157,7 @@ def build_iteration_campaign(
         "remaining_rounds": rounds,
         "benchmark": readiness.get("benchmark", {}),
         "paper_workflow_readiness_status": readiness.get("status"),
+        "paper_workflow_readiness_checks": readiness.get("checks", []),
         "readiness_blockers": readiness.get("blockers", []),
         "target_sequence": [dict(target) for target in CAMPAIGN_TARGETS],
         "batches": batches,
@@ -460,7 +461,26 @@ def _validate_campaign_metadata(campaign: dict[str, Any], issues: list[str]) -> 
     readiness_blockers_valid = isinstance(readiness_blockers, list)
     if not readiness_blockers_valid:
         issues.append("readiness_blockers must be a list")
-    blocker_count = len(readiness_blockers) if readiness_blockers_valid else None
+    readiness_checks = campaign.get("paper_workflow_readiness_checks")
+    readiness_checks_valid = isinstance(readiness_checks, list)
+    if not readiness_checks_valid:
+        issues.append("paper_workflow_readiness_checks must be a list")
+    expected_readiness_blockers = _failed_readiness_blockers_from_checks(campaign)
+    readiness_blockers_match_failed_checks = (
+        readiness_blockers_valid
+        and readiness_checks_valid
+        and readiness_blockers == expected_readiness_blockers
+    )
+    if readiness_blockers_valid and readiness_checks_valid and not readiness_blockers_match_failed_checks:
+        record_mismatch(
+            "readiness_blockers",
+            expected_readiness_blockers,
+            readiness_blockers,
+            "readiness_blockers do not match failed paper_workflow_readiness_checks",
+        )
+    blocker_count = len(expected_readiness_blockers) if readiness_checks_valid else (
+        len(readiness_blockers) if readiness_blockers_valid else None
+    )
     expected_readiness_status = None
     if blocker_count is not None:
         expected_readiness_status = "blocked" if blocker_count > 0 else "ready"
@@ -492,12 +512,20 @@ def _validate_campaign_metadata(campaign: dict[str, Any], issues: list[str]) -> 
         )
 
     return {
-        "campaign_metadata_valid": not metadata_mismatches and readiness_blockers_valid,
+        "campaign_metadata_valid": (
+            not metadata_mismatches
+            and readiness_blockers_valid
+            and readiness_checks_valid
+            and readiness_blockers_match_failed_checks
+        ),
         "expected_campaign_version": ITERATION_CAMPAIGN_VERSION,
         "expected_claim_boundary": ITERATION_CAMPAIGN_CLAIM_BOUNDARY,
         "expected_status": expected_campaign_status,
         "expected_paper_workflow_readiness_status": expected_readiness_status,
         "readiness_blocker_count": blocker_count,
+        "readiness_checks_valid": readiness_checks_valid,
+        "readiness_blockers_match_failed_checks": readiness_blockers_match_failed_checks,
+        "expected_readiness_blockers": expected_readiness_blockers,
         "metadata_mismatches": metadata_mismatches,
     }
 
@@ -844,14 +872,35 @@ def _validate_round_integrity(
 
 
 def _readiness_blockers_by_check(campaign: dict[str, Any]) -> dict[str, dict[str, object]]:
-    readiness_blockers = campaign.get("readiness_blockers")
-    if not isinstance(readiness_blockers, list):
-        return {}
+    failed_check_blockers = _failed_readiness_blockers_from_checks(campaign)
+    if failed_check_blockers:
+        readiness_blockers = failed_check_blockers
+    else:
+        raw_readiness_blockers = campaign.get("readiness_blockers")
+        readiness_blockers = raw_readiness_blockers if isinstance(raw_readiness_blockers, list) else []
     return {
         str(blocker.get("check_id")): dict(blocker)
         for blocker in readiness_blockers
         if isinstance(blocker, dict) and blocker.get("check_id")
     }
+
+
+def _failed_readiness_blockers_from_checks(campaign: dict[str, Any]) -> list[dict[str, object]]:
+    readiness_checks = campaign.get("paper_workflow_readiness_checks")
+    if not isinstance(readiness_checks, list):
+        return []
+    failed_blockers: list[dict[str, object]] = []
+    for check in readiness_checks:
+        if not isinstance(check, dict) or check.get("passed") is not False:
+            continue
+        failed_blockers.append(
+            {
+                "check_id": check.get("check_id"),
+                "category": check.get("category"),
+                "next_action": check.get("next_action"),
+            }
+        )
+    return failed_blockers
 
 
 def render_iteration_campaign_markdown(campaign: dict[str, Any]) -> str:

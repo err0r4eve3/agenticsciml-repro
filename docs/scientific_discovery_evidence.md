@@ -86,8 +86,9 @@ NotebookLM summary 当作 evaluator 事实。
   手工改写成科学发现声明。
   `requires_external_asset=true` 的 round 若仍携带 `blocked_by`，不能通过手工 record
   或 digest 被验收为 completed。
-  Verifier 会从顶层 `readiness_blockers` 重建每轮预期 `blocked_by`，并校验外部资产轮次
-  在 blocker 未解除前仍是 `blocked_by_readiness`。
+  Campaign 会保存 `paper_workflow_readiness_checks`；verifier 会从 failed checks 重建
+  顶层 `readiness_blockers` 和每轮预期 `blocked_by`，并校验外部资产轮次在 blocker
+  未解除前仍是 `blocked_by_readiness`。
   默认只审计已完成轮次；`--require-complete` 会额外要求 campaign 的全部轮次完成，
   供 60 轮最终验收使用。它仍只验证工程证据完整性。
 

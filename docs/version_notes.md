@@ -52,8 +52,10 @@
   手工改写成真实科学发现声明。
 - `requires_external_asset=true` 的 campaign round 若仍携带 `blocked_by`，不能通过手工
   record 或 digest 被验收为 completed。
-- Campaign verifier 会从顶层 `readiness_blockers` 重建每轮预期 `blocked_by` 和外部资产
-  blocked 状态；`record-iteration-round` 也会拒绝先抹掉 blocker 再记录完成的外部资产轮次。
+- Campaign artifact 会保存 `paper_workflow_readiness_checks`；verifier 会从 failed checks
+  重建顶层 `readiness_blockers`、每轮预期 `blocked_by` 和外部资产 blocked 状态。
+  `record-iteration-round` 也会拒绝先清空 blocker 列表或抹掉 round blocker 再记录完成的
+  外部资产轮次。
 - `AgentConfig` / Web `AgentModelRequest` 支持 per-member `base_url`。selector panel
   可以在不记录 API key 的前提下，为不同 selector member 指定不同 OpenAI-compatible
   provider endpoint。
