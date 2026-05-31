@@ -12,6 +12,7 @@ from agenticsciml.storage import _atomic_write_text
 ITERATION_CAMPAIGN_SCHEMA_VERSION = 1
 DEFAULT_CAMPAIGN_ROUNDS = 60
 DEFAULT_BATCH_SIZE = 10
+SUPPORTED_ROUND_STATUSES = frozenset({"planned", "blocked_by_readiness", "completed"})
 
 CAMPAIGN_TARGETS = (
     {
@@ -263,9 +264,13 @@ def verify_iteration_campaign(campaign_path: Path, *, require_complete: bool = F
     rounds = campaign.get("rounds")
     if not isinstance(rounds, list):
         raise ValueError("campaign rounds must be a list")
-    valid_rounds = [item for item in rounds if isinstance(item, dict)]
-    completed_rounds = [item for item in valid_rounds if item.get("status") == "completed"]
     issues: list[str] = []
+    valid_rounds, round_integrity = _validate_round_integrity(campaign, rounds, issues)
+    completed_rounds = [
+        item
+        for item in valid_rounds
+        if item.get("status") == "completed" and isinstance(item.get("round_index"), int)
+    ]
     record_summaries: list[dict[str, Any]] = []
     for round_item in completed_rounds:
         round_index = int(round_item["round_index"])
@@ -369,6 +374,7 @@ def verify_iteration_campaign(campaign_path: Path, *, require_complete: bool = F
         "completed_round_count": len(completed_rounds),
         "remaining_round_count": expected_remaining,
         "integrity_issue_count": len(issues),
+        "round_integrity": round_integrity,
         "issues": issues,
         "records": record_summaries,
         "claim_boundary": (
@@ -383,6 +389,68 @@ def write_iteration_campaign_verification(campaign_path: Path, *, require_comple
     output_path = campaign_path.parent / "iteration_campaign_verification.json"
     _atomic_write_text(output_path, json.dumps(verification, indent=2, sort_keys=True, allow_nan=False))
     return {"verification": verification, "path": str(output_path)}
+
+
+def _validate_round_integrity(
+    campaign: dict[str, Any],
+    rounds: list[object],
+    issues: list[str],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    valid_rounds: list[dict[str, Any]] = []
+    round_indices: list[int] = []
+    duplicate_indices: list[int] = []
+    seen_indices: set[int] = set()
+    invalid_round_entries = 0
+    unsupported_statuses: list[dict[str, Any]] = []
+    for position, item in enumerate(rounds, start=1):
+        if not isinstance(item, dict):
+            invalid_round_entries += 1
+            issues.append(f"round entry {position} is not an object")
+            continue
+        valid_rounds.append(item)
+        round_index = item.get("round_index")
+        if not isinstance(round_index, int) or round_index <= 0:
+            invalid_round_entries += 1
+            issues.append(f"round entry {position} has invalid round_index: {round_index}")
+        else:
+            round_indices.append(round_index)
+            if round_index in seen_indices and round_index not in duplicate_indices:
+                duplicate_indices.append(round_index)
+            seen_indices.add(round_index)
+        status = item.get("status")
+        if status not in SUPPORTED_ROUND_STATUSES:
+            unsupported_statuses.append({"round_index": round_index, "status": status})
+            issues.append(f"round {round_index} has unsupported status: {status}")
+    rounds_requested = campaign.get("rounds_requested")
+    rounds_requested_valid = isinstance(rounds_requested, int) and rounds_requested > 0
+    expected_indices = set(range(1, rounds_requested + 1)) if rounds_requested_valid else set()
+    actual_indices = set(round_indices)
+    missing_indices = sorted(expected_indices - actual_indices)
+    extra_indices = sorted(actual_indices - expected_indices)
+    duplicate_indices.sort()
+    if duplicate_indices:
+        issues.append(f"duplicate round_index values: {duplicate_indices}")
+    if missing_indices:
+        issues.append(f"missing round_index values: {missing_indices}")
+    if extra_indices:
+        issues.append(f"unexpected round_index values: {extra_indices}")
+    if not rounds_requested_valid:
+        issues.append(f"rounds_requested must be a positive integer, got {rounds_requested}")
+    return valid_rounds, {
+        "round_schema_valid": not (
+            invalid_round_entries
+            or unsupported_statuses
+            or duplicate_indices
+            or missing_indices
+            or extra_indices
+            or not rounds_requested_valid
+        ),
+        "invalid_round_entry_count": invalid_round_entries,
+        "duplicate_round_indices": duplicate_indices,
+        "missing_round_indices": missing_indices,
+        "unexpected_round_indices": extra_indices,
+        "unsupported_statuses": unsupported_statuses,
+    }
 
 
 def render_iteration_campaign_markdown(campaign: dict[str, Any]) -> str:

@@ -279,6 +279,30 @@ def test_verify_iteration_campaign_require_complete_blocks_incomplete_campaign(t
     assert "campaign is not complete: completed=1, expected=12" in verification["issues"]
 
 
+def test_verify_iteration_campaign_detects_round_schema_tampering(tmp_path: Path) -> None:
+    result = write_iteration_campaign(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        rounds=12,
+        batch_size=5,
+        env={},
+    )
+    campaign_path = Path(result["paths"]["campaign_json"])
+    campaign = json.loads(campaign_path.read_text(encoding="utf-8"))
+    campaign["rounds"][1]["round_index"] = 1
+    campaign["rounds"][2]["status"] = "done"
+    campaign_path.write_text(json.dumps(campaign), encoding="utf-8")
+
+    verification = verify_iteration_campaign(campaign_path)
+
+    assert verification["passed"] is False
+    assert verification["round_integrity"]["duplicate_round_indices"] == [1]
+    assert verification["round_integrity"]["missing_round_indices"] == [2]
+    assert "duplicate round_index values: [1]" in verification["issues"]
+    assert "missing round_index values: [2]" in verification["issues"]
+    assert "round 3 has unsupported status: done" in verification["issues"]
+
+
 def test_verify_iteration_campaign_detects_tampered_evidence(tmp_path: Path) -> None:
     result = write_iteration_campaign(
         benchmark_dir=Path("examples/function_approx").resolve(),

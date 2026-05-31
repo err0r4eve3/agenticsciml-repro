@@ -33,6 +33,8 @@
   `verify-iteration-campaign` 会重新校验 validation output digest，并在验证命令失败或输出被改时阻塞。
 - `verify-iteration-campaign --require-complete` 可作为 60 轮 campaign 的最终完成审计：
   未完成、仍 blocked 或计数不一致时返回失败；默认模式仍只校验已完成轮次的证据完整性。
+- `verify-iteration-campaign` 现在还会校验 campaign round schema：round index 必须唯一连续，
+  status 必须在 `planned` / `blocked_by_readiness` / `completed` 内，否则 fail closed。
 - `AgentConfig` / Web `AgentModelRequest` 支持 per-member `base_url`。selector panel
   可以在不记录 API key 的前提下，为不同 selector member 指定不同 OpenAI-compatible
   provider endpoint。

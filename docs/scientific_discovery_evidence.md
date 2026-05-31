@@ -70,8 +70,9 @@ NotebookLM summary 当作 evaluator 事实。
   卡住的轮次，避免把外部缺口伪装成已完成。
 - `verify-iteration-campaign`：重新校验 completed round 的 record、evidence digest 和
   validation output digest、validation exit code、campaign 计数，防止轮次完成状态被手工篡改、
-  证据文件替换或验证结果被改写。默认只审计已完成轮次；`--require-complete` 会额外要求
-  campaign 的全部轮次完成，供 60 轮最终验收使用。它仍只验证工程证据完整性。
+  证据文件替换或验证结果被改写。它同时校验 round 编号是否唯一连续、状态是否在支持集合内。
+  默认只审计已完成轮次；`--require-complete` 会额外要求 campaign 的全部轮次完成，
+  供 60 轮最终验收使用。它仍只验证工程证据完整性。
 
 ## Claim Gate
 
