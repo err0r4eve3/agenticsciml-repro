@@ -80,6 +80,8 @@ NotebookLM summary 当作 evaluator 事实。
   `iteration_round_XXX_record.json`。
   `batches` 摘要会从当前 rounds 反向重算，batch 范围、target 列表和 planned/blocked/completed
   计数不一致时 fail closed。
+  顶层 `campaign_version`、`claim_boundary`、`paper_workflow_readiness_status` 和
+  `status` 也会按 blocker 状态重新对账，避免把 blocked campaign 手工改成 ready。
   默认只审计已完成轮次；`--require-complete` 会额外要求 campaign 的全部轮次完成，
   供 60 轮最终验收使用。它仍只验证工程证据完整性。
 

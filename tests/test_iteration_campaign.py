@@ -370,6 +370,39 @@ def test_verify_iteration_campaign_detects_batch_summary_tampering(tmp_path: Pat
     assert "batch 1 planned_round_count mismatch: expected 0, got 99" in verification["issues"]
 
 
+def test_verify_iteration_campaign_detects_campaign_metadata_tampering(tmp_path: Path) -> None:
+    result = write_iteration_campaign(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        rounds=12,
+        batch_size=5,
+        env={},
+    )
+    campaign_path = Path(result["paths"]["campaign_json"])
+    campaign = json.loads(campaign_path.read_text(encoding="utf-8"))
+    campaign["campaign_version"] = "iteration_campaign.v999"
+    campaign["claim_boundary"] = "scientific discovery ready"
+    campaign["status"] = "ready"
+    campaign["paper_workflow_readiness_status"] = "ready"
+    campaign_path.write_text(json.dumps(campaign), encoding="utf-8")
+
+    verification = verify_iteration_campaign(campaign_path)
+
+    assert verification["passed"] is False
+    assert verification["campaign_metadata_integrity"]["campaign_metadata_valid"] is False
+    assert {
+        "field": "campaign_version",
+        "expected": "iteration_campaign.v1",
+        "actual": "iteration_campaign.v999",
+    } in verification["campaign_metadata_integrity"]["metadata_mismatches"]
+    assert "campaign_version mismatch: expected iteration_campaign.v1, got iteration_campaign.v999" in verification[
+        "issues"
+    ]
+    assert "campaign status mismatch: expected blocked, got ready" in verification["issues"]
+    assert "paper_workflow_readiness_status mismatch: expected blocked, got ready" in verification["issues"]
+    assert "claim_boundary mismatch for iteration campaign" in verification["issues"]
+
+
 def test_verify_iteration_campaign_detects_record_metadata_tampering(tmp_path: Path) -> None:
     result = write_iteration_campaign(
         benchmark_dir=Path("examples/function_approx").resolve(),

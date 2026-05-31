@@ -10,8 +10,15 @@ from agenticsciml.storage import _atomic_write_text
 
 
 ITERATION_CAMPAIGN_SCHEMA_VERSION = 1
+ITERATION_CAMPAIGN_VERSION = "iteration_campaign.v1"
+ITERATION_CAMPAIGN_CLAIM_BOUNDARY = (
+    "This campaign is an execution plan for iterative engineering evidence. Planned or blocked rounds "
+    "do not count as scientific discovery evidence until validated run artifacts exist."
+)
 DEFAULT_CAMPAIGN_ROUNDS = 60
 DEFAULT_BATCH_SIZE = 10
+SUPPORTED_CAMPAIGN_STATUSES = frozenset({"blocked", "ready"})
+SUPPORTED_READINESS_STATUSES = frozenset({"blocked", "ready"})
 SUPPORTED_ROUND_STATUSES = frozenset({"planned", "blocked_by_readiness", "completed"})
 
 CAMPAIGN_TARGETS = (
@@ -139,7 +146,7 @@ def build_iteration_campaign(
     batches = _batches(rounds_payload, batch_size)
     return {
         "schema_version": ITERATION_CAMPAIGN_SCHEMA_VERSION,
-        "campaign_version": "iteration_campaign.v1",
+        "campaign_version": ITERATION_CAMPAIGN_VERSION,
         "rounds_requested": rounds,
         "batch_size": batch_size,
         "status": "blocked" if readiness.get("status") == "blocked" else "ready",
@@ -151,10 +158,7 @@ def build_iteration_campaign(
         "target_sequence": [dict(target) for target in CAMPAIGN_TARGETS],
         "batches": batches,
         "rounds": rounds_payload,
-        "claim_boundary": (
-            "This campaign is an execution plan for iterative engineering evidence. Planned or blocked rounds "
-            "do not count as scientific discovery evidence until validated run artifacts exist."
-        ),
+        "claim_boundary": ITERATION_CAMPAIGN_CLAIM_BOUNDARY,
     }
 
 
@@ -265,6 +269,7 @@ def verify_iteration_campaign(campaign_path: Path, *, require_complete: bool = F
     if not isinstance(rounds, list):
         raise ValueError("campaign rounds must be a list")
     issues: list[str] = []
+    campaign_metadata_integrity = _validate_campaign_metadata(campaign, issues)
     valid_rounds, round_integrity = _validate_round_integrity(campaign, rounds, issues)
     batch_integrity = _validate_batch_integrity(campaign, valid_rounds, issues)
     completed_rounds = [
@@ -399,6 +404,7 @@ def verify_iteration_campaign(campaign_path: Path, *, require_complete: bool = F
         "completed_round_count": len(completed_rounds),
         "remaining_round_count": expected_remaining,
         "integrity_issue_count": len(issues),
+        "campaign_metadata_integrity": campaign_metadata_integrity,
         "round_integrity": round_integrity,
         "batch_integrity": batch_integrity,
         "issues": issues,
@@ -415,6 +421,77 @@ def write_iteration_campaign_verification(campaign_path: Path, *, require_comple
     output_path = campaign_path.parent / "iteration_campaign_verification.json"
     _atomic_write_text(output_path, json.dumps(verification, indent=2, sort_keys=True, allow_nan=False))
     return {"verification": verification, "path": str(output_path)}
+
+
+def _validate_campaign_metadata(campaign: dict[str, Any], issues: list[str]) -> dict[str, Any]:
+    metadata_mismatches: list[dict[str, Any]] = []
+
+    def record_mismatch(field: str, expected: object, actual: object, message: str) -> None:
+        metadata_mismatches.append({"field": field, "expected": expected, "actual": actual})
+        issues.append(message)
+
+    campaign_version = campaign.get("campaign_version")
+    if campaign_version != ITERATION_CAMPAIGN_VERSION:
+        record_mismatch(
+            "campaign_version",
+            ITERATION_CAMPAIGN_VERSION,
+            campaign_version,
+            f"campaign_version mismatch: expected {ITERATION_CAMPAIGN_VERSION}, got {campaign_version}",
+        )
+
+    claim_boundary = campaign.get("claim_boundary")
+    if claim_boundary != ITERATION_CAMPAIGN_CLAIM_BOUNDARY:
+        record_mismatch(
+            "claim_boundary",
+            ITERATION_CAMPAIGN_CLAIM_BOUNDARY,
+            claim_boundary,
+            "claim_boundary mismatch for iteration campaign",
+        )
+
+    readiness_blockers = campaign.get("readiness_blockers")
+    readiness_blockers_valid = isinstance(readiness_blockers, list)
+    if not readiness_blockers_valid:
+        issues.append("readiness_blockers must be a list")
+    blocker_count = len(readiness_blockers) if readiness_blockers_valid else None
+    expected_readiness_status = None
+    if blocker_count is not None:
+        expected_readiness_status = "blocked" if blocker_count > 0 else "ready"
+
+    readiness_status = campaign.get("paper_workflow_readiness_status")
+    if readiness_status not in SUPPORTED_READINESS_STATUSES:
+        issues.append(f"paper_workflow_readiness_status has unsupported value: {readiness_status}")
+    if expected_readiness_status is not None and readiness_status != expected_readiness_status:
+        record_mismatch(
+            "paper_workflow_readiness_status",
+            expected_readiness_status,
+            readiness_status,
+            (
+                "paper_workflow_readiness_status mismatch: "
+                f"expected {expected_readiness_status}, got {readiness_status}"
+            ),
+        )
+
+    expected_campaign_status = expected_readiness_status
+    campaign_status = campaign.get("status")
+    if campaign_status not in SUPPORTED_CAMPAIGN_STATUSES:
+        issues.append(f"campaign status has unsupported value: {campaign_status}")
+    if expected_campaign_status is not None and campaign_status != expected_campaign_status:
+        record_mismatch(
+            "status",
+            expected_campaign_status,
+            campaign_status,
+            f"campaign status mismatch: expected {expected_campaign_status}, got {campaign_status}",
+        )
+
+    return {
+        "campaign_metadata_valid": not metadata_mismatches and readiness_blockers_valid,
+        "expected_campaign_version": ITERATION_CAMPAIGN_VERSION,
+        "expected_claim_boundary": ITERATION_CAMPAIGN_CLAIM_BOUNDARY,
+        "expected_status": expected_campaign_status,
+        "expected_paper_workflow_readiness_status": expected_readiness_status,
+        "readiness_blocker_count": blocker_count,
+        "metadata_mismatches": metadata_mismatches,
+    }
 
 
 def _validate_batch_integrity(

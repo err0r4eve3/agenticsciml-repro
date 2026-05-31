@@ -45,6 +45,9 @@
   `iteration_round_XXX_record.json`，不能指向同目录下任意 JSON。
 - Campaign verifier 会从 rounds 重新计算 `batches` 摘要，batch range、target 列表、
   planned/blocked/completed/remaining 计数不一致时 fail closed。
+- Campaign verifier 现在也会校验顶层 metadata：`campaign_version`、`claim_boundary`、
+  `paper_workflow_readiness_status` 和 `status` 必须与 blocker 状态一致，防止把仍 blocked
+  的 campaign 手工改成 ready 或科学发现证据。
 - `AgentConfig` / Web `AgentModelRequest` 支持 per-member `base_url`。selector panel
   可以在不记录 API key 的前提下，为不同 selector member 指定不同 OpenAI-compatible
   provider endpoint。
