@@ -43,6 +43,8 @@
   绝对路径、`..` 逃逸或 symlink 逃逸都会被拒绝或在 verification 中 fail closed。
 - Completed round 的 `evidence_record_path` 必须使用规范文件名
   `iteration_round_XXX_record.json`，不能指向同目录下任意 JSON。
+- Campaign verifier 会从 rounds 重新计算 `batches` 摘要，batch range、target 列表、
+  planned/blocked/completed/remaining 计数不一致时 fail closed。
 - `AgentConfig` / Web `AgentModelRequest` 支持 per-member `base_url`。selector panel
   可以在不记录 API key 的前提下，为不同 selector member 指定不同 OpenAI-compatible
   provider endpoint。

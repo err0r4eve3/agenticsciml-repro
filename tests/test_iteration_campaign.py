@@ -341,6 +341,35 @@ def test_verify_iteration_campaign_detects_round_target_tampering(tmp_path: Path
     assert "round 6 batch_index mismatch: expected 2, got 99" in verification["issues"]
 
 
+def test_verify_iteration_campaign_detects_batch_summary_tampering(tmp_path: Path) -> None:
+    result = write_iteration_campaign(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        rounds=12,
+        batch_size=5,
+        env={},
+    )
+    campaign_path = Path(result["paths"]["campaign_json"])
+    campaign = json.loads(campaign_path.read_text(encoding="utf-8"))
+    campaign["batches"][0]["round_end"] = 4
+    campaign["batches"][0]["target_ids"] = ["documentation_and_repro_packet"]
+    campaign["batches"][0]["planned_round_count"] = 99
+    campaign_path.write_text(json.dumps(campaign), encoding="utf-8")
+
+    verification = verify_iteration_campaign(campaign_path)
+
+    assert verification["passed"] is False
+    assert verification["batch_integrity"]["batch_schema_valid"] is False
+    assert {
+        "batch_index": 1,
+        "field": "round_end",
+        "expected": 5,
+        "actual": 4,
+    } in verification["batch_integrity"]["batch_mismatches"]
+    assert any(issue.startswith("batch 1 target_ids mismatch") for issue in verification["issues"])
+    assert "batch 1 planned_round_count mismatch: expected 0, got 99" in verification["issues"]
+
+
 def test_verify_iteration_campaign_detects_record_metadata_tampering(tmp_path: Path) -> None:
     result = write_iteration_campaign(
         benchmark_dir=Path("examples/function_approx").resolve(),

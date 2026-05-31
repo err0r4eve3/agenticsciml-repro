@@ -266,6 +266,7 @@ def verify_iteration_campaign(campaign_path: Path, *, require_complete: bool = F
         raise ValueError("campaign rounds must be a list")
     issues: list[str] = []
     valid_rounds, round_integrity = _validate_round_integrity(campaign, rounds, issues)
+    batch_integrity = _validate_batch_integrity(campaign, valid_rounds, issues)
     completed_rounds = [
         item
         for item in valid_rounds
@@ -399,6 +400,7 @@ def verify_iteration_campaign(campaign_path: Path, *, require_complete: bool = F
         "remaining_round_count": expected_remaining,
         "integrity_issue_count": len(issues),
         "round_integrity": round_integrity,
+        "batch_integrity": batch_integrity,
         "issues": issues,
         "records": record_summaries,
         "claim_boundary": (
@@ -413,6 +415,78 @@ def write_iteration_campaign_verification(campaign_path: Path, *, require_comple
     output_path = campaign_path.parent / "iteration_campaign_verification.json"
     _atomic_write_text(output_path, json.dumps(verification, indent=2, sort_keys=True, allow_nan=False))
     return {"verification": verification, "path": str(output_path)}
+
+
+def _validate_batch_integrity(
+    campaign: dict[str, Any],
+    valid_rounds: list[dict[str, Any]],
+    issues: list[str],
+) -> dict[str, Any]:
+    batches = campaign.get("batches")
+    batch_mismatches: list[dict[str, Any]] = []
+    if not isinstance(batches, list):
+        issues.append("campaign batches must be a list")
+        return {
+            "batch_schema_valid": False,
+            "expected_batch_count": 0,
+            "actual_batch_count": 0,
+            "batch_mismatches": batch_mismatches,
+        }
+    batch_size = campaign.get("batch_size")
+    if not isinstance(batch_size, int) or batch_size <= 0:
+        return {
+            "batch_schema_valid": False,
+            "expected_batch_count": 0,
+            "actual_batch_count": len(batches),
+            "batch_mismatches": batch_mismatches,
+        }
+    expected_batches = _recompute_batch_summaries(valid_rounds, batch_size)
+    if len(batches) != len(expected_batches):
+        issues.append(f"batch count mismatch: expected {len(expected_batches)}, got {len(batches)}")
+    for index, expected in enumerate(expected_batches):
+        if index >= len(batches):
+            batch_mismatches.append(
+                {
+                    "batch_index": expected["batch_index"],
+                    "field": "batch",
+                    "expected": expected,
+                    "actual": None,
+                }
+            )
+            continue
+        actual = batches[index]
+        if not isinstance(actual, dict):
+            batch_mismatches.append(
+                {
+                    "batch_index": expected["batch_index"],
+                    "field": "batch",
+                    "expected": expected,
+                    "actual": actual,
+                }
+            )
+            issues.append(f"batch entry {index + 1} is not an object")
+            continue
+        for field, expected_value in expected.items():
+            actual_value = actual.get(field)
+            if actual_value != expected_value:
+                batch_mismatches.append(
+                    {
+                        "batch_index": expected["batch_index"],
+                        "field": field,
+                        "expected": expected_value,
+                        "actual": actual_value,
+                    }
+                )
+                issues.append(
+                    f"batch {expected['batch_index']} {field} mismatch: "
+                    f"expected {expected_value}, got {actual_value}"
+                )
+    return {
+        "batch_schema_valid": not batch_mismatches and len(batches) == len(expected_batches),
+        "expected_batch_count": len(expected_batches),
+        "actual_batch_count": len(batches),
+        "batch_mismatches": batch_mismatches,
+    }
 
 
 def _record_metadata_mismatches(
@@ -711,18 +785,9 @@ def _refresh_campaign_progress(campaign: dict[str, Any]) -> None:
     completed = sum(1 for item in rounds if item.get("status") == "completed")
     campaign["completed_rounds"] = completed
     campaign["remaining_rounds"] = max(0, len(rounds) - completed)
-    for batch in campaign.get("batches", []):
-        if not isinstance(batch, dict):
-            continue
-        start = int(batch.get("round_start", 0))
-        end = int(batch.get("round_end", 0))
-        batch_rounds = [
-            item
-            for item in rounds
-            if isinstance(item.get("round_index"), int) and start <= int(item["round_index"]) <= end
-        ]
-        batch["completed_round_count"] = sum(1 for item in batch_rounds if item.get("status") == "completed")
-        batch["remaining_round_count"] = len(batch_rounds) - int(batch["completed_round_count"])
+    batch_size = campaign.get("batch_size")
+    if isinstance(batch_size, int) and batch_size > 0:
+        campaign["batches"] = _recompute_batch_summaries(rounds, batch_size)
 
 
 def _round_payload(
@@ -750,17 +815,29 @@ def _round_payload(
 
 
 def _batches(rounds_payload: list[dict[str, Any]], batch_size: int) -> list[dict[str, Any]]:
+    return _recompute_batch_summaries(rounds_payload, batch_size)
+
+
+def _recompute_batch_summaries(rounds_payload: list[dict[str, Any]], batch_size: int) -> list[dict[str, Any]]:
     batches: list[dict[str, Any]] = []
-    for start in range(0, len(rounds_payload), batch_size):
-        items = rounds_payload[start : start + batch_size]
+    valid_items = [
+        item
+        for item in rounds_payload
+        if isinstance(item.get("round_index"), int) and int(item["round_index"]) > 0
+    ]
+    valid_items.sort(key=lambda item: int(item["round_index"]))
+    for start in range(0, len(valid_items), batch_size):
+        items = valid_items[start : start + batch_size]
         batches.append(
             {
-                "batch_index": items[0]["batch_index"],
+                "batch_index": (start // batch_size) + 1,
                 "round_start": items[0]["round_index"],
                 "round_end": items[-1]["round_index"],
                 "target_ids": sorted({str(item["target_id"]) for item in items}),
-                "blocked_round_count": sum(1 for item in items if item["status"] != "planned"),
+                "blocked_round_count": sum(1 for item in items if item["status"] == "blocked_by_readiness"),
                 "planned_round_count": sum(1 for item in items if item["status"] == "planned"),
+                "completed_round_count": sum(1 for item in items if item["status"] == "completed"),
+                "remaining_round_count": sum(1 for item in items if item["status"] != "completed"),
             }
         )
     return batches
