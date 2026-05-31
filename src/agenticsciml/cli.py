@@ -18,7 +18,11 @@ from agenticsciml.config import (
     EvolutionConfig,
     ExperimentConfig,
 )
-from agenticsciml.iteration_campaign import record_iteration_round_evidence, write_iteration_campaign
+from agenticsciml.iteration_campaign import (
+    record_iteration_round_evidence,
+    write_iteration_campaign,
+    write_iteration_campaign_verification,
+)
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.llm_smoke import DEFAULT_SMOKE_VARIANTS, run_llm_smoke, verify_llm_smoke_output
@@ -227,6 +231,14 @@ def cmd_record_iteration_round(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_verify_iteration_campaign(args: argparse.Namespace) -> int:
+    result = write_iteration_campaign_verification(Path(args.campaign_json).resolve())
+    print(result["path"])
+    if args.fail_on_issues and result["verification"]["passed"] is not True:
+        return 1
+    return 0
+
+
 def cmd_smoke_llm(args: argparse.Namespace) -> int:
     variants = [item.strip() for item in args.variants.split(",") if item.strip()]
     result = run_llm_smoke(
@@ -417,6 +429,11 @@ def build_parser() -> argparse.ArgumentParser:
     record_round.add_argument("--validation-command", required=True)
     record_round.add_argument("--notes", default="")
     record_round.set_defaults(func=cmd_record_iteration_round)
+
+    verify_campaign = sub.add_parser("verify-iteration-campaign")
+    verify_campaign.add_argument("campaign_json")
+    verify_campaign.add_argument("--fail-on-issues", action="store_true")
+    verify_campaign.set_defaults(func=cmd_verify_iteration_campaign)
 
     smoke_llm = sub.add_parser("smoke-llm")
     smoke_llm.add_argument("benchmark_dir")

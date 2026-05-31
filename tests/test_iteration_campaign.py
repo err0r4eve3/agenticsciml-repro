@@ -10,6 +10,7 @@ import pytest
 from agenticsciml.iteration_campaign import (
     build_iteration_campaign,
     record_iteration_round_evidence,
+    verify_iteration_campaign,
     write_iteration_campaign,
 )
 
@@ -200,3 +201,123 @@ def test_cli_record_iteration_round_updates_campaign(
     assert record_path == campaign_dir / "iteration_round_006_record.json"
     assert json.loads(record_path.read_text(encoding="utf-8"))["round_index"] == 6
     assert campaign["completed_rounds"] == 1
+
+
+def test_verify_iteration_campaign_passes_recorded_round(tmp_path: Path) -> None:
+    result = write_iteration_campaign(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        rounds=12,
+        batch_size=5,
+        env={},
+    )
+    campaign_path = Path(result["paths"]["campaign_json"])
+    evidence_path = tmp_path / "round_006_evidence.json"
+    evidence_path.write_text('{"validated": true}\n', encoding="utf-8")
+    record_iteration_round_evidence(
+        campaign_path,
+        round_index=6,
+        evidence_path=evidence_path,
+        validation_command="pytest tests/test_iteration_campaign.py -q",
+    )
+
+    verification = verify_iteration_campaign(campaign_path)
+
+    assert verification["passed"] is True
+    assert verification["completed_round_count"] == 1
+    assert verification["integrity_issue_count"] == 0
+    assert verification["records"][0]["round_index"] == 6
+    assert verification["records"][0]["evidence_digest_match"] is True
+
+
+def test_verify_iteration_campaign_detects_tampered_evidence(tmp_path: Path) -> None:
+    result = write_iteration_campaign(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        rounds=12,
+        batch_size=5,
+        env={},
+    )
+    campaign_path = Path(result["paths"]["campaign_json"])
+    evidence_path = tmp_path / "round_006_evidence.json"
+    evidence_path.write_text('{"validated": true}\n', encoding="utf-8")
+    record_iteration_round_evidence(
+        campaign_path,
+        round_index=6,
+        evidence_path=evidence_path,
+        validation_command="pytest tests/test_iteration_campaign.py -q",
+    )
+    evidence_path.write_text('{"validated": false}\n', encoding="utf-8")
+
+    verification = verify_iteration_campaign(campaign_path)
+
+    assert verification["passed"] is False
+    assert verification["integrity_issue_count"] == 1
+    assert "evidence digest mismatch for round 6" in verification["issues"]
+
+
+def test_cli_verify_iteration_campaign_writes_report(
+    tmp_path: Path,
+    cli_env: dict[str, str],
+) -> None:
+    campaign_dir = tmp_path / "campaign"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenticsciml.cli",
+            "plan-iteration-campaign",
+            "examples/function_approx",
+            "--output-dir",
+            str(campaign_dir),
+            "--rounds",
+            "12",
+            "--batch-size",
+            "5",
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+        env=cli_env,
+    )
+    evidence_path = campaign_dir / "round_006_evidence.json"
+    evidence_path.write_text('{"validated": true}\n', encoding="utf-8")
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenticsciml.cli",
+            "record-iteration-round",
+            str(campaign_dir / "iteration_campaign.json"),
+            "--round",
+            "6",
+            "--evidence-path",
+            str(evidence_path),
+            "--validation-command",
+            "pytest tests/test_iteration_campaign.py -q",
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+        env=cli_env,
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenticsciml.cli",
+            "verify-iteration-campaign",
+            str(campaign_dir / "iteration_campaign.json"),
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+        env=cli_env,
+    )
+    report_path = Path(result.stdout.strip())
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    assert report_path == campaign_dir / "iteration_campaign_verification.json"
+    assert report["passed"] is True
+    assert report["completed_round_count"] == 1

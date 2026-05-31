@@ -243,6 +243,97 @@ def record_iteration_round_evidence(
     return record
 
 
+def verify_iteration_campaign(campaign_path: Path) -> dict[str, Any]:
+    campaign = _load_campaign(campaign_path)
+    campaign_dir = campaign_path.parent
+    rounds = campaign.get("rounds")
+    if not isinstance(rounds, list):
+        raise ValueError("campaign rounds must be a list")
+    completed_rounds = [item for item in rounds if isinstance(item, dict) and item.get("status") == "completed"]
+    issues: list[str] = []
+    record_summaries: list[dict[str, Any]] = []
+    for round_item in completed_rounds:
+        round_index = int(round_item["round_index"])
+        record_path_value = str(round_item.get("evidence_record_path") or "").strip()
+        if not record_path_value:
+            issues.append(f"completed round {round_index} is missing evidence_record_path")
+            continue
+        record_path = campaign_dir / record_path_value
+        if not record_path.is_file():
+            issues.append(f"record file missing for round {round_index}: {record_path_value}")
+            continue
+        try:
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            issues.append(f"record file invalid JSON for round {round_index}: {record_path_value}")
+            continue
+        if not isinstance(record, dict):
+            issues.append(f"record file must be an object for round {round_index}: {record_path_value}")
+            continue
+        record_round_index = record.get("round_index")
+        if record_round_index != round_index:
+            issues.append(f"record round mismatch for round {round_index}: got {record_round_index}")
+        evidence = record.get("evidence") if isinstance(record.get("evidence"), dict) else {}
+        evidence_path_value = str(evidence.get("path") or "").strip()
+        expected_digest = str(evidence.get("sha256") or "").strip()
+        digest_match = False
+        if not evidence_path_value:
+            issues.append(f"record evidence path missing for round {round_index}")
+        elif not expected_digest:
+            issues.append(f"record evidence sha256 missing for round {round_index}")
+        else:
+            evidence_path = Path(evidence_path_value)
+            evidence_file = evidence_path if evidence_path.is_absolute() else campaign_dir / evidence_path
+            if not evidence_file.is_file():
+                issues.append(f"evidence file missing for round {round_index}: {evidence_path_value}")
+            else:
+                actual_digest = _sha256(evidence_file)
+                digest_match = actual_digest == expected_digest
+                if not digest_match:
+                    issues.append(f"evidence digest mismatch for round {round_index}")
+        record_summaries.append(
+            {
+                "round_index": round_index,
+                "target_id": round_item.get("target_id"),
+                "record_path": record_path_value,
+                "evidence_path": evidence_path_value or None,
+                "evidence_digest_match": digest_match,
+            }
+        )
+    declared_completed = campaign.get("completed_rounds")
+    if declared_completed != len(completed_rounds):
+        issues.append(
+            f"completed_rounds mismatch: declared={declared_completed}, actual={len(completed_rounds)}"
+        )
+    declared_remaining = campaign.get("remaining_rounds")
+    expected_remaining = len([item for item in rounds if isinstance(item, dict)]) - len(completed_rounds)
+    if declared_remaining != expected_remaining:
+        issues.append(f"remaining_rounds mismatch: declared={declared_remaining}, actual={expected_remaining}")
+    return {
+        "schema_version": 1,
+        "verification_version": "iteration_campaign_verification.v1",
+        "passed": not issues,
+        "campaign_path": str(campaign_path),
+        "round_count": len([item for item in rounds if isinstance(item, dict)]),
+        "completed_round_count": len(completed_rounds),
+        "remaining_round_count": expected_remaining,
+        "integrity_issue_count": len(issues),
+        "issues": issues,
+        "records": record_summaries,
+        "claim_boundary": (
+            "This verification checks campaign accounting and evidence-record integrity only. "
+            "It does not validate scientific claims or blocked external assets."
+        ),
+    }
+
+
+def write_iteration_campaign_verification(campaign_path: Path) -> dict[str, Any]:
+    verification = verify_iteration_campaign(campaign_path)
+    output_path = campaign_path.parent / "iteration_campaign_verification.json"
+    _atomic_write_text(output_path, json.dumps(verification, indent=2, sort_keys=True, allow_nan=False))
+    return {"verification": verification, "path": str(output_path)}
+
+
 def render_iteration_campaign_markdown(campaign: dict[str, Any]) -> str:
     lines = [
         "# Iteration Campaign",

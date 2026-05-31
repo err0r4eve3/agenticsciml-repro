@@ -27,6 +27,8 @@
 - 新增 CLI `record-iteration-round`，用于把某一 planned 轮次绑定到实际 evidence artifact、
   SHA-256 digest 和验证命令，写出 `iteration_round_XXX_record.json` 并更新 campaign
   进度。被 readiness blocker 卡住的轮次不能被记录为完成。
+- 新增 CLI `verify-iteration-campaign`，可重新校验 completed round 的 record、evidence
+  digest 和 campaign 计数；证据文件被篡改、record 缺失或计数不一致时会 fail closed。
 - `AgentConfig` / Web `AgentModelRequest` 支持 per-member `base_url`。selector panel
   可以在不记录 API key 的前提下，为不同 selector member 指定不同 OpenAI-compatible
   provider endpoint。

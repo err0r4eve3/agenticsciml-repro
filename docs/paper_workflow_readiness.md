@@ -37,6 +37,14 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli recor
   --validation-command "PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_iteration_campaign.py -q"
 ```
 
+重新校验 campaign 已完成轮次的 record 和 evidence digest：
+
+```bash
+PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli verify-iteration-campaign \
+  runs/iteration-campaign/iteration_campaign.json \
+  --fail-on-issues
+```
+
 可选输入：
 
 - `--domain-approval-json <path>`：领域审核 packet。
@@ -55,6 +63,7 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli recor
 - `iteration_campaign.json`
 - `iteration_campaign.md`
 - `iteration_round_XXX_record.json`
+- `iteration_campaign_verification.json`
 
 ## Gate
 
@@ -83,3 +92,6 @@ visual audit、domain approval、ablation evidence 和 paper-like benchmark doss
 `record-iteration-round` 只允许记录未被 readiness blocker 卡住的 planned 轮次；它会
 写入证据文件 digest、验证命令和轮次 record，并更新 campaign 的
 `completed_rounds` / `remaining_rounds`。该记录仍是工程进度证据，不是科学发现证据。
+`verify-iteration-campaign` 会重新读取每个 completed round 的 record 和 evidence 文件，
+校验 SHA-256 digest 与 campaign 计数，检测记录缺失、证据篡改和进度计数不一致。它只验证
+工程证据完整性，不会把 blocked 的外部资产或科学 claim 判为已完成。

@@ -68,6 +68,8 @@ NotebookLM summary 当作 evaluator 事实。
 - `record-iteration-round`：只有某轮已有实际 evidence artifact 和验证命令时，才写入
   `iteration_round_XXX_record.json` 并更新 campaign 进度。它拒绝完成被 readiness blocker
   卡住的轮次，避免把外部缺口伪装成已完成。
+- `verify-iteration-campaign`：重新校验 completed round 的 record、evidence digest 和
+  campaign 计数，防止轮次完成状态被手工篡改或证据文件替换。它仍只验证工程证据完整性。
 
 ## Claim Gate
 
