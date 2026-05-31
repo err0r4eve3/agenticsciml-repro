@@ -257,13 +257,14 @@ def record_iteration_round_evidence(
     return record
 
 
-def verify_iteration_campaign(campaign_path: Path) -> dict[str, Any]:
+def verify_iteration_campaign(campaign_path: Path, *, require_complete: bool = False) -> dict[str, Any]:
     campaign = _load_campaign(campaign_path)
     campaign_dir = campaign_path.parent
     rounds = campaign.get("rounds")
     if not isinstance(rounds, list):
         raise ValueError("campaign rounds must be a list")
-    completed_rounds = [item for item in rounds if isinstance(item, dict) and item.get("status") == "completed"]
+    valid_rounds = [item for item in rounds if isinstance(item, dict)]
+    completed_rounds = [item for item in valid_rounds if item.get("status") == "completed"]
     issues: list[str] = []
     record_summaries: list[dict[str, Any]] = []
     for round_item in completed_rounds:
@@ -351,15 +352,20 @@ def verify_iteration_campaign(campaign_path: Path) -> dict[str, Any]:
             f"completed_rounds mismatch: declared={declared_completed}, actual={len(completed_rounds)}"
         )
     declared_remaining = campaign.get("remaining_rounds")
-    expected_remaining = len([item for item in rounds if isinstance(item, dict)]) - len(completed_rounds)
+    expected_remaining = len(valid_rounds) - len(completed_rounds)
     if declared_remaining != expected_remaining:
         issues.append(f"remaining_rounds mismatch: declared={declared_remaining}, actual={expected_remaining}")
+    fully_completed = len(valid_rounds) > 0 and len(completed_rounds) == len(valid_rounds)
+    if require_complete and not fully_completed:
+        issues.append(f"campaign is not complete: completed={len(completed_rounds)}, expected={len(valid_rounds)}")
     return {
         "schema_version": 1,
         "verification_version": "iteration_campaign_verification.v1",
         "passed": not issues,
         "campaign_path": str(campaign_path),
-        "round_count": len([item for item in rounds if isinstance(item, dict)]),
+        "require_complete": require_complete,
+        "fully_completed": fully_completed,
+        "round_count": len(valid_rounds),
         "completed_round_count": len(completed_rounds),
         "remaining_round_count": expected_remaining,
         "integrity_issue_count": len(issues),
@@ -372,8 +378,8 @@ def verify_iteration_campaign(campaign_path: Path) -> dict[str, Any]:
     }
 
 
-def write_iteration_campaign_verification(campaign_path: Path) -> dict[str, Any]:
-    verification = verify_iteration_campaign(campaign_path)
+def write_iteration_campaign_verification(campaign_path: Path, *, require_complete: bool = False) -> dict[str, Any]:
+    verification = verify_iteration_campaign(campaign_path, require_complete=require_complete)
     output_path = campaign_path.parent / "iteration_campaign_verification.json"
     _atomic_write_text(output_path, json.dumps(verification, indent=2, sort_keys=True, allow_nan=False))
     return {"verification": verification, "path": str(output_path)}

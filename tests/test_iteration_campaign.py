@@ -249,6 +249,36 @@ def test_verify_iteration_campaign_passes_recorded_round(tmp_path: Path) -> None
     assert verification["records"][0]["validation_output_digest_match"] is True
 
 
+def test_verify_iteration_campaign_require_complete_blocks_incomplete_campaign(tmp_path: Path) -> None:
+    result = write_iteration_campaign(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        rounds=12,
+        batch_size=5,
+        env={},
+    )
+    campaign_path = Path(result["paths"]["campaign_json"])
+    evidence_path = tmp_path / "round_006_evidence.json"
+    evidence_path.write_text('{"validated": true}\n', encoding="utf-8")
+    validation_output = tmp_path / "round_006_validation.log"
+    validation_output.write_text("1 passed\n", encoding="utf-8")
+    record_iteration_round_evidence(
+        campaign_path,
+        round_index=6,
+        evidence_path=evidence_path,
+        validation_command="pytest tests/test_iteration_campaign.py -q",
+        validation_exit_code=0,
+        validation_output_path=validation_output,
+    )
+
+    verification = verify_iteration_campaign(campaign_path, require_complete=True)
+
+    assert verification["passed"] is False
+    assert verification["require_complete"] is True
+    assert verification["fully_completed"] is False
+    assert "campaign is not complete: completed=1, expected=12" in verification["issues"]
+
+
 def test_verify_iteration_campaign_detects_tampered_evidence(tmp_path: Path) -> None:
     result = write_iteration_campaign(
         benchmark_dir=Path("examples/function_approx").resolve(),
@@ -380,3 +410,50 @@ def test_cli_verify_iteration_campaign_writes_report(
     assert report_path == campaign_dir / "iteration_campaign_verification.json"
     assert report["passed"] is True
     assert report["completed_round_count"] == 1
+
+
+def test_cli_verify_iteration_campaign_require_complete_exits_nonzero(
+    tmp_path: Path,
+    cli_env: dict[str, str],
+) -> None:
+    campaign_dir = tmp_path / "campaign"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenticsciml.cli",
+            "plan-iteration-campaign",
+            "examples/function_approx",
+            "--output-dir",
+            str(campaign_dir),
+            "--rounds",
+            "12",
+            "--batch-size",
+            "5",
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+        env=cli_env,
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenticsciml.cli",
+            "verify-iteration-campaign",
+            str(campaign_dir / "iteration_campaign.json"),
+            "--require-complete",
+            "--fail-on-issues",
+        ],
+        text=True,
+        capture_output=True,
+        env=cli_env,
+    )
+    report = json.loads((campaign_dir / "iteration_campaign_verification.json").read_text(encoding="utf-8"))
+
+    assert result.returncode == 1
+    assert report["require_complete"] is True
+    assert report["fully_completed"] is False
+    assert "campaign is not complete: completed=0, expected=12" in report["issues"]

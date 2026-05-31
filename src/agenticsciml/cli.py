@@ -234,7 +234,10 @@ def cmd_record_iteration_round(args: argparse.Namespace) -> int:
 
 
 def cmd_verify_iteration_campaign(args: argparse.Namespace) -> int:
-    result = write_iteration_campaign_verification(Path(args.campaign_json).resolve())
+    result = write_iteration_campaign_verification(
+        Path(args.campaign_json).resolve(),
+        require_complete=args.require_complete,
+    )
     print(result["path"])
     if args.fail_on_issues and result["verification"]["passed"] is not True:
         return 1
@@ -436,6 +439,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     verify_campaign = sub.add_parser("verify-iteration-campaign")
     verify_campaign.add_argument("campaign_json")
+    verify_campaign.add_argument("--require-complete", action="store_true")
     verify_campaign.add_argument("--fail-on-issues", action="store_true")
     verify_campaign.set_defaults(func=cmd_verify_iteration_campaign)
 

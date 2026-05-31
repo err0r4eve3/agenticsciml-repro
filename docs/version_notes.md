@@ -31,6 +31,8 @@
   digest 和 campaign 计数；证据文件被篡改、record 缺失或计数不一致时会 fail closed。
 - `record-iteration-round` 现在要求记录 validation exit code 和 validation output artifact；
   `verify-iteration-campaign` 会重新校验 validation output digest，并在验证命令失败或输出被改时阻塞。
+- `verify-iteration-campaign --require-complete` 可作为 60 轮 campaign 的最终完成审计：
+  未完成、仍 blocked 或计数不一致时返回失败；默认模式仍只校验已完成轮次的证据完整性。
 - `AgentConfig` / Web `AgentModelRequest` 支持 per-member `base_url`。selector panel
   可以在不记录 API key 的前提下，为不同 selector member 指定不同 OpenAI-compatible
   provider endpoint。

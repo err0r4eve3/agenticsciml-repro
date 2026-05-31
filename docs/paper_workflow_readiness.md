@@ -47,6 +47,15 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli verif
   --fail-on-issues
 ```
 
+最终验收 60 轮是否全部完成时，增加完整性要求：
+
+```bash
+PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli verify-iteration-campaign \
+  runs/iteration-campaign/iteration_campaign.json \
+  --require-complete \
+  --fail-on-issues
+```
+
 可选输入：
 
 - `--domain-approval-json <path>`：领域审核 packet。
@@ -97,4 +106,6 @@ visual audit、domain approval、ablation evidence 和 paper-like benchmark doss
 `verify-iteration-campaign` 会重新读取每个 completed round 的 record 和 evidence 文件，
 校验 SHA-256 digest、validation output digest、validation exit code 与 campaign 计数，
 检测记录缺失、证据篡改、验证输出篡改和进度计数不一致。它只验证工程证据完整性，
-不会把 blocked 的外部资产或科学 claim 判为已完成。
+不会把 blocked 的外部资产或科学 claim 判为已完成。默认模式允许校验部分完成的 campaign；
+`--require-complete` 会额外要求所有轮次都已完成，用于最终 60 轮验收，不能用来绕过任何
+readiness blocker。
