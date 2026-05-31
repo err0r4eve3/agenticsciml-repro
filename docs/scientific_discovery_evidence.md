@@ -73,6 +73,8 @@ NotebookLM summary 当作 evaluator 事实。
   证据文件替换或验证结果被改写。它同时校验 round 编号是否唯一连续、状态是否在支持集合内。
   每轮的 target、readiness check、validation 描述和 batch index 必须匹配 campaign schema，
   防止把某轮手工换成更容易完成的目标。
+  completed round 的 record metadata 也必须与 campaign round 对账，包括 schema/version、
+  target、readiness check、previous status、validation command 和 campaign evidence digest。
   默认只审计已完成轮次；`--require-complete` 会额外要求 campaign 的全部轮次完成，
   供 60 轮最终验收使用。它仍只验证工程证据完整性。
 

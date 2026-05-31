@@ -37,6 +37,8 @@
   status 必须在 `planned` / `blocked_by_readiness` / `completed` 内，否则 fail closed。
 - Campaign verifier 还会比对固定 target sequence 与 per-round target/readiness/validation/batch
   metadata，防止通过手工改 JSON 把被阻塞或困难轮次替换成更容易完成的目标。
+- Completed round record 会被反向对账到 campaign round：schema/version、target、readiness
+  check、previous status、validation command 和 campaign-side evidence digest 不一致时 fail closed。
 - `AgentConfig` / Web `AgentModelRequest` 支持 per-member `base_url`。selector panel
   可以在不记录 API key 的前提下，为不同 selector member 指定不同 OpenAI-compatible
   provider endpoint。

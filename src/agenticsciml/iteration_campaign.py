@@ -290,6 +290,7 @@ def verify_iteration_campaign(campaign_path: Path, *, require_complete: bool = F
         if not isinstance(record, dict):
             issues.append(f"record file must be an object for round {round_index}: {record_path_value}")
             continue
+        record_metadata_mismatches = _record_metadata_mismatches(round_item, record, round_index, issues)
         record_round_index = record.get("round_index")
         if record_round_index != round_index:
             issues.append(f"record round mismatch for round {round_index}: got {record_round_index}")
@@ -302,6 +303,16 @@ def verify_iteration_campaign(campaign_path: Path, *, require_complete: bool = F
         elif not expected_digest:
             issues.append(f"record evidence sha256 missing for round {round_index}")
         else:
+            campaign_evidence_digest = str(round_item.get("evidence_sha256") or "").strip()
+            if campaign_evidence_digest != expected_digest:
+                record_metadata_mismatches.append(
+                    {
+                        "field": "evidence_sha256",
+                        "expected": expected_digest,
+                        "actual": campaign_evidence_digest,
+                    }
+                )
+                issues.append(f"campaign evidence_sha256 mismatch for round {round_index}")
             evidence_path = Path(evidence_path_value)
             evidence_file = evidence_path if evidence_path.is_absolute() else campaign_dir / evidence_path
             if not evidence_file.is_file():
@@ -349,6 +360,8 @@ def verify_iteration_campaign(campaign_path: Path, *, require_complete: bool = F
                 "validation_exit_code": exit_code,
                 "validation_output_path": validation_output_path_value or None,
                 "validation_output_digest_match": validation_digest_match,
+                "record_metadata_match": not record_metadata_mismatches,
+                "record_metadata_mismatches": record_metadata_mismatches,
             }
         )
     declared_completed = campaign.get("completed_rounds")
@@ -389,6 +402,56 @@ def write_iteration_campaign_verification(campaign_path: Path, *, require_comple
     output_path = campaign_path.parent / "iteration_campaign_verification.json"
     _atomic_write_text(output_path, json.dumps(verification, indent=2, sort_keys=True, allow_nan=False))
     return {"verification": verification, "path": str(output_path)}
+
+
+def _record_metadata_mismatches(
+    round_item: dict[str, Any],
+    record: dict[str, Any],
+    round_index: int,
+    issues: list[str],
+) -> list[dict[str, Any]]:
+    mismatches: list[dict[str, Any]] = []
+    if record.get("schema_version") != 1:
+        mismatches.append({"field": "schema_version", "expected": 1, "actual": record.get("schema_version")})
+        issues.append(f"record schema_version mismatch for round {round_index}: got {record.get('schema_version')}")
+    if record.get("record_version") != "iteration_round_record.v1":
+        mismatches.append(
+            {
+                "field": "record_version",
+                "expected": "iteration_round_record.v1",
+                "actual": record.get("record_version"),
+            }
+        )
+        issues.append(f"record_version mismatch for round {round_index}: got {record.get('record_version')}")
+    for field in ("batch_index", "target_id", "readiness_check_id"):
+        expected_value = round_item.get(field)
+        actual_value = record.get(field)
+        if actual_value != expected_value:
+            mismatches.append({"field": field, "expected": expected_value, "actual": actual_value})
+            issues.append(
+                f"record {field} mismatch for round {round_index}: "
+                f"expected {expected_value}, got {actual_value}"
+            )
+    previous_status = record.get("previous_status")
+    if previous_status != "planned":
+        mismatches.append({"field": "previous_status", "expected": "planned", "actual": previous_status})
+        issues.append(
+            f"record previous_status mismatch for round {round_index}: "
+            f"expected planned, got {previous_status}"
+        )
+    validation = record.get("validation_result") if isinstance(record.get("validation_result"), dict) else {}
+    validation_command = str(record.get("validation_command") or "").strip()
+    validation_result_command = str(validation.get("command") or "").strip()
+    if not validation_command or validation_command != validation_result_command:
+        mismatches.append(
+            {
+                "field": "validation_command",
+                "expected": validation_command,
+                "actual": validation_result_command,
+            }
+        )
+        issues.append(f"record validation command mismatch for round {round_index}")
+    return mismatches
 
 
 def _validate_round_integrity(
