@@ -69,7 +69,8 @@ NotebookLM summary 当作 evaluator 事实。
   `iteration_round_XXX_record.json` 并更新 campaign 进度。它拒绝完成被 readiness blocker
   卡住的轮次，避免把外部缺口伪装成已完成。
 - `verify-iteration-campaign`：重新校验 completed round 的 record、evidence digest 和
-  campaign 计数，防止轮次完成状态被手工篡改或证据文件替换。它仍只验证工程证据完整性。
+  validation output digest、validation exit code、campaign 计数，防止轮次完成状态被手工篡改、
+  证据文件替换或验证结果被改写。它仍只验证工程证据完整性。
 
 ## Claim Gate
 

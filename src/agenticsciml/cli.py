@@ -224,6 +224,8 @@ def cmd_record_iteration_round(args: argparse.Namespace) -> int:
         round_index=args.round_index,
         evidence_path=Path(args.evidence_path),
         validation_command=args.validation_command,
+        validation_exit_code=args.validation_exit_code,
+        validation_output_path=Path(args.validation_output_path),
         notes=args.notes,
     )
     campaign_dir = Path(args.campaign_json).resolve().parent
@@ -427,6 +429,8 @@ def build_parser() -> argparse.ArgumentParser:
     record_round.add_argument("--round", dest="round_index", type=int, required=True)
     record_round.add_argument("--evidence-path", required=True)
     record_round.add_argument("--validation-command", required=True)
+    record_round.add_argument("--validation-exit-code", type=int, required=True)
+    record_round.add_argument("--validation-output-path", required=True)
     record_round.add_argument("--notes", default="")
     record_round.set_defaults(func=cmd_record_iteration_round)
 

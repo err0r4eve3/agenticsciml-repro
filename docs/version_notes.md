@@ -29,6 +29,8 @@
   进度。被 readiness blocker 卡住的轮次不能被记录为完成。
 - 新增 CLI `verify-iteration-campaign`，可重新校验 completed round 的 record、evidence
   digest 和 campaign 计数；证据文件被篡改、record 缺失或计数不一致时会 fail closed。
+- `record-iteration-round` 现在要求记录 validation exit code 和 validation output artifact；
+  `verify-iteration-campaign` 会重新校验 validation output digest，并在验证命令失败或输出被改时阻塞。
 - `AgentConfig` / Web `AgentModelRequest` 支持 per-member `base_url`。selector panel
   可以在不记录 API key 的前提下，为不同 selector member 指定不同 OpenAI-compatible
   provider endpoint。

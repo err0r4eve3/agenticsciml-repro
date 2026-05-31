@@ -199,6 +199,8 @@ def record_iteration_round_evidence(
     round_index: int,
     evidence_path: Path,
     validation_command: str,
+    validation_exit_code: int,
+    validation_output_path: Path,
     notes: str = "",
 ) -> dict[str, Any]:
     if round_index <= 0:
@@ -210,6 +212,13 @@ def record_iteration_round_evidence(
     evidence_file = evidence_path if evidence_path.is_absolute() else campaign_dir / evidence_path
     if not evidence_file.is_file():
         raise ValueError(f"evidence_path does not exist: {evidence_path}")
+    validation_output_file = (
+        validation_output_path
+        if validation_output_path.is_absolute()
+        else campaign_dir / validation_output_path
+    )
+    if not validation_output_file.is_file():
+        raise ValueError(f"validation_output_path does not exist: {validation_output_path}")
     rounds = campaign.get("rounds")
     if not isinstance(rounds, list):
         raise ValueError("campaign rounds must be a list")
@@ -229,6 +238,11 @@ def record_iteration_round_evidence(
         "readiness_check_id": round_item.get("readiness_check_id"),
         "previous_status": status,
         "validation_command": validation_command.strip(),
+        "validation_result": {
+            "command": validation_command.strip(),
+            "exit_code": int(validation_exit_code),
+            "output": _evidence_descriptor(validation_output_file, campaign_dir),
+        },
         "notes": notes.strip(),
         "evidence": _evidence_descriptor(evidence_file, campaign_dir),
         "claim_boundary": "This record proves an engineering iteration artifact exists; it is not scientific discovery evidence.",
@@ -291,6 +305,34 @@ def verify_iteration_campaign(campaign_path: Path) -> dict[str, Any]:
                 digest_match = actual_digest == expected_digest
                 if not digest_match:
                     issues.append(f"evidence digest mismatch for round {round_index}")
+        validation = record.get("validation_result") if isinstance(record.get("validation_result"), dict) else {}
+        validation_output = validation.get("output") if isinstance(validation.get("output"), dict) else {}
+        validation_output_path_value = str(validation_output.get("path") or "").strip()
+        expected_validation_digest = str(validation_output.get("sha256") or "").strip()
+        validation_digest_match = False
+        exit_code = validation.get("exit_code")
+        if exit_code != 0:
+            issues.append(f"validation exit code nonzero for round {round_index}: {exit_code}")
+        if not validation_output_path_value:
+            issues.append(f"validation output path missing for round {round_index}")
+        elif not expected_validation_digest:
+            issues.append(f"validation output sha256 missing for round {round_index}")
+        else:
+            validation_output_path = Path(validation_output_path_value)
+            validation_output_file = (
+                validation_output_path
+                if validation_output_path.is_absolute()
+                else campaign_dir / validation_output_path
+            )
+            if not validation_output_file.is_file():
+                issues.append(
+                    f"validation output file missing for round {round_index}: {validation_output_path_value}"
+                )
+            else:
+                actual_validation_digest = _sha256(validation_output_file)
+                validation_digest_match = actual_validation_digest == expected_validation_digest
+                if not validation_digest_match:
+                    issues.append(f"validation output digest mismatch for round {round_index}")
         record_summaries.append(
             {
                 "round_index": round_index,
@@ -298,6 +340,9 @@ def verify_iteration_campaign(campaign_path: Path) -> dict[str, Any]:
                 "record_path": record_path_value,
                 "evidence_path": evidence_path_value or None,
                 "evidence_digest_match": digest_match,
+                "validation_exit_code": exit_code,
+                "validation_output_path": validation_output_path_value or None,
+                "validation_output_digest_match": validation_digest_match,
             }
         )
     declared_completed = campaign.get("completed_rounds")

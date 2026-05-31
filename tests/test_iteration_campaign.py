@@ -107,12 +107,16 @@ def test_record_iteration_round_evidence_updates_campaign(tmp_path: Path) -> Non
     campaign_path = Path(result["paths"]["campaign_json"])
     evidence_path = tmp_path / "round_006_evidence.json"
     evidence_path.write_text('{"validated": true}\n', encoding="utf-8")
+    validation_output = tmp_path / "round_006_validation.log"
+    validation_output.write_text("1 passed\n", encoding="utf-8")
 
     record = record_iteration_round_evidence(
         campaign_path,
         round_index=6,
         evidence_path=evidence_path,
         validation_command="pytest tests/test_iteration_campaign.py -q",
+        validation_exit_code=0,
+        validation_output_path=validation_output,
         notes="multi-seed ablation verifier implementation landed",
     )
     campaign = json.loads(campaign_path.read_text(encoding="utf-8"))
@@ -122,6 +126,8 @@ def test_record_iteration_round_evidence_updates_campaign(tmp_path: Path) -> Non
     assert record["target_id"] == "multi_seed_ablation"
     assert record["evidence"]["sha256"]
     assert record["validation_command"] == "pytest tests/test_iteration_campaign.py -q"
+    assert record["validation_result"]["exit_code"] == 0
+    assert record["validation_result"]["output"]["sha256"]
     assert round_six["status"] == "completed"
     assert round_six["evidence_record_path"] == "iteration_round_006_record.json"
     assert campaign["completed_rounds"] == 1
@@ -146,6 +152,8 @@ def test_record_iteration_round_evidence_rejects_blocked_round(tmp_path: Path) -
             round_index=1,
             evidence_path=evidence_path,
             validation_command="pytest tests/test_iteration_campaign.py -q",
+            validation_exit_code=0,
+            validation_output_path=evidence_path,
         )
 
 
@@ -175,6 +183,8 @@ def test_cli_record_iteration_round_updates_campaign(
     )
     evidence_path = campaign_dir / "round_006_evidence.json"
     evidence_path.write_text('{"validated": true}\n', encoding="utf-8")
+    validation_output = campaign_dir / "round_006_validation.log"
+    validation_output.write_text("1 passed\n", encoding="utf-8")
 
     result = subprocess.run(
         [
@@ -189,6 +199,10 @@ def test_cli_record_iteration_round_updates_campaign(
             str(evidence_path),
             "--validation-command",
             "pytest tests/test_iteration_campaign.py -q",
+            "--validation-exit-code",
+            "0",
+            "--validation-output-path",
+            str(validation_output),
         ],
         check=True,
         text=True,
@@ -214,11 +228,15 @@ def test_verify_iteration_campaign_passes_recorded_round(tmp_path: Path) -> None
     campaign_path = Path(result["paths"]["campaign_json"])
     evidence_path = tmp_path / "round_006_evidence.json"
     evidence_path.write_text('{"validated": true}\n', encoding="utf-8")
+    validation_output = tmp_path / "round_006_validation.log"
+    validation_output.write_text("1 passed\n", encoding="utf-8")
     record_iteration_round_evidence(
         campaign_path,
         round_index=6,
         evidence_path=evidence_path,
         validation_command="pytest tests/test_iteration_campaign.py -q",
+        validation_exit_code=0,
+        validation_output_path=validation_output,
     )
 
     verification = verify_iteration_campaign(campaign_path)
@@ -228,6 +246,7 @@ def test_verify_iteration_campaign_passes_recorded_round(tmp_path: Path) -> None
     assert verification["integrity_issue_count"] == 0
     assert verification["records"][0]["round_index"] == 6
     assert verification["records"][0]["evidence_digest_match"] is True
+    assert verification["records"][0]["validation_output_digest_match"] is True
 
 
 def test_verify_iteration_campaign_detects_tampered_evidence(tmp_path: Path) -> None:
@@ -241,11 +260,15 @@ def test_verify_iteration_campaign_detects_tampered_evidence(tmp_path: Path) -> 
     campaign_path = Path(result["paths"]["campaign_json"])
     evidence_path = tmp_path / "round_006_evidence.json"
     evidence_path.write_text('{"validated": true}\n', encoding="utf-8")
+    validation_output = tmp_path / "round_006_validation.log"
+    validation_output.write_text("1 passed\n", encoding="utf-8")
     record_iteration_round_evidence(
         campaign_path,
         round_index=6,
         evidence_path=evidence_path,
         validation_command="pytest tests/test_iteration_campaign.py -q",
+        validation_exit_code=0,
+        validation_output_path=validation_output,
     )
     evidence_path.write_text('{"validated": false}\n', encoding="utf-8")
 
@@ -254,6 +277,36 @@ def test_verify_iteration_campaign_detects_tampered_evidence(tmp_path: Path) -> 
     assert verification["passed"] is False
     assert verification["integrity_issue_count"] == 1
     assert "evidence digest mismatch for round 6" in verification["issues"]
+
+
+def test_verify_iteration_campaign_detects_tampered_validation_output(tmp_path: Path) -> None:
+    result = write_iteration_campaign(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        rounds=12,
+        batch_size=5,
+        env={},
+    )
+    campaign_path = Path(result["paths"]["campaign_json"])
+    evidence_path = tmp_path / "round_006_evidence.json"
+    evidence_path.write_text('{"validated": true}\n', encoding="utf-8")
+    validation_output = tmp_path / "round_006_validation.log"
+    validation_output.write_text("1 passed\n", encoding="utf-8")
+    record_iteration_round_evidence(
+        campaign_path,
+        round_index=6,
+        evidence_path=evidence_path,
+        validation_command="pytest tests/test_iteration_campaign.py -q",
+        validation_exit_code=0,
+        validation_output_path=validation_output,
+    )
+    validation_output.write_text("failed after edit\n", encoding="utf-8")
+
+    verification = verify_iteration_campaign(campaign_path)
+
+    assert verification["passed"] is False
+    assert verification["integrity_issue_count"] == 1
+    assert "validation output digest mismatch for round 6" in verification["issues"]
 
 
 def test_cli_verify_iteration_campaign_writes_report(
@@ -282,6 +335,8 @@ def test_cli_verify_iteration_campaign_writes_report(
     )
     evidence_path = campaign_dir / "round_006_evidence.json"
     evidence_path.write_text('{"validated": true}\n', encoding="utf-8")
+    validation_output = campaign_dir / "round_006_validation.log"
+    validation_output.write_text("1 passed\n", encoding="utf-8")
     subprocess.run(
         [
             sys.executable,
@@ -295,6 +350,10 @@ def test_cli_verify_iteration_campaign_writes_report(
             str(evidence_path),
             "--validation-command",
             "pytest tests/test_iteration_campaign.py -q",
+            "--validation-exit-code",
+            "0",
+            "--validation-output-path",
+            str(validation_output),
         ],
         check=True,
         text=True,
