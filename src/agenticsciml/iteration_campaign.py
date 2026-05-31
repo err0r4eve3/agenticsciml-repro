@@ -236,6 +236,11 @@ def record_iteration_round_evidence(
         raise ValueError(f"round {round_index} is blocked_by_readiness")
     if status == "completed":
         raise ValueError(f"round {round_index} is already completed")
+    expected_target = CAMPAIGN_TARGETS[(round_index - 1) % len(CAMPAIGN_TARGETS)]
+    expected_readiness_check_id = str(expected_target["readiness_check_id"])
+    expected_blocker = _readiness_blockers_by_check(campaign).get(expected_readiness_check_id)
+    if expected_target["requires_external_asset"] is True and expected_blocker:
+        raise ValueError(f"round {round_index} still has readiness blocker {expected_readiness_check_id}")
     record_path = campaign_dir / f"iteration_round_{round_index:03d}_record.json"
     record = {
         "schema_version": 1,
@@ -682,6 +687,9 @@ def _validate_round_integrity(
     round_target_mismatches: list[dict[str, Any]] = []
     batch_index_mismatches: list[dict[str, Any]] = []
     completed_rounds_with_blockers: list[int] = []
+    round_blocker_mismatches: list[dict[str, Any]] = []
+    round_status_blocker_mismatches: list[dict[str, Any]] = []
+    blockers_by_check = _readiness_blockers_by_check(campaign)
     schema_target_sequence = [dict(target) for target in CAMPAIGN_TARGETS]
     target_sequence_valid = campaign.get("target_sequence") == schema_target_sequence
     if not target_sequence_valid:
@@ -744,6 +752,40 @@ def _validate_round_integrity(
                         f"round {round_index} batch_index mismatch: "
                         f"expected {expected_batch_index}, got {actual_batch_index}"
                     )
+            expected_readiness_check_id = str(expected_target["readiness_check_id"])
+            expected_blocker = blockers_by_check.get(expected_readiness_check_id)
+            actual_blocker = item.get("blocked_by")
+            if actual_blocker != expected_blocker:
+                round_blocker_mismatches.append(
+                    {
+                        "round_index": round_index,
+                        "field": "blocked_by",
+                        "expected": expected_blocker,
+                        "actual": actual_blocker,
+                    }
+                )
+                if expected_blocker:
+                    issues.append(
+                        f"round {round_index} blocked_by mismatch for readiness blocker "
+                        f"{expected_readiness_check_id}"
+                    )
+                else:
+                    issues.append(f"round {round_index} has stale blocked_by without readiness blocker")
+            if expected_target["requires_external_asset"] is True and expected_blocker:
+                expected_status = "blocked_by_readiness"
+                actual_status = item.get("status")
+                if actual_status != expected_status:
+                    round_status_blocker_mismatches.append(
+                        {
+                            "round_index": round_index,
+                            "expected": expected_status,
+                            "actual": actual_status,
+                        }
+                    )
+                    issues.append(
+                        f"round {round_index} status mismatch: expected blocked_by_readiness "
+                        f"while blocker remains, got {actual_status}"
+                    )
         status = item.get("status")
         if status not in SUPPORTED_ROUND_STATUSES:
             unsupported_statuses.append({"round_index": round_index, "status": status})
@@ -784,6 +826,8 @@ def _validate_round_integrity(
             or round_target_mismatches
             or batch_index_mismatches
             or completed_rounds_with_blockers
+            or round_blocker_mismatches
+            or round_status_blocker_mismatches
         ),
         "invalid_round_entry_count": invalid_round_entries,
         "duplicate_round_indices": duplicate_indices,
@@ -794,6 +838,19 @@ def _validate_round_integrity(
         "round_target_mismatches": round_target_mismatches,
         "batch_index_mismatches": batch_index_mismatches,
         "completed_rounds_with_blockers": completed_rounds_with_blockers,
+        "round_blocker_mismatches": round_blocker_mismatches,
+        "round_status_blocker_mismatches": round_status_blocker_mismatches,
+    }
+
+
+def _readiness_blockers_by_check(campaign: dict[str, Any]) -> dict[str, dict[str, object]]:
+    readiness_blockers = campaign.get("readiness_blockers")
+    if not isinstance(readiness_blockers, list):
+        return {}
+    return {
+        str(blocker.get("check_id")): dict(blocker)
+        for blocker in readiness_blockers
+        if isinstance(blocker, dict) and blocker.get("check_id")
     }
 
 

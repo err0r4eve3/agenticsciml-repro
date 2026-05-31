@@ -112,7 +112,8 @@ batch 摘要篡改和进度计数不一致。它还会校验 campaign 顶层 met
 防止把仍 blocked 的计划手工改成 ready 或科学发现证据。每个 completed round 的 record
 也必须保留固定 claim boundary，不能把单轮工程证据改写成科学发现声明。若某轮
 `requires_external_asset=true` 且仍携带 `blocked_by`，即使手工补齐 record 和 digest，
-也不能被验收为 completed。
+也不能被验收为 completed。Verifier 会从顶层 `readiness_blockers` 重建每轮预期
+`blocked_by` 和外部资产轮次的 blocked 状态，防止先抹掉 round blocker 再记录完成。
 它只验证工程证据完整性，不会把 blocked 的外部资产或科学 claim 判为已完成。默认模式允许校验部分完成的 campaign；
 `--require-complete` 会额外要求所有轮次都已完成，用于最终 60 轮验收，不能用来绕过任何
 readiness blocker。
