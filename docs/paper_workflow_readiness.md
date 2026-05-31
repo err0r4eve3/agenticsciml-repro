@@ -17,6 +17,16 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli plan-
   --expert-blueprint-id fluid_pde
 ```
 
+规划 60 轮可审计工程迭代：
+
+```bash
+PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli plan-iteration-campaign \
+  examples/cylinder_wake_reconstruction_faithful_small \
+  --rounds 60 \
+  --batch-size 10 \
+  --output-dir runs/iteration-campaign
+```
+
 可选输入：
 
 - `--domain-approval-json <path>`：领域审核 packet。
@@ -32,6 +42,8 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli plan-
 - `domain_approval_template.json`
 - `paper_benchmark_manifest_template.json`
 - `paper_workflow_commands.md`
+- `iteration_campaign.json`
+- `iteration_campaign.md`
 
 ## Gate
 
@@ -54,3 +66,6 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli plan-
 visual audit、domain approval、ablation evidence 和 paper-like benchmark dossier 共同
 通过，才允许讨论 paper workflow 级别 claim。默认仍保持
 `scientific_claim_supported=false`。
+
+`plan-iteration-campaign` 只规划轮次和 blocker，不把计划本身计入证据。每一轮仍必须
+落到代码、文档、测试、run artifact 或外部审批材料，才能改变 readiness。

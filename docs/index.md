@@ -29,7 +29,7 @@
 - [Codex 实施任务](codex_tasks.md)：MVP 的分步实现任务和验收标准。
 - [Real LLM 运行](real_run.md)：真实模型模式、环境变量、dry-run 和 trace summary 检查。
 - [Ablation 说明](ablation.md)：root-only、无 KB、有 KB、随机 KB 的比较边界。
-- [Paper Workflow Readiness](paper_workflow_readiness.md)：真实多模态、异构 selector、paper-like benchmark、领域审批和 ablation 的预执行门禁包。
+- [Paper Workflow Readiness](paper_workflow_readiness.md)：真实多模态、异构 selector、paper-like benchmark、领域审批、ablation 和 60 轮 campaign 的预执行门禁包。
 - [ChatUI 实验操作台](chatui_console.md)：本地 Web 控制台、算法 tool API、code-server sidecar 和 repo-local skill 工作流。
 - [AgenticSciML Problem Intake Prompt](agenticsciml_problem_intake_prompt.md)：把科学机器学习问题转成可审计 workflow-proxy / faithful-small 求解计划的提示模板。
 

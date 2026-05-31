@@ -63,6 +63,8 @@ NotebookLM summary 当作 evaluator 事实。
   `paper_benchmark_manifest_template.json` 和 `paper_workflow_commands.md`。它只检查
   provider/vision/selector/benchmark/domain/ablation/KB/resource 是否具备进入
   `paper_workflow` 的条件；缺凭证或缺真实数据时保持 blocked。
+- `plan-iteration-campaign`：把后续 60 轮工程迭代拆成可审计 batch/round，每轮都绑定
+  readiness gate、预期 artifact、验证命令和 claim boundary。campaign 计划不是科学证据。
 
 ## Claim Gate
 

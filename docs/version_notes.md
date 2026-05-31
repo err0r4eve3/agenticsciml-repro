@@ -20,6 +20,10 @@
   provider、异构 real selector、paper-like benchmark manifest、领域审批 packet、
   paper-equivalent KB、multi-seed ablation、资源约束和专家蓝图统一成预执行门禁包。
   当前环境缺真实 provider 凭证时，该命令会生成 blocked artifact，而不会伪造 real run。
+- 新增 `agenticsciml.iteration_campaign` 和 CLI `plan-iteration-campaign`，可以把 60 轮
+  后续迭代拆成 batch/round artifact。每轮绑定 readiness check、目标 artifact、
+  validation command 和 claim boundary；被真实凭证、paper-like 数据或领域审批阻塞的轮次
+  会显式标记 `blocked_by_readiness`。
 - `AgentConfig` / Web `AgentModelRequest` 支持 per-member `base_url`。selector panel
   可以在不记录 API key 的前提下，为不同 selector member 指定不同 OpenAI-compatible
   provider endpoint。

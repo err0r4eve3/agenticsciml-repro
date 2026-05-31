@@ -18,6 +18,7 @@ from agenticsciml.config import (
     EvolutionConfig,
     ExperimentConfig,
 )
+from agenticsciml.iteration_campaign import write_iteration_campaign
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.llm_smoke import DEFAULT_SMOKE_VARIANTS, run_llm_smoke, verify_llm_smoke_output
@@ -189,6 +190,30 @@ def cmd_plan_paper_workflow(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_plan_iteration_campaign(args: argparse.Namespace) -> int:
+    selector_panel = _json_array_arg(args.selector_panel_json, "--selector-panel-json")
+    result = write_iteration_campaign(
+        benchmark_dir=Path(args.benchmark_dir).resolve(),
+        output_dir=Path(args.output_dir).resolve(),
+        rounds=args.rounds,
+        batch_size=args.batch_size,
+        selector_panel=selector_panel,
+        resource_constraints=_json_object_arg(args.resource_constraints_json, "--resource-constraints-json"),
+        expert_blueprint_id=args.expert_blueprint_id,
+        domain_approval_path=Path(args.domain_approval_json).resolve()
+        if args.domain_approval_json
+        else None,
+        ablation_output_dir=Path(args.ablation_output_dir).resolve()
+        if args.ablation_output_dir
+        else None,
+        expected_seeds=args.expected_seeds,
+        expected_variants=_split_csv(args.expected_variants),
+        env=os.environ,
+    )
+    print(result["paths"]["campaign_json"])
+    return 0
+
+
 def cmd_smoke_llm(args: argparse.Namespace) -> int:
     variants = [item.strip() for item in args.variants.split(",") if item.strip()]
     result = run_llm_smoke(
@@ -349,6 +374,28 @@ def build_parser() -> argparse.ArgumentParser:
     paper_workflow.add_argument("--expected-variants", default="")
     paper_workflow.add_argument("--fail-on-blockers", action="store_true")
     paper_workflow.set_defaults(func=cmd_plan_paper_workflow)
+
+    campaign = sub.add_parser("plan-iteration-campaign")
+    campaign.add_argument("benchmark_dir")
+    campaign.add_argument("--rounds", type=int, default=60)
+    campaign.add_argument("--batch-size", type=int, default=10)
+    campaign.add_argument("--output-dir", default="runs/iteration-campaign")
+    campaign.add_argument(
+        "--selector-panel-json",
+        default="[]",
+        help="JSON array of selector member objects with model and optional base_url",
+    )
+    campaign.add_argument(
+        "--resource-constraints-json",
+        default="{}",
+        help="JSON object with cpu, gpu, timeout_s, dependency_limits, and data_limits",
+    )
+    campaign.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
+    campaign.add_argument("--domain-approval-json")
+    campaign.add_argument("--ablation-output-dir")
+    campaign.add_argument("--expected-seeds", nargs="+", type=int, default=[])
+    campaign.add_argument("--expected-variants", default="")
+    campaign.set_defaults(func=cmd_plan_iteration_campaign)
 
     smoke_llm = sub.add_parser("smoke-llm")
     smoke_llm.add_argument("benchmark_dir")
