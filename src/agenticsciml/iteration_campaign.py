@@ -278,6 +278,12 @@ def verify_iteration_campaign(campaign_path: Path, *, require_complete: bool = F
         if not record_path_value:
             issues.append(f"completed round {round_index} is missing evidence_record_path")
             continue
+        expected_record_path = f"iteration_round_{round_index:03d}_record.json"
+        if record_path_value != expected_record_path:
+            issues.append(
+                f"record path mismatch for round {round_index}: "
+                f"expected {expected_record_path}, got {record_path_value}"
+            )
         record_path = _campaign_reference_file(
             record_path_value,
             campaign_dir,

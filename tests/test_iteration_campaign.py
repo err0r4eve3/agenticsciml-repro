@@ -392,6 +392,43 @@ def test_verify_iteration_campaign_detects_record_metadata_tampering(tmp_path: P
     assert "campaign evidence_sha256 mismatch for round 6" in verification["issues"]
 
 
+def test_verify_iteration_campaign_requires_canonical_record_path(tmp_path: Path) -> None:
+    result = write_iteration_campaign(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        rounds=12,
+        batch_size=5,
+        env={},
+    )
+    campaign_path = Path(result["paths"]["campaign_json"])
+    evidence_path = tmp_path / "round_006_evidence.json"
+    evidence_path.write_text('{"validated": true}\n', encoding="utf-8")
+    validation_output = tmp_path / "round_006_validation.log"
+    validation_output.write_text("1 passed\n", encoding="utf-8")
+    record_iteration_round_evidence(
+        campaign_path,
+        round_index=6,
+        evidence_path=evidence_path,
+        validation_command="pytest tests/test_iteration_campaign.py -q",
+        validation_exit_code=0,
+        validation_output_path=validation_output,
+    )
+    canonical_record = tmp_path / "iteration_round_006_record.json"
+    alternate_record = tmp_path / "alternate_round_006_record.json"
+    alternate_record.write_text(canonical_record.read_text(encoding="utf-8"), encoding="utf-8")
+    campaign = json.loads(campaign_path.read_text(encoding="utf-8"))
+    campaign["rounds"][5]["evidence_record_path"] = alternate_record.name
+    campaign_path.write_text(json.dumps(campaign), encoding="utf-8")
+
+    verification = verify_iteration_campaign(campaign_path)
+
+    assert verification["passed"] is False
+    assert (
+        "record path mismatch for round 6: expected iteration_round_006_record.json, got "
+        "alternate_round_006_record.json"
+    ) in verification["issues"]
+
+
 def test_record_iteration_round_rejects_external_evidence_paths(tmp_path: Path) -> None:
     campaign_dir = tmp_path / "campaign"
     external_dir = tmp_path / "external"

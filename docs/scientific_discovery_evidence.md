@@ -76,7 +76,8 @@ NotebookLM summary 当作 evaluator 事实。
   completed round 的 record metadata 也必须与 campaign round 对账，包括 schema/version、
   target、readiness check、previous status、validation command 和 campaign evidence digest。
   record、evidence 和 validation output 引用必须解析在 campaign 目录内，不能用绝对路径或
-  `..` 逃逸到外部文件。
+  `..` 逃逸到外部文件；completed round 的 record 文件名必须是规范的
+  `iteration_round_XXX_record.json`。
   默认只审计已完成轮次；`--require-complete` 会额外要求 campaign 的全部轮次完成，
   供 60 轮最终验收使用。它仍只验证工程证据完整性。
 

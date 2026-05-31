@@ -41,6 +41,8 @@
   check、previous status、validation command 和 campaign-side evidence digest 不一致时 fail closed。
 - Campaign round evidence、validation output 和 record 文件引用必须解析在 campaign 目录内；
   绝对路径、`..` 逃逸或 symlink 逃逸都会被拒绝或在 verification 中 fail closed。
+- Completed round 的 `evidence_record_path` 必须使用规范文件名
+  `iteration_round_XXX_record.json`，不能指向同目录下任意 JSON。
 - `AgentConfig` / Web `AgentModelRequest` 支持 per-member `base_url`。selector panel
   可以在不记录 API key 的前提下，为不同 selector member 指定不同 OpenAI-compatible
   provider endpoint。
