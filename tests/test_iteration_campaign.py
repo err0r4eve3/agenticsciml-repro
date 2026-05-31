@@ -303,6 +303,44 @@ def test_verify_iteration_campaign_detects_round_schema_tampering(tmp_path: Path
     assert "round 3 has unsupported status: done" in verification["issues"]
 
 
+def test_verify_iteration_campaign_detects_round_target_tampering(tmp_path: Path) -> None:
+    result = write_iteration_campaign(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        rounds=12,
+        batch_size=5,
+        env={},
+    )
+    campaign_path = Path(result["paths"]["campaign_json"])
+    campaign = json.loads(campaign_path.read_text(encoding="utf-8"))
+    campaign["target_sequence"][5]["target_id"] = "paper_like_benchmark"
+    campaign["rounds"][5]["target_id"] = "paper_like_benchmark"
+    campaign["rounds"][5]["batch_index"] = 99
+    campaign_path.write_text(json.dumps(campaign), encoding="utf-8")
+
+    verification = verify_iteration_campaign(campaign_path)
+
+    assert verification["passed"] is False
+    assert verification["round_integrity"]["target_sequence_valid"] is False
+    assert verification["round_integrity"]["round_target_mismatches"] == [
+        {
+            "round_index": 6,
+            "field": "target_id",
+            "expected": "multi_seed_ablation",
+            "actual": "paper_like_benchmark",
+        }
+    ]
+    assert verification["round_integrity"]["batch_index_mismatches"] == [
+        {"round_index": 6, "expected": 2, "actual": 99}
+    ]
+    assert "target_sequence does not match campaign schema targets" in verification["issues"]
+    assert (
+        "round 6 target_id mismatch: expected multi_seed_ablation, got paper_like_benchmark"
+        in verification["issues"]
+    )
+    assert "round 6 batch_index mismatch: expected 2, got 99" in verification["issues"]
+
+
 def test_verify_iteration_campaign_detects_tampered_evidence(tmp_path: Path) -> None:
     result = write_iteration_campaign(
         benchmark_dir=Path("examples/function_approx").resolve(),

@@ -402,6 +402,16 @@ def _validate_round_integrity(
     seen_indices: set[int] = set()
     invalid_round_entries = 0
     unsupported_statuses: list[dict[str, Any]] = []
+    round_target_mismatches: list[dict[str, Any]] = []
+    batch_index_mismatches: list[dict[str, Any]] = []
+    schema_target_sequence = [dict(target) for target in CAMPAIGN_TARGETS]
+    target_sequence_valid = campaign.get("target_sequence") == schema_target_sequence
+    if not target_sequence_valid:
+        issues.append("target_sequence does not match campaign schema targets")
+    batch_size = campaign.get("batch_size")
+    batch_size_valid = isinstance(batch_size, int) and batch_size > 0
+    if not batch_size_valid:
+        issues.append(f"batch_size must be a positive integer, got {batch_size}")
     for position, item in enumerate(rounds, start=1):
         if not isinstance(item, dict):
             invalid_round_entries += 1
@@ -417,6 +427,45 @@ def _validate_round_integrity(
             if round_index in seen_indices and round_index not in duplicate_indices:
                 duplicate_indices.append(round_index)
             seen_indices.add(round_index)
+            expected_target = schema_target_sequence[(round_index - 1) % len(schema_target_sequence)]
+            for round_field, target_field in (
+                ("target_id", "target_id"),
+                ("readiness_check_id", "readiness_check_id"),
+                ("objective", "objective"),
+                ("evidence_artifact", "artifact"),
+                ("validation", "validation"),
+                ("requires_external_asset", "requires_external_asset"),
+            ):
+                expected_value = expected_target[target_field]
+                actual_value = item.get(round_field)
+                if actual_value != expected_value:
+                    round_target_mismatches.append(
+                        {
+                            "round_index": round_index,
+                            "field": round_field,
+                            "expected": expected_value,
+                            "actual": actual_value,
+                        }
+                    )
+                    issues.append(
+                        f"round {round_index} {round_field} mismatch: "
+                        f"expected {expected_value}, got {actual_value}"
+                    )
+            if batch_size_valid:
+                expected_batch_index = ((round_index - 1) // batch_size) + 1
+                actual_batch_index = item.get("batch_index")
+                if actual_batch_index != expected_batch_index:
+                    batch_index_mismatches.append(
+                        {
+                            "round_index": round_index,
+                            "expected": expected_batch_index,
+                            "actual": actual_batch_index,
+                        }
+                    )
+                    issues.append(
+                        f"round {round_index} batch_index mismatch: "
+                        f"expected {expected_batch_index}, got {actual_batch_index}"
+                    )
         status = item.get("status")
         if status not in SUPPORTED_ROUND_STATUSES:
             unsupported_statuses.append({"round_index": round_index, "status": status})
@@ -444,12 +493,19 @@ def _validate_round_integrity(
             or missing_indices
             or extra_indices
             or not rounds_requested_valid
+            or not batch_size_valid
+            or not target_sequence_valid
+            or round_target_mismatches
+            or batch_index_mismatches
         ),
         "invalid_round_entry_count": invalid_round_entries,
         "duplicate_round_indices": duplicate_indices,
         "missing_round_indices": missing_indices,
         "unexpected_round_indices": extra_indices,
         "unsupported_statuses": unsupported_statuses,
+        "target_sequence_valid": target_sequence_valid,
+        "round_target_mismatches": round_target_mismatches,
+        "batch_index_mismatches": batch_index_mismatches,
     }
 
 

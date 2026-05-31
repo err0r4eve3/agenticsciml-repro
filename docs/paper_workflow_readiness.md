@@ -105,7 +105,7 @@ visual audit、domain approval、ablation evidence 和 paper-like benchmark doss
 `completed_rounds` / `remaining_rounds`。该记录仍是工程进度证据，不是科学发现证据。
 `verify-iteration-campaign` 会重新读取每个 completed round 的 record 和 evidence 文件，
 校验 SHA-256 digest、validation output digest、validation exit code 与 campaign 计数，
-检测记录缺失、证据篡改、验证输出篡改、round 编号重复/缺失、未知状态和进度计数不一致。
+检测记录缺失、证据篡改、验证输出篡改、round 编号重复/缺失、未知状态、target/batch 篡改和进度计数不一致。
 它只验证工程证据完整性，不会把 blocked 的外部资产或科学 claim 判为已完成。默认模式允许校验部分完成的 campaign；
 `--require-complete` 会额外要求所有轮次都已完成，用于最终 60 轮验收，不能用来绕过任何
 readiness blocker。
