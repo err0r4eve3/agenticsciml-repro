@@ -56,6 +56,14 @@
   重建顶层 `readiness_blockers`、每轮预期 `blocked_by` 和外部资产 blocked 状态。
   `record-iteration-round` 也会拒绝先清空 blocker 列表或抹掉 round blocker 再记录完成的
   外部资产轮次。
+- 新增 `agenticsciml.real_problem_closure` 和 CLI `plan-real-problem-closure`，输出
+  `real_problem_closure_plan.json/md`，把“能否依靠多智能体解决真实问题”拆成 real LLM、
+  真实多模态输入、异构 real selector、paper-like benchmark、paper-equivalent KB、
+  领域审批、多 seed/ablation、资源蓝图和 completed-run audit。该 gate 继续固定
+  `multi_agent_real_problem_claim_supported=false`，直到所有 proof artifact 都存在。
+- 新增 [Real Problem Evidence Closure](real_problem_evidence_closure.md) 和执行计划
+  `docs/superpowers/plans/2026-06-01-real-problem-evidence-closure.md`，明确哪些模块能由本地
+  工程补齐，哪些必须由真实外部资产、领域专家和 completed run 补齐。
 - `AgentConfig` / Web `AgentModelRequest` 支持 per-member `base_url`。selector panel
   可以在不记录 API key 的前提下，为不同 selector member 指定不同 OpenAI-compatible
   provider endpoint。

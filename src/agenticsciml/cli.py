@@ -28,6 +28,7 @@ from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.llm_smoke import DEFAULT_SMOKE_VARIANTS, run_llm_smoke, verify_llm_smoke_output
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 from agenticsciml.paper_workflow_readiness import write_paper_workflow_readiness_bundle
+from agenticsciml.real_problem_closure import write_real_problem_closure_plan
 from agenticsciml.reporting import write_sdk_trace_export, write_trace_summary
 from agenticsciml.storage import _atomic_write_text
 
@@ -190,6 +191,30 @@ def cmd_plan_paper_workflow(args: argparse.Namespace) -> int:
     )
     print(result["paths"]["plan_json"])
     if args.fail_on_blockers and result["bundle"]["status"] == "blocked":
+        return 1
+    return 0
+
+
+def cmd_plan_real_problem_closure(args: argparse.Namespace) -> int:
+    selector_panel = _json_array_arg(args.selector_panel_json, "--selector-panel-json")
+    result = write_real_problem_closure_plan(
+        benchmark_dir=Path(args.benchmark_dir).resolve(),
+        output_dir=Path(args.output_dir).resolve(),
+        selector_panel=selector_panel,
+        resource_constraints=_json_object_arg(args.resource_constraints_json, "--resource-constraints-json"),
+        expert_blueprint_id=args.expert_blueprint_id,
+        domain_approval_path=Path(args.domain_approval_json).resolve()
+        if args.domain_approval_json
+        else None,
+        ablation_output_dir=Path(args.ablation_output_dir).resolve()
+        if args.ablation_output_dir
+        else None,
+        expected_seeds=args.expected_seeds,
+        expected_variants=_split_csv(args.expected_variants),
+        env=os.environ,
+    )
+    print(result["paths"]["plan_json"])
+    if args.fail_on_blockers and result["plan"]["status"] == "blocked":
         return 1
     return 0
 
@@ -404,6 +429,27 @@ def build_parser() -> argparse.ArgumentParser:
     paper_workflow.add_argument("--expected-variants", default="")
     paper_workflow.add_argument("--fail-on-blockers", action="store_true")
     paper_workflow.set_defaults(func=cmd_plan_paper_workflow)
+
+    real_problem = sub.add_parser("plan-real-problem-closure")
+    real_problem.add_argument("benchmark_dir")
+    real_problem.add_argument("--output-dir", default="runs/real-problem-closure")
+    real_problem.add_argument(
+        "--selector-panel-json",
+        default="[]",
+        help="JSON array of selector member objects with model and optional base_url",
+    )
+    real_problem.add_argument(
+        "--resource-constraints-json",
+        default="{}",
+        help="JSON object with cpu, gpu, timeout_s, dependency_limits, and data_limits",
+    )
+    real_problem.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
+    real_problem.add_argument("--domain-approval-json")
+    real_problem.add_argument("--ablation-output-dir")
+    real_problem.add_argument("--expected-seeds", nargs="+", type=int, default=[])
+    real_problem.add_argument("--expected-variants", default="")
+    real_problem.add_argument("--fail-on-blockers", action="store_true")
+    real_problem.set_defaults(func=cmd_plan_real_problem_closure)
 
     campaign = sub.add_parser("plan-iteration-campaign")
     campaign.add_argument("benchmark_dir")
