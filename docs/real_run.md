@@ -39,9 +39,12 @@ Use the provider's exact model id. For example, if the provider rejects
 
 When `OPENAI_BASE_URL` is unset, `OpenAIAdapter` treats the provider as an
 OpenAI-native Responses path and uses typed Structured Outputs for agent JSON.
-When `OPENAI_BASE_URL` is set, the adapter records an `openai_compatible_chat`
+When `OPENAI_BASE_URL` is set, the adapter records an OpenAI-compatible
 capability profile and falls back to chat completions plus local Pydantic
-schema validation.
+schema validation. `https://api.gatexflow.com/v1` is treated as an
+OpenAI-compatible multimodal chat provider: structured text output still uses
+local schema validation, while `--visual-audit-mode real` may send diagnostic
+images through chat image content when the configured model supports it.
 
 Optional fail-closed budget gates:
 

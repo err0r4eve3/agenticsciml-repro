@@ -91,6 +91,27 @@ def test_openai_adapter_supports_base_url_env(monkeypatch) -> None:
     assert adapter.provider_capabilities.supports_image_inputs is False
 
 
+def test_openai_adapter_marks_gatexflow_as_multimodal_chat(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-5-mini")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.gatexflow.com/v1")
+    monkeypatch.setenv("OPENAI_TIMEOUT_S", "120")
+    FakeOpenAI.last_kwargs = None
+
+    adapter = OpenAIAdapter()
+
+    assert adapter.base_url == "https://api.gatexflow.com/v1"
+    assert FakeOpenAI.last_kwargs == {
+        "api_key": "test-key",
+        "base_url": "https://api.gatexflow.com/v1",
+        "timeout": 120.0,
+    }
+    assert adapter.provider_capabilities.adapter_type == "openai_compatible_multimodal_chat"
+    assert adapter.provider_capabilities.supports_structured_outputs is False
+    assert adapter.provider_capabilities.supports_image_inputs is True
+
+
 def test_openai_adapter_omits_base_url_when_unset(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -176,6 +197,44 @@ def test_openai_adapter_sends_image_inputs_to_native_responses(tmp_path: Path, m
     assert user_message["content"][1]["type"] == "input_image"
     assert user_message["content"][1]["image_url"].startswith("data:image/svg+xml;base64,")
     assert user_message["content"][1]["detail"] == "auto"
+    assert adapter.last_call_metadata is not None
+    assert adapter.last_call_metadata["method"] == "complete_json_with_images"
+    assert adapter.last_call_metadata["image_input_count"] == 1
+
+
+def test_openai_adapter_sends_image_inputs_to_gatexflow_chat(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeChatOpenAI))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.gatexflow.com/v1")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-5-mini")
+    FakeChatCompletions.last_kwargs = None
+    FakeChatCompletions.response_text = (
+        '{"summary":"Vision audit saw the diagnostic plots.",'
+        '"physical_consistency_checks":["image_input_received","prediction_only"],'
+        '"visual_artifacts_reviewed":["visual_field_diagnostic.svg"],'
+        '"warnings":[],"actual_image_inputs_used":true,'
+        '"analysis_mode":"real_visual_provider_image_input"}'
+    )
+    image_path = tmp_path / "visual_field_diagnostic.svg"
+    image_path.write_text("<svg xmlns='http://www.w3.org/2000/svg'></svg>", encoding="utf-8")
+
+    adapter = OpenAIAdapter(model="gpt-5-mini")
+    payload = adapter.complete_json_with_images(
+        "audit image",
+        "visual_audit",
+        [image_path],
+        reasoning_effort="high",
+    )
+
+    assert payload["actual_image_inputs_used"] is True
+    assert FakeChatCompletions.last_kwargs is not None
+    user_message = FakeChatCompletions.last_kwargs["messages"][-1]
+    assert user_message["role"] == "user"
+    assert user_message["content"][0]["type"] == "text"
+    assert "Required JSON Schema" in user_message["content"][0]["text"]
+    assert user_message["content"][1]["type"] == "image_url"
+    assert user_message["content"][1]["image_url"]["url"].startswith("data:image/svg+xml;base64,")
+    assert user_message["content"][1]["image_url"]["detail"] == "auto"
     assert adapter.last_call_metadata is not None
     assert adapter.last_call_metadata["method"] == "complete_json_with_images"
     assert adapter.last_call_metadata["image_input_count"] == 1

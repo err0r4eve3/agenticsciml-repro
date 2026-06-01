@@ -81,6 +81,9 @@
 - OpenAI native Responses adapter 新增 `complete_json_with_images(...)`，真实 visual audit
   可以把已生成的 SVG 诊断图作为 image input 发送给支持图像输入的 provider；OpenAI-compatible
   chat 和 mock 路径仍默认不支持。
+- `https://api.gatexflow.com/v1` 作为 OpenAI-compatible multimodal chat provider
+  处理：文本 JSON 仍走本地 schema validation，`visual_audit_mode=real` 可通过 chat
+  image content 发送诊断图像。
 - `visual_audit_mode=real` 现在只有在 provider capability 明确
   `supports_image_inputs=true` 且图像请求成功时才记录 `actual_image_inputs_used=true`。
 - 新增 run-level evidence artifacts：
@@ -129,7 +132,8 @@ agent-systems scaling 与材料发现资料，先升级科学证据链。默认�
   `ExperienceSubstrate` 记录 exact fingerprint 与 benchmark-family 经验。
 - selector vote provenance 增加 `adapter_type` 和 `provider_capabilities`；
   `ProviderCapabilities` 增加 `supports_image_inputs`。OpenAI native Responses 记录为
-  支持 image input，OpenAI-compatible chat 和 mock 默认不支持。
+  支持 image input，GatexFlow compatible multimodal chat 记录为支持 image input；
+  其他 OpenAI-compatible chat 和 mock 默认不支持。
 - CLI / Web / Problem Intake 增加 `visual_audit_mode`、`resource_constraints` 和
   `expert_blueprint_id`。custom benchmark 仍只能生成 `workflow_proxy` scaffold。
 - `trace_summary.json` 增加 scientific readiness consistency check，防止

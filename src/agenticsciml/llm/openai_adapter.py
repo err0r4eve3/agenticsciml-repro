@@ -126,7 +126,16 @@ class OpenAIAdapter(LLMClient):
             and self.provider_capabilities.supports_structured_outputs
             and self.provider_capabilities.supports_image_inputs
         ):
-            raise RuntimeError("Image JSON calls require OpenAI native Responses with image input support.")
+            if self.provider_capabilities.supports_image_inputs:
+                return self._complete_json_with_images_compatible(
+                    prompt,
+                    schema_name,
+                    image_paths,
+                    system=system,
+                    temperature=temperature,
+                    reasoning_effort=reasoning_effort,
+                )
+            raise RuntimeError("Image JSON calls require a provider with image input support.")
         model = output_model_for(schema_name)
         if model is None:
             raise RuntimeError(f"No structured output schema registered for {schema_name}.")
@@ -156,6 +165,42 @@ class OpenAIAdapter(LLMClient):
             payload = parsed
         else:
             raise RuntimeError(f"Parsed structured output for {schema_name} has unsupported type.")
+        return validate_output_payload(payload, schema_name=schema_name)
+
+    def _complete_json_with_images_compatible(
+        self,
+        prompt: str,
+        schema_name: str,
+        image_paths: list[Path],
+        system: str | None,
+        temperature: float,
+        reasoning_effort: str | None,
+    ) -> dict[str, Any]:
+        json_prompt = _compatible_json_prompt(prompt, schema_name)
+        request_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": _chat_multimodal_messages(json_prompt, system, image_paths),
+            "temperature": temperature,
+        }
+        if reasoning_effort is not None:
+            request_kwargs["reasoning_effort"] = reasoning_effort
+        response = self.client.chat.completions.create(**request_kwargs)
+        self.last_call_metadata = self._metadata(
+            method="complete_json_with_images",
+            schema_name=schema_name,
+            response=response,
+            reasoning_effort=reasoning_effort,
+        )
+        self.last_call_metadata["image_input_count"] = len(image_paths)
+        self.last_call_metadata["image_input_filenames"] = [path.name for path in image_paths]
+        text = response.choices[0].message.content or ""
+        json_text = _extract_json_object_text(text)
+        try:
+            payload = json.loads(json_text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Model did not return valid JSON for {schema_name}: {text[:300]}") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"Model JSON for {schema_name} must be an object.")
         return validate_output_payload(payload, schema_name=schema_name)
 
     def _complete_json_responses(
@@ -274,6 +319,29 @@ def _response_multimodal_input(
         )
     items.append({"role": "user", "content": content})
     return items
+
+
+def _chat_multimodal_messages(
+    prompt: str,
+    system: str | None,
+    image_paths: list[Path],
+) -> list[dict[str, object]]:
+    messages: list[dict[str, object]] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    content: list[dict[str, object]] = [{"type": "text", "text": prompt}]
+    for image_path in image_paths:
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": _image_data_url(image_path),
+                    "detail": "auto",
+                },
+            }
+        )
+    messages.append({"role": "user", "content": content})
+    return messages
 
 
 def _image_data_url(path: Path) -> str:

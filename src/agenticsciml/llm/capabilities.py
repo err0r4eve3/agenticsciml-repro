@@ -32,6 +32,17 @@ def capabilities_for_openai_compatible(base_url: str | None) -> ProviderCapabili
     if base_url:
         parsed = urlparse(base_url)
         provider = parsed.netloc or base_url
+        if provider == "api.gatexflow.com":
+            return ProviderCapabilities(
+                provider=provider,
+                adapter_type="openai_compatible_multimodal_chat",
+                supports_responses=False,
+                supports_structured_outputs=False,
+                supports_image_inputs=True,
+                supports_usage=True,
+                supports_trace_export=False,
+                supports_prompt_cache=False,
+            )
         return ProviderCapabilities(
             provider=provider,
             adapter_type="openai_compatible_chat",
