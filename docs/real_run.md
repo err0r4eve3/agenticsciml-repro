@@ -61,6 +61,38 @@ export AGENTICSCIML_COST_PER_1K_TOKENS_USD=0.01
 `AGENTICSCIML_COST_PER_1K_TOKENS_USD`, because provider pricing is not inferred
 from the model name.
 
+Role-level model policy can be set from CLI with `--agent-models-json`. The
+payload is a JSON object keyed by role; each role value supports `model`,
+`base_url`, `temperature`, and `reasoning_effort`. If `temperature` or
+`reasoning_effort` is omitted, the role default is used:
+
+```bash
+uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx \
+  --agent-models-json '{"root_engineer":{"model":"gpt-5.5","reasoning_effort":"xhigh"},"retriever":{"model":"gpt-5.4-mini","reasoning_effort":"medium"}}'
+```
+
+Selector ensembles still use `--selector-panel-json`, because each selector
+member is an independent voter rather than a normal workflow role override.
+For a cost-bounded GatexFlow-style tiering run, keep evidence and contract roles
+on a mini model, route synthesis roles to the strongest model with `xhigh`, and
+use a two-member selector panel only when `max_iterations >= 2` so selector
+voting is actually exercised:
+
+```json
+{
+  "data_analyst": {"model": "gpt-5.4-mini", "reasoning_effort": "high"},
+  "evaluator": {"model": "gpt-5.4-mini", "reasoning_effort": "high"},
+  "root_engineer": {"model": "gpt-5.5", "reasoning_effort": "xhigh"},
+  "retriever": {"model": "gpt-5.4-mini", "reasoning_effort": "medium"},
+  "proposer": {"model": "gpt-5.5", "reasoning_effort": "xhigh"},
+  "critic": {"model": "gpt-5.4", "reasoning_effort": "high"},
+  "engineer": {"model": "gpt-5.5", "reasoning_effort": "xhigh"},
+  "debugger": {"model": "gpt-5.5", "reasoning_effort": "xhigh"},
+  "result_analyst": {"model": "gpt-5.4-mini", "reasoning_effort": "high"},
+  "selector": {"model": "gpt-5.4-mini", "reasoning_effort": "high"}
+}
+```
+
 For first real runs, prefer root-only smoke before mutation:
 
 ```bash

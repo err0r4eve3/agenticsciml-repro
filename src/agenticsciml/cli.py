@@ -12,6 +12,7 @@ from agenticsciml.ablation_evidence import build_multi_seed_ablation_verified_ma
 from agenticsciml.ablation import DEFAULT_VARIANTS, run_ablation
 from agenticsciml.benchmarks import list_benchmarks
 from agenticsciml.config import (
+    DEFAULT_AGENT_ROLE_MODEL_SETTINGS,
     EXPERT_BLUEPRINT_IDS,
     VISUAL_AUDIT_MODES,
     AgentConfig,
@@ -92,6 +93,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         output_dir=Path(args.output_dir).resolve(),
         evolution=evolution,
         use_mock=args.mock,
+        agents=_agent_configs_from_role_payloads(
+            _json_object_arg(args.agent_models_json, "--agent-models-json")
+        ),
         selector_panel=[
             _agent_config_from_selector_payload(index, payload)
             for index, payload in enumerate(_selector_panel_payloads(args), start=1)
@@ -360,6 +364,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON object describing verified multi-seed or ablation evidence for readiness artifacts",
     )
     run.add_argument(
+        "--agent-models-json",
+        default="{}",
+        help=(
+            "JSON object keyed by agent role; each value may include model, base_url, "
+            "temperature, and reasoning_effort"
+        ),
+    )
+    run.add_argument(
         "--selector-panel-models",
         default="",
         help="comma-separated selector panel model names; records per-member selector vote provenance",
@@ -534,6 +546,35 @@ def _selector_panel_payloads(args: argparse.Namespace) -> list[dict[str, object]
             result.append(dict(item))
         return result
     return [{"model": model} for model in _split_csv(args.selector_panel_models)]
+
+
+def _agent_configs_from_role_payloads(payload: dict[str, object]) -> dict[str, AgentConfig]:
+    known_roles = set(DEFAULT_AGENT_ROLE_MODEL_SETTINGS)
+    unknown_roles = sorted(set(payload) - known_roles)
+    if unknown_roles:
+        raise ValueError("--agent-models-json unknown role(s): " + ", ".join(unknown_roles))
+    result: dict[str, AgentConfig] = {}
+    for role, value in payload.items():
+        if not isinstance(value, dict):
+            raise ValueError("--agent-models-json values must be JSON objects")
+        model = str(value.get("model", "")).strip()
+        if not model:
+            raise ValueError(f"--agent-models-json {role} model is required")
+        base_url_value = value.get("base_url")
+        base_url = str(base_url_value).strip() if base_url_value is not None else None
+        defaults = DEFAULT_AGENT_ROLE_MODEL_SETTINGS[role]
+        result[role] = AgentConfig(
+            role=role,
+            model=model,
+            temperature=float(value.get("temperature", defaults["temperature"])),
+            reasoning_effort=(
+                str(value["reasoning_effort"])
+                if value.get("reasoning_effort") is not None
+                else None
+            ),
+            base_url=base_url or None,
+        )
+    return result
 
 
 def _agent_config_from_selector_payload(index: int, payload: dict[str, object]) -> AgentConfig:

@@ -2759,6 +2759,7 @@ class AgenticSciMLOrchestrator:
                 model=agent_config.model,
                 temperature=agent_config.temperature,
                 reasoning_effort=str(settings["reasoning_effort"]),
+                base_url=agent_config.base_url,
             )
         settings = agent_role_default_model_settings(role)
         return AgentConfig(

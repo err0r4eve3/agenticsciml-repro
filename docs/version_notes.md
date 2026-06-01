@@ -136,6 +136,10 @@ agent-systems scaling 与材料发现资料，先升级科学证据链。默认�
   其他 OpenAI-compatible chat 和 mock 默认不支持。
 - CLI / Web / Problem Intake 增加 `visual_audit_mode`、`resource_constraints` 和
   `expert_blueprint_id`。custom benchmark 仍只能生成 `workflow_proxy` scaffold。
+- CLI `run` 增加 `--agent-models-json`，可为普通 agent role 指定 `model`、
+  `base_url`、`temperature` 和 `reasoning_effort`；selector ensemble 仍使用
+  `--selector-panel-json`。导出的 `run_metadata.json.agent_models` 记录每个
+  role 的配置来源、实际模型、provider 和 adapter。
 - `trace_summary.json` 增加 scientific readiness consistency check，防止
   `run_metadata.json` 夸大 readiness 或 scientific claim。
 - 新增 [Scientific Discovery Evidence Digest](scientific_discovery_evidence.md)，记录
