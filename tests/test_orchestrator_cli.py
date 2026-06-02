@@ -423,6 +423,7 @@ def test_cylinder_faithful_small_mock_run_writes_scientific_readiness_artifacts(
     assert visual_report["privacy_boundary"] == "prediction_only_no_validation_labels"
     assert "private_validation_labels_not_loaded" in visual_report["physical_consistency_checks"]
     assert (run_dir / "solutions" / "solution_000" / "visual_field_diagnostic.svg").exists()
+    assert (run_dir / "solutions" / "solution_000" / "visual_field_diagnostic.png").exists()
     assert method_record["benchmark_family"] == "inverse reconstruction"
     assert method_record["experience_scope"]["benchmark_family_retrieval"] is True
 
@@ -449,16 +450,21 @@ def test_real_visual_audit_records_actual_image_input_with_capable_provider(tmp_
     )
     visual_manifest = json.loads((run_dir / "reports" / "visual_audit_manifest.json").read_text(encoding="utf-8"))
     readiness = json.loads((run_dir / "reports" / "scientific_discovery_readiness.json").read_text(encoding="utf-8"))
+    run_metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
     trace_events = [
         json.loads(line)
         for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
     ]
 
     assert llm.image_calls
+    assert all(path.suffix == ".png" for path in llm.image_calls[0])
     assert visual_report["actual_image_inputs_used"] is True
     assert visual_report["analysis_mode"] == "real_visual_provider_image_input"
     assert visual_report["visual_provider_output"]["actual_image_inputs_used"] is True
     assert visual_manifest["actual_image_inputs_used"] is True
+    assert run_metadata["visual_audit_mode"] == "real"
+    assert run_metadata["visual_audit"]["mode"] == "real"
+    assert run_metadata["visual_audit"]["actual_image_inputs_used"] is True
     actual_image_check = next(check for check in readiness["checks"] if check["check_id"] == "actual_image_inputs")
     assert actual_image_check["passed"] is True
     assert readiness["scientific_claim_supported"] is False

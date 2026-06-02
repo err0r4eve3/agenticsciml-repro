@@ -75,11 +75,14 @@
   `unique_providers=["api.deepseek.com", "openai"]`，并让
   `heterogeneous_selector_evidence=true`。该测试不调用外部模型，不代表真实 provider
   已完成科学运行。
+- `visual_audit_mode=real` 现在会生成 provider 兼容的 PNG 诊断图，并只把
+  PNG/JPEG/GIF/WebP 这类真实图像格式传给 image-capable provider；SVG 仍作为本地
+  artifact 保留。run metadata 也显式记录 top-level `visual_audit_mode`。
 
 已实现：
 
 - OpenAI native Responses adapter 新增 `complete_json_with_images(...)`，真实 visual audit
-  可以把已生成的 SVG 诊断图作为 image input 发送给支持图像输入的 provider；OpenAI-compatible
+  可以把已生成的 PNG 诊断图作为 image input 发送给支持图像输入的 provider；OpenAI-compatible
   chat 和 mock 路径仍默认不支持。
 - `https://api.gatexflow.com/v1` 作为 OpenAI-compatible multimodal chat provider
   处理：文本 JSON 仍走本地 schema validation，`visual_audit_mode=real` 可通过 chat

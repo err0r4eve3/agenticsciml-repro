@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import html
 import json
+import struct
 import sys
 import tempfile
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -191,11 +193,12 @@ def build_visual_audit_package(
     run_dir: Path,
     mode: str,
     provider_capabilities: dict[str, object] | None = None,
-) -> tuple[dict[str, Any], dict[str, str]]:
+) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes]]:
     mode = mode if mode in {"off", "mock", "real"} else "off"
     arrays = _load_solution_arrays(workspace)
     capabilities = dict(provider_capabilities or {})
     plots: dict[str, str] = {}
+    image_plots: dict[str, bytes] = {}
     artifacts: list[dict[str, object]] = []
     prediction_key = _first_matching_key(
         arrays,
@@ -209,6 +212,7 @@ def build_visual_audit_package(
             "Visual field diagnostic",
             "No prediction array was produced.",
         )
+        image_plots["visual_field_diagnostic.png"] = _empty_png()
     else:
         y = _first_series(arrays[prediction_key])
         x = _first_series(arrays[x_key]) if x_key else np.arange(len(y), dtype=float)
@@ -219,10 +223,18 @@ def build_visual_audit_package(
             x_label=x_key or "sample_index",
             y_label=prediction_key,
         )
+        image_plots["visual_field_diagnostic.png"] = _scatter_png(x, y)
         artifacts.append(
             {
                 "path": str((workspace / "visual_field_diagnostic.svg").relative_to(run_dir)),
                 "kind": "prediction_field_proxy",
+                "privacy_boundary": "prediction_only_no_validation_labels",
+            }
+        )
+        artifacts.append(
+            {
+                "path": str((workspace / "visual_field_diagnostic.png").relative_to(run_dir)),
+                "kind": "prediction_field_proxy_png",
                 "privacy_boundary": "prediction_only_no_validation_labels",
             }
         )
@@ -234,10 +246,21 @@ def build_visual_audit_package(
             x_label="sample_index",
             y_label="absolute_prediction_step",
         )
+        image_plots["visual_residual_diagnostic.png"] = _scatter_png(
+            np.arange(len(residual), dtype=float),
+            residual,
+        )
         artifacts.append(
             {
                 "path": str((workspace / "visual_residual_diagnostic.svg").relative_to(run_dir)),
                 "kind": "prediction_smoothness_proxy",
+                "privacy_boundary": "prediction_only_no_validation_labels",
+            }
+        )
+        artifacts.append(
+            {
+                "path": str((workspace / "visual_residual_diagnostic.png").relative_to(run_dir)),
+                "kind": "prediction_smoothness_proxy_png",
                 "privacy_boundary": "prediction_only_no_validation_labels",
             }
         )
@@ -249,10 +272,21 @@ def build_visual_audit_package(
             x_label="boundary_sample_index",
             y_label=prediction_key,
         )
+        image_plots["visual_boundary_diagnostic.png"] = _scatter_png(
+            np.arange(len(boundary), dtype=float),
+            boundary,
+        )
         artifacts.append(
             {
                 "path": str((workspace / "visual_boundary_diagnostic.svg").relative_to(run_dir)),
                 "kind": "prediction_boundary_proxy",
+                "privacy_boundary": "prediction_only_no_validation_labels",
+            }
+        )
+        artifacts.append(
+            {
+                "path": str((workspace / "visual_boundary_diagnostic.png").relative_to(run_dir)),
+                "kind": "prediction_boundary_proxy_png",
                 "privacy_boundary": "prediction_only_no_validation_labels",
             }
         )
@@ -294,7 +328,7 @@ def build_visual_audit_package(
             "domain review."
         ),
     }
-    return report, plots
+    return report, plots, image_plots
 
 
 DATA_EDA_SCRIPT = r'''from __future__ import annotations
@@ -787,6 +821,109 @@ def _scatter_svg(
             "</svg>",
         ]
     )
+
+
+def _scatter_png(x: np.ndarray, y: np.ndarray) -> bytes:
+    x_values, y_values = _finite_pairs(x, y)
+    if x_values.size == 0:
+        return _empty_png()
+    if x_values.size > 500:
+        indices = np.linspace(0, x_values.size - 1, 500, dtype=int)
+        x_values = x_values[indices]
+        y_values = y_values[indices]
+
+    width = 640
+    height = 360
+    left = 58
+    right = 24
+    top = 38
+    bottom = 52
+    plot_w = width - left - right
+    plot_h = height - top - bottom
+    x_min, x_max = _domain(x_values)
+    y_min, y_max = _domain(y_values)
+
+    image = np.full((height, width, 3), 255, dtype=np.uint8)
+    _draw_horizontal_line(image, top + plot_h, left, left + plot_w, (17, 24, 39))
+    _draw_vertical_line(image, left, top, top + plot_h, (17, 24, 39))
+    for x_item, y_item in zip(x_values, y_values):
+        px = left + ((float(x_item) - x_min) / (x_max - x_min)) * plot_w
+        py = top + (1.0 - ((float(y_item) - y_min) / (y_max - y_min))) * plot_h
+        _draw_disc(image, int(round(px)), int(round(py)), radius=2, color=(37, 99, 235))
+    return _png_bytes(image)
+
+
+def _empty_png() -> bytes:
+    image = np.full((240, 640, 3), 255, dtype=np.uint8)
+    _draw_horizontal_line(image, 120, 64, 576, (209, 213, 219))
+    _draw_vertical_line(image, 64, 64, 196, (209, 213, 219))
+    _draw_disc(image, 64, 120, radius=3, color=(156, 163, 175))
+    return _png_bytes(image)
+
+
+def _draw_disc(
+    image: np.ndarray,
+    cx: int,
+    cy: int,
+    *,
+    radius: int,
+    color: tuple[int, int, int],
+) -> None:
+    height, width = image.shape[:2]
+    for y_pos in range(max(0, cy - radius), min(height, cy + radius + 1)):
+        for x_pos in range(max(0, cx - radius), min(width, cx + radius + 1)):
+            if (x_pos - cx) ** 2 + (y_pos - cy) ** 2 <= radius**2:
+                image[y_pos, x_pos] = color
+
+
+def _draw_horizontal_line(
+    image: np.ndarray,
+    y_pos: int,
+    x_start: int,
+    x_end: int,
+    color: tuple[int, int, int],
+) -> None:
+    if y_pos < 0 or y_pos >= image.shape[0]:
+        return
+    low = max(0, min(x_start, x_end))
+    high = min(image.shape[1], max(x_start, x_end) + 1)
+    image[y_pos, low:high] = color
+
+
+def _draw_vertical_line(
+    image: np.ndarray,
+    x_pos: int,
+    y_start: int,
+    y_end: int,
+    color: tuple[int, int, int],
+) -> None:
+    if x_pos < 0 or x_pos >= image.shape[1]:
+        return
+    low = max(0, min(y_start, y_end))
+    high = min(image.shape[0], max(y_start, y_end) + 1)
+    image[low:high, x_pos] = color
+
+
+def _png_bytes(rgb: np.ndarray) -> bytes:
+    if rgb.ndim != 3 or rgb.shape[2] != 3:
+        raise ValueError("PNG encoder expects an RGB image array")
+    height, width = rgb.shape[:2]
+    rows = [b"\x00" + np.ascontiguousarray(row, dtype=np.uint8).tobytes() for row in rgb]
+    raw = b"".join(rows)
+    return b"".join(
+        [
+            b"\x89PNG\r\n\x1a\n",
+            _png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)),
+            _png_chunk(b"IDAT", zlib.compress(raw)),
+            _png_chunk(b"IEND", b""),
+        ]
+    )
+
+
+def _png_chunk(kind: bytes, data: bytes) -> bytes:
+    checksum = zlib.crc32(kind)
+    checksum = zlib.crc32(data, checksum) & 0xFFFFFFFF
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", checksum)
 
 
 def _empty_svg(title: str, message: str) -> str:

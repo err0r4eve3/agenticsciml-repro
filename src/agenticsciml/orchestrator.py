@@ -1866,6 +1866,7 @@ class AgenticSciMLOrchestrator:
                 "benchmark_name": self.problem_bundle.benchmark_name,
                 "solution_count": len(self.nodes),
                 "champion": best.node_id,
+                "visual_audit_mode": self.config.visual_audit_mode,
                 "branch_context_enabled": self.config.evolution.use_branch_context,
                 "strategy_seed_ids": list(self.config.strategy_seed_ids),
                 "strategy_seed_count": len(self.config.strategy_seed_ids),
@@ -2049,7 +2050,7 @@ class AgenticSciMLOrchestrator:
         )
 
     def _write_visual_audit_report(self, node: SolutionNode, workspace: Path) -> None:
-        report, plots = build_visual_audit_package(
+        report, plots, image_plots = build_visual_audit_package(
             node.node_id,
             workspace,
             run_dir=self.storage.run_dir,
@@ -2059,6 +2060,10 @@ class AgenticSciMLOrchestrator:
         saved_plot_paths: list[Path] = []
         for filename, svg in plots.items():
             saved_plot_paths.append(self.storage.save_solution_text(node.node_id, filename, svg))
+        for filename, image_bytes in image_plots.items():
+            saved_plot_paths.append(
+                self.storage.save_solution_bytes(node.node_id, filename, image_bytes)
+            )
         self._try_real_visual_provider_audit(node, report, saved_plot_paths)
         self.storage.save_json(Path("solutions") / node.node_id / "visual_audit_report.json", report)
         self.storage.record_trace(
@@ -2086,10 +2091,13 @@ class AgenticSciMLOrchestrator:
         capabilities = self._provider_capabilities_dict(self.llm)
         if capabilities.get("supports_image_inputs") is not True:
             return
+        image_paths = _provider_supported_image_paths(image_paths)
         if not image_paths:
             warnings = report.get("warnings")
             if isinstance(warnings, list):
-                warnings.append("Real visual audit skipped because no image artifact was generated.")
+                warnings.append(
+                    "Real visual audit skipped because no provider-supported image artifact was generated."
+                )
             return
         prompt = (
             "Audit these prediction-only scientific visualization artifacts. "
@@ -2788,6 +2796,11 @@ def _agent_config_requests_distinct_llm(
     model_differs = bool(requested_model and requested_model != "mock" and requested_model != base_model)
     base_url_differs = requested_base_url is not None and requested_base_url != base_url
     return model_differs or base_url_differs
+
+
+def _provider_supported_image_paths(paths: list[Path]) -> list[Path]:
+    supported_suffixes = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+    return [path for path in paths if path.suffix.lower() in supported_suffixes]
 
 
 def _manifest_count(manifest: dict[str, object], count_key: str, list_key: str) -> int:
