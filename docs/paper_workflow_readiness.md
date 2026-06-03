@@ -54,6 +54,15 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli gener
   runs/<run_id>
 ```
 
+生成 paper workflow readiness 时引用已有 selector evidence packet：
+
+```bash
+PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli plan-paper-workflow \
+  examples/cylinder_wake_reconstruction_faithful_small \
+  --selector-evidence-json runs/<run_id>/reports/selector_evidence_packet.json \
+  --output-dir runs/paper-workflow-readiness
+```
+
 最终验收 60 轮是否全部完成时，增加完整性要求：
 
 ```bash
@@ -66,6 +75,7 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli verif
 可选输入：
 
 - `--domain-approval-json <path>`：领域审核 packet。
+- `--selector-evidence-json <path>`：已生成的 runtime selector evidence packet。
 - `--ablation-output-dir <path>`：已有 ablation 输出目录。
 - `--expected-seeds 0 1 2`：期望 seed 覆盖。
 - `--expected-variants root_only,kb,random_kb`：期望 variant 覆盖。
@@ -115,6 +125,9 @@ visual audit、domain approval、ablation evidence 和 paper-like benchmark doss
 的 selector votes，并且 provider 或 actual model 异构；重复单一路径投票、mock vote 或
 缺失 selector artifact 都会保持 blocked。该 packet 只证明 selector 证据，不替代 evaluator
 分数，也不会把 `scientific_claim_supported` 改成 true。
+`plan-paper-workflow`、`plan-real-problem-closure` 和 `plan-iteration-campaign` 可通过
+`--selector-evidence-json` 引用该 packet；ready packet 只解除 `heterogeneous_real_selector`
+这一项，不会绕过 real LLM、多模态、paper-like benchmark、domain review 或 ablation gate。
 `record-iteration-round` 只允许记录未被 readiness blocker 卡住的 planned 轮次；它会
 写入证据文件 digest、验证命令、验证退出码、验证输出 digest 和轮次 record，并更新 campaign 的
 `completed_rounds` / `remaining_rounds`。该记录仍是工程进度证据，不是科学发现证据。

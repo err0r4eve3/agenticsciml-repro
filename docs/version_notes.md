@@ -82,6 +82,9 @@
   completed run 的 `reports/selector_votes.json` 生成
   `reports/selector_evidence_packet.json/md`。packet 要求至少两个非 mock、不同 runtime
   member 的异构 provider/model votes；它只补 selector 证据，不替代 evaluator 或科学 claim gate。
+- `plan-paper-workflow`、`plan-real-problem-closure` 和 `plan-iteration-campaign` 支持
+  `--selector-evidence-json`，可以把已生成的 selector evidence packet 纳入 readiness；
+  ready packet 只解除 `heterogeneous_real_selector` blocker，不会绕过其他 paper workflow gate。
 
 已实现：
 

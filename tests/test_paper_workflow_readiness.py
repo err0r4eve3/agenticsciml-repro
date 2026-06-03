@@ -91,6 +91,27 @@ def test_paper_workflow_readiness_accepts_available_non_paper_assets_but_keeps_b
     assert "redacted-test-key" not in json.dumps(bundle)
 
 
+def test_paper_workflow_readiness_accepts_runtime_selector_evidence_packet(tmp_path: Path) -> None:
+    selector_evidence_path = _write_selector_evidence_packet(tmp_path)
+
+    bundle = build_paper_workflow_readiness_bundle(
+        benchmark_dir=Path("examples/cylinder_wake_reconstruction_faithful_small").resolve(),
+        selector_panel=[],
+        selector_evidence_path=selector_evidence_path,
+        resource_constraints={},
+        expert_blueprint_id=None,
+        env={},
+    )
+
+    blockers = {item["check_id"] for item in bundle["blockers"]}
+    checks = {item["check_id"]: item for item in bundle["checks"]}
+    assert checks["heterogeneous_real_selector"]["passed"] is True
+    assert "heterogeneous_real_selector" not in blockers
+    assert bundle["selector_readiness"]["runtime_selector_evidence_ready"] is True
+    assert bundle["selector_readiness"]["selector_evidence_packet"]["paper_workflow_selector_ready"] is True
+    assert bundle["selector_readiness"]["heterogeneous_selector_candidate"] is False
+
+
 def test_write_paper_workflow_readiness_bundle_outputs_templates(tmp_path: Path) -> None:
     result = write_paper_workflow_readiness_bundle(
         benchmark_dir=Path("examples/function_approx").resolve(),
@@ -150,6 +171,36 @@ def test_cli_plan_paper_workflow_writes_blocked_bundle(
     assert (output_dir / "domain_approval_template.json").exists()
     assert (output_dir / "paper_benchmark_manifest_template.json").exists()
     assert (output_dir / "paper_workflow_commands.md").exists()
+
+
+def test_cli_plan_paper_workflow_accepts_selector_evidence_packet(
+    tmp_path: Path,
+    cli_env: dict[str, str],
+) -> None:
+    output_dir = tmp_path / "paper workflow selector evidence"
+    selector_evidence_path = _write_selector_evidence_packet(tmp_path)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenticsciml.cli",
+            "plan-paper-workflow",
+            "examples/cylinder_wake_reconstruction_faithful_small",
+            "--output-dir",
+            str(output_dir),
+            "--selector-evidence-json",
+            str(selector_evidence_path),
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+        env=cli_env,
+    )
+
+    plan = json.loads(Path(result.stdout.strip()).read_text(encoding="utf-8"))
+    selector_check = next(check for check in plan["checks"] if check["check_id"] == "heterogeneous_real_selector")
+    assert selector_check["passed"] is True
+    assert plan["selector_readiness"]["runtime_selector_evidence_ready"] is True
 
 
 def test_cli_plan_paper_workflow_can_fail_on_blockers(
@@ -216,3 +267,31 @@ def _write_csv(path: Path, rows: list[dict[str, object]]) -> None:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         writer.writeheader()
         writer.writerows(rows)
+
+
+def _write_selector_evidence_packet(tmp_path: Path) -> Path:
+    path = tmp_path / "selector_evidence_packet.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": "ready",
+                "paper_workflow_selector_ready": True,
+                "scientific_claim_supported": False,
+                "runtime_vote_summary": {
+                    "real_vote_count": 2,
+                    "mock_vote_count": 0,
+                    "distinct_member_vote_count": 2,
+                    "unique_providers": ["api.gatexflow.com"],
+                    "unique_actual_models": ["gpt-5.2", "gpt-5.4-mini"],
+                    "provider_diversity": False,
+                    "actual_model_diversity": True,
+                },
+                "blockers": [],
+                "claim_boundary": "selector evidence only",
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return path

@@ -28,6 +28,7 @@ def build_paper_workflow_readiness_bundle(
     *,
     benchmark_dir: Path,
     selector_panel: list[dict[str, object]] | None = None,
+    selector_evidence_path: Path | None = None,
     resource_constraints: dict[str, object] | None = None,
     expert_blueprint_id: str | None = None,
     domain_approval_path: Path | None = None,
@@ -40,7 +41,11 @@ def build_paper_workflow_readiness_bundle(
     problem_bundle = ProblemBundle.load(benchmark_dir)
     benchmark = problem_bundle.benchmark_spec
     provider = _provider_readiness(env_map)
-    selector = _selector_readiness(selector_panel or [], provider_api_key_present=provider["api_key_present"])
+    selector = _selector_readiness(
+        selector_panel or [],
+        provider_api_key_present=provider["api_key_present"],
+        selector_evidence_path=selector_evidence_path,
+    )
     benchmark_gate = _paper_benchmark_readiness(benchmark_dir, benchmark.to_dict())
     domain = _domain_approval_readiness(domain_approval_path)
     ablation = _ablation_readiness(
@@ -79,7 +84,8 @@ def build_paper_workflow_readiness_bundle(
         _check(
             "heterogeneous_real_selector",
             "selector",
-            selector["heterogeneous_selector_candidate"] is True,
+            selector["heterogeneous_selector_candidate"] is True
+            or selector["runtime_selector_evidence_ready"] is True,
             "Selector panel has at least two real heterogeneous provider/model candidates.",
             "Configure at least two selector members with distinct provider/model paths and real credentials.",
             selector,
@@ -162,6 +168,7 @@ def write_paper_workflow_readiness_bundle(
     benchmark_dir: Path,
     output_dir: Path,
     selector_panel: list[dict[str, object]] | None = None,
+    selector_evidence_path: Path | None = None,
     resource_constraints: dict[str, object] | None = None,
     expert_blueprint_id: str | None = None,
     domain_approval_path: Path | None = None,
@@ -174,6 +181,7 @@ def write_paper_workflow_readiness_bundle(
     bundle = build_paper_workflow_readiness_bundle(
         benchmark_dir=benchmark_dir,
         selector_panel=selector_panel,
+        selector_evidence_path=selector_evidence_path,
         resource_constraints=resource_constraints,
         expert_blueprint_id=expert_blueprint_id,
         domain_approval_path=domain_approval_path,
@@ -309,6 +317,7 @@ def _selector_readiness(
     selector_panel: list[dict[str, object]],
     *,
     provider_api_key_present: bool,
+    selector_evidence_path: Path | None = None,
 ) -> dict[str, Any]:
     members: list[dict[str, object]] = []
     for index, member in enumerate(selector_panel, start=1):
@@ -329,6 +338,7 @@ def _selector_readiness(
     providers = sorted({str(member["provider"]) for member in real_members})
     models = sorted({str(member["model"]) for member in real_members})
     provider_model_pairs = sorted({f"{member['provider']}::{member['model']}" for member in real_members})
+    evidence_packet = _selector_evidence_packet_readiness(selector_evidence_path)
     return {
         "configured_member_count": len(members),
         "real_member_count": len(real_members),
@@ -336,8 +346,72 @@ def _selector_readiness(
         "unique_models": models,
         "unique_provider_model_pairs": provider_model_pairs,
         "heterogeneous_selector_candidate": len(real_members) >= 2 and len(provider_model_pairs) >= 2,
+        "runtime_selector_evidence_ready": evidence_packet["paper_workflow_selector_ready"] is True,
+        "selector_evidence_packet": evidence_packet,
         "members": members,
-        "claim_boundary": "Configuration is only a candidate; completed runtime selector_votes.json remains the evidence source.",
+        "claim_boundary": (
+            "Configuration is only a candidate; completed runtime selector_votes.json or "
+            "selector_evidence_packet.json remains the evidence source."
+        ),
+    }
+
+
+def _selector_evidence_packet_readiness(selector_evidence_path: Path | None) -> dict[str, Any]:
+    if selector_evidence_path is None:
+        return {
+            "path": None,
+            "exists": False,
+            "status": "not_provided",
+            "paper_workflow_selector_ready": False,
+            "blockers": ["selector_evidence_path not provided"],
+        }
+    path = Path(selector_evidence_path)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {
+            "path": str(path),
+            "exists": False,
+            "status": "missing",
+            "paper_workflow_selector_ready": False,
+            "blockers": ["selector evidence packet is missing"],
+        }
+    except json.JSONDecodeError as exc:
+        return {
+            "path": str(path),
+            "exists": True,
+            "status": "invalid_json",
+            "paper_workflow_selector_ready": False,
+            "blockers": [f"selector evidence packet is invalid JSON: {exc}"],
+        }
+    if not isinstance(payload, dict):
+        return {
+            "path": str(path),
+            "exists": True,
+            "status": "invalid_schema",
+            "paper_workflow_selector_ready": False,
+            "blockers": ["selector evidence packet must be a JSON object"],
+        }
+    scientific_claim_supported = payload.get("scientific_claim_supported") is True
+    ready = (
+        payload.get("status") == "ready"
+        and payload.get("paper_workflow_selector_ready") is True
+        and scientific_claim_supported is False
+    )
+    blockers = payload.get("blockers") if isinstance(payload.get("blockers"), list) else []
+    if scientific_claim_supported:
+        blockers = [*blockers, "selector evidence packet must not claim scientific support"]
+    return {
+        "path": str(path),
+        "exists": True,
+        "schema_version": payload.get("schema_version"),
+        "status": payload.get("status"),
+        "paper_workflow_selector_ready": ready,
+        "scientific_claim_supported": scientific_claim_supported,
+        "runtime_vote_summary": payload.get("runtime_vote_summary")
+        if isinstance(payload.get("runtime_vote_summary"), dict)
+        else {},
+        "blockers": blockers,
     }
 
 

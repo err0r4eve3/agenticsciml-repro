@@ -182,6 +182,9 @@ def cmd_plan_paper_workflow(args: argparse.Namespace) -> int:
         benchmark_dir=Path(args.benchmark_dir).resolve(),
         output_dir=Path(args.output_dir).resolve(),
         selector_panel=selector_panel,
+        selector_evidence_path=Path(args.selector_evidence_json).resolve()
+        if args.selector_evidence_json
+        else None,
         resource_constraints=_json_object_arg(args.resource_constraints_json, "--resource-constraints-json"),
         expert_blueprint_id=args.expert_blueprint_id,
         domain_approval_path=Path(args.domain_approval_json).resolve()
@@ -217,6 +220,9 @@ def cmd_plan_real_problem_closure(args: argparse.Namespace) -> int:
         benchmark_dir=Path(args.benchmark_dir).resolve(),
         output_dir=Path(args.output_dir).resolve(),
         selector_panel=selector_panel,
+        selector_evidence_path=Path(args.selector_evidence_json).resolve()
+        if args.selector_evidence_json
+        else None,
         resource_constraints=_json_object_arg(args.resource_constraints_json, "--resource-constraints-json"),
         expert_blueprint_id=args.expert_blueprint_id,
         domain_approval_path=Path(args.domain_approval_json).resolve()
@@ -243,6 +249,9 @@ def cmd_plan_iteration_campaign(args: argparse.Namespace) -> int:
         rounds=args.rounds,
         batch_size=args.batch_size,
         selector_panel=selector_panel,
+        selector_evidence_path=Path(args.selector_evidence_json).resolve()
+        if args.selector_evidence_json
+        else None,
         resource_constraints=_json_object_arg(args.resource_constraints_json, "--resource-constraints-json"),
         expert_blueprint_id=args.expert_blueprint_id,
         domain_approval_path=Path(args.domain_approval_json).resolve()
@@ -447,6 +456,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON object with cpu, gpu, timeout_s, dependency_limits, and data_limits",
     )
     paper_workflow.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
+    paper_workflow.add_argument("--selector-evidence-json")
     paper_workflow.add_argument("--domain-approval-json")
     paper_workflow.add_argument("--ablation-output-dir")
     paper_workflow.add_argument("--expected-seeds", nargs="+", type=int, default=[])
@@ -474,6 +484,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON object with cpu, gpu, timeout_s, dependency_limits, and data_limits",
     )
     real_problem.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
+    real_problem.add_argument("--selector-evidence-json")
     real_problem.add_argument("--domain-approval-json")
     real_problem.add_argument("--ablation-output-dir")
     real_problem.add_argument("--expected-seeds", nargs="+", type=int, default=[])
@@ -497,6 +508,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON object with cpu, gpu, timeout_s, dependency_limits, and data_limits",
     )
     campaign.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
+    campaign.add_argument("--selector-evidence-json")
     campaign.add_argument("--domain-approval-json")
     campaign.add_argument("--ablation-output-dir")
     campaign.add_argument("--expected-seeds", nargs="+", type=int, default=[])
