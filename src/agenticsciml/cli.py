@@ -31,6 +31,7 @@ from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 from agenticsciml.paper_workflow_readiness import write_paper_workflow_readiness_bundle
 from agenticsciml.real_problem_closure import write_real_problem_closure_plan
 from agenticsciml.reporting import write_sdk_trace_export, write_trace_summary
+from agenticsciml.selector_evidence import write_selector_evidence_packet
 from agenticsciml.storage import _atomic_write_text
 
 
@@ -195,6 +196,17 @@ def cmd_plan_paper_workflow(args: argparse.Namespace) -> int:
     )
     print(result["paths"]["plan_json"])
     if args.fail_on_blockers and result["bundle"]["status"] == "blocked":
+        return 1
+    return 0
+
+
+def cmd_generate_selector_evidence(args: argparse.Namespace) -> int:
+    result = write_selector_evidence_packet(
+        Path(args.run_dir).resolve(),
+        output_dir=Path(args.output_dir).resolve() if args.output_dir else None,
+    )
+    print(result["paths"]["packet_json"])
+    if args.fail_on_blockers and result["packet"]["status"] == "blocked":
         return 1
     return 0
 
@@ -441,6 +453,12 @@ def build_parser() -> argparse.ArgumentParser:
     paper_workflow.add_argument("--expected-variants", default="")
     paper_workflow.add_argument("--fail-on-blockers", action="store_true")
     paper_workflow.set_defaults(func=cmd_plan_paper_workflow)
+
+    selector_evidence = sub.add_parser("generate-selector-evidence")
+    selector_evidence.add_argument("run_dir")
+    selector_evidence.add_argument("--output-dir")
+    selector_evidence.add_argument("--fail-on-blockers", action="store_true")
+    selector_evidence.set_defaults(func=cmd_generate_selector_evidence)
 
     real_problem = sub.add_parser("plan-real-problem-closure")
     real_problem.add_argument("benchmark_dir")

@@ -47,6 +47,13 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli verif
   --fail-on-issues
 ```
 
+从 completed run 的 runtime selector votes 生成 paper workflow 可引用的 selector evidence packet：
+
+```bash
+PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli generate-selector-evidence \
+  runs/<run_id>
+```
+
 最终验收 60 轮是否全部完成时，增加完整性要求：
 
 ```bash
@@ -75,6 +82,8 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli verif
 - `iteration_campaign.md`
 - `iteration_round_XXX_record.json`
 - `iteration_campaign_verification.json`
+- `selector_evidence_packet.json`
+- `selector_evidence_packet.md`
 
 ## Gate
 
@@ -100,6 +109,12 @@ visual audit、domain approval、ablation evidence 和 paper-like benchmark doss
 
 `plan-iteration-campaign` 只规划轮次和 blocker，不把计划本身计入证据。每一轮仍必须
 落到代码、文档、测试、run artifact 或外部审批材料，才能改变 readiness。
+`generate-selector-evidence` 只读取 completed run 中的 `reports/selector_votes.json` 和
+可选的 `reports/selector_heterogeneity.json`，再生成
+`reports/selector_evidence_packet.json/md`。它要求至少两个非 mock、不同 runtime member
+的 selector votes，并且 provider 或 actual model 异构；重复单一路径投票、mock vote 或
+缺失 selector artifact 都会保持 blocked。该 packet 只证明 selector 证据，不替代 evaluator
+分数，也不会把 `scientific_claim_supported` 改成 true。
 `record-iteration-round` 只允许记录未被 readiness blocker 卡住的 planned 轮次；它会
 写入证据文件 digest、验证命令、验证退出码、验证输出 digest 和轮次 record，并更新 campaign 的
 `completed_rounds` / `remaining_rounds`。该记录仍是工程进度证据，不是科学发现证据。

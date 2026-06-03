@@ -78,6 +78,10 @@
 - `visual_audit_mode=real` 现在会生成 provider 兼容的 PNG 诊断图，并只把
   PNG/JPEG/GIF/WebP 这类真实图像格式传给 image-capable provider；SVG 仍作为本地
   artifact 保留。run metadata 也显式记录 top-level `visual_audit_mode`。
+- 新增 `agenticsciml.selector_evidence` 和 CLI `generate-selector-evidence`，可从
+  completed run 的 `reports/selector_votes.json` 生成
+  `reports/selector_evidence_packet.json/md`。packet 要求至少两个非 mock、不同 runtime
+  member 的异构 provider/model votes；它只补 selector 证据，不替代 evaluator 或科学 claim gate。
 
 已实现：
 
