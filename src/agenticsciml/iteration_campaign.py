@@ -163,6 +163,7 @@ def build_iteration_campaign(
         "paper_workflow_readiness_status": readiness.get("status"),
         "paper_workflow_readiness_checks": readiness.get("checks", []),
         "reference_capability_matrix": readiness.get("reference_capability_matrix", {}),
+        "llm_problem_context_pack": readiness.get("llm_problem_context_pack", {}),
         "readiness_blockers": readiness.get("blockers", []),
         "target_sequence": [dict(target) for target in CAMPAIGN_TARGETS],
         "batches": batches,

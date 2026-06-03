@@ -97,15 +97,15 @@ evaluator、selector 或 champion selection 实现。
   orchestrator 会在执行 `solution.py` 前写入 `policy_fidelity_report.json` 并 fail closed
   于 required 条件失败的候选解。
 - `Layered model routing`：列出 Data Analyst、Evaluator、Root Engineer、
-  Retriever、Proposer、Critic、Engineer、Debugger、Result Analyst 和 Selector。
+  Retriever、Proposer、Critic、Engineer、Debugger、Result Analyst、Visual Audit 和 Selector。
   默认仍使用后端单一 adapter；只有填写 role override 时，后端才按 role 创建模型配置。
   `reasoning_effort` 当前允许 `low | medium | high | xhigh`，并会写入配置、
   metadata 和传给支持该字段的 OpenAI-native Responses / OpenAI-compatible Chat
   Completions provider。未填写 override 时，后端按 role 默认 policy 生效：
   `evaluator=0.00/high`、`root_engineer=0.10/xhigh`、`engineer=0.10/xhigh`、
   `debugger=0.05/xhigh`、`proposer=0.55/xhigh`、`critic=0.35/high`、
-  `data_analyst=0.35/high`、`result_analyst=0.30/high`、`selector=0.05/high`、
-  `retriever=0.00/medium`。`selector_panel` 可配置多个 selector member；UI/报告必须
+  `data_analyst=0.35/high`、`result_analyst=0.30/high`、`visual_audit=0.00/high`、
+  `selector=0.05/high`、`retriever=0.00/medium`。`selector_panel` 可配置多个 selector member；UI/报告必须
   优先读取 `reports/selector_votes.json` 中的 `selector_diversity`，再参考
   `actual_model` / `provider`，判断是否真的具备异构模型证据；mock、同 provider panel
   或 repeated-member votes 不能被描述为论文级 selector ensemble。

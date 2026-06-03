@@ -2116,7 +2116,7 @@ class AgenticSciMLOrchestrator:
                 image_paths,
                 system="You are a conservative scientific visualization auditor.",
                 temperature=0.0,
-                reasoning_effort=self._reasoning_effort_for_role("result_analyst"),
+                reasoning_effort=self._reasoning_effort_for_role("visual_audit"),
             )
         except Exception as exc:
             report["analysis_mode"] = "real_visual_provider_failed"

@@ -115,6 +115,7 @@ adapter 时，role-level `reasoning_effort` 会传给 provider；若兼容 endpo
 | engineer | 0.10 | xhigh | 稳定 patch 生成 |
 | debugger | 0.05 | xhigh | 保守修复失败 |
 | result_analyst | 0.30 | high | 结果解释和边界总结 |
+| visual_audit | 0.00 | high | 保守图像证据审计 |
 | selector | 0.05 | high | 稳定 parent selection |
 
 当前允许 action：

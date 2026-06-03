@@ -249,6 +249,11 @@ DEFAULT_AGENT_ROLE_MODEL_SETTINGS: dict[str, dict[str, Any]] = {
         "reasoning_effort": "high",
         "rationale": "Result summaries need interpretation while preserving evidence boundaries.",
     },
+    "visual_audit": {
+        "temperature": 0.0,
+        "reasoning_effort": "high",
+        "rationale": "Visual audit should be conservative and image-evidence-bound.",
+    },
     "selector": {
         "temperature": 0.05,
         "reasoning_effort": "high",

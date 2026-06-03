@@ -35,6 +35,8 @@ def test_iteration_campaign_builds_sixty_rounds_in_batches() -> None:
     assert campaign["rounds"][10]["target_id"] == "real_provider_budget"
     assert campaign["rounds"][0]["status"] == "blocked_by_readiness"
     assert campaign["rounds"][5]["status"] == "planned"
+    assert campaign["llm_problem_context_pack"]["llm_execution_required"] is True
+    assert campaign["llm_problem_context_pack"]["scientific_claim_supported"] is False
     assert campaign["claim_boundary"]
 
 

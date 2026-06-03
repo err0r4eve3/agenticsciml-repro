@@ -1,6 +1,6 @@
 # Paper Workflow Readiness
 
-[返回文档树](index.md) · 相关文档：[Scientific Discovery Evidence Digest](scientific_discovery_evidence.md)、[Real LLM 运行](real_run.md)、[Ablation 说明](ablation.md)
+[返回文档树](index.md) · 相关文档：[Scientific Discovery Evidence Digest](scientific_discovery_evidence.md)、[LLM Problem Context Pack](llm_problem_context_pack.md)、[Real LLM 运行](real_run.md)、[Ablation 说明](ablation.md)
 
 `plan-paper-workflow` 用于把真实科学证据链的剩余缺口变成一个可审计执行包。它不调用模型、
 不读取密钥值、不升级任何 claim；只检查当前环境和本地证据是否已经满足进入
@@ -72,6 +72,16 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli build
   --output-dir runs/reference-capability-matrix
 ```
 
+生成或随 plan 输出未来 real LLM agent 可消费的 problem context pack：
+
+```bash
+PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli build-llm-problem-context \
+  --problem-intake-json planning/problem_intake.json \
+  --resource-constraints-json '{"cpu":"local","gpu":false,"timeout_s":120,"dependency_limits":["numpy"],"data_limits":"faithful-small"}' \
+  --expert-blueprint-id fluid_pde \
+  --output-dir runs/llm-problem-context
+```
+
 最终验收 60 轮是否全部完成时，增加完整性要求：
 
 ```bash
@@ -107,6 +117,8 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli verif
 - `selector_evidence_packet.md`
 - `reference_capability_matrix.json`
 - `reference_capability_matrix.md`
+- `llm_problem_context_pack.json`
+- `llm_problem_context_pack.md`
 
 ## Gate
 
@@ -144,6 +156,10 @@ visual audit、domain approval、ablation evidence 和 paper-like benchmark doss
 这些命令也可通过 `--problem-intake-json` 生成并嵌入 `reference_capability_matrix`。
 matrix 只报告参考文献机制覆盖度和 intake 结构完整性；即使 rubric ready，
 `scientific_claim_supported` 也保持 false。
+这些命令还会生成并嵌入 `llm_problem_context_pack`。该 pack 把完整 intake、专家蓝图、
+资源边界和 reference matrix 转成 `data_analyst`、`root_engineer`、`proposer`、`critic`、
+`engineer`、`debugger`、`selector`、`result_analyst` 和 `visual_audit` 的角色任务包。
+它用于提升未来真实 LLM 执行质量，不代表离线测试已经替代 LLM 或解决真实问题。
 `record-iteration-round` 只允许记录未被 readiness blocker 卡住的 planned 轮次；它会
 写入证据文件 digest、验证命令、验证退出码、验证输出 digest 和轮次 record，并更新 campaign 的
 `completed_rounds` / `remaining_rounds`。该记录仍是工程进度证据，不是科学发现证据。

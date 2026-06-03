@@ -1,6 +1,6 @@
 # Reference Capability Matrix
 
-[返回文档树](index.md) · 相关文档：[Scientific Discovery Evidence Digest](scientific_discovery_evidence.md)、[Paper Workflow Readiness](paper_workflow_readiness.md)、[Real Problem Evidence Closure](real_problem_evidence_closure.md)
+[返回文档树](index.md) · 相关文档：[Scientific Discovery Evidence Digest](scientific_discovery_evidence.md)、[LLM Problem Context Pack](llm_problem_context_pack.md)、[Paper Workflow Readiness](paper_workflow_readiness.md)、[Real Problem Evidence Closure](real_problem_evidence_closure.md)
 
 `build-reference-capability-matrix` 是离线证据规划工具。它把 NotebookLM digest 和本地文档中
 可工程化的参考机制转成固定 matrix，并检查 problem intake 是否包含真实问题讨论所需的
@@ -19,6 +19,10 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli build
 
 - `reference_capability_matrix.json`
 - `reference_capability_matrix.md`
+
+需要把 matrix 进一步转成真实 LLM agent 可消费的角色任务包时，使用
+[`build-llm-problem-context`](llm_problem_context_pack.md)。该命令仍不调用模型，只整理
+role task、输入 schema、输出 schema、禁区和 stop condition。
 
 ## Problem Intake Rubric
 

@@ -1,6 +1,6 @@
 # Real Problem Evidence Closure
 
-[返回文档树](index.md) · 相关文档：[Paper Workflow Readiness](paper_workflow_readiness.md)、[Scientific Discovery Evidence Digest](scientific_discovery_evidence.md)
+[返回文档树](index.md) · 相关文档：[Paper Workflow Readiness](paper_workflow_readiness.md)、[LLM Problem Context Pack](llm_problem_context_pack.md)、[Scientific Discovery Evidence Digest](scientific_discovery_evidence.md)
 
 `plan-real-problem-closure` 用于回答一个更高层的问题：当前项目是否已经能依靠多智能体解决真实科学或现实问题。该命令不会调用模型、不会读取密钥值、不会把 readiness artifact 写成结果；它只把真实问题声明所需的证据模块列成 fail-closed closure plan。
 
@@ -36,6 +36,8 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli plan-
 - `paper_workflow_commands.md`
 - `reference_capability_matrix.json`
 - `reference_capability_matrix.md`
+- `llm_problem_context_pack.json`
+- `llm_problem_context_pack.md`
 
 ## Closure Modules
 
@@ -50,6 +52,8 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli plan-
 - `multi_seed_ablation`：多 seed 和 non-baseline ablation 的 verified manifest。
 - `resource_blueprint`：专家蓝图和 CPU/GPU/timeout/dependency/data limits。
 - `reference_capability_matrix`：参考文献机制到本地 artifact、intake rubric 和未来真实运行需求的离线映射。
+- `llm_problem_context_pack`：把 problem intake、资源边界、reference matrix 和 role-level
+  `reasoning_effort` 整理成未来真实 LLM agent 的任务上下文。
 - `completed_run_audit`：`reports/scientific_discovery_readiness.json`、`trace_summary.json`、`run_metadata.json` 和 claim gate 共同证明 completed run。
 
 ## 边界
@@ -58,5 +62,7 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli plan-
 
 `reference_capability_matrix` 可以让本地系统在没有大模型 key 时继续整理问题结构和参考机制覆盖度，
 但它仍只是离线 planning/rubric artifact，不能替代真实 provider run、真实实验或专家审批。
+`llm_problem_context_pack` 的定位相同：它提升未来 LLM 执行输入质量，而不是把无 LLM 测试包装成
+已经依靠多智能体解决真实问题。
 
 能本地补齐的是计划、模板、门禁、artifact schema 和 verifier；不能本地伪造的是真实 provider 运行、真实数据等价性、领域专家审批和真实实验闭环。

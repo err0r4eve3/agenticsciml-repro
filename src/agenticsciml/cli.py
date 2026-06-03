@@ -24,6 +24,7 @@ from agenticsciml.iteration_campaign import (
     write_iteration_campaign,
     write_iteration_campaign_verification,
 )
+from agenticsciml.llm_problem_context import write_llm_problem_context_pack
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.llm_smoke import DEFAULT_SMOKE_VARIANTS, run_llm_smoke, verify_llm_smoke_output
@@ -228,6 +229,21 @@ def cmd_build_reference_capability_matrix(args: argparse.Namespace) -> int:
     )
     print(result["paths"]["matrix_json"])
     if args.fail_on_blockers and result["matrix"]["status"] == "blocked":
+        return 1
+    return 0
+
+
+def cmd_build_llm_problem_context(args: argparse.Namespace) -> int:
+    result = write_llm_problem_context_pack(
+        output_dir=Path(args.output_dir).resolve(),
+        problem_intake=_json_object_file_arg(args.problem_intake_json, "--problem-intake-json")
+        if args.problem_intake_json
+        else {},
+        expert_blueprint_id=args.expert_blueprint_id,
+        resource_constraints=_json_object_arg(args.resource_constraints_json, "--resource-constraints-json"),
+    )
+    print(result["paths"]["pack_json"])
+    if args.fail_on_blockers and result["pack"]["status"] == "blocked":
         return 1
     return 0
 
@@ -501,6 +517,18 @@ def build_parser() -> argparse.ArgumentParser:
     reference_matrix.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
     reference_matrix.add_argument("--fail-on-blockers", action="store_true")
     reference_matrix.set_defaults(func=cmd_build_reference_capability_matrix)
+
+    llm_context = sub.add_parser("build-llm-problem-context")
+    llm_context.add_argument("--output-dir", default="runs/llm-problem-context")
+    llm_context.add_argument("--problem-intake-json")
+    llm_context.add_argument(
+        "--resource-constraints-json",
+        default="{}",
+        help="JSON object with cpu, gpu, timeout_s, dependency_limits, and data_limits",
+    )
+    llm_context.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
+    llm_context.add_argument("--fail-on-blockers", action="store_true")
+    llm_context.set_defaults(func=cmd_build_llm_problem_context)
 
     real_problem = sub.add_parser("plan-real-problem-closure")
     real_problem.add_argument("benchmark_dir")

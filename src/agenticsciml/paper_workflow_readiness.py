@@ -8,6 +8,10 @@ from typing import Any
 from agenticsciml.ablation_evidence import build_multi_seed_ablation_verified_manifest
 from agenticsciml.benchmarks import ProblemBundle
 from agenticsciml.evidence import SCIENTIFIC_CLAIM_NOT_SUPPORTED
+from agenticsciml.llm_problem_context import (
+    build_llm_problem_context_pack,
+    render_llm_problem_context_pack_markdown,
+)
 from agenticsciml.llm.capabilities import capabilities_for_openai_compatible
 from agenticsciml.reference_capability_matrix import (
     build_reference_capability_matrix,
@@ -63,6 +67,12 @@ def build_paper_workflow_readiness_bundle(
     reference_matrix = build_reference_capability_matrix(
         problem_intake=problem_intake or {},
         expert_blueprint_id=expert_blueprint_id,
+    )
+    llm_context_pack = build_llm_problem_context_pack(
+        problem_intake=problem_intake or {},
+        expert_blueprint_id=expert_blueprint_id,
+        resource_constraints=resource_constraints or {},
+        reference_capability_matrix=reference_matrix,
     )
 
     checks = [
@@ -156,6 +166,7 @@ def build_paper_workflow_readiness_bundle(
         "kb_manifest": kb_manifest,
         "resource_readiness": resource_gate,
         "reference_capability_matrix": reference_matrix,
+        "llm_problem_context_pack": llm_context_pack,
         "checks": checks,
         "blockers": [
             {
@@ -209,11 +220,16 @@ def write_paper_workflow_readiness_bundle(
     commands_md = output_dir / "paper_workflow_commands.md"
     reference_matrix_json = output_dir / "reference_capability_matrix.json"
     reference_matrix_md = output_dir / "reference_capability_matrix.md"
+    llm_context_json = output_dir / "llm_problem_context_pack.json"
+    llm_context_md = output_dir / "llm_problem_context_pack.md"
     _atomic_write_text(plan_json, json.dumps(bundle, indent=2, sort_keys=True, allow_nan=False))
     _atomic_write_text(plan_md, render_paper_workflow_readiness_markdown(bundle))
     reference_matrix = bundle["reference_capability_matrix"]
+    llm_context_pack = bundle["llm_problem_context_pack"]
     _atomic_write_text(reference_matrix_json, json.dumps(reference_matrix, indent=2, sort_keys=True, allow_nan=False))
     _atomic_write_text(reference_matrix_md, render_reference_capability_matrix_markdown(reference_matrix))
+    _atomic_write_text(llm_context_json, json.dumps(llm_context_pack, indent=2, sort_keys=True, allow_nan=False))
+    _atomic_write_text(llm_context_md, render_llm_problem_context_pack_markdown(llm_context_pack))
     _atomic_write_text(
         domain_template,
         json.dumps(domain_approval_template(), indent=2, sort_keys=True, allow_nan=False),
@@ -233,6 +249,8 @@ def write_paper_workflow_readiness_bundle(
             "commands_md": str(commands_md),
             "reference_capability_matrix_json": str(reference_matrix_json),
             "reference_capability_matrix_md": str(reference_matrix_md),
+            "llm_problem_context_pack_json": str(llm_context_json),
+            "llm_problem_context_pack_md": str(llm_context_md),
         },
     }
 
@@ -290,6 +308,7 @@ def render_paper_workflow_readiness_markdown(bundle: dict[str, Any]) -> str:
         f"- status: {bundle.get('status')}",
         f"- ready_to_execute_real_run: {bundle.get('ready_to_execute_real_run')}",
         f"- scientific_claim_supported: {bundle.get('scientific_claim_supported')}",
+        f"- llm_problem_context_status: {bundle.get('llm_problem_context_pack', {}).get('status')}",
         "",
         "## Checks",
         "",

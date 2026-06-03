@@ -167,6 +167,7 @@ def build_real_problem_closure_plan(
         "paper_workflow_readiness_status": paper_bundle.get("status"),
         "paper_workflow_blockers": paper_bundle.get("blockers", []),
         "reference_capability_matrix": paper_bundle.get("reference_capability_matrix", {}),
+        "llm_problem_context_pack": paper_bundle.get("llm_problem_context_pack", {}),
         "modules": modules,
         "blocked_modules": blocked_modules,
         "local_engineering_completed": [
@@ -237,6 +238,8 @@ def write_real_problem_closure_plan(
             "plan_md": str(plan_md),
             "paper_workflow_readiness_json": paper_result["paths"]["plan_json"],
             "paper_workflow_readiness_md": paper_result["paths"]["plan_md"],
+            "llm_problem_context_pack_json": paper_result["paths"]["llm_problem_context_pack_json"],
+            "llm_problem_context_pack_md": paper_result["paths"]["llm_problem_context_pack_md"],
         },
     }
 
@@ -251,6 +254,7 @@ def render_real_problem_closure_markdown(plan: dict[str, Any]) -> str:
         "- ready_to_rely_on_multi_agent_problem_solving: "
         f"{plan.get('ready_to_rely_on_multi_agent_problem_solving')}",
         f"- paper_workflow_readiness_status: {plan.get('paper_workflow_readiness_status')}",
+        f"- llm_problem_context_status: {plan.get('llm_problem_context_pack', {}).get('status')}",
         "",
         "## Modules",
         "",

@@ -93,6 +93,19 @@
 - `plan-paper-workflow`、`plan-real-problem-closure` 和 `plan-iteration-campaign` 支持
   `--problem-intake-json`，并在输出中嵌入 `reference_capability_matrix`。该 matrix 只报告
   参考机制覆盖度，仍固定 `scientific_claim_supported=false`。
+- 新增 `agenticsciml.llm_problem_context` 和 CLI `build-llm-problem-context`，在不调用 real LLM
+  的测试条件下，把完整 problem intake、`expert_blueprint_id`、CPU/GPU/timeout/dependency/data
+  limits 和 reference matrix 整理成未来真实 LLM agent 可直接消费的 `llm_problem_context_pack.json/md`。
+- `llm_problem_context_pack` 为 `data_analyst`、`root_engineer`、`proposer`、`critic`、
+  `engineer`、`debugger`、`selector`、`result_analyst` 和 `visual_audit` 固定输入、输出 schema、
+  禁止动作、stop condition、证据 artifact 与默认 role-level `reasoning_effort`；Python orchestrator
+  仍拥有 evaluation scoring、champion selection、selector eligibility、sandbox、trace、artifact writes
+  和 claim gate。
+- `visual_audit` 现在纳入默认 role model policy 和 Web/CLI role override 范围；真实图像审计会读取
+  `visual_audit` 的 `reasoning_effort`，不再借用 `result_analyst`。
+- `plan-paper-workflow`、`plan-real-problem-closure` 和 `plan-iteration-campaign` 现在会嵌入同一份
+  `llm_problem_context_pack`。缺 problem intake 字段、专家蓝图或资源限制时 pack 保持 blocked；
+  该 pack 只提升未来 real LLM 输入质量，不替代 LLM 执行，也不支持科学 claim。
 
 已实现：
 
@@ -116,7 +129,9 @@
 
 验证：
 
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_llm_problem_context.py tests/test_reference_capability_matrix.py tests/test_paper_workflow_readiness.py tests/test_real_problem_closure.py tests/test_iteration_campaign.py tests/test_web_api.py tests/test_orchestrator_cli.py::test_real_visual_audit_records_actual_image_input_with_capable_provider -q`：90 passed。
 - `PYTHONPATH=src uv run --python 3.11 --extra dev python -m compileall -q src/agenticsciml`：通过。
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest -q`：468 passed。
 - `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_evidence.py tests/test_openai_adapter.py::test_openai_adapter_sends_image_inputs_to_native_responses tests/test_orchestrator_cli.py::test_real_visual_audit_records_actual_image_input_with_capable_provider tests/test_orchestrator_cli.py::test_run_writes_domain_selector_paper_and_multiseed_readiness_artifacts -q`：12 passed。
 
 边界：
@@ -684,6 +699,8 @@ approval pause、以及非库内问题不能被错误当作已有 benchmark 运�
   `selector=0.05/high`、`retriever=0.00/medium`。
 - 创造/分析类 role 使用更高温度：`proposer=0.55/xhigh`、
   `critic=0.35/high`、`data_analyst=0.35/high`、`result_analyst=0.30/high`。
+- 视觉证据审计 role 使用保守设置：`visual_audit=0.00/high`；真实图像审计调用会读取
+  `visual_audit` role override，而不是借用 `result_analyst`。
 - Orchestrator 在没有用户 override 时直接使用这些 defaults；用户传入 role override
   时仍优先生效。
 - `GET /api/agent-roles` 和 `GET /api/solver/settings` 会返回 role default policy，

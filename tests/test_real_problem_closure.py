@@ -53,6 +53,10 @@ def test_real_problem_closure_includes_reference_capability_matrix() -> None:
     matrix = plan["reference_capability_matrix"]
     assert matrix["problem_intake_rubric"]["passed"] is True
     assert matrix["scientific_claim_supported"] is False
+    context_pack = plan["llm_problem_context_pack"]
+    assert context_pack["status"] == "blocked"
+    assert context_pack["llm_execution_required"] is True
+    assert context_pack["scientific_claim_supported"] is False
     assert plan["multi_agent_real_problem_claim_supported"] is False
 
 

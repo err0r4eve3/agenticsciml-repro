@@ -66,6 +66,7 @@ PLANNED_AGENT_CALLS = (
     "engineer",
     "debugger",
     "result_analyst",
+    "visual_audit",
 )
 
 def _agent_role(role: str, label: str, kind: str) -> dict[str, object]:
@@ -87,6 +88,7 @@ AGENT_ROLES: tuple[dict[str, object], ...] = (
     _agent_role("engineer", "Engineer", "patch"),
     _agent_role("debugger", "Debugger", "repair"),
     _agent_role("result_analyst", "Result Analyst", "analysis"),
+    _agent_role("visual_audit", "Visual Audit", "review"),
     _agent_role("selector", "Selector", "selection"),
 )
 

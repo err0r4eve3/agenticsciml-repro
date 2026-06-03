@@ -190,6 +190,7 @@ class VisionAuditLLM(MockLLMClient):
             "schema_name": schema_name,
             "adapter_type": self.adapter_type,
             "provider_capabilities": self.provider_capabilities.to_dict(),
+            "reasoning_effort": reasoning_effort,
             "image_input_count": len(image_paths),
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
         }
@@ -436,6 +437,13 @@ def test_real_visual_audit_records_actual_image_input_with_capable_provider(tmp_
         output_dir=tmp_path,
         evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
         use_mock=False,
+        agents={
+            "visual_audit": AgentConfig(
+                role="visual_audit",
+                model="fake-vision-real",
+                reasoning_effort="xhigh",
+            )
+        },
         visual_audit_mode="real",
         resource_constraints={"cpu": "local", "timeout_s": 60},
         expert_blueprint_id="piml",
@@ -457,6 +465,8 @@ def test_real_visual_audit_records_actual_image_input_with_capable_provider(tmp_
     ]
 
     assert llm.image_calls
+    assert llm.last_call_metadata is not None
+    assert llm.last_call_metadata["reasoning_effort"] == "xhigh"
     assert all(path.suffix == ".png" for path in llm.image_calls[0])
     assert visual_report["actual_image_inputs_used"] is True
     assert visual_report["analysis_mode"] == "real_visual_provider_image_input"

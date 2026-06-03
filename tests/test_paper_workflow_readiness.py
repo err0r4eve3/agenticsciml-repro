@@ -119,7 +119,13 @@ def test_paper_workflow_readiness_reports_reference_capability_matrix(tmp_path: 
         benchmark_dir=Path("examples/cylinder_wake_reconstruction_faithful_small").resolve(),
         selector_panel=[],
         problem_intake=problem_intake,
-        resource_constraints={},
+        resource_constraints={
+            "cpu": "local",
+            "gpu": False,
+            "timeout_s": 120,
+            "dependency_limits": ["numpy"],
+            "data_limits": "faithful-small fixture",
+        },
         expert_blueprint_id="fluid_pde",
         env={},
     )
@@ -128,6 +134,13 @@ def test_paper_workflow_readiness_reports_reference_capability_matrix(tmp_path: 
     assert matrix["status"] == "ready_for_offline_planning"
     assert matrix["problem_intake_rubric"]["passed"] is True
     assert matrix["scientific_claim_supported"] is False
+    context_pack = bundle["llm_problem_context_pack"]
+    assert context_pack["status"] == "ready_for_llm_context"
+    assert context_pack["llm_execution_required"] is True
+    assert context_pack["scientific_claim_supported"] is False
+    role_ids = {item["role_id"] for item in context_pack["role_task_plan"]}
+    assert "root_engineer" in role_ids
+    assert "visual_audit" in role_ids
     assert bundle["scientific_claim_supported"] is False
 
 
@@ -149,6 +162,8 @@ def test_write_paper_workflow_readiness_bundle_outputs_templates(tmp_path: Path)
     assert plan["status"] == "blocked"
     assert Path(result["paths"]["plan_md"]).exists()
     assert Path(result["paths"]["commands_md"]).exists()
+    assert Path(result["paths"]["llm_problem_context_pack_json"]).exists()
+    assert Path(result["paths"]["llm_problem_context_pack_md"]).exists()
     assert domain_template["checklist"] == {check_id: False for check_id in DOMAIN_CHECKLIST_IDS}
     assert benchmark_template["benchmark_name"] == "function_approx"
     assert benchmark_template["data_provenance"]["private_label_protocol"]

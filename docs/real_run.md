@@ -89,6 +89,7 @@ voting is actually exercised:
   "engineer": {"model": "gpt-5.5", "reasoning_effort": "xhigh"},
   "debugger": {"model": "gpt-5.5", "reasoning_effort": "xhigh"},
   "result_analyst": {"model": "gpt-5.4-mini", "reasoning_effort": "high"},
+  "visual_audit": {"model": "gpt-5.4-mini", "reasoning_effort": "high"},
   "selector": {"model": "gpt-5.4-mini", "reasoning_effort": "high"}
 }
 ```
