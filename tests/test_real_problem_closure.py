@@ -35,6 +35,27 @@ def test_real_problem_closure_blocks_missing_real_assets() -> None:
     assert "scientific_claim_supported=true" not in json.dumps(plan)
 
 
+def test_real_problem_closure_includes_reference_capability_matrix() -> None:
+    plan = build_real_problem_closure_plan(
+        benchmark_dir=Path("examples/cylinder_wake_reconstruction_faithful_small").resolve(),
+        problem_intake={
+            "hypothesis": "Lagged sparse sensors preserve coherent wake modes.",
+            "observable": ["sensor_history", "vorticity_field"],
+            "metric": "relative_l2",
+            "failure_modes": ["phase drift", "boundary artifacts"],
+            "physical_constraints": ["boundary consistency", "residual proxy stability"],
+            "domain_review_checklist": ["failure samples reviewed", "claim boundary reviewed"],
+        },
+        expert_blueprint_id="fluid_pde",
+        env={},
+    )
+
+    matrix = plan["reference_capability_matrix"]
+    assert matrix["problem_intake_rubric"]["passed"] is True
+    assert matrix["scientific_claim_supported"] is False
+    assert plan["multi_agent_real_problem_claim_supported"] is False
+
+
 def test_write_real_problem_closure_plan_outputs_json_and_markdown(tmp_path: Path) -> None:
     result = write_real_problem_closure_plan(
         benchmark_dir=Path("examples/function_approx").resolve(),

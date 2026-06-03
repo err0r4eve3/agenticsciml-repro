@@ -30,6 +30,7 @@ from agenticsciml.llm_smoke import DEFAULT_SMOKE_VARIANTS, run_llm_smoke, verify
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 from agenticsciml.paper_workflow_readiness import write_paper_workflow_readiness_bundle
 from agenticsciml.real_problem_closure import write_real_problem_closure_plan
+from agenticsciml.reference_capability_matrix import write_reference_capability_matrix
 from agenticsciml.reporting import write_sdk_trace_export, write_trace_summary
 from agenticsciml.selector_evidence import write_selector_evidence_packet
 from agenticsciml.storage import _atomic_write_text
@@ -185,6 +186,9 @@ def cmd_plan_paper_workflow(args: argparse.Namespace) -> int:
         selector_evidence_path=Path(args.selector_evidence_json).resolve()
         if args.selector_evidence_json
         else None,
+        problem_intake=_json_object_file_arg(args.problem_intake_json, "--problem-intake-json")
+        if args.problem_intake_json
+        else {},
         resource_constraints=_json_object_arg(args.resource_constraints_json, "--resource-constraints-json"),
         expert_blueprint_id=args.expert_blueprint_id,
         domain_approval_path=Path(args.domain_approval_json).resolve()
@@ -214,6 +218,20 @@ def cmd_generate_selector_evidence(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_build_reference_capability_matrix(args: argparse.Namespace) -> int:
+    result = write_reference_capability_matrix(
+        output_dir=Path(args.output_dir).resolve(),
+        problem_intake=_json_object_file_arg(args.problem_intake_json, "--problem-intake-json")
+        if args.problem_intake_json
+        else {},
+        expert_blueprint_id=args.expert_blueprint_id,
+    )
+    print(result["paths"]["matrix_json"])
+    if args.fail_on_blockers and result["matrix"]["status"] == "blocked":
+        return 1
+    return 0
+
+
 def cmd_plan_real_problem_closure(args: argparse.Namespace) -> int:
     selector_panel = _json_array_arg(args.selector_panel_json, "--selector-panel-json")
     result = write_real_problem_closure_plan(
@@ -223,6 +241,9 @@ def cmd_plan_real_problem_closure(args: argparse.Namespace) -> int:
         selector_evidence_path=Path(args.selector_evidence_json).resolve()
         if args.selector_evidence_json
         else None,
+        problem_intake=_json_object_file_arg(args.problem_intake_json, "--problem-intake-json")
+        if args.problem_intake_json
+        else {},
         resource_constraints=_json_object_arg(args.resource_constraints_json, "--resource-constraints-json"),
         expert_blueprint_id=args.expert_blueprint_id,
         domain_approval_path=Path(args.domain_approval_json).resolve()
@@ -252,6 +273,9 @@ def cmd_plan_iteration_campaign(args: argparse.Namespace) -> int:
         selector_evidence_path=Path(args.selector_evidence_json).resolve()
         if args.selector_evidence_json
         else None,
+        problem_intake=_json_object_file_arg(args.problem_intake_json, "--problem-intake-json")
+        if args.problem_intake_json
+        else {},
         resource_constraints=_json_object_arg(args.resource_constraints_json, "--resource-constraints-json"),
         expert_blueprint_id=args.expert_blueprint_id,
         domain_approval_path=Path(args.domain_approval_json).resolve()
@@ -457,6 +481,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     paper_workflow.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
     paper_workflow.add_argument("--selector-evidence-json")
+    paper_workflow.add_argument("--problem-intake-json")
     paper_workflow.add_argument("--domain-approval-json")
     paper_workflow.add_argument("--ablation-output-dir")
     paper_workflow.add_argument("--expected-seeds", nargs="+", type=int, default=[])
@@ -469,6 +494,13 @@ def build_parser() -> argparse.ArgumentParser:
     selector_evidence.add_argument("--output-dir")
     selector_evidence.add_argument("--fail-on-blockers", action="store_true")
     selector_evidence.set_defaults(func=cmd_generate_selector_evidence)
+
+    reference_matrix = sub.add_parser("build-reference-capability-matrix")
+    reference_matrix.add_argument("--output-dir", default="runs/reference-capability-matrix")
+    reference_matrix.add_argument("--problem-intake-json")
+    reference_matrix.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
+    reference_matrix.add_argument("--fail-on-blockers", action="store_true")
+    reference_matrix.set_defaults(func=cmd_build_reference_capability_matrix)
 
     real_problem = sub.add_parser("plan-real-problem-closure")
     real_problem.add_argument("benchmark_dir")
@@ -485,6 +517,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     real_problem.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
     real_problem.add_argument("--selector-evidence-json")
+    real_problem.add_argument("--problem-intake-json")
     real_problem.add_argument("--domain-approval-json")
     real_problem.add_argument("--ablation-output-dir")
     real_problem.add_argument("--expected-seeds", nargs="+", type=int, default=[])
@@ -509,6 +542,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     campaign.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
     campaign.add_argument("--selector-evidence-json")
+    campaign.add_argument("--problem-intake-json")
     campaign.add_argument("--domain-approval-json")
     campaign.add_argument("--ablation-output-dir")
     campaign.add_argument("--expected-seeds", nargs="+", type=int, default=[])
@@ -633,6 +667,19 @@ def _json_object_arg(value: str, label: str) -> dict[str, object]:
         raise ValueError(f"{label} must be a JSON object: {exc}") from exc
     if not isinstance(payload, dict):
         raise ValueError(f"{label} must be a JSON object")
+    return payload
+
+
+def _json_object_file_arg(value: str, label: str) -> dict[str, object]:
+    path = Path(value)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise ValueError(f"{label} file does not exist: {path}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{label} must contain a JSON object: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} must contain a JSON object")
     return payload
 
 

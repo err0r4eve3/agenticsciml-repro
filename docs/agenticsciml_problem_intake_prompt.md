@@ -3,6 +3,16 @@
 问题目标：
 【在这里详细描述我要解决的问题，包括 PDE/函数逼近/operator learning/传感器重建/数据形式/边界条件/期望输出】
 
+请尽量显式给出以下字段，便于离线 reference capability matrix 和 readiness gate 审计：
+
+- hypothesis：要验证的科学或工程假设。
+- observable / observables：可观测量、输入输出、传感器、场变量或实验测量。
+- metric：主评价指标。
+- failure_modes：可能失败方式、负样本和需要复核的失败归因。
+- physical_constraints：边界条件、残差、守恒量、平滑性、结构先验或数值稳定约束。
+- domain_review_checklist：领域审查 checklist。
+- data_source：数据来源、公开性、许可、私有标签边界和数据规模。
+
 请按以下规则执行：
 
 1. 先判断该问题是否能映射到现有 benchmark catalog。

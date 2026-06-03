@@ -85,6 +85,14 @@
 - `plan-paper-workflow`、`plan-real-problem-closure` 和 `plan-iteration-campaign` 支持
   `--selector-evidence-json`，可以把已生成的 selector evidence packet 纳入 readiness；
   ready packet 只解除 `heterogeneous_real_selector` blocker，不会绕过其他 paper workflow gate。
+- 新增 `agenticsciml.reference_capability_matrix` 和 CLI `build-reference-capability-matrix`，
+  把 AgenticSciML / ATHENA / GRAFT-ATHENA / AI Fluid Scientist / agent-systems scaling /
+  材料发现资料中的可离线机制映射到本地 artifact、fail-closed blocker、no-key path 和未来
+  real-run requirement；同时检查 problem intake 是否包含 hypothesis、observable、metric、
+  failure modes、physical constraints 和 domain review checklist。
+- `plan-paper-workflow`、`plan-real-problem-closure` 和 `plan-iteration-campaign` 支持
+  `--problem-intake-json`，并在输出中嵌入 `reference_capability_matrix`。该 matrix 只报告
+  参考机制覆盖度，仍固定 `scientific_claim_supported=false`。
 
 已实现：
 

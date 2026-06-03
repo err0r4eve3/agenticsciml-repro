@@ -63,6 +63,15 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli plan-
   --output-dir runs/paper-workflow-readiness
 ```
 
+生成或随 plan 输出 reference capability matrix：
+
+```bash
+PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli build-reference-capability-matrix \
+  --problem-intake-json planning/problem_intake.json \
+  --expert-blueprint-id fluid_pde \
+  --output-dir runs/reference-capability-matrix
+```
+
 最终验收 60 轮是否全部完成时，增加完整性要求：
 
 ```bash
@@ -76,6 +85,8 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli verif
 
 - `--domain-approval-json <path>`：领域审核 packet。
 - `--selector-evidence-json <path>`：已生成的 runtime selector evidence packet。
+- `--problem-intake-json <path>`：包含 hypothesis、observable、metric、failure modes、
+  physical constraints 和 domain review checklist 的真实问题 intake。
 - `--ablation-output-dir <path>`：已有 ablation 输出目录。
 - `--expected-seeds 0 1 2`：期望 seed 覆盖。
 - `--expected-variants root_only,kb,random_kb`：期望 variant 覆盖。
@@ -94,6 +105,8 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli verif
 - `iteration_campaign_verification.json`
 - `selector_evidence_packet.json`
 - `selector_evidence_packet.md`
+- `reference_capability_matrix.json`
+- `reference_capability_matrix.md`
 
 ## Gate
 
@@ -128,6 +141,9 @@ visual audit、domain approval、ablation evidence 和 paper-like benchmark doss
 `plan-paper-workflow`、`plan-real-problem-closure` 和 `plan-iteration-campaign` 可通过
 `--selector-evidence-json` 引用该 packet；ready packet 只解除 `heterogeneous_real_selector`
 这一项，不会绕过 real LLM、多模态、paper-like benchmark、domain review 或 ablation gate。
+这些命令也可通过 `--problem-intake-json` 生成并嵌入 `reference_capability_matrix`。
+matrix 只报告参考文献机制覆盖度和 intake 结构完整性；即使 rubric ready，
+`scientific_claim_supported` 也保持 false。
 `record-iteration-round` 只允许记录未被 readiness blocker 卡住的 planned 轮次；它会
 写入证据文件 digest、验证命令、验证退出码、验证输出 digest 和轮次 record，并更新 campaign 的
 `completed_rounds` / `remaining_rounds`。该记录仍是工程进度证据，不是科学发现证据。

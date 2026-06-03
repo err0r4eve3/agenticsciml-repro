@@ -12,6 +12,7 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli plan-
   --output-dir runs/real-problem-closure \
   --selector-panel-json '[{"model":"gpt-5-mini"},{"model":"deepseek-v4-pro","base_url":"https://api.deepseek.com"}]' \
   --resource-constraints-json '{"cpu":"local","gpu":false,"timeout_s":120,"dependency_limits":["numpy"],"data_limits":"faithful-small"}' \
+  --problem-intake-json planning/problem_intake.json \
   --expert-blueprint-id fluid_pde
 ```
 
@@ -33,6 +34,8 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli plan-
 - `domain_approval_template.json`
 - `paper_benchmark_manifest_template.json`
 - `paper_workflow_commands.md`
+- `reference_capability_matrix.json`
+- `reference_capability_matrix.md`
 
 ## Closure Modules
 
@@ -46,10 +49,14 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli plan-
 - `domain_approval`：领域 reviewer、review notes、checklist 和失败样本复核。
 - `multi_seed_ablation`：多 seed 和 non-baseline ablation 的 verified manifest。
 - `resource_blueprint`：专家蓝图和 CPU/GPU/timeout/dependency/data limits。
+- `reference_capability_matrix`：参考文献机制到本地 artifact、intake rubric 和未来真实运行需求的离线映射。
 - `completed_run_audit`：`reports/scientific_discovery_readiness.json`、`trace_summary.json`、`run_metadata.json` 和 claim gate 共同证明 completed run。
 
 ## 边界
 
 当前 closure plan 是“真实问题 claim gate”，不是科学结果。即使某些配置项已经填写，只要缺 real LLM、真实多模态输入、异构 real selector、paper-like benchmark、领域审批、多 seed/ablation 或 completed run audit，`multi_agent_real_problem_claim_supported` 必须保持 `false`。
+
+`reference_capability_matrix` 可以让本地系统在没有大模型 key 时继续整理问题结构和参考机制覆盖度，
+但它仍只是离线 planning/rubric artifact，不能替代真实 provider run、真实实验或专家审批。
 
 能本地补齐的是计划、模板、门禁、artifact schema 和 verifier；不能本地伪造的是真实 provider 运行、真实数据等价性、领域专家审批和真实实验闭环。

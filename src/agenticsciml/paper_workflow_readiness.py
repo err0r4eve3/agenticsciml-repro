@@ -9,6 +9,10 @@ from agenticsciml.ablation_evidence import build_multi_seed_ablation_verified_ma
 from agenticsciml.benchmarks import ProblemBundle
 from agenticsciml.evidence import SCIENTIFIC_CLAIM_NOT_SUPPORTED
 from agenticsciml.llm.capabilities import capabilities_for_openai_compatible
+from agenticsciml.reference_capability_matrix import (
+    build_reference_capability_matrix,
+    render_reference_capability_matrix_markdown,
+)
 from agenticsciml.retrieval.kb_store import kb_manifest_for_dir
 from agenticsciml.storage import _atomic_write_text
 
@@ -29,6 +33,7 @@ def build_paper_workflow_readiness_bundle(
     benchmark_dir: Path,
     selector_panel: list[dict[str, object]] | None = None,
     selector_evidence_path: Path | None = None,
+    problem_intake: dict[str, Any] | None = None,
     resource_constraints: dict[str, object] | None = None,
     expert_blueprint_id: str | None = None,
     domain_approval_path: Path | None = None,
@@ -55,6 +60,10 @@ def build_paper_workflow_readiness_bundle(
     )
     kb_manifest = kb_manifest_for_dir(problem_bundle.benchmark_dir / "kb")
     resource_gate = _resource_readiness(resource_constraints or {}, expert_blueprint_id)
+    reference_matrix = build_reference_capability_matrix(
+        problem_intake=problem_intake or {},
+        expert_blueprint_id=expert_blueprint_id,
+    )
 
     checks = [
         _check(
@@ -146,6 +155,7 @@ def build_paper_workflow_readiness_bundle(
         "multi_seed_ablation_readiness": ablation,
         "kb_manifest": kb_manifest,
         "resource_readiness": resource_gate,
+        "reference_capability_matrix": reference_matrix,
         "checks": checks,
         "blockers": [
             {
@@ -169,6 +179,7 @@ def write_paper_workflow_readiness_bundle(
     output_dir: Path,
     selector_panel: list[dict[str, object]] | None = None,
     selector_evidence_path: Path | None = None,
+    problem_intake: dict[str, Any] | None = None,
     resource_constraints: dict[str, object] | None = None,
     expert_blueprint_id: str | None = None,
     domain_approval_path: Path | None = None,
@@ -182,6 +193,7 @@ def write_paper_workflow_readiness_bundle(
         benchmark_dir=benchmark_dir,
         selector_panel=selector_panel,
         selector_evidence_path=selector_evidence_path,
+        problem_intake=problem_intake,
         resource_constraints=resource_constraints,
         expert_blueprint_id=expert_blueprint_id,
         domain_approval_path=domain_approval_path,
@@ -195,8 +207,13 @@ def write_paper_workflow_readiness_bundle(
     domain_template = output_dir / "domain_approval_template.json"
     benchmark_template = output_dir / "paper_benchmark_manifest_template.json"
     commands_md = output_dir / "paper_workflow_commands.md"
+    reference_matrix_json = output_dir / "reference_capability_matrix.json"
+    reference_matrix_md = output_dir / "reference_capability_matrix.md"
     _atomic_write_text(plan_json, json.dumps(bundle, indent=2, sort_keys=True, allow_nan=False))
     _atomic_write_text(plan_md, render_paper_workflow_readiness_markdown(bundle))
+    reference_matrix = bundle["reference_capability_matrix"]
+    _atomic_write_text(reference_matrix_json, json.dumps(reference_matrix, indent=2, sort_keys=True, allow_nan=False))
+    _atomic_write_text(reference_matrix_md, render_reference_capability_matrix_markdown(reference_matrix))
     _atomic_write_text(
         domain_template,
         json.dumps(domain_approval_template(), indent=2, sort_keys=True, allow_nan=False),
@@ -214,6 +231,8 @@ def write_paper_workflow_readiness_bundle(
             "domain_approval_template": str(domain_template),
             "paper_benchmark_manifest_template": str(benchmark_template),
             "commands_md": str(commands_md),
+            "reference_capability_matrix_json": str(reference_matrix_json),
+            "reference_capability_matrix_md": str(reference_matrix_md),
         },
     }
 

@@ -112,6 +112,25 @@ def test_paper_workflow_readiness_accepts_runtime_selector_evidence_packet(tmp_p
     assert bundle["selector_readiness"]["heterogeneous_selector_candidate"] is False
 
 
+def test_paper_workflow_readiness_reports_reference_capability_matrix(tmp_path: Path) -> None:
+    problem_intake = _complete_reference_problem_intake()
+
+    bundle = build_paper_workflow_readiness_bundle(
+        benchmark_dir=Path("examples/cylinder_wake_reconstruction_faithful_small").resolve(),
+        selector_panel=[],
+        problem_intake=problem_intake,
+        resource_constraints={},
+        expert_blueprint_id="fluid_pde",
+        env={},
+    )
+
+    matrix = bundle["reference_capability_matrix"]
+    assert matrix["status"] == "ready_for_offline_planning"
+    assert matrix["problem_intake_rubric"]["passed"] is True
+    assert matrix["scientific_claim_supported"] is False
+    assert bundle["scientific_claim_supported"] is False
+
+
 def test_write_paper_workflow_readiness_bundle_outputs_templates(tmp_path: Path) -> None:
     result = write_paper_workflow_readiness_bundle(
         benchmark_dir=Path("examples/function_approx").resolve(),
@@ -295,3 +314,15 @@ def _write_selector_evidence_packet(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def _complete_reference_problem_intake() -> dict[str, object]:
+    return {
+        "hypothesis": "Sparse wake sensors retain enough coherent modes for reconstruction.",
+        "observable": ["sensor_history", "vorticity_field"],
+        "metric": "relative_l2",
+        "failure_modes": ["phase drift", "boundary artifacts"],
+        "physical_constraints": ["boundary consistency", "smooth residual proxy"],
+        "domain_review_checklist": ["failure samples reviewed", "claim boundary reviewed"],
+        "data_source": "local faithful-small synthetic fixture",
+    }
