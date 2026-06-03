@@ -921,6 +921,39 @@ def test_selector_votes_and_solutions_are_read_only_evidence(tmp_path: Path) -> 
         ),
         encoding="utf-8",
     )
+    (run_dir / "reports" / "scientific_result_card.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "card_version": "scientific_result_card.v1",
+                "benchmark_name": "function_approx",
+                "champion": {"node_id": "solution_000", "status": "evaluated"},
+                "score": {
+                    "metric": "validation_mse",
+                    "champion_value": 0.25,
+                    "root_value": 0.3,
+                    "improvement_over_root": 0.05,
+                },
+                "evidence_grade": "workflow_evidence_only",
+                "claim_support": {
+                    "scientific_claim_supported": False,
+                    "paper_level_claim_supported": False,
+                    "readiness_status": "blocked",
+                    "claim_gate_status": "allowed",
+                    "evidence_mode": "mock_workflow_shape",
+                    "llm_mode": "mock",
+                    "benchmark_fidelity_level": "proxy",
+                },
+                "uncertainty_flags": [
+                    "mock LLM mode validates workflow shape only",
+                    "scientific discovery readiness is not satisfied",
+                ],
+                "minimum_next_validation": ["resolve real_llm: run used real LLM mode"],
+                "claim_boundary": "workflow evidence only",
+            }
+        ),
+        encoding="utf-8",
+    )
     (run_dir / "run_inputs" / "private_eval").mkdir(parents=True)
     (run_dir / "run_inputs" / "private_eval" / "val_data.npz").write_text("private", encoding="utf-8")
     (run_dir / "tree.json").write_text(
@@ -1025,6 +1058,14 @@ def test_selector_votes_and_solutions_are_read_only_evidence(tmp_path: Path) -> 
     assert payload["innovation_report"]["innovation_claim_level"] == "workflow_exploration_only"
     assert payload["innovation_report"]["novelty_axis_count"] == 1
     assert payload["innovation_report"]["operator_count"] == 1
+    assert payload["scientific_result_card"]["available"] is True
+    assert payload["scientific_result_card"]["evidence_grade"] == "workflow_evidence_only"
+    assert payload["scientific_result_card"]["champion_node_id"] == "solution_000"
+    assert payload["scientific_result_card"]["scientific_claim_supported"] is False
+    assert payload["scientific_result_card"]["uncertainty_flag_count"] == 2
+    assert payload["scientific_result_card"]["minimum_next_validation"] == [
+        "resolve real_llm: run used real LLM mode"
+    ]
     assert {figure["path"] for figure in payload["figures"]} == {
         "reports/data_overview.svg",
         "solutions/solution_000/prediction_overview.svg",

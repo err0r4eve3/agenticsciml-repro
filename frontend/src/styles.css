@@ -479,6 +479,31 @@ ul {
   gap: 10px;
 }
 
+.flow-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.flow-strip span {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff7eb;
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 7px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-strip .active {
+  border-color: rgba(138, 90, 43, 0.42);
+  background: #eadfce;
+  color: var(--green-strong);
+}
+
 .problem-intake label {
   display: grid;
   gap: 5px;
@@ -583,6 +608,55 @@ ul {
   color: var(--ink-muted);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.evidence-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.scientific-card {
+  display: grid;
+  gap: 12px;
+}
+
+.scientific-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.scientific-card-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.scientific-card-grid span {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff7eb;
+  color: var(--ink-muted);
+  font-size: 11px;
+  padding: 8px;
+}
+
+.scientific-card-grid strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scientific-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .paper-task-columns {
@@ -2106,6 +2180,8 @@ tbody tr:hover,
   .main-composer,
   .paper-lab-grid,
   .evidence-grid,
+  .flow-strip,
+  .scientific-card-grid,
   .pure-composer {
     grid-template-columns: 1fr;
   }

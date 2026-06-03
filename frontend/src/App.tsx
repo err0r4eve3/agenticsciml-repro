@@ -276,6 +276,25 @@ type SolutionsPayload = {
     top_axes?: Array<string | null>;
     claim_boundary?: string | null;
   };
+  scientific_result_card?: {
+    available: boolean;
+    evidence_grade?: string | null;
+    champion_node_id?: string | null;
+    scientific_claim_supported?: boolean | null;
+    paper_level_claim_supported?: boolean | null;
+    readiness_status?: string | null;
+    claim_gate_status?: string | null;
+    evidence_mode?: string | null;
+    llm_mode?: string | null;
+    benchmark_fidelity_level?: string | null;
+    metric?: string | null;
+    champion_value?: number | null;
+    improvement_over_root?: number | null;
+    uncertainty_flag_count?: number;
+    uncertainty_flags?: string[];
+    minimum_next_validation?: string[];
+    claim_boundary?: string | null;
+  };
   figures: ArtifactEntry[];
 };
 
@@ -1675,11 +1694,11 @@ function PureChatUI({
             <h2>今天要做什么？</h2>
             <p>直接提问；需要代码或算法证据时，使用左侧分页切换。</p>
             <div className="prompt-pills">
-              <button type="button" onClick={() => onQuickPrompt("介绍一下这个项目当前能做什么")}>
-                介绍项目
+              <button type="button" onClick={() => onQuickPrompt("我有一个新的科学机器学习问题，先帮我判断应该怎么跑", { assistantMode: "plan" })}>
+                新问题规划
               </button>
-              <button type="button" onClick={() => onQuickPrompt("帮我规划下一步", { assistantMode: "plan" })}>
-                规划任务
+              <button type="button" onClick={() => onQuickPrompt("解释最近一次 run 的科学证据边界和下一步验证")}>
+                解释证据
               </button>
               <button type="button" onClick={onOpenLibrary}>
                 打开算法库
@@ -1958,7 +1977,11 @@ function AlgorithmLibraryPage({
       </div>
       <PaperTaskDetail task={selectedPaperTask} selectedBenchmark={selected?.name ?? null} />
       <RoleModelPanel agentModels={agentModels} roles={agentRoles} onUpdate={onUpdateAgentModel} />
-      <EvidencePanel selectorVotes={selectorVotes} solutionsPayload={solutionsPayload} />
+      <EvidencePanel
+        selectorVotes={selectorVotes}
+        solutionsPayload={solutionsPayload}
+        onSelectArtifact={onSelectArtifact}
+      />
       <DataRegion title="Paper primitive catalog">
         <div className="catalog-toolbar" aria-label="算法库语言切换">
           <div>
@@ -2071,6 +2094,12 @@ function ProblemIntakePanel({
   return (
     <DataRegion title="Problem Intake">
       <div className="problem-intake">
+        <div className="flow-strip" aria-label="run workflow">
+          <span className="active">1 描述问题</span>
+          <span>2 自动匹配</span>
+          <span>3 Readiness</span>
+          <span>4 Run / 证据卡</span>
+        </div>
         <label>
           <span>完整问题描述</span>
           <textarea
@@ -2337,13 +2366,13 @@ function RunConfigPanel({
             <strong>auto-audited</strong>
           </div>
         </div>
+        <button className="icon-text-button full-width secondary" disabled={busy} type="button" onClick={onPreviewReadiness}>
+          <AlertTriangle size={15} />
+          先检查 readiness
+        </button>
         <button className="icon-text-button full-width" type="button" onClick={onStartRun}>
           <Play size={15} />
           启动配置 run
-        </button>
-        <button className="icon-text-button full-width secondary" disabled={busy} type="button" onClick={onPreviewReadiness}>
-          <AlertTriangle size={15} />
-          检查 run readiness
         </button>
         {readinessReport ? <RunReadinessSummary report={readinessReport} /> : null}
         {mode === "real" ? (
@@ -2497,24 +2526,107 @@ function RoleModelPanel({
 }
 
 function EvidencePanel({
+  onSelectArtifact,
   selectorVotes,
   solutionsPayload
 }: {
+  onSelectArtifact: (path: string) => void;
   selectorVotes: SelectorVotesPayload | null;
   solutionsPayload: SolutionsPayload | null;
 }) {
   return (
-    <div className="evidence-grid">
-      <DataRegion title="Selector votes">
-        <SelectorVotesView payload={selectorVotes} />
-      </DataRegion>
-      <DataRegion title="Solution loss / tree">
-        <SolutionsTable payload={solutionsPayload} />
-      </DataRegion>
-      <DataRegion title="Local figures">
-        <FigureArtifactsView figures={solutionsPayload?.figures ?? []} />
-      </DataRegion>
+    <div className="evidence-stack">
+      <ScientificResultCardView card={solutionsPayload?.scientific_result_card} onSelectArtifact={onSelectArtifact} />
+      <div className="evidence-grid">
+        <DataRegion title="Selector votes">
+          <SelectorVotesView payload={selectorVotes} />
+        </DataRegion>
+        <DataRegion title="Solution loss / tree">
+          <SolutionsTable payload={solutionsPayload} />
+        </DataRegion>
+        <DataRegion title="Local figures">
+          <FigureArtifactsView figures={solutionsPayload?.figures ?? []} />
+        </DataRegion>
+      </div>
     </div>
+  );
+}
+
+function ScientificResultCardView({
+  card,
+  onSelectArtifact
+}: {
+  card: SolutionsPayload["scientific_result_card"] | undefined;
+  onSelectArtifact: (path: string) => void;
+}) {
+  if (!card?.available) {
+    return (
+      <DataRegion title="Scientific result card">
+        <p className="muted">选择完成导出的 run 后显示 scientific_result_card。</p>
+      </DataRegion>
+    );
+  }
+  const supportTone = card.scientific_claim_supported ? "good" : "info";
+  return (
+    <DataRegion title="Scientific result card">
+      <div className="scientific-card">
+        <div className="scientific-card-head">
+          <div>
+            <p className="eyebrow">Evidence grade</p>
+            <h3>{card.evidence_grade ?? "unknown"}</h3>
+          </div>
+          <StatusBadge tone={supportTone}>{card.scientific_claim_supported ? "scientific supported" : "workflow evidence"}</StatusBadge>
+        </div>
+        <div className="scientific-card-grid">
+          <span>
+            champion
+            <strong>{card.champion_node_id ?? "n/a"}</strong>
+          </span>
+          <span>
+            metric
+            <strong>{card.metric ?? "n/a"}</strong>
+          </span>
+          <span>
+            score
+            <strong>{formatScore(card.champion_value)}</strong>
+          </span>
+          <span>
+            improvement
+            <strong>{formatScore(card.improvement_over_root)}</strong>
+          </span>
+          <span>
+            readiness
+            <strong>{card.readiness_status ?? "unknown"}</strong>
+          </span>
+          <span>
+            claim gate
+            <strong>{card.claim_gate_status ?? "unknown"}</strong>
+          </span>
+        </div>
+        <div className="inline-warnings">
+          {(card.uncertainty_flags ?? []).slice(0, 3).map((flag) => (
+            <span key={flag}>{flag}</span>
+          ))}
+          {card.uncertainty_flag_count && card.uncertainty_flag_count > 3 ? (
+            <span>+{card.uncertainty_flag_count - 3} more</span>
+          ) : null}
+        </div>
+        <div className="scientific-card-actions">
+          <button type="button" onClick={() => onSelectArtifact("reports/scientific_result_card.md")}>
+            <FileText size={14} />
+            结果卡
+          </button>
+          <button type="button" onClick={() => onSelectArtifact("reports/scientific_discovery_readiness.md")}>
+            <AlertTriangle size={14} />
+            Readiness
+          </button>
+          <button type="button" onClick={() => onSelectArtifact("leaderboard.csv")}>
+            <Database size={14} />
+            Leaderboard
+          </button>
+        </div>
+      </div>
+    </DataRegion>
   );
 }
 

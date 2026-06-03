@@ -1604,6 +1604,9 @@ def _solutions_payload(run_id: str, run_dir: Path) -> dict[str, object]:
         "leaderboard": leaderboard,
         "evolution_health": _read_optional_json(run_dir / "reports" / "evolution_health.json") or {},
         "innovation_report": _innovation_report_summary(run_dir / "reports" / "innovation_report.json"),
+        "scientific_result_card": _scientific_result_card_summary(
+            run_dir / "reports" / "scientific_result_card.json"
+        ),
         "figures": _local_figure_artifacts(run_dir),
     }
 
@@ -1765,6 +1768,40 @@ def _innovation_report_summary(path: Path) -> dict[str, object]:
         "operator_count": evidence.get("operator_count"),
         "warning_count": evidence.get("warning_count", len(warnings)),
         "top_axes": [axis.get("axis_id") for axis in axes[:4] if isinstance(axis, dict)],
+        "claim_boundary": payload.get("claim_boundary"),
+    }
+
+
+def _scientific_result_card_summary(path: Path) -> dict[str, object]:
+    payload = _read_optional_json(path)
+    if not isinstance(payload, dict):
+        return {"available": False}
+    champion = payload.get("champion") if isinstance(payload.get("champion"), dict) else {}
+    score = payload.get("score") if isinstance(payload.get("score"), dict) else {}
+    support = payload.get("claim_support") if isinstance(payload.get("claim_support"), dict) else {}
+    flags = payload.get("uncertainty_flags") if isinstance(payload.get("uncertainty_flags"), list) else []
+    next_validation = (
+        payload.get("minimum_next_validation")
+        if isinstance(payload.get("minimum_next_validation"), list)
+        else []
+    )
+    return {
+        "available": True,
+        "evidence_grade": payload.get("evidence_grade"),
+        "champion_node_id": champion.get("node_id"),
+        "scientific_claim_supported": support.get("scientific_claim_supported"),
+        "paper_level_claim_supported": support.get("paper_level_claim_supported"),
+        "readiness_status": support.get("readiness_status"),
+        "claim_gate_status": support.get("claim_gate_status"),
+        "evidence_mode": support.get("evidence_mode"),
+        "llm_mode": support.get("llm_mode"),
+        "benchmark_fidelity_level": support.get("benchmark_fidelity_level"),
+        "metric": score.get("metric"),
+        "champion_value": score.get("champion_value"),
+        "improvement_over_root": score.get("improvement_over_root"),
+        "uncertainty_flag_count": len(flags),
+        "uncertainty_flags": [str(item) for item in flags[:5]],
+        "minimum_next_validation": [str(item) for item in next_validation[:5]],
         "claim_boundary": payload.get("claim_boundary"),
     }
 

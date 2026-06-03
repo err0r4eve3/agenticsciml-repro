@@ -116,6 +116,9 @@ evaluator、selector 或 champion selection 实现。
 - `Evidence`：只读展示 `reports/selector_votes.json`、`tree.json`、
   `leaderboard.csv`、各 `solutions/solution_*/eval.json` 汇总出的 votes、loss/score、
   parent/tree summary、method tags、`policy_fidelity`、`emergence_audit` 和本地 SVG artifact。
+- `Scientific result card`：Evidence 顶部展示 `reports/scientific_result_card.json/md`
+  的 evidence grade、champion score、readiness/claim gate 状态、不确定性 flags 和最小
+  下一步验证，帮助用户先判断“这轮能不能作为科学证据”。
 - `Local figures`：优先列出 `reports/data_overview.svg` 与
   `solutions/*/prediction_overview.svg`。未来 loss curve artifact 可按同样路径规则接入。
 
@@ -242,14 +245,15 @@ code-server 安装或启动入口不对。应优先检查 `command -v code-serve
   `problem_intake` 和 `planner_snapshot`。
 - `GET /api/runs/{id}`：读取 metadata、leaderboard、trace summary 和 artifact index。
 - `GET /api/runs/{id}/solutions`：读取 solution tree、leaderboard-derived score、
-  local figures、artifact refs 和每个 solution 的 `policy_fidelity` 摘要。
+  local figures、artifact refs、`scientific_result_card` 摘要和每个 solution 的
+  `policy_fidelity` 摘要。
 - `GET /api/runs/{id}/events`：SSE 输出 trace events。
 - `GET /api/runs/{id}/artifacts/*`：只读 UTF-8 artifact，拒绝路径逃逸和 symlink 逃逸。
 - `GET /api/runs/{id}/selector-votes`：只读读取
   `reports/selector_votes.json`，缺失时返回空状态。
 - `GET /api/runs/{id}/solutions`：从 `tree.json`、`leaderboard.csv` 和各
   solution `eval.json` 汇总 solution status、score/loss、parent、children、method tags 和
-  本地 figure artifact。
+  本地 figure artifact，并返回 run-level scientific result card 摘要。
 - `POST /api/solver/chat`：内部算法 tool 入口，只返回结构化 actions、warnings、artifact refs 和 trace refs；它不是 MCP server。
   `agent` 模式下的高上下文求解请求会调用同一个受控 problem-intake planner，并返回带
   planner snapshot 的 `start_run` action。
