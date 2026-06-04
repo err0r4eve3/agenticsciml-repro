@@ -32,6 +32,10 @@ EVIDENCE_METADATA_KEYS = (
 
 RUN_STATES = {"partial", "completed", "exported", "finalized"}
 EXPORTED_RUN_STATES = {"completed", "exported", "finalized"}
+TRACE_QUALITY_PASS = "pass"
+TRACE_QUALITY_DEGRADED_RECOVERED = "degraded_recovered"
+TRACE_QUALITY_FAILED_HARD = "failed_hard"
+TRACE_QUALITY_FAILED_INCOMPLETE = "failed_incomplete"
 TRACE_NODE_REFERENCE_EVENT_NAMES = {
     "agenticsciml.parallel_children.start",
     "agenticsciml.parallel_children.end",
@@ -98,24 +102,93 @@ def summarize_trace(run_dir: Path) -> dict[str, Any]:
     )
     artifact_consistency = _check_artifact_consistency(run_dir, events)
     claim_gate = _summary_claim_gate(run_dir, events)
-    quality_passed = (
-        not missing_event_types
-        and not guardrail_failures
-        and bool(artifact_consistency.get("passed", True))
-    )
+    quality = _trace_quality_gate(missing_event_types, guardrail_failures, artifact_consistency)
     return {
         "event_count": len(events),
         "event_counts": dict(sorted(event_counts.items())),
         "agent_roles": agent_roles,
         "guardrail_failures": guardrail_failures,
+        "recoverable_guardrail_failures": quality["recoverable_guardrail_failures"],
+        "hard_guardrail_failures": quality["hard_guardrail_failures"],
         "artifact_consistency": artifact_consistency,
         "claim_gate": claim_gate,
+        "trace_quality_status": quality["status"],
         "quality_gate": {
-            "passed": quality_passed,
+            "passed": quality["passed"],
+            "status": quality["status"],
             "required_event_types": list(REQUIRED_EVENT_TYPES),
             "missing_event_types": missing_event_types,
+            "recoverable_guardrail_failure_count": len(quality["recoverable_guardrail_failures"]),
+            "hard_guardrail_failure_count": len(quality["hard_guardrail_failures"]),
+            "provider_timeout_count": quality["provider_timeout_count"],
+            "structured_output_retry_count": quality["structured_output_retry_count"],
+            "recovered": quality["recovered"],
+            "hard_guardrail_violation": quality["hard_guardrail_violation"],
+            "artifact_consistency_passed": bool(artifact_consistency.get("passed", True)),
         },
     }
+
+
+def _trace_quality_gate(
+    missing_event_types: list[str],
+    guardrail_failures: list[dict[str, Any]],
+    artifact_consistency: dict[str, Any],
+) -> dict[str, Any]:
+    recoverable_failures = [
+        failure for failure in guardrail_failures if _is_recoverable_guardrail_failure(failure)
+    ]
+    hard_failures = [
+        failure for failure in guardrail_failures if not _is_recoverable_guardrail_failure(failure)
+    ]
+    artifact_passed = bool(artifact_consistency.get("passed", True))
+    if missing_event_types:
+        status = TRACE_QUALITY_FAILED_INCOMPLETE
+    elif hard_failures or not artifact_passed:
+        status = TRACE_QUALITY_FAILED_HARD
+    elif recoverable_failures:
+        status = TRACE_QUALITY_DEGRADED_RECOVERED
+    else:
+        status = TRACE_QUALITY_PASS
+    return {
+        "status": status,
+        "passed": status in {TRACE_QUALITY_PASS, TRACE_QUALITY_DEGRADED_RECOVERED},
+        "recoverable_guardrail_failures": recoverable_failures,
+        "hard_guardrail_failures": hard_failures,
+        "provider_timeout_count": sum(
+            1 for failure in recoverable_failures if _is_provider_timeout_failure(failure)
+        ),
+        "structured_output_retry_count": len(recoverable_failures),
+        "recovered": bool(recoverable_failures)
+        and status == TRACE_QUALITY_DEGRADED_RECOVERED,
+        "hard_guardrail_violation": bool(hard_failures),
+    }
+
+
+def _is_recoverable_guardrail_failure(failure: dict[str, Any]) -> bool:
+    name = str(failure.get("name", ""))
+    metadata = failure.get("metadata", {})
+    if not isinstance(metadata, dict):
+        return False
+    if not name.endswith(":structured_output"):
+        return False
+    error = _failure_error_text(failure)
+    return (
+        "LLM JSON call failed" in error
+        or "Model did not return valid JSON" in error
+        or _is_provider_timeout_failure(failure)
+    )
+
+
+def _is_provider_timeout_failure(failure: dict[str, Any]) -> bool:
+    error = _failure_error_text(failure).lower()
+    return "timeout" in error or "timed out" in error
+
+
+def _failure_error_text(failure: dict[str, Any]) -> str:
+    metadata = failure.get("metadata", {})
+    if not isinstance(metadata, dict):
+        return ""
+    return str(metadata.get("error", ""))
 
 
 def _summary_claim_gate(run_dir: Path, events: list[dict[str, Any]]) -> dict[str, Any] | None:

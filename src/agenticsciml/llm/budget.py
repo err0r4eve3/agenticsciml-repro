@@ -9,6 +9,10 @@ class LLMBudgetExceeded(RuntimeError):
     pass
 
 
+class LLMBudgetPreflightError(RuntimeError):
+    pass
+
+
 def _optional_int_env(name: str) -> int | None:
     raw = os.environ.get(name)
     if raw is None or raw == "":
@@ -136,3 +140,63 @@ class LLMBudget:
             raise LLMBudgetExceeded(
                 f"LLM cost budget exceeded: estimated={self.estimated_cost_usd:.6f}, max={self.max_cost_usd:.6f}"
             )
+
+
+def estimate_orchestrator_llm_call_range(
+    *,
+    max_iterations: int,
+    parallel_mutations: int,
+) -> dict[str, int]:
+    root_calls = 4
+    if max_iterations <= 0:
+        return {"min": root_calls, "max": root_calls}
+    mutation_slots = max(1, max_iterations) * max(1, parallel_mutations)
+    return {
+        "min": root_calls + mutation_slots * 6,
+        "max": root_calls + mutation_slots * 18,
+    }
+
+
+def combine_llm_call_ranges(ranges: list[dict[str, int]]) -> dict[str, int]:
+    if not ranges:
+        return {"min": 0, "max": 0}
+    return {
+        "min": sum(int(item.get("min", 0)) for item in ranges),
+        "max": sum(int(item.get("max", 0)) for item in ranges),
+    }
+
+
+def llm_call_budget_preflight(
+    *,
+    budget: LLMBudget,
+    expected_llm_call_range: dict[str, int],
+) -> dict[str, Any]:
+    expected_min = int(expected_llm_call_range.get("min", 0))
+    expected_max = int(expected_llm_call_range.get("max", 0))
+    blockers: list[str] = []
+    if budget.max_calls is not None and expected_max > budget.max_calls:
+        blockers.append(
+            "estimated_max_llm_calls exceeds AGENTICSCIML_MAX_LLM_CALLS: "
+            f"estimated_max={expected_max}, max_calls={budget.max_calls}"
+        )
+    return {
+        "schema_version": 1,
+        "status": "blocked_by_budget" if blockers else "ready",
+        "passed": not blockers,
+        "expected_min_llm_calls": expected_min,
+        "expected_max_llm_calls": expected_max,
+        "configured_max_llm_calls": budget.max_calls,
+        "blockers": blockers,
+        "notes": [
+            "Preflight checks deterministic call-count budgets before provider calls.",
+            "Prompt, output, total-token, and cost budgets are still enforced by the runtime LLM ledger.",
+        ],
+    }
+
+
+def require_llm_call_budget_preflight(preflight: dict[str, Any]) -> None:
+    if preflight.get("passed") is True:
+        return
+    blockers = preflight.get("blockers")
+    detail = "; ".join(str(item) for item in blockers) if isinstance(blockers, list) else ""
+    raise LLMBudgetPreflightError(f"LLM call budget preflight failed: {detail}")

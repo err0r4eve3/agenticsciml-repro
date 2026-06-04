@@ -150,7 +150,10 @@ def test_llm_smoke_dry_run_writes_plan_without_api_key(tmp_path: Path, monkeypat
     assert "API calls: none" in report
     manifest = json.loads(result.manifest_json.read_text(encoding="utf-8"))
     assert manifest["execution_mode"] == "dry_run"
+    assert manifest["run_count"] == 2
     assert manifest["expected_llm_call_range"]["min"] > 0
+    assert manifest["expected_llm_call_range"]["max"] == 80
+    assert manifest["budget_preflight"]["status"] == "ready"
     assert manifest["provider_capabilities"]["provider"] == "openai"
     assert manifest["provider_capabilities"]["supports_structured_outputs"] is True
     assert manifest["provider_capabilities"]["supports_image_inputs"] is True
@@ -248,7 +251,7 @@ def test_llm_smoke_real_mode_enforces_llm_call_budget(
 ) -> None:
     monkeypatch.setenv("AGENTICSCIML_MAX_LLM_CALLS", "1")
 
-    with pytest.raises(RuntimeError, match="LLM call budget exceeded"):
+    with pytest.raises(RuntimeError, match="LLM call budget preflight failed"):
         run_llm_smoke(
             benchmark_dir=Path("examples/function_approx").resolve(),
             output_dir=tmp_path,
@@ -256,6 +259,12 @@ def test_llm_smoke_real_mode_enforces_llm_call_budget(
             dry_run=False,
             llm_client=MockLLMClient(),
         )
+    report = (tmp_path / "real_llm_smoke_report.md").read_text(encoding="utf-8")
+    manifest = json.loads((tmp_path / "real_llm_smoke_manifest.json").read_text(encoding="utf-8"))
+    assert "blocked_by_budget" in report
+    assert manifest["run_count"] == 2
+    assert manifest["budget_preflight"]["status"] == "blocked_by_budget"
+    assert manifest["budget_preflight"]["expected_max_llm_calls"] == 80
 
 
 def test_recording_llm_reserves_call_budget_across_parallel_calls(tmp_path: Path) -> None:

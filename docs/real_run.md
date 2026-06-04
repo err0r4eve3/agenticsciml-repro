@@ -170,6 +170,7 @@ export OPENAI_MODEL=gpt-5-mini
 uv run --python 3.11 --extra real-llm agenticsciml smoke-llm examples/function_approx \
   --variants branch_context,no_branch_context \
   --real \
+  --llm-fast-mode \
   --max-iterations 1 \
   --parallel-mutations 2 \
   --output-dir runs/real-llm-smoke
@@ -182,6 +183,11 @@ exact pair `branch_context,no_branch_context`. It writes
 request-side prompt-delivery evidence for branch context, and verifies that
 `no_branch_context` request prompts do not leak branch fields. If the gate
 fails, the CLI returns non-zero and points at the report.
+
+Before any real provider call, smoke tooling writes the manifest and runs a
+shared LLM call-budget preflight. If `expected_llm_call_range.max` exceeds
+`AGENTICSCIML_MAX_LLM_CALLS`, the command exits before provider calls with
+`blocked_by_budget` and writes a blocked report.
 
 After a real or mock run completes, inspect the trace quality gate:
 
@@ -214,6 +220,16 @@ consistency, and requires parallel-child trace evidence when
 `run_metadata.json` also records aggregate LLM call counts by role plus prompt
 and response token estimates. These are accounting placeholders, not provider
 billing records.
+
+After a real run, scan run artifacts for accidental secret leakage before
+sharing or attaching them:
+
+```bash
+uv run --python 3.11 --extra dev agenticsciml secret-hygiene runs/<experiment_id> --fail-on-findings
+```
+
+The scanner reports file paths and rule IDs only; it does not print matched
+secret values.
 
 Real-smoke manifest and run metadata also record provider capability, adapter
 type, and budget state:

@@ -52,6 +52,19 @@
   provider call 前写 plan/manifest，并为每个 run 写 `llm_call_ledger.jsonl`。ablation
   输出仍固定 `scientific_claim=not_supported`，底层 run 的 claim boundary 单独保存在
   `run_evidence_mode` / `run_scientific_claim`。
+- Trace quality gate 现在保留兼容的 `quality_gate.passed`，并新增
+  `quality_gate.status` / `trace_quality_status`：`pass`、
+  `degraded_recovered`、`failed_hard`、`failed_incomplete`。LLM structured-output
+  首次失败后成功恢复会被标记为 `degraded_recovered`，sandbox/evaluator/artifact
+  问题仍是 hard failure。该状态只改善工程诊断，不提升 scientific claim。
+- Real smoke 与 real ablation 共享 LLM call-budget preflight。manifest 写入
+  `expected_llm_call_range` 和 `budget_preflight`；真实模式若 estimated max calls 超过
+  `AGENTICSCIML_MAX_LLM_CALLS`，会在 provider call 前写 blocked report 并退出。runtime
+  ledger 继续执行 token/cost 预算。
+- `smoke-llm` 新增 `--llm-fast-mode`，与 ablation runner 的 latency-sensitive real-run
+  路径保持一致。
+- 新增 CLI `secret-hygiene`，扫描 run artifact 文本文件中的常见 token pattern 和当前
+  敏感 env value 泄漏。报告只包含路径、规则名和 env 变量名，不打印 secret 值。
 - `multi_seed_ablation.ablation_output_dir` 现在会让 orchestrator 重新生成
   `reports/multi_seed_ablation_verified_manifest.json`，再纳入
   `reports/multi_seed_ablation_evidence.json` 和 scientific readiness；手写 manifest

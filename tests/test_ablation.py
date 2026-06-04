@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from agenticsciml.ablation import _aggregate, run_ablation
 from agenticsciml.evidence import (
     EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE,
@@ -191,8 +193,36 @@ def test_ablation_real_dry_run_writes_plan_without_evidence_csv(
     assert len(plan["runs"]) == 4
     assert manifest["execution_mode"] == "dry_run"
     assert manifest["run_count"] == 4
+    assert manifest["budget_preflight"]["status"] == "ready"
+    assert manifest["expected_llm_call_range"]["max"] == 52
     assert "No provider calls were made" in report
     assert "must not pass `verify-ablation-evidence`" in report
+
+
+def test_ablation_real_mode_blocks_on_call_budget_preflight(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("AGENTICSCIML_MAX_LLM_CALLS", "10")
+
+    with pytest.raises(RuntimeError, match="LLM call budget preflight failed"):
+        run_ablation(
+            benchmark_dir=Path("examples/function_approx").resolve(),
+            output_dir=tmp_path,
+            seeds=[0],
+            variants=["branch_context", "no_branch_context"],
+            mock=False,
+            dry_run=False,
+            llm_client=MockLLMClient(),
+        )
+
+    report = (tmp_path / "ablation_report.md").read_text(encoding="utf-8")
+    manifest = json.loads((tmp_path / "real_llm_ablation_manifest.json").read_text(encoding="utf-8"))
+    assert "blocked_by_budget" in report
+    assert manifest["budget_preflight"]["status"] == "blocked_by_budget"
+    assert manifest["budget_preflight"]["expected_max_llm_calls"] == 80
+    assert not (tmp_path / "ablation_runs.csv").exists()
 
 
 def test_ablation_real_runner_accepts_injected_llm_without_network(

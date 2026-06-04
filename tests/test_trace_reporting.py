@@ -33,6 +33,8 @@ def test_trace_summary_passes_when_required_spans_exist(tmp_path: Path) -> None:
     summary = summarize_trace(run_dir)
 
     assert summary["quality_gate"]["passed"] is True
+    assert summary["quality_gate"]["status"] == "pass"
+    assert summary["trace_quality_status"] == "pass"
     assert summary["event_counts"]["guardrail_span"] == 1
     assert summary["agent_roles"] == ["proposer"]
 
@@ -51,8 +53,84 @@ def test_trace_summary_fails_on_missing_spans_or_guardrail_failures(tmp_path: Pa
     summary = summarize_trace(run_dir)
 
     assert summary["quality_gate"]["passed"] is False
+    assert summary["quality_gate"]["status"] == "failed_incomplete"
     assert "agent_span" in summary["quality_gate"]["missing_event_types"]
     assert summary["guardrail_failures"][0]["name"] == "sandbox"
+    assert summary["hard_guardrail_failures"][0]["name"] == "sandbox"
+
+
+def test_trace_summary_marks_recovered_structured_output_as_degraded(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    _write_events(
+        run_dir / "trace.jsonl",
+        [
+            {"event_type": "workflow_span", "name": "start", "metadata": {}},
+            {"event_type": "agent_span", "name": "engineer", "metadata": {"spec_role": "engineer"}},
+            {"event_type": "generation_span", "name": "engineer", "metadata": {"mode": "json"}},
+            {"event_type": "tool_span", "name": "train_and_evaluate", "metadata": {"exit_code": 0}},
+            {
+                "event_type": "guardrail_span",
+                "name": "engineer:engineer:structured_output",
+                "metadata": {
+                    "passed": False,
+                    "error": (
+                        "LLM JSON call failed for engineer: RuntimeError: "
+                        "Model did not return valid JSON for engineer"
+                    ),
+                },
+            },
+            {
+                "event_type": "guardrail_span",
+                "name": "engineer:engineer:structured_output",
+                "metadata": {"passed": True},
+            },
+        ],
+    )
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["quality_gate"]["passed"] is True
+    assert summary["quality_gate"]["status"] == "degraded_recovered"
+    assert summary["trace_quality_status"] == "degraded_recovered"
+    assert summary["quality_gate"]["structured_output_retry_count"] == 1
+    assert summary["quality_gate"]["hard_guardrail_failure_count"] == 0
+    assert summary["recoverable_guardrail_failures"][0]["name"] == "engineer:engineer:structured_output"
+    assert summary["hard_guardrail_failures"] == []
+
+
+def test_trace_summary_counts_recovered_provider_timeout(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    _write_events(
+        run_dir / "trace.jsonl",
+        [
+            {"event_type": "workflow_span", "name": "start", "metadata": {}},
+            {"event_type": "agent_span", "name": "root_engineer", "metadata": {"spec_role": "root_engineer"}},
+            {"event_type": "generation_span", "name": "root_engineer", "metadata": {"mode": "json"}},
+            {"event_type": "tool_span", "name": "train_and_evaluate", "metadata": {"exit_code": 0}},
+            {
+                "event_type": "guardrail_span",
+                "name": "root_engineer:root_engineer:structured_output",
+                "metadata": {
+                    "passed": False,
+                    "error": "LLM JSON call failed for root_engineer: APITimeoutError: Request timed out.",
+                },
+            },
+            {
+                "event_type": "guardrail_span",
+                "name": "root_engineer:root_engineer:structured_output",
+                "metadata": {"passed": True},
+            },
+        ],
+    )
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["quality_gate"]["passed"] is True
+    assert summary["quality_gate"]["status"] == "degraded_recovered"
+    assert summary["quality_gate"]["provider_timeout_count"] == 1
+    assert summary["quality_gate"]["structured_output_retry_count"] == 1
 
 
 def test_write_trace_summary_creates_json_artifact(tmp_path: Path) -> None:
