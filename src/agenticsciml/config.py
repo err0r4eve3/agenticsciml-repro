@@ -532,6 +532,7 @@ class ExperimentConfig:
     resource_constraints: dict[str, Any] = field(default_factory=dict)
     expert_blueprint_id: str | None = None
     multi_seed_ablation: dict[str, Any] = field(default_factory=dict)
+    llm_fast_mode: bool = False
     auto_approve_evaluation: bool = True
     resume: bool = False
 
@@ -565,6 +566,7 @@ class ExperimentConfig:
             "resource_constraints": dict(self.resource_constraints),
             "expert_blueprint_id": self.expert_blueprint_id,
             "multi_seed_ablation": dict(self.multi_seed_ablation),
+            "llm_fast_mode": self.llm_fast_mode,
             "auto_approve_evaluation": self.auto_approve_evaluation,
             "resume": self.resume,
         }
@@ -630,6 +632,7 @@ class ExperimentConfig:
                 if isinstance(data.get("multi_seed_ablation"), dict)
                 else {}
             ),
+            llm_fast_mode=bool(data.get("llm_fast_mode", False)),
             auto_approve_evaluation=bool(data.get("auto_approve_evaluation", True)),
             resume=bool(data.get("resume", False)),
         )

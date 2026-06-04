@@ -22,6 +22,10 @@
   明确的 NumPy-only compact baseline 指令，降低 OpenAI-compatible chat endpoint
   生成完整 `solution.py` 的超时概率。若 provider/model 仍不能在预算内返回 root code，
   run 继续按真实 provider failure 记录，不用 mock 或本地模板冒充 real LLM 解。
+- CLI / Web run request 新增 `llm_fast_mode`（CLI: `--llm-fast-mode`）：未显式设置
+  `reasoning_effort` 的 agent role 会降到 `low`，显式 per-role override 继续优先。
+  该字段写入 config 和 run metadata，用于降低真实 provider latency；它不改变
+  benchmark fidelity、selector heterogeneity 或 scientific claim gate。
 - 新增 `agenticsciml.ablation_evidence` 和 CLI `verify-ablation-evidence`，可以读取
   `ablation_runs.csv` / `ablation_summary.csv`，验证至少两个 seed、至少一个 non-baseline
   ablation variant、每个 ablation variant 的 seed 覆盖、verifier 和 artifact digest。

@@ -209,6 +209,8 @@ class AgenticSciMLOrchestrator:
         agent_config = self._agent_config_for_role(role)
         if agent_config and agent_config.reasoning_effort is not None:
             return agent_config.reasoning_effort
+        if self.config.llm_fast_mode:
+            return "low"
         value = agent_role_default_model_settings(role).get("reasoning_effort")
         return str(value) if value is not None else None
 
@@ -2689,6 +2691,7 @@ class AgenticSciMLOrchestrator:
             metadata["llm_model"] = model
         if isinstance(adapter_type, str) and adapter_type:
             metadata["llm_adapter_type"] = adapter_type
+        metadata["llm_fast_mode"] = self.config.llm_fast_mode
         if hasattr(self.llm, "timeout_s"):
             metadata["llm_timeout_s"] = getattr(self.llm, "timeout_s")
         if hasattr(self.llm, "max_retries"):
@@ -2778,7 +2781,7 @@ class AgenticSciMLOrchestrator:
                 role=role,
                 model=agent_config.model,
                 temperature=agent_config.temperature,
-                reasoning_effort=str(settings["reasoning_effort"]),
+                reasoning_effort="low" if self.config.llm_fast_mode else str(settings["reasoning_effort"]),
                 base_url=agent_config.base_url,
             )
         settings = agent_role_default_model_settings(role)
@@ -2786,7 +2789,7 @@ class AgenticSciMLOrchestrator:
             role=role,
             model="default",
             temperature=float(settings["temperature"]),
-            reasoning_effort=str(settings["reasoning_effort"]),
+            reasoning_effort="low" if self.config.llm_fast_mode else str(settings["reasoning_effort"]),
         )
 
 

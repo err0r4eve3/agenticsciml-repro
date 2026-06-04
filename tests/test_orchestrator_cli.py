@@ -221,6 +221,33 @@ class ProviderAwareMockLLM(MockLLMClient):
         self.adapter_type = self.provider_capabilities.adapter_type
 
 
+def test_llm_fast_mode_sets_unspecified_role_reasoning_to_low(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="fast-mode-contract",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        use_mock=False,
+        llm_fast_mode=True,
+        agents={
+            "root_engineer": AgentConfig(
+                role="root_engineer",
+                model="gpt-5-mini",
+                reasoning_effort="high",
+            ),
+            "engineer": AgentConfig(role="engineer", model="gpt-5-mini"),
+        },
+    )
+    restored = ExperimentConfig.from_dict(config.to_dict())
+    orchestrator = AgenticSciMLOrchestrator(restored, ProviderAwareMockLLM())
+
+    assert restored.llm_fast_mode is True
+    assert orchestrator._reasoning_effort_for_role("root_engineer") == "high"
+    assert orchestrator._reasoning_effort_for_role("engineer") == "low"
+    assert orchestrator._reasoning_effort_for_role("proposer") == "low"
+    assert orchestrator._effective_agent_config_for_role("engineer").reasoning_effort == "low"
+    assert orchestrator._effective_agent_config_for_role("proposer").reasoning_effort == "low"
+
+
 def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     config = ExperimentConfig(
         experiment_id="mock-run",

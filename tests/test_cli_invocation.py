@@ -47,11 +47,13 @@ def test_run_cli_accepts_real_llm_timeout_and_retry_budget() -> None:
             "30",
             "--llm-max-retries",
             "1",
+            "--llm-fast-mode",
         ]
     )
 
     assert args.llm_timeout_s == 30.0
     assert args.llm_max_retries == 1
+    assert args.llm_fast_mode is True
 
 
 def test_run_cli_accepts_agent_model_overrides() -> None:

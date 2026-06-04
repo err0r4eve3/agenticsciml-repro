@@ -145,6 +145,7 @@ def test_problem_intake_plans_benchmark_and_strategy_seeds() -> None:
             "mode": "mock",
             "target_solution_count": 7,
             "parallel_mutations": 3,
+            "llm_fast_mode": True,
             "selected_algorithm_ids": ["paper_cylinder_bandlimited_filter"],
         },
     )
@@ -158,8 +159,10 @@ def test_problem_intake_plans_benchmark_and_strategy_seeds() -> None:
     assert payload["planner_snapshot"]["selected_seed_snapshot"][0]["id"] == "paper_cylinder_bandlimited_filter"
     assert payload["run_config"]["max_iterations"] == 2
     assert payload["run_config"]["planned_solution_budget"] == 7
+    assert payload["run_config"]["llm_fast_mode"] is True
     assert "paper_cylinder_bandlimited_filter" in payload["selected_algorithm_ids"]
     assert payload["actions"][0]["payload"]["benchmark"] == "cylinder_wake_reconstruction_faithful_small"
+    assert payload["actions"][0]["payload"]["llm_fast_mode"] is True
     assert payload["actions"][0]["payload"]["selected_algorithm_ids"] == payload["selected_algorithm_ids"]
     assert payload["actions"][0]["payload"]["problem_intake"] == payload["problem_intake"]
     assert payload["actions"][0]["payload"]["planner_snapshot"] == payload["planner_snapshot"]

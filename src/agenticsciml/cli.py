@@ -107,6 +107,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         resource_constraints=_json_object_arg(args.resource_constraints_json, "--resource-constraints-json"),
         expert_blueprint_id=args.expert_blueprint_id,
         multi_seed_ablation=_json_object_arg(args.multi_seed_ablation_json, "--multi-seed-ablation-json"),
+        llm_fast_mode=args.llm_fast_mode,
         auto_approve_evaluation=not args.require_evaluation_approval,
         resume=args.resume,
     )
@@ -419,6 +420,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="real LLM provider retry count; defaults to OPENAI_MAX_RETRIES, which defaults to 0",
+    )
+    run.add_argument(
+        "--llm-fast-mode",
+        action="store_true",
+        help="route unspecified agent reasoning_effort defaults to low for latency-sensitive real runs",
     )
     run.add_argument("--output-dir", default="runs")
     run.add_argument("--experiment-id")

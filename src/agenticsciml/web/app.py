@@ -139,6 +139,7 @@ class RunStartRequest(BaseModel):
     resource_constraints: dict[str, Any] = Field(default_factory=dict)
     expert_blueprint_id: ExpertBlueprintId | None = None
     multi_seed_ablation: dict[str, Any] = Field(default_factory=dict)
+    llm_fast_mode: bool = False
     auto_approve_evaluation: bool = True
     resume: bool = False
     background: bool = False
@@ -169,6 +170,7 @@ class ProblemIntakeRequest(BaseModel):
     resource_constraints: dict[str, Any] = Field(default_factory=dict)
     expert_blueprint_id: ExpertBlueprintId | None = None
     multi_seed_ablation: dict[str, Any] = Field(default_factory=dict)
+    llm_fast_mode: bool = False
 
 
 class RunReadinessRequest(BaseModel):
@@ -196,6 +198,7 @@ class RunReadinessRequest(BaseModel):
     resource_constraints: dict[str, Any] = Field(default_factory=dict)
     expert_blueprint_id: ExpertBlueprintId | None = None
     multi_seed_ablation: dict[str, Any] = Field(default_factory=dict)
+    llm_fast_mode: bool = False
     real_confirmed: bool = False
 
 
@@ -226,6 +229,7 @@ class SolverChatRequest(BaseModel):
     resource_constraints: dict[str, Any] = Field(default_factory=dict)
     expert_blueprint_id: ExpertBlueprintId | None = None
     multi_seed_ablation: dict[str, Any] = Field(default_factory=dict)
+    llm_fast_mode: bool = False
 
 
 class AccountCreateRequest(BaseModel):
@@ -548,6 +552,7 @@ def _run_orchestrator(
             resource_constraints=_normalized_mapping(request.resource_constraints),
             expert_blueprint_id=request.expert_blueprint_id,
             multi_seed_ablation=_normalized_mapping(request.multi_seed_ablation),
+            llm_fast_mode=request.llm_fast_mode,
             auto_approve_evaluation=request.auto_approve_evaluation,
             resume=request.resume,
         )
@@ -690,6 +695,7 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
         "resource_constraints": _normalized_mapping(request.resource_constraints),
         "expert_blueprint_id": request.expert_blueprint_id,
         "multi_seed_ablation": _normalized_mapping(request.multi_seed_ablation),
+        "llm_fast_mode": request.llm_fast_mode,
         "agent_models": {
             role: config.to_dict()
             for role, config in _agent_configs_from_problem_request(request).items()
@@ -764,6 +770,7 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
             "resource_constraints": _normalized_mapping(request.resource_constraints),
             "expert_blueprint_id": request.expert_blueprint_id,
             "multi_seed_ablation": _normalized_mapping(request.multi_seed_ablation),
+            "llm_fast_mode": request.llm_fast_mode,
         },
         "agent_models": {
             role: config.to_dict()
@@ -822,6 +829,7 @@ def _planner_snapshot(
         "expert_blueprint_id": request.expert_blueprint_id,
         "visual_audit_mode": request.visual_audit_mode,
         "multi_seed_ablation": _normalized_mapping(request.multi_seed_ablation),
+        "llm_fast_mode": request.llm_fast_mode,
         "claim_boundary": (
             "Problem-intake planning is a controlled mapping to local benchmark and strategy seed catalogs. "
             "It is not evaluator synthesis and is not scientific evidence."
@@ -2368,6 +2376,7 @@ def _problem_intake_request_from_chat(request: SolverChatRequest) -> ProblemInta
         resource_constraints=_normalized_mapping(request.resource_constraints),
         expert_blueprint_id=request.expert_blueprint_id,
         multi_seed_ablation=_normalized_mapping(request.multi_seed_ablation),
+        llm_fast_mode=request.llm_fast_mode,
     )
 
 

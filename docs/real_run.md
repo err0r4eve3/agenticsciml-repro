@@ -62,6 +62,20 @@ Provider timeout/retry fields are written into generation trace metadata and
 `run_metadata.json`. Generated solution execution still uses `--timeout-s`;
 that is the sandbox/evaluator subprocess budget, not the provider HTTP budget.
 
+Latency-sensitive runs can enable run-level fast mode:
+
+```bash
+uv run --python 3.11 --extra real-llm agenticsciml run examples/poisson_lshape \
+  --llm-fast-mode \
+  --llm-timeout-s 75 \
+  --llm-max-retries 0
+```
+
+Fast mode routes any agent role without an explicit `reasoning_effort` override
+to `low`. Explicit per-role settings in `--agent-models-json` still win. This
+is a runtime budget choice for getting real provider evidence; it does not
+change benchmark fidelity, selector heterogeneity, or scientific claim gates.
+
 Optional fail-closed budget gates:
 
 ```bash
