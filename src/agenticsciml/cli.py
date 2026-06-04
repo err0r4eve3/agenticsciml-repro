@@ -35,6 +35,7 @@ from agenticsciml.real_problem_closure import write_real_problem_closure_plan
 from agenticsciml.reference_capability_matrix import write_reference_capability_matrix
 from agenticsciml.reporting import write_sdk_trace_export, write_trace_summary
 from agenticsciml.selector_evidence import write_selector_evidence_packet
+from agenticsciml.secret_hygiene import write_secret_hygiene_report
 from agenticsciml.storage import _atomic_write_text
 
 
@@ -369,6 +370,7 @@ def cmd_smoke_llm(args: argparse.Namespace) -> int:
         timeout_s=args.timeout_s,
         max_iterations=args.max_iterations,
         parallel_mutations=args.parallel_mutations,
+        llm_fast_mode=args.llm_fast_mode,
     )
     print(result.report_md.resolve())
     return 0
@@ -378,6 +380,15 @@ def cmd_verify_smoke_llm(args: argparse.Namespace) -> int:
     result = verify_llm_smoke_output(Path(args.output_dir).resolve())
     print(result.verification_json.resolve())
     return 0 if result.passed else 1
+
+
+def cmd_secret_hygiene(args: argparse.Namespace) -> int:
+    result = write_secret_hygiene_report(
+        Path(args.run_dir).resolve(),
+        output_json=Path(args.output_json).resolve() if args.output_json else None,
+    )
+    print(result.report_json.resolve())
+    return 1 if args.fail_on_findings and not result.passed else 0
 
 
 def cmd_web(args: argparse.Namespace) -> int:
@@ -683,6 +694,11 @@ def build_parser() -> argparse.ArgumentParser:
     smoke_llm.add_argument("--max-iterations", type=int, default=1)
     smoke_llm.add_argument("--parallel-mutations", type=int, default=2)
     smoke_llm.add_argument("--output-dir", default="runs/real-llm-smoke")
+    smoke_llm.add_argument(
+        "--llm-fast-mode",
+        action="store_true",
+        help="route unspecified agent reasoning_effort defaults to low for latency-sensitive real smoke runs",
+    )
     smoke_mode = smoke_llm.add_mutually_exclusive_group()
     smoke_mode.add_argument("--dry-run", dest="dry_run", action="store_true", default=True)
     smoke_mode.add_argument("--real", dest="dry_run", action="store_false")
@@ -691,6 +707,12 @@ def build_parser() -> argparse.ArgumentParser:
     verify_smoke_llm = sub.add_parser("verify-smoke-llm")
     verify_smoke_llm.add_argument("output_dir")
     verify_smoke_llm.set_defaults(func=cmd_verify_smoke_llm)
+
+    secret_hygiene = sub.add_parser("secret-hygiene")
+    secret_hygiene.add_argument("run_dir")
+    secret_hygiene.add_argument("--output-json")
+    secret_hygiene.add_argument("--fail-on-findings", action="store_true")
+    secret_hygiene.set_defaults(func=cmd_secret_hygiene)
 
     web = sub.add_parser("web")
     web.add_argument("--host", default="127.0.0.1")

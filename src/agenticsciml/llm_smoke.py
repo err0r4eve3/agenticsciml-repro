@@ -18,7 +18,13 @@ from typing import Any
 from agenticsciml.config import EvolutionConfig, ExperimentConfig
 from agenticsciml.evidence import EVIDENCE_MODE_REAL_LLM_SMOKE, SCIENTIFIC_CLAIM_NOT_SUPPORTED
 from agenticsciml.llm.base import LLMClient
-from agenticsciml.llm.budget import LLMBudget
+from agenticsciml.llm.budget import (
+    LLMBudget,
+    combine_llm_call_ranges,
+    estimate_orchestrator_llm_call_range,
+    llm_call_budget_preflight,
+    require_llm_call_budget_preflight,
+)
 from agenticsciml.llm.capabilities import capabilities_for_openai_compatible
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
@@ -189,6 +195,7 @@ def run_llm_smoke(
     timeout_s: int = 60,
     max_iterations: int = 1,
     parallel_mutations: int = 2,
+    llm_fast_mode: bool = False,
     llm_client: LLMClient | None = None,
 ) -> LLMSmokeResult:
     selected_variants = variants or list(DEFAULT_SMOKE_VARIANTS)
@@ -217,6 +224,11 @@ def run_llm_smoke(
         report_path = output_dir / "real_llm_smoke_report.md"
         report_path.write_text(_render_dry_run_report(plan), encoding="utf-8")
         return LLMSmokeResult(plan_json=plan_path, report_md=report_path, manifest_json=manifest_path)
+    preflight = manifest.get("budget_preflight", {})
+    if isinstance(preflight, dict) and preflight.get("passed") is not True:
+        report_path = output_dir / "real_llm_smoke_report.md"
+        report_path.write_text(_render_budget_blocked_report(plan, preflight), encoding="utf-8")
+        require_llm_call_budget_preflight(preflight)
 
     try:
         llm = llm_client or OpenAIAdapter()
@@ -245,6 +257,7 @@ def run_llm_smoke(
                 parallel_mutations=parallel_mutations,
             ),
             use_mock=False,
+            llm_fast_mode=llm_fast_mode,
         )
         try:
             recording_llm = _RecordingLLMClient(llm, ledger_path, budget)
@@ -296,9 +309,20 @@ def _build_plan(
             "max_iterations": max_iterations,
             "parallel_mutations": parallel_mutations,
             "use_branch_context": variant != "no_branch_context",
+            "expected_llm_call_range": estimate_orchestrator_llm_call_range(
+                max_iterations=max_iterations,
+                parallel_mutations=parallel_mutations,
+            ),
         }
         for variant in variants
     ]
+    expected_llm_call_range = combine_llm_call_ranges(
+        [
+            dict(entry["expected_llm_call_range"])
+            for entry in runs
+            if isinstance(entry.get("expected_llm_call_range"), dict)
+        ]
+    )
     expected_artifacts = [
         artifact
         for entry in runs
@@ -339,6 +363,7 @@ def _build_plan(
             *expected_artifacts,
         ],
         "runs": runs,
+        "expected_llm_call_range": expected_llm_call_range,
         "claim_boundary": (
             "This smoke can provide prompt-delivery and behavioral-difference evidence only. "
             "It is not a paper-scale scientific reproduction."
@@ -498,6 +523,45 @@ def _render_failure_report(plan: dict[str, Any], failure_kind: str, exc: Excepti
         "- `real_llm_smoke_manifest.json`\n\n"
         "## Boundary\n\n"
         f"{plan['claim_boundary']}\n"
+    )
+
+
+def _render_budget_blocked_report(plan: dict[str, Any], preflight: dict[str, Any]) -> str:
+    blockers = preflight.get("blockers")
+    blocker_lines = [
+        f"- {item}" for item in blockers if isinstance(item, str)
+    ] if isinstance(blockers, list) else []
+    if not blocker_lines:
+        blocker_lines = ["- budget preflight failed"]
+    return "\n".join(
+        [
+            "# Real LLM Smoke Blocked",
+            "",
+            f"- Evidence mode: `{plan['evidence_mode']}`",
+            f"- Scientific claim: `{plan['scientific_claim']}`",
+            "- failure_kind: `blocked_by_budget`",
+            "",
+            "No provider calls were made. Reduce the smoke matrix or increase the explicit call budget.",
+            "",
+            "## Budget Preflight",
+            "",
+            f"- expected min calls: `{preflight.get('expected_min_llm_calls')}`",
+            f"- expected max calls: `{preflight.get('expected_max_llm_calls')}`",
+            f"- configured max calls: `{preflight.get('configured_max_llm_calls')}`",
+            "",
+            "## Blockers",
+            "",
+            *blocker_lines,
+            "",
+            "## Manifest",
+            "",
+            "- `real_llm_smoke_manifest.json`",
+            "",
+            "## Boundary",
+            "",
+            str(plan["claim_boundary"]),
+            "",
+        ]
     )
 
 
@@ -1210,7 +1274,11 @@ def _build_manifest(plan: dict[str, Any], *, llm_client: LLMClient | None, budge
         type(llm_client).__name__ if llm_client is not None else _default_provider_capabilities().adapter_type
     )
     provider_capabilities = _llm_provider_capabilities(llm_client) if llm_client is not None else _default_provider_capabilities().to_dict()
-    run_count = len(plan.get("runs", []))
+    expected_llm_call_range = dict(plan.get("expected_llm_call_range") or {})
+    budget_preflight = llm_call_budget_preflight(
+        budget=budget,
+        expected_llm_call_range=expected_llm_call_range,
+    )
     return {
         "schema_version": 1,
         "execution_mode": plan["execution_mode"],
@@ -1222,6 +1290,7 @@ def _build_manifest(plan: dict[str, Any], *, llm_client: LLMClient | None, budge
         "python_version": sys.version.split()[0],
         "package_versions": _package_versions(),
         "seed": plan["seed"],
+        "run_count": len(plan["runs"]),
         "max_iterations": [entry["max_iterations"] for entry in plan["runs"]],
         "parallel_mutations": [entry["parallel_mutations"] for entry in plan["runs"]],
         "timeout_s": plan["timeout_s"],
@@ -1230,10 +1299,8 @@ def _build_manifest(plan: dict[str, Any], *, llm_client: LLMClient | None, budge
         "plan_hash": plan_hash,
         "config_hash": plan_hash,
         "token_budget": budget.to_dict(),
-        "expected_llm_call_range": {
-            "min": max(1, run_count * 8),
-            "max": max(1, run_count * 80),
-        },
+        "expected_llm_call_range": expected_llm_call_range,
+        "budget_preflight": budget_preflight,
         "claim_boundary": plan["claim_boundary"],
     }
 

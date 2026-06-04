@@ -20,7 +20,13 @@ from agenticsciml.evidence import (
     SCIENTIFIC_CLAIM_NOT_SUPPORTED,
 )
 from agenticsciml.llm.base import LLMClient
-from agenticsciml.llm.budget import LLMBudget
+from agenticsciml.llm.budget import (
+    LLMBudget,
+    combine_llm_call_ranges,
+    estimate_orchestrator_llm_call_range,
+    llm_call_budget_preflight,
+    require_llm_call_budget_preflight,
+)
 from agenticsciml.llm.capabilities import capabilities_for_openai_compatible
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
@@ -145,6 +151,10 @@ def _run_real_ablation(
             plan_json=plan_path,
             manifest_json=manifest_path,
         )
+    preflight = manifest.get("budget_preflight", {})
+    if isinstance(preflight, dict) and preflight.get("passed") is not True:
+        report_md.write_text(_render_real_budget_blocked_report(plan, preflight), encoding="utf-8")
+        require_llm_call_budget_preflight(preflight)
 
     try:
         inner_llm = llm_client or OpenAIAdapter(timeout_s=llm_timeout_s, max_retries=llm_max_retries)
@@ -335,12 +345,17 @@ def _build_real_ablation_plan(
     for variant in variants:
         for seed in seeds:
             config = _variant_config(variant, seed, timeout_s=timeout_s)
+            expected_call_range = estimate_orchestrator_llm_call_range(
+                max_iterations=config.max_iterations,
+                parallel_mutations=config.parallel_mutations,
+            )
             runs.append(
                 {
                     "variant": variant,
                     "seed": seed,
                     "experiment_id": f"{variant}-seed-{seed}",
                     "evolution": config.to_dict(),
+                    "expected_llm_call_range": expected_call_range,
                 }
             )
     expected_run_artifacts = [
@@ -355,6 +370,13 @@ def _build_real_ablation_plan(
             f"runs/{entry['experiment_id']}/llm_call_ledger.jsonl",
         ]
     ]
+    expected_llm_call_range = combine_llm_call_ranges(
+        [
+            dict(entry["expected_llm_call_range"])
+            for entry in runs
+            if isinstance(entry.get("expected_llm_call_range"), dict)
+        ]
+    )
     return {
         "schema_version": 1,
         "benchmark_dir": str(benchmark_dir),
@@ -369,6 +391,7 @@ def _build_real_ablation_plan(
         "evidence_mode": EVIDENCE_MODE_REAL_LLM_ABLATION,
         "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
         "runs": runs,
+        "expected_llm_call_range": expected_llm_call_range,
         "expected_artifacts": [
             "real_llm_ablation_plan.json",
             "real_llm_ablation_manifest.json",
@@ -397,6 +420,11 @@ def _build_real_ablation_manifest(
 ) -> dict[str, Any]:
     provider_capabilities = _provider_capabilities(llm_client)
     run_count = len(plan.get("runs", []))
+    expected_llm_call_range = dict(plan.get("expected_llm_call_range") or {})
+    budget_preflight = llm_call_budget_preflight(
+        budget=budget,
+        expected_llm_call_range=expected_llm_call_range,
+    )
     return {
         "schema_version": 1,
         "execution_mode": plan["execution_mode"],
@@ -416,10 +444,8 @@ def _build_real_ablation_manifest(
         "plan_hash": _hash_payload(plan),
         "config_hash": _hash_payload({"runs": plan["runs"], "benchmark_dir": plan["benchmark_dir"]}),
         "token_budget": budget.to_dict(),
-        "expected_llm_call_range": {
-            "min": max(1, run_count * 6),
-            "max": max(1, run_count * 80),
-        },
+        "expected_llm_call_range": expected_llm_call_range,
+        "budget_preflight": budget_preflight,
         "claim_boundary": plan["claim_boundary"],
     }
 
@@ -700,6 +726,39 @@ def _render_real_failure_report(plan: dict[str, Any], failure_kind: str, exc: Ex
             f"Error type: `{type(exc).__name__}`.",
             "",
             "The run remains blocked. Do not treat this output as multi-seed ablation evidence.",
+            "",
+            f"Planned run count: `{len(plan.get('runs', []))}`.",
+            "",
+        ]
+    )
+
+
+def _render_real_budget_blocked_report(plan: dict[str, Any], preflight: dict[str, Any]) -> str:
+    blockers = preflight.get("blockers")
+    blocker_lines = [
+        f"- {item}" for item in blockers if isinstance(item, str)
+    ] if isinstance(blockers, list) else []
+    if not blocker_lines:
+        blocker_lines = ["- budget preflight failed"]
+    return "\n".join(
+        [
+            "# Real LLM Ablation Blocked",
+            "",
+            f"Evidence mode: `{EVIDENCE_MODE_REAL_LLM_ABLATION}`.",
+            "",
+            "Failure kind: `blocked_by_budget`.",
+            "",
+            "No provider calls were made. Increase the explicit call budget, reduce variants/seeds, or run a smaller matrix.",
+            "",
+            "## Budget Preflight",
+            "",
+            f"- expected min calls: `{preflight.get('expected_min_llm_calls')}`",
+            f"- expected max calls: `{preflight.get('expected_max_llm_calls')}`",
+            f"- configured max calls: `{preflight.get('configured_max_llm_calls')}`",
+            "",
+            "## Blockers",
+            "",
+            *blocker_lines,
             "",
             f"Planned run count: `{len(plan.get('runs', []))}`.",
             "",

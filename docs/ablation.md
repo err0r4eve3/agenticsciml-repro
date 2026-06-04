@@ -57,7 +57,9 @@ uv run --python 3.11 --extra dev agenticsciml ablate examples/function_approx \
 
 真正调用 provider 时必须去掉 `--dry-run`，并使用 real LLM extra、凭证和预算
 环境变量。该命令会在 provider call 前写出 `real_llm_ablation_plan.json` 与
-`real_llm_ablation_manifest.json`，每个 run 还会写 `llm_call_ledger.jsonl`：
+`real_llm_ablation_manifest.json`，并执行共享 LLM call-budget preflight；若
+`expected_llm_call_range.max` 超过 `AGENTICSCIML_MAX_LLM_CALLS`，命令会在 provider
+call 前以 `blocked_by_budget` 退出。每个真实 run 还会写 `llm_call_ledger.jsonl`：
 
 ```bash
 export OPENAI_API_KEY=<redacted>
@@ -69,6 +71,14 @@ uv run --python 3.11 --extra real-llm agenticsciml ablate examples/function_appr
   --variants root_only,kb,branch_context,no_branch_context \
   --output-dir runs/real-llm-ablation
 ```
+
+真实 ablation 完成后，先做 artifact secret hygiene 扫描：
+
+```bash
+uv run --python 3.11 --extra dev agenticsciml secret-hygiene runs/real-llm-ablation --fail-on-findings
+```
+
+该扫描只报告路径和规则名，不打印匹配到的 secret 值。
 
 验证已有 ablation 输出是否能作为 readiness evidence：
 
@@ -91,7 +101,7 @@ uv run --python 3.11 --extra dev agenticsciml verify-ablation-evidence runs/abla
 - `real_llm_ablation_plan.json`：real/dry-run 模式的计划文件，列出 benchmark、seed、
   variant、evolution config 和预期 artifact。
 - `real_llm_ablation_manifest.json`：real/dry-run 模式的 provider/model、package、
-  budget 和 plan hash manifest。
+  budget、budget preflight 和 plan hash manifest。
 - `multi_seed_ablation_verified_manifest.json`：可选的验证 manifest，供 run config 的
   `multi_seed_ablation.ablation_output_dir` 或 `--multi-seed-ablation-json` 指向原始
   ablation 输出后由 orchestrator 重新生成并附加到 run artifact。
