@@ -373,9 +373,10 @@ def _build_real_ablation_plan(
             if isinstance(entry.get("expected_llm_call_range"), dict)
         ]
     )
-    return {
+    plan = {
         "schema_version": 1,
         "benchmark_dir": str(benchmark_dir),
+        "benchmark_content_hash": _benchmark_content_hash(benchmark_dir),
         "output_dir": str(output_dir),
         "seeds": list(seeds),
         "variants": list(variants),
@@ -387,7 +388,9 @@ def _build_real_ablation_plan(
         "evidence_mode": EVIDENCE_MODE_REAL_LLM_ABLATION,
         "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
         "runs": runs,
+        "full_stage_run_count": len(runs),
         "expected_llm_call_range": expected_llm_call_range,
+        "full_stage_expected_llm_call_range": expected_llm_call_range,
         "expected_artifacts": _real_ablation_expected_artifacts(runs),
         "claim_boundary": {
             "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
@@ -399,6 +402,8 @@ def _build_real_ablation_plan(
             ),
         },
     }
+    plan["full_stage_plan_hash"] = _full_stage_plan_hash(plan)
+    return plan
 
 
 def _with_budget_batch_plan(plan: dict[str, Any], budget: LLMBudget) -> dict[str, Any]:
@@ -446,6 +451,7 @@ def _select_budget_batch(plan: dict[str, Any], budget_batch_index: int) -> dict[
     selected = dict(plan)
     selected["full_stage_run_count"] = len(plan.get("runs", []))
     selected["full_stage_expected_llm_call_range"] = dict(plan.get("expected_llm_call_range") or {})
+    selected["full_stage_plan_hash"] = str(plan.get("full_stage_plan_hash", ""))
     selected["selected_budget_batch_index"] = budget_batch_index
     selected["budget_batch_selection"] = dict(selected_batch)
     selected["runs"] = selected_runs
@@ -472,6 +478,9 @@ def _build_budget_batch_plan(runs: list[dict[str, Any]], *, max_calls: int | Non
         return {
             "schema_version": 1,
             "status": "not_configured",
+            "full_stage_budget_status": "not_configured",
+            "batch_plan_status": "not_configured",
+            "batching_required": False,
             "configured_max_llm_calls": None,
             "required_for_execution": False,
             "planned_run_count": len(runs),
@@ -509,11 +518,31 @@ def _build_budget_batch_plan(runs: list[dict[str, Any]], *, max_calls: int | Non
     if current_runs:
         batches.append(_budget_batch(len(batches) + 1, current_runs))
     coverage_run_count = sum(int(batch["run_count"]) for batch in batches)
+    total_max = int(total_call_range.get("max", 0))
+    batching_required = total_max > max_calls
+    full_stage_budget_status = (
+        "blocked_by_single_run"
+        if blocked_runs
+        else "blocked_by_budget"
+        if batching_required
+        else "ready"
+    )
+    batch_plan_status = (
+        "blocked_by_single_run"
+        if blocked_runs
+        else "ready"
+        if coverage_run_count == len(runs)
+        and all(int(dict(batch.get("expected_llm_call_range") or {}).get("max", 0)) <= max_calls for batch in batches)
+        else "invalid_plan"
+    )
     return {
         "schema_version": 1,
-        "status": "blocked_by_budget" if blocked_runs else "ready",
+        "status": full_stage_budget_status,
+        "full_stage_budget_status": full_stage_budget_status,
+        "batch_plan_status": batch_plan_status,
+        "batching_required": batching_required,
         "configured_max_llm_calls": max_calls,
-        "required_for_execution": int(total_call_range.get("max", 0)) > max_calls,
+        "required_for_execution": batching_required,
         "planned_run_count": len(runs),
         "coverage_run_count": coverage_run_count,
         "total_expected_llm_call_range": total_call_range,
@@ -587,12 +616,14 @@ def _build_real_ablation_manifest(
         "model": getattr(llm_client, "model", None) or os.environ.get("OPENAI_MODEL", "gpt-5-mini"),
         "adapter_type": getattr(llm_client, "adapter_type", None) or provider_capabilities["adapter_type"],
         "provider_capabilities": provider_capabilities,
+        "benchmark_content_hash": plan.get("benchmark_content_hash"),
         "python_version": sys.version.split()[0],
         "package_versions": _package_versions(),
         "seeds": plan["seeds"],
         "variants": plan["variants"],
         "run_count": run_count,
         "full_stage_run_count": plan.get("full_stage_run_count", run_count),
+        "full_stage_plan_hash": plan.get("full_stage_plan_hash", ""),
         "selected_budget_batch_index": plan.get("selected_budget_batch_index"),
         "timeout_s": plan["timeout_s"],
         "timeout_scope": plan["timeout_scope"],
@@ -608,6 +639,7 @@ def _build_real_ablation_manifest(
         "budget_preflight": budget_preflight,
         "budget_batch_plan": plan.get("budget_batch_plan"),
         "budget_batch_selection": plan.get("budget_batch_selection"),
+        "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
         "claim_boundary": plan["claim_boundary"],
     }
 
@@ -635,6 +667,43 @@ def _package_versions() -> dict[str, str | None]:
 def _hash_payload(payload: dict[str, Any]) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _full_stage_plan_hash(plan: dict[str, Any]) -> str:
+    return _hash_payload(
+        {
+            "schema_version": plan.get("schema_version"),
+            "benchmark_dir": plan.get("benchmark_dir"),
+            "benchmark_content_hash": plan.get("benchmark_content_hash"),
+            "seeds": plan.get("seeds"),
+            "variants": plan.get("variants"),
+            "timeout_s": plan.get("timeout_s"),
+            "timeout_scope": plan.get("timeout_scope"),
+            "evidence_mode": plan.get("evidence_mode"),
+            "scientific_claim": plan.get("scientific_claim"),
+            "runs": plan.get("runs"),
+            "expected_llm_call_range": plan.get("expected_llm_call_range"),
+            "claim_boundary": plan.get("claim_boundary"),
+        }
+    )
+
+
+def _benchmark_content_hash(benchmark_dir: Path) -> str:
+    root = benchmark_dir.resolve()
+    items: list[dict[str, str]] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        if "__pycache__" in path.parts:
+            continue
+        relative = path.relative_to(root).as_posix()
+        items.append(
+            {
+                "path": relative,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        )
+    return _hash_payload({"schema_version": 1, "artifacts": items})
 
 
 def _champion(nodes: list[dict[str, Any]]) -> dict[str, Any]:

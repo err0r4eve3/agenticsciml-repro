@@ -192,8 +192,11 @@ shared LLM call-budget preflight. If `expected_llm_call_range.max` exceeds
 Real ablation manifests also include `budget_batch_plan`. When a full planned
 matrix is over the configured call budget, run a single explicit batch with
 `agenticsciml ablate --real --budget-batch-index N`; the manifest keeps the
-full-stage run count and expected call range so partial batches cannot be
-mistaken for complete Stage A evidence.
+full-stage run count, expected call range, and `full_stage_plan_hash` so partial
+batches cannot be mistaken for complete Stage A evidence. Use
+`agenticsciml collect-ablation-batches` to aggregate batches; it reorders rows by
+the canonical stage plan, rejects duplicate/extra run IDs, and recomputes
+`ablation_summary.csv` instead of concatenating stale summaries.
 
 After a real or mock run completes, inspect the trace quality gate:
 

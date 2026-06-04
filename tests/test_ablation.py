@@ -193,8 +193,15 @@ def test_ablation_real_dry_run_writes_plan_without_evidence_csv(
     assert len(plan["runs"]) == 4
     assert manifest["execution_mode"] == "dry_run"
     assert manifest["run_count"] == 4
+    assert manifest["full_stage_run_count"] == 4
+    assert manifest["full_stage_plan_hash"] == plan["full_stage_plan_hash"]
+    assert manifest["benchmark_content_hash"] == plan["benchmark_content_hash"]
     assert manifest["budget_preflight"]["status"] == "ready"
     assert manifest["expected_llm_call_range"]["max"] == 52
+    assert manifest["full_stage_expected_llm_call_range"]["max"] == 52
+    assert manifest["budget_batch_plan"]["full_stage_budget_status"] == "not_configured"
+    assert manifest["budget_batch_plan"]["batch_plan_status"] == "not_configured"
+    assert manifest["budget_batch_plan"]["batching_required"] is False
     assert manifest["budget_batch_plan"]["batch_count"] == 1
     assert manifest["budget_batch_plan"]["coverage_run_count"] == 4
     assert "No provider calls were made" in report
@@ -223,11 +230,59 @@ def test_ablation_real_dry_run_records_budget_batches_when_full_stage_exceeds_bu
 
     assert manifest["run_count"] == 20
     assert manifest["budget_preflight"]["status"] == "blocked_by_budget"
+    assert manifest["full_stage_plan_hash"] == plan["full_stage_plan_hash"]
+    assert manifest["budget_batch_plan"]["full_stage_budget_status"] == "blocked_by_budget"
+    assert manifest["budget_batch_plan"]["batch_plan_status"] == "ready"
+    assert manifest["budget_batch_plan"]["batching_required"] is True
     assert manifest["budget_batch_plan"]["required_for_execution"] is True
     assert manifest["budget_batch_plan"]["coverage_run_count"] == 20
     assert manifest["budget_batch_plan"]["batch_count"] > 1
     assert plan["budget_batch_plan"]["batches"][0]["expected_llm_call_range"]["max"] <= 80
     assert "## Budget Batches" in report
+
+
+def test_ablation_full_stage_plan_hash_survives_output_dir_and_batch_selection(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("AGENTICSCIML_MAX_LLM_CALLS", "25")
+
+    result_a = run_ablation(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path / "a",
+        seeds=[0],
+        variants=["root_only", "kb"],
+        mock=False,
+        dry_run=True,
+    )
+    result_b = run_ablation(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path / "b",
+        seeds=[0],
+        variants=["root_only", "kb"],
+        mock=False,
+        dry_run=True,
+    )
+    batch = run_ablation(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path / "batch",
+        seeds=[0],
+        variants=["root_only", "kb"],
+        mock=False,
+        dry_run=True,
+        budget_batch_index=1,
+    )
+
+    plan_a = json.loads(result_a.plan_json.read_text(encoding="utf-8"))
+    plan_b = json.loads(result_b.plan_json.read_text(encoding="utf-8"))
+    batch_plan = json.loads(batch.plan_json.read_text(encoding="utf-8"))
+    batch_manifest = json.loads(batch.manifest_json.read_text(encoding="utf-8"))
+
+    assert plan_a["full_stage_plan_hash"] == plan_b["full_stage_plan_hash"]
+    assert batch_plan["full_stage_plan_hash"] == plan_a["full_stage_plan_hash"]
+    assert batch_manifest["full_stage_plan_hash"] == plan_a["full_stage_plan_hash"]
+    assert batch_manifest["plan_hash"] != json.loads(result_a.manifest_json.read_text(encoding="utf-8"))["plan_hash"]
 
 
 def test_ablation_real_mode_blocks_on_call_budget_preflight(
@@ -282,6 +337,7 @@ def test_ablation_real_mode_can_execute_selected_budget_batch(
     assert manifest["selected_budget_batch_index"] == 1
     assert manifest["budget_preflight"]["status"] == "ready"
     assert manifest["full_stage_expected_llm_call_range"]["max"] == 26
+    assert manifest["full_stage_plan_hash"]
     assert manifest["expected_llm_call_range"]["max"] == 4
     assert [row["variant"] for row in run_rows] == ["root_only"]
 

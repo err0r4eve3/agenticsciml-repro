@@ -63,8 +63,14 @@
   ledger 继续执行 token/cost 预算。
 - Real ablation manifest 现在写入 `budget_batch_plan`；当 full Stage A 矩阵超过当前
   call budget 时，可用显式 `--budget-batch-index N` 只执行一个预算内 batch。manifest
-  保留 `full_stage_run_count` 和 `full_stage_expected_llm_call_range`，防止 partial
-  batch 被误读为完整多 seed evidence。
+  保留 `full_stage_run_count`、`full_stage_expected_llm_call_range` 和
+  `full_stage_plan_hash`，防止 partial batch 被误读为完整多 seed evidence。
+  `budget_batch_plan` 现在拆分 `full_stage_budget_status`、`batch_plan_status` 和
+  `batching_required`，避免把 batch-ready 误读成 full-stage-ready。
+- 新增 CLI `collect-ablation-batches`，按 canonical stage plan 校验多个 real ablation
+  batch，拒绝 hash/benchmark/run ID/secret hygiene/trace summary 不一致的 batch，合并
+  `ablation_runs.csv` 后重新计算 `ablation_summary.csv`，并写
+  `batch_collection_manifest.json` 标注 partial/complete。
 - `smoke-llm` 新增 `--llm-fast-mode`，与 ablation runner 的 latency-sensitive real-run
   路径保持一致。
 - 新增 CLI `secret-hygiene`，扫描 run artifact 文本文件中的常见 token pattern 和当前
