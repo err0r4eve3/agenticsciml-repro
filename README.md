@@ -157,9 +157,10 @@ export AGENTICSCIML_COST_PER_1K_TOKENS_USD=0.01
 ```
 
 The benchmark catalog now includes all six paper task families as lightweight
-offline examples, plus five `faithful-small` upgrades for S1.1 function
+offline examples, plus six `faithful-small` upgrades for S1.1 function
 approximation, S1.2 L-shaped Poisson, S1.3 Burgers, S1.4 antiderivative
-operator learning, and S1.5 reaction-diffusion operator learning. Each catalog entry records
+operator learning, S1.5 reaction-diffusion operator learning, and S1.6 sparse
+cylinder-wake reconstruction. Each catalog entry records
 `fidelity_level`, expected runtime, dependency flags, and paper-gap notes so
 proxy tasks are not mistaken for full paper experiments:
 
@@ -174,6 +175,7 @@ proxy tasks are not mistaken for full paper experiments:
 - `examples/reaction_diffusion_operator`
 - `examples/reaction_diffusion_operator_faithful_small`
 - `examples/cylinder_wake_reconstruction`
+- `examples/cylinder_wake_reconstruction_faithful_small`
 
 These examples keep PyTorch as an optional `sciml` extra for real generated
 SciML solutions. Most checked-in benchmark fixtures use NumPy to keep local
@@ -183,12 +185,15 @@ and PDE residual collocation arrays, `burgers_pinn_faithful_small` adds
 IC/BC/collocation structure, and `antiderivative_operator_faithful_small`
 adds 100-point function-to-function operator scoring, and
 `reaction_diffusion_operator_faithful_small` adds a multiple-input
-function-to-spatiotemporal-field task without claiming paper-like score parity.
+function-to-spatiotemporal-field task, and
+`cylinder_wake_reconstruction_faithful_small` adds SHRED-style lagged sparse
+sensor-history reconstruction on deterministic synthetic cylinder-wake-like
+fields, without claiming paper-like score parity.
 
 ## Scope
 
 This is not a claim that the paper's reported improvement factors are reproduced.
 The MVP validates orchestration, persistence, evaluation contracts, and
 deterministic mock behavior first. The benchmark catalog now mixes engineering
-proxies with five faithful-small tasks; none of these are full paper-score
+proxies with six faithful-small tasks; none of these are full paper-score
 reproductions.

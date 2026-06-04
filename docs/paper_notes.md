@@ -62,7 +62,7 @@ computes the metric without importing `solution.py`.
 ## Benchmark Coverage
 
 The local benchmark catalog mirrors the six paper task families with lightweight
-offline proxies and five faithful-small upgrades:
+offline proxies and six faithful-small upgrades:
 
 - `S1.1` `function_approx`: discontinuous oscillatory function approximation proxy.
 - `S1.1` `function_approx_faithful_small`: paper-described piecewise function
@@ -80,6 +80,9 @@ offline proxies and five faithful-small upgrades:
 - `S1.5` `reaction_diffusion_operator_faithful_small`: diffusion/source/initial
   fields to a 40x50 spatiotemporal response, still low-budget and not paper-like.
 - `S1.6` `cylinder_wake_reconstruction`: sparse sensor to vorticity-field reconstruction proxy.
+- `S1.6` `cylinder_wake_reconstruction_faithful_small`: SHRED-style lagged
+  sparse sensor-history reconstruction on deterministic synthetic
+  cylinder-wake-like vorticity fields, still low-budget and not paper-like.
 
 These examples preserve workflow pressure points from the paper but use small
 deterministic local datasets for validation. The faithful-small entries narrow

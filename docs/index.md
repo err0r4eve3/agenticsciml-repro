@@ -14,7 +14,7 @@
 - [多 Agent 设计方法](multi_agent_design.md)：什么时候使用多 Agent、状态机优先原则、通信方式、可靠性和新增 Agent 检查清单。
 - [Git 与 Markdown 分层记录方法论](git_markdown_methodology.md)：把论文依据、SDK 边界、Git 时间轴、Markdown 文档树和 run artifacts 统一为可追溯记录协议。
 - [OpenAI Agents SDK 升级复盘](openai_agents_sdk_upgrade_review.md)：基于 2026 年官方 SDK 文档的已对齐项、差距和版本路线。
-- [Benchmark 与实验设计](benchmark_plan.md)：6 类论文任务家族、本地代理、五项 faithful-small 升级、验证矩阵和真实 LLM 实验顺序。
+- [Benchmark 与实验设计](benchmark_plan.md)：6 类论文任务家族、本地代理、六项 faithful-small 升级、验证矩阵和真实 LLM 实验顺序。
 - [Benchmark Fidelity Levels](fidelity_levels.md)：`proxy`、`faithful-small`、`paper-like` 的准入标准和 claim 边界。
 - [Paper Gap Report](paper_gap_report.md)：把 benchmark fidelity metadata 与已有 run artifact 合并成 fail-closed 论文差距报告。
 - [PR Split Plan](pr_split_plan.md)：把当前大 PR 收敛成 evidence、benchmark、algorithm 和 ChatUI 四个 stacked PR 的拆分边界。

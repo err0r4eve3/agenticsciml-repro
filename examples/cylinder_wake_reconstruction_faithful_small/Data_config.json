@@ -1,0 +1,5 @@
+{
+  "train_path": "train_data.npz",
+  "validation_path": "val_data.npz",
+  "description": "Faithful-small lagged sparse-sensor history mapped to a flattened 24x24 synthetic cylinder-wake-like vorticity field."
+}
