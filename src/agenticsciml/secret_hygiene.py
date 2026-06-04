@@ -123,12 +123,24 @@ def _pattern_findings(path: Path, root: Path, text: str) -> list[dict[str, Any]]
     findings: list[dict[str, Any]] = []
     for pattern_id, pattern in SECRET_PATTERNS:
         for match in pattern.finditer(text):
+            line = _line_for_offset(text, match.start())
+            column = _column_for_offset(text, match.start())
+            path_text = _relative_path(path, root)
             findings.append(
                 {
-                    "path": _relative_path(path, root),
+                    "finding_id": _finding_id(
+                        path=path_text,
+                        pattern_id=pattern_id,
+                        line=line,
+                        column=column,
+                    ),
+                    "path": path_text,
                     "pattern_id": pattern_id,
-                    "line": _line_for_offset(text, match.start()),
+                    "line": line,
+                    "column": column,
                     "match_redacted": True,
+                    "value_redacted": True,
+                    "secret_derived_fingerprint": False,
                 }
             )
     return findings
@@ -142,16 +154,36 @@ def _env_value_findings(
 ) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     for name, value in env_values.items():
-        if value and value in text:
+        if not value:
+            continue
+        start = 0
+        while True:
+            offset = text.find(value, start)
+            if offset < 0:
+                break
+            line = _line_for_offset(text, offset)
+            column = _column_for_offset(text, offset)
+            path_text = _relative_path(path, root)
             findings.append(
                 {
-                    "path": _relative_path(path, root),
+                    "finding_id": _finding_id(
+                        path=path_text,
+                        pattern_id="sensitive_env_value",
+                        line=line,
+                        column=column,
+                        env_name=name,
+                    ),
+                    "path": path_text,
                     "pattern_id": "sensitive_env_value",
                     "env_name": name,
-                    "value_sha256": hashlib.sha256(value.encode("utf-8")).hexdigest(),
+                    "line": line,
+                    "column": column,
                     "match_redacted": True,
+                    "value_redacted": True,
+                    "secret_derived_fingerprint": False,
                 }
             )
+            start = offset + max(1, len(value))
     return findings
 
 
@@ -164,14 +196,26 @@ def _sensitive_assignment_findings(path: Path, root: Path, text: str) -> list[di
             continue
         if len(value) < 20 and _shannon_entropy(value) < 3.5:
             continue
+        line = _line_for_offset(text, match.start("value"))
+        column = _column_for_offset(text, match.start("value"))
+        path_text = _relative_path(path, root)
         findings.append(
             {
-                "path": _relative_path(path, root),
+                "finding_id": _finding_id(
+                    path=path_text,
+                    pattern_id="sensitive_assignment_value",
+                    line=line,
+                    column=column,
+                    key_name=key,
+                ),
+                "path": path_text,
                 "pattern_id": "sensitive_assignment_value",
-                "line": _line_for_offset(text, match.start()),
-                "key": key,
-                "value_sha256": hashlib.sha256(value.encode("utf-8")).hexdigest(),
+                "line": line,
+                "column": column,
+                "key_name": key,
                 "match_redacted": True,
+                "value_redacted": True,
+                "secret_derived_fingerprint": False,
             }
         )
     return findings
@@ -197,11 +241,36 @@ def _line_for_offset(text: str, offset: int) -> int:
     return text.count("\n", 0, offset) + 1
 
 
+def _column_for_offset(text: str, offset: int) -> int:
+    return offset - text.rfind("\n", 0, offset)
+
+
 def _relative_path(path: Path, root: Path) -> str:
     try:
         return str(path.resolve().relative_to(root))
     except ValueError:
         return str(path.resolve())
+
+
+def _finding_id(
+    *,
+    path: str,
+    pattern_id: str,
+    line: int,
+    column: int,
+    env_name: str | None = None,
+    key_name: str | None = None,
+) -> str:
+    identity = {
+        "path": path,
+        "pattern_id": pattern_id,
+        "line": line,
+        "column": column,
+        "env_name": env_name,
+        "key_name": key_name,
+    }
+    encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return "finding_" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
 
 
 def _looks_low_risk_literal(value: str) -> bool:

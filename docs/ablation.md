@@ -96,8 +96,9 @@ uv run --python 3.11 --extra dev agenticsciml secret-hygiene runs/real-llm-ablat
 ```
 
 该扫描覆盖常见 provider token pattern、JWT/private-key 形状、敏感字段赋值、以及
-当前敏感 env value 的精确匹配；报告只包含路径、规则名、变量名和 hash，不打印匹配到的
-secret 值。它是 run artifact 卫生门，不是完整 DLP 证明。
+当前敏感 env value 的精确匹配；报告只包含路径、规则名、变量名、位置和非 secret 派生的
+`finding_id`，不打印匹配到的 secret 值，也不保存 secret 值的 hash。它是 run artifact
+卫生门，不是完整 DLP 证明。
 
 验证已有 ablation 输出是否能作为 readiness evidence：
 

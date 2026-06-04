@@ -234,8 +234,11 @@ sharing or attaching them:
 uv run --python 3.11 --extra dev agenticsciml secret-hygiene runs/<experiment_id> --fail-on-findings
 ```
 
-The scanner reports file paths and rule IDs only; it does not print matched
-secret values.
+The scanner reports file paths, rule IDs, locations, redaction metadata, and
+non-secret-derived finding IDs only. It does not print matched secret values or
+store secret-value hashes.
+Older reports may contain legacy secret-value hashes; regenerate the hygiene
+report before sharing a run artifact bundle.
 
 Real-smoke manifest and run metadata also record provider capability, adapter
 type, and budget state:
