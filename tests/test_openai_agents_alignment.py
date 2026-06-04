@@ -71,6 +71,30 @@ class RaisingThenValidJsonLLM(FlakyJsonLLM):
         }
 
 
+class APITimeoutError(RuntimeError):
+    pass
+
+
+class TimeoutThenValidJsonLLM(FlakyJsonLLM):
+    def complete_json(
+        self,
+        prompt: str,
+        schema_name: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+    ) -> dict[str, Any]:
+        self.calls += 1
+        if self.calls == 1:
+            raise APITimeoutError("Request timed out.")
+        return {
+            "title": "Valid proposal",
+            "diagnosis": "Root underfits.",
+            "mutation_plan": ["Add features."],
+            "expected_effect": "Lower validation MSE.",
+            "risks": ["May overfit."],
+        }
+
+
 class ExtraFieldProposalLLM(FlakyJsonLLM):
     def complete_json(
         self,
@@ -268,6 +292,34 @@ def test_agent_json_exception_is_retried_and_traced(tmp_path: Path) -> None:
         and "invalid json payload" in event["metadata"].get("error", "")
         for event in events
     )
+
+
+def test_agent_json_timeout_is_not_schema_retried(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    llm = TimeoutThenValidJsonLLM()
+    agent = ProposerAgent(llm, storage)
+
+    with pytest.raises(StructuredOutputError) as exc:
+        agent.complete_json_checked(
+            prompt="return a proposal",
+            schema_name="proposal",
+            retries=1,
+        )
+    events = [
+        json.loads(line)
+        for line in (storage.run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert llm.calls == 1
+    assert "APITimeoutError" in str(exc.value)
+    failed_generations = [
+        event
+        for event in events
+        if event["event_type"] == "generation_span"
+        and event["name"] == "proposer"
+        and event["metadata"].get("error_type") == "APITimeoutError"
+    ]
+    assert len(failed_generations) == 1
 
 
 def test_proposer_final_round_uses_critic_feedback(tmp_path: Path) -> None:

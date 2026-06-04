@@ -226,12 +226,15 @@ class AgenticSciMLOrchestrator:
             and not self.config.use_mock
             and all(hasattr(self.llm, attr) for attr in ("api_key", "base_url", "timeout_s"))
         ):
-            role_llm = self.llm.__class__(
-                model=requested_model or base_model,
-                api_key=getattr(self.llm, "api_key"),
-                base_url=requested_base_url if requested_base_url is not None else base_url,
-                timeout_s=getattr(self.llm, "timeout_s"),
-            )
+            llm_kwargs = {
+                "model": requested_model or base_model,
+                "api_key": getattr(self.llm, "api_key"),
+                "base_url": requested_base_url if requested_base_url is not None else base_url,
+                "timeout_s": getattr(self.llm, "timeout_s"),
+            }
+            if hasattr(self.llm, "max_retries"):
+                llm_kwargs["max_retries"] = getattr(self.llm, "max_retries")
+            role_llm = self.llm.__class__(**llm_kwargs)
         self._role_llms[role] = role_llm
         return role_llm
 
@@ -245,12 +248,15 @@ class AgenticSciMLOrchestrator:
             and not self.config.use_mock
             and all(hasattr(self.llm, attr) for attr in ("api_key", "base_url", "timeout_s"))
         ):
-            return self.llm.__class__(
-                model=requested_model or base_model,
-                api_key=getattr(self.llm, "api_key"),
-                base_url=requested_base_url if requested_base_url is not None else base_url,
-                timeout_s=getattr(self.llm, "timeout_s"),
-            )
+            llm_kwargs = {
+                "model": requested_model or base_model,
+                "api_key": getattr(self.llm, "api_key"),
+                "base_url": requested_base_url if requested_base_url is not None else base_url,
+                "timeout_s": getattr(self.llm, "timeout_s"),
+            }
+            if hasattr(self.llm, "max_retries"):
+                llm_kwargs["max_retries"] = getattr(self.llm, "max_retries")
+            return self.llm.__class__(**llm_kwargs)
         return self.llm
 
     def run(self) -> Path:
@@ -2683,6 +2689,10 @@ class AgenticSciMLOrchestrator:
             metadata["llm_model"] = model
         if isinstance(adapter_type, str) and adapter_type:
             metadata["llm_adapter_type"] = adapter_type
+        if hasattr(self.llm, "timeout_s"):
+            metadata["llm_timeout_s"] = getattr(self.llm, "timeout_s")
+        if hasattr(self.llm, "max_retries"):
+            metadata["llm_max_retries"] = getattr(self.llm, "max_retries")
         if hasattr(capabilities, "to_dict"):
             metadata["llm_provider_capabilities"] = capabilities.to_dict()
         elif isinstance(capabilities, dict):
@@ -2709,6 +2719,8 @@ class AgenticSciMLOrchestrator:
                     or getattr(role_llm, "provider_name", None)
                 ),
                 "adapter_type": getattr(role_llm, "adapter_type", None),
+                "timeout_s": getattr(role_llm, "timeout_s", None),
+                "max_retries": getattr(role_llm, "max_retries", None),
             }
         metadata["agent_models"] = role_models
         metadata["selector_panel"] = self._selector_panel_metadata()

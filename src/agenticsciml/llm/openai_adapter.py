@@ -27,6 +27,17 @@ def _timeout_from_env() -> float:
     return timeout
 
 
+def _max_retries_from_env() -> int:
+    raw = os.environ.get("OPENAI_MAX_RETRIES", "0")
+    try:
+        max_retries = int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"OPENAI_MAX_RETRIES must be an integer, got {raw!r}.") from exc
+    if max_retries < 0:
+        raise RuntimeError(f"OPENAI_MAX_RETRIES must be non-negative, got {raw!r}.")
+    return max_retries
+
+
 class OpenAIAdapter(LLMClient):
     def __init__(
         self,
@@ -34,12 +45,16 @@ class OpenAIAdapter(LLMClient):
         api_key: str | None = None,
         base_url: str | None = None,
         timeout_s: float | None = None,
+        max_retries: int | None = None,
     ):
         raw_model = model or os.environ.get("OPENAI_MODEL", "gpt-5-mini")
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self.base_url = base_url or os.environ.get("OPENAI_BASE_URL")
         self.model = _normalize_model_name(raw_model, self.base_url)
         self.timeout_s = timeout_s if timeout_s is not None else _timeout_from_env()
+        self.max_retries = max_retries if max_retries is not None else _max_retries_from_env()
+        if self.max_retries < 0:
+            raise RuntimeError(f"max_retries must be non-negative, got {self.max_retries!r}.")
         self.provider_capabilities: ProviderCapabilities = capabilities_for_openai_compatible(self.base_url)
         self.provider_name = self.provider_capabilities.provider
         self.adapter_type = self.provider_capabilities.adapter_type
@@ -50,7 +65,11 @@ class OpenAIAdapter(LLMClient):
             from openai import OpenAI
         except ImportError as exc:
             raise RuntimeError("Install the real-llm extra to use OpenAIAdapter.") from exc
-        client_kwargs = {"api_key": self.api_key, "timeout": self.timeout_s}
+        client_kwargs = {
+            "api_key": self.api_key,
+            "timeout": self.timeout_s,
+            "max_retries": self.max_retries,
+        }
         if self.base_url:
             client_kwargs["base_url"] = self.base_url
         self.client = OpenAI(**client_kwargs)
@@ -73,6 +92,12 @@ class OpenAIAdapter(LLMClient):
         }
         if reasoning_effort is not None:
             request_kwargs["reasoning_effort"] = reasoning_effort
+        self.last_call_metadata = self._metadata(
+            method="complete_text",
+            schema_name=None,
+            response=None,
+            reasoning_effort=reasoning_effort,
+        )
         response = self.client.chat.completions.create(**request_kwargs)
         self.last_call_metadata = self._metadata(
             method="complete_text",
@@ -147,6 +172,14 @@ class OpenAIAdapter(LLMClient):
         }
         if reasoning_effort is not None:
             request_kwargs["reasoning"] = {"effort": reasoning_effort}
+        self.last_call_metadata = self._metadata(
+            method="complete_json_with_images",
+            schema_name=schema_name,
+            response=None,
+            reasoning_effort=reasoning_effort,
+        )
+        self.last_call_metadata["image_input_count"] = len(image_paths)
+        self.last_call_metadata["image_input_filenames"] = [path.name for path in image_paths]
         response = self.client.responses.parse(**request_kwargs)
         self.last_call_metadata = self._metadata(
             method="complete_json_with_images",
@@ -184,6 +217,14 @@ class OpenAIAdapter(LLMClient):
         }
         if reasoning_effort is not None:
             request_kwargs["reasoning_effort"] = reasoning_effort
+        self.last_call_metadata = self._metadata(
+            method="complete_json_with_images",
+            schema_name=schema_name,
+            response=None,
+            reasoning_effort=reasoning_effort,
+        )
+        self.last_call_metadata["image_input_count"] = len(image_paths)
+        self.last_call_metadata["image_input_filenames"] = [path.name for path in image_paths]
         response = self.client.chat.completions.create(**request_kwargs)
         self.last_call_metadata = self._metadata(
             method="complete_json_with_images",
@@ -228,6 +269,12 @@ class OpenAIAdapter(LLMClient):
         }
         if reasoning_effort is not None:
             request_kwargs["reasoning"] = {"effort": reasoning_effort}
+        self.last_call_metadata = self._metadata(
+            method="complete_json",
+            schema_name=schema_name,
+            response=None,
+            reasoning_effort=reasoning_effort,
+        )
         response = self.client.responses.parse(**request_kwargs)
         self.last_call_metadata = self._metadata(
             method="complete_json",
@@ -285,6 +332,8 @@ class OpenAIAdapter(LLMClient):
             "schema_name": schema_name,
             "adapter_type": self.adapter_type,
             "provider_capabilities": self.provider_capabilities.to_dict(),
+            "timeout_s": self.timeout_s,
+            "max_retries": self.max_retries,
             "usage": _usage_metadata(response),
         }
         if reasoning_effort is not None:

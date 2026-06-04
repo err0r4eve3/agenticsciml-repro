@@ -188,6 +188,8 @@ class AgentBase:
                         "error": last_error,
                     },
                 )
+                if _is_non_retryable_llm_api_error(exc):
+                    raise StructuredOutputError(last_error) from exc
                 current_prompt = (
                     f"{prompt}\n\nPrevious output failed schema validation: {last_error}. "
                     "Return corrected JSON only."
@@ -317,11 +319,13 @@ class AgentBase:
             "llm_call_id",
             "method",
             "model",
+            "max_retries",
             "provider",
             "provider_capabilities",
             "reasoning_effort",
             "schema_name",
             "span_kind",
+            "timeout_s",
             "usage",
         }
         return {key: value for key, value in metadata.items() if key in allowed}
@@ -369,3 +373,17 @@ def _accepts_reasoning_effort(method: Any) -> bool:
     if "reasoning_effort" in parameters:
         return True
     return any(parameter.kind == Parameter.VAR_KEYWORD for parameter in parameters.values())
+
+
+def _is_non_retryable_llm_api_error(exc: Exception) -> bool:
+    name = type(exc).__name__
+    if "Timeout" in name:
+        return True
+    return name in {
+        "APIConnectionError",
+        "APIStatusError",
+        "AuthenticationError",
+        "BadRequestError",
+        "PermissionDeniedError",
+        "RateLimitError",
+    }

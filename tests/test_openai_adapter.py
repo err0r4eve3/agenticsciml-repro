@@ -46,10 +46,15 @@ class FakeResponses:
 
 class FakeChatCompletions:
     response_text = "{}"
+    raised_exc: Exception | None = None
     last_kwargs: dict[str, Any] | None = None
 
     def create(self, **kwargs: Any) -> object:
         FakeChatCompletions.last_kwargs = kwargs
+        if FakeChatCompletions.raised_exc is not None:
+            exc = FakeChatCompletions.raised_exc
+            FakeChatCompletions.raised_exc = None
+            raise exc
         return types.SimpleNamespace(
             choices=[types.SimpleNamespace(message=types.SimpleNamespace(content=self.response_text))],
             usage=types.SimpleNamespace(prompt_tokens=7, completion_tokens=3, total_tokens=10),
@@ -68,12 +73,17 @@ class FakeChatOpenAI(FakeOpenAI):
         self.chat = types.SimpleNamespace(completions=FakeChatCompletions())
 
 
+class APITimeoutError(RuntimeError):
+    pass
+
+
 def test_openai_adapter_supports_base_url_env(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("OPENAI_MODEL", "deepseekv4pro")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://api.deepseek.com")
     monkeypatch.setenv("OPENAI_TIMEOUT_S", "120")
+    monkeypatch.setenv("OPENAI_MAX_RETRIES", "2")
     FakeOpenAI.last_kwargs = None
 
     adapter = OpenAIAdapter()
@@ -81,9 +91,11 @@ def test_openai_adapter_supports_base_url_env(monkeypatch) -> None:
     assert adapter.model == "deepseek-v4-pro"
     assert adapter.base_url == "https://api.deepseek.com"
     assert adapter.timeout_s == 120.0
+    assert adapter.max_retries == 2
     assert FakeOpenAI.last_kwargs == {
         "api_key": "test-key",
         "base_url": "https://api.deepseek.com",
+        "max_retries": 2,
         "timeout": 120.0,
     }
     assert adapter.provider_capabilities.adapter_type == "openai_compatible_chat"
@@ -105,6 +117,7 @@ def test_openai_adapter_marks_gatexflow_as_multimodal_chat(monkeypatch) -> None:
     assert FakeOpenAI.last_kwargs == {
         "api_key": "test-key",
         "base_url": "https://api.gatexflow.com/v1",
+        "max_retries": 0,
         "timeout": 120.0,
     }
     assert adapter.provider_capabilities.adapter_type == "openai_compatible_multimodal_chat"
@@ -126,6 +139,7 @@ def test_openai_adapter_marks_error_forever_as_multimodal_chat(monkeypatch) -> N
     assert FakeOpenAI.last_kwargs == {
         "api_key": "test-key",
         "base_url": "https://api.error-forever.com/v1",
+        "max_retries": 0,
         "timeout": 120.0,
     }
     assert adapter.provider_capabilities.adapter_type == "openai_compatible_multimodal_chat"
@@ -145,7 +159,8 @@ def test_openai_adapter_omits_base_url_when_unset(monkeypatch) -> None:
 
     assert adapter.base_url is None
     assert adapter.timeout_s == 60.0
-    assert FakeOpenAI.last_kwargs == {"api_key": "test-key", "timeout": 60.0}
+    assert adapter.max_retries == 0
+    assert FakeOpenAI.last_kwargs == {"api_key": "test-key", "max_retries": 0, "timeout": 60.0}
     assert adapter.provider_capabilities.adapter_type == "openai_native_responses"
     assert adapter.provider_capabilities.supports_structured_outputs is True
     assert adapter.provider_capabilities.supports_image_inputs is True
@@ -162,6 +177,19 @@ def test_openai_adapter_rejects_invalid_timeout_env(monkeypatch) -> None:
         assert "OPENAI_TIMEOUT_S must be positive" in str(exc)
     else:
         raise AssertionError("OpenAIAdapter accepted non-positive timeout")
+
+
+def test_openai_adapter_rejects_invalid_max_retries_env(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_MAX_RETRIES", "-1")
+
+    try:
+        OpenAIAdapter()
+    except RuntimeError as exc:
+        assert "OPENAI_MAX_RETRIES must be non-negative" in str(exc)
+    else:
+        raise AssertionError("OpenAIAdapter accepted negative max retries")
 
 
 def test_openai_adapter_uses_native_structured_outputs_when_available(monkeypatch) -> None:
@@ -303,7 +331,39 @@ def test_openai_adapter_compatible_json_prompt_includes_schema_types(monkeypatch
     assert '"type": "array"' in message
     assert "Arrays must be JSON arrays" in message
     assert adapter.last_call_metadata is not None
+    assert adapter.last_call_metadata["timeout_s"] == 60.0
+    assert adapter.last_call_metadata["max_retries"] == 0
     assert adapter.last_call_metadata["reasoning_effort"] == "xhigh"
+
+
+def test_openai_adapter_refreshes_metadata_before_failed_chat_call(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeChatOpenAI))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.error-forever.com/v1")
+    FakeChatCompletions.response_text = (
+        '{"title":"Proposal","diagnosis":"x","mutation_plan":["y"],'
+        '"expected_effect":"z","risks":["r"]}'
+    )
+
+    adapter = OpenAIAdapter(model="gpt-5-mini", timeout_s=12, max_retries=0)
+    adapter.complete_json("return proposal", "proposal", reasoning_effort="low")
+    FakeChatCompletions.raised_exc = APITimeoutError("Request timed out.")
+
+    try:
+        adapter.complete_json("return root", "root_engineer", reasoning_effort="medium")
+    except APITimeoutError:
+        pass
+    else:
+        raise AssertionError("Fake chat timeout was not raised")
+
+    assert adapter.last_call_metadata is not None
+    assert adapter.last_call_metadata["method"] == "complete_text"
+    assert adapter.last_call_metadata["model"] == "gpt-5-mini"
+    assert adapter.last_call_metadata["provider"] == "api.error-forever.com"
+    assert adapter.last_call_metadata["reasoning_effort"] == "medium"
+    assert adapter.last_call_metadata["timeout_s"] == 12
+    assert adapter.last_call_metadata["max_retries"] == 0
+    assert adapter.last_call_metadata["usage"] == {}
 
 
 def test_openai_adapter_compatible_json_extracts_object_from_wrapped_text(monkeypatch) -> None:

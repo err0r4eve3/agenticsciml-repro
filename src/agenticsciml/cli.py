@@ -110,7 +110,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         auto_approve_evaluation=not args.require_evaluation_approval,
         resume=args.resume,
     )
-    llm = MockLLMClient() if args.mock else OpenAIAdapter()
+    llm = (
+        MockLLMClient()
+        if args.mock
+        else OpenAIAdapter(timeout_s=args.llm_timeout_s, max_retries=args.llm_max_retries)
+    )
     run_dir = AgenticSciMLOrchestrator(config, llm).run()
     print(run_dir.resolve())
     return 0
@@ -404,6 +408,18 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-iterations", type=int, default=1)
     run.add_argument("--parallel-mutations", type=int, default=2)
     run.add_argument("--timeout-s", type=int, default=60)
+    run.add_argument(
+        "--llm-timeout-s",
+        type=float,
+        default=None,
+        help="real LLM provider HTTP timeout in seconds; defaults to OPENAI_TIMEOUT_S",
+    )
+    run.add_argument(
+        "--llm-max-retries",
+        type=int,
+        default=None,
+        help="real LLM provider retry count; defaults to OPENAI_MAX_RETRIES, which defaults to 0",
+    )
     run.add_argument("--output-dir", default="runs")
     run.add_argument("--experiment-id")
     run.add_argument("--dry-run", action="store_true")

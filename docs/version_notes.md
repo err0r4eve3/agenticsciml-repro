@@ -9,6 +9,19 @@
 
 追加迭代：
 
+- Real LLM provider budget hardening：`OpenAIAdapter` 默认设置 `max_retries=0`，
+  避免 OpenAI SDK 隐式重试把 `OPENAI_TIMEOUT_S` 放大成多倍墙钟等待；可通过
+  `OPENAI_MAX_RETRIES`、`--llm-timeout-s` 和 `--llm-max-retries` 显式覆盖。trace
+  generation span 与 `run_metadata.json` 会记录 provider HTTP `timeout_s` /
+  `max_retries`，并继续与生成解的 sandbox `--timeout-s` 分开。Agent-level
+  JSON retry 仍用于坏 JSON / schema drift，但 `APITimeoutError` 等 provider API
+  边界错误会立即 fail closed；adapter 会在发起请求前刷新 call metadata，避免失败
+  trace 误用上一轮成功调用的 usage 或 reasoning 设置。
+- RootEngineer prompt 减负：仍保留 ProblemBundle、EvaluationContract JSON、
+  guidelines 和 data analysis context，但使用紧凑 contract JSON、较短上下文窗口和
+  明确的 NumPy-only compact baseline 指令，降低 OpenAI-compatible chat endpoint
+  生成完整 `solution.py` 的超时概率。若 provider/model 仍不能在预算内返回 root code，
+  run 继续按真实 provider failure 记录，不用 mock 或本地模板冒充 real LLM 解。
 - 新增 `agenticsciml.ablation_evidence` 和 CLI `verify-ablation-evidence`，可以读取
   `ablation_runs.csv` / `ablation_summary.csv`，验证至少两个 seed、至少一个 non-baseline
   ablation variant、每个 ablation variant 的 seed 覆盖、verifier 和 artifact digest。

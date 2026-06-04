@@ -31,6 +31,7 @@ export OPENAI_BASE_URL=https://api.deepseek.com
 export OPENAI_API_KEY=...
 export OPENAI_MODEL=deepseek-v4-pro
 export OPENAI_TIMEOUT_S=120
+export OPENAI_MAX_RETRIES=0
 uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx --max-iterations 0
 ```
 
@@ -46,6 +47,20 @@ schema validation. `https://api.gatexflow.com/v1` and
 chat providers: structured text output still uses local schema validation,
 while `--visual-audit-mode real` may send diagnostic images through chat image
 content when the configured model supports it.
+
+`OPENAI_TIMEOUT_S` is the per-request provider HTTP timeout. `OPENAI_MAX_RETRIES`
+defaults to `0` so a configured agent-call budget is not silently multiplied by
+SDK retries. The same provider-call budget can be supplied per run:
+
+```bash
+uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx \
+  --llm-timeout-s 45 \
+  --llm-max-retries 0
+```
+
+Provider timeout/retry fields are written into generation trace metadata and
+`run_metadata.json`. Generated solution execution still uses `--timeout-s`;
+that is the sandbox/evaluator subprocess budget, not the provider HTTP budget.
 
 Optional fail-closed budget gates:
 
