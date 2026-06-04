@@ -75,7 +75,8 @@
   路径保持一致。
 - 新增 CLI `secret-hygiene`，扫描 run artifact 文本文件中的常见 token pattern 和当前
   敏感 env value 泄漏。扫描器现在也覆盖 JWT/private-key 形状和敏感字段赋值；报告只包含
-  路径、规则名、env 变量名和 hash，不打印 secret 值。
+  路径、规则名、env 变量名、位置和非 secret 派生的 `finding_id`，不打印 secret 值，也不保存
+  secret 值的 hash。
 - `multi_seed_ablation.ablation_output_dir` 现在会让 orchestrator 重新生成
   `reports/multi_seed_ablation_verified_manifest.json`，再纳入
   `reports/multi_seed_ablation_evidence.json` 和 scientific readiness；手写 manifest

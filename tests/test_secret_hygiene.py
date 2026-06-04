@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -46,6 +47,12 @@ def test_secret_hygiene_detects_patterns_without_printing_secret(
     assert "OPENAI_API_KEY" in encoded
     assert secret_value not in encoded
     assert "sk-testsecretvalue1234567890" not in encoded
+    assert hashlib.sha256(secret_value.encode("utf-8")).hexdigest() not in encoded
+    assert "value_sha256" not in encoded
+    assert "value_hash" not in encoded
+    assert all(finding["secret_derived_fingerprint"] is False for finding in payload["findings"])
+    assert all(finding["value_redacted"] is True for finding in payload["findings"])
+    assert all(str(finding["finding_id"]).startswith("finding_") for finding in payload["findings"])
 
 
 def test_secret_hygiene_detects_jwt_private_key_and_sensitive_assignment(tmp_path: Path) -> None:
@@ -74,6 +81,46 @@ def test_secret_hygiene_detects_jwt_private_key_and_sensitive_assignment(tmp_pat
     assert "private_key_block" in pattern_ids
     assert api_token not in encoded
     assert jwt_value not in encoded
+    assert "value_sha256" not in encoded
+    assert "key_name" in encoded
+
+
+def test_secret_hygiene_finding_id_is_not_secret_derived(tmp_path: Path) -> None:
+    artifact = tmp_path / "transcript.md"
+    first_secret = "AbCdEfGhIjKlMnOpQrStUvWxYz123456"
+    second_secret = "ZyXwVuTsRqPoNmLkJiHgFeDcBa654321"
+
+    artifact.write_text(f"token = {first_secret}\n", encoding="utf-8")
+    first = scan_secret_hygiene(tmp_path)
+    first_finding = next(
+        finding for finding in first["findings"] if finding["pattern_id"] == "sensitive_assignment_value"
+    )
+    first_encoded = json.dumps(first, sort_keys=True)
+
+    artifact.write_text(f"token = {second_secret}\n", encoding="utf-8")
+    second = scan_secret_hygiene(tmp_path)
+    second_finding = next(
+        finding for finding in second["findings"] if finding["pattern_id"] == "sensitive_assignment_value"
+    )
+    second_encoded = json.dumps(second, sort_keys=True)
+
+    assert first_finding["finding_id"] == second_finding["finding_id"]
+    assert first_finding["secret_derived_fingerprint"] is False
+    assert second_finding["secret_derived_fingerprint"] is False
+    assert hashlib.sha256(first_secret.encode("utf-8")).hexdigest() not in first_encoded
+    assert hashlib.sha256(second_secret.encode("utf-8")).hexdigest() not in second_encoded
+
+    moved_artifact = tmp_path / "nested" / "transcript.md"
+    moved_artifact.parent.mkdir()
+    moved_artifact.write_text(f"token = {second_secret}\n", encoding="utf-8")
+    moved = scan_secret_hygiene(tmp_path)
+    moved_finding = next(
+        finding
+        for finding in moved["findings"]
+        if finding["pattern_id"] == "sensitive_assignment_value" and finding["path"] == "nested/transcript.md"
+    )
+
+    assert moved_finding["finding_id"] != first_finding["finding_id"]
 
 
 def test_secret_hygiene_ignores_low_risk_boolean_assignment(tmp_path: Path) -> None:
