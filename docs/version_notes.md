@@ -112,9 +112,9 @@
 - OpenAI native Responses adapter 新增 `complete_json_with_images(...)`，真实 visual audit
   可以把已生成的 PNG 诊断图作为 image input 发送给支持图像输入的 provider；OpenAI-compatible
   chat 和 mock 路径仍默认不支持。
-- `https://api.gatexflow.com/v1` 作为 OpenAI-compatible multimodal chat provider
-  处理：文本 JSON 仍走本地 schema validation，`visual_audit_mode=real` 可通过 chat
-  image content 发送诊断图像。
+- `https://api.gatexflow.com/v1` 和 `https://api.error-forever.com/v1` 作为
+  OpenAI-compatible multimodal chat provider 处理：文本 JSON 仍走本地 schema validation，
+  `visual_audit_mode=real` 可通过 chat image content 发送诊断图像。
 - `visual_audit_mode=real` 现在只有在 provider capability 明确
   `supports_image_inputs=true` 且图像请求成功时才记录 `actual_image_inputs_used=true`。
 - 新增 run-level evidence artifacts：
@@ -130,8 +130,9 @@
 验证：
 
 - `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_llm_problem_context.py tests/test_reference_capability_matrix.py tests/test_paper_workflow_readiness.py tests/test_real_problem_closure.py tests/test_iteration_campaign.py tests/test_web_api.py tests/test_orchestrator_cli.py::test_real_visual_audit_records_actual_image_input_with_capable_provider -q`：90 passed。
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_openai_adapter.py::test_openai_adapter_marks_error_forever_as_multimodal_chat tests/test_openai_adapter.py::test_openai_adapter_marks_gatexflow_as_multimodal_chat tests/test_openai_adapter.py::test_openai_adapter_sends_image_inputs_to_gatexflow_chat -q`：3 passed。
 - `PYTHONPATH=src uv run --python 3.11 --extra dev python -m compileall -q src/agenticsciml`：通过。
-- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest -q`：468 passed。
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest -q`：469 passed。
 - `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_evidence.py tests/test_openai_adapter.py::test_openai_adapter_sends_image_inputs_to_native_responses tests/test_orchestrator_cli.py::test_real_visual_audit_records_actual_image_input_with_capable_provider tests/test_orchestrator_cli.py::test_run_writes_domain_selector_paper_and_multiseed_readiness_artifacts -q`：12 passed。
 
 边界：

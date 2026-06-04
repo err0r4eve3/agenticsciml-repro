@@ -4,6 +4,14 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 
+OPENAI_COMPATIBLE_MULTIMODAL_CHAT_HOSTS = frozenset(
+    {
+        "api.gatexflow.com",
+        "api.error-forever.com",
+    }
+)
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderCapabilities:
     provider: str
@@ -32,7 +40,7 @@ def capabilities_for_openai_compatible(base_url: str | None) -> ProviderCapabili
     if base_url:
         parsed = urlparse(base_url)
         provider = parsed.netloc or base_url
-        if provider == "api.gatexflow.com":
+        if provider in OPENAI_COMPATIBLE_MULTIMODAL_CHAT_HOSTS:
             return ProviderCapabilities(
                 provider=provider,
                 adapter_type="openai_compatible_multimodal_chat",

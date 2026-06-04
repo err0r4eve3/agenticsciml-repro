@@ -112,6 +112,28 @@ def test_openai_adapter_marks_gatexflow_as_multimodal_chat(monkeypatch) -> None:
     assert adapter.provider_capabilities.supports_image_inputs is True
 
 
+def test_openai_adapter_marks_error_forever_as_multimodal_chat(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-5-mini")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.error-forever.com/v1")
+    monkeypatch.setenv("OPENAI_TIMEOUT_S", "120")
+    FakeOpenAI.last_kwargs = None
+
+    adapter = OpenAIAdapter()
+
+    assert adapter.base_url == "https://api.error-forever.com/v1"
+    assert FakeOpenAI.last_kwargs == {
+        "api_key": "test-key",
+        "base_url": "https://api.error-forever.com/v1",
+        "timeout": 120.0,
+    }
+    assert adapter.provider_capabilities.adapter_type == "openai_compatible_multimodal_chat"
+    assert adapter.provider_capabilities.provider == "api.error-forever.com"
+    assert adapter.provider_capabilities.supports_structured_outputs is False
+    assert adapter.provider_capabilities.supports_image_inputs is True
+
+
 def test_openai_adapter_omits_base_url_when_unset(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
