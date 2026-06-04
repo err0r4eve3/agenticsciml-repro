@@ -48,6 +48,45 @@ def test_secret_hygiene_detects_patterns_without_printing_secret(
     assert "sk-testsecretvalue1234567890" not in encoded
 
 
+def test_secret_hygiene_detects_jwt_private_key_and_sensitive_assignment(tmp_path: Path) -> None:
+    api_token = "AbCdEfGhIjKlMnOpQrStUvWxYz123456"
+    jwt_value = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturepart"
+    artifact = tmp_path / "transcript.md"
+    artifact.write_text(
+        "\n".join(
+            [
+                f"token = {api_token}",
+                f"authorization: {jwt_value}",
+                "-----BEGIN PRIVATE KEY-----",
+                "not-the-key-body",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    report = scan_secret_hygiene(tmp_path)
+    encoded = json.dumps(report, sort_keys=True)
+    pattern_ids = {finding["pattern_id"] for finding in report["findings"]}
+
+    assert report["passed"] is False
+    assert "sensitive_assignment_value" in pattern_ids
+    assert "jwt_token_pattern" in pattern_ids
+    assert "private_key_block" in pattern_ids
+    assert api_token not in encoded
+    assert jwt_value not in encoded
+
+
+def test_secret_hygiene_ignores_low_risk_boolean_assignment(tmp_path: Path) -> None:
+    (tmp_path / "run_metadata.json").write_text(
+        json.dumps({"api_key_present": True, "token_budget": {"max_calls": 80}}),
+        encoding="utf-8",
+    )
+
+    report = scan_secret_hygiene(tmp_path)
+
+    assert report["passed"] is True
+
+
 def test_cli_secret_hygiene_fail_on_findings(
     tmp_path: Path,
     cli_env: dict[str, str],

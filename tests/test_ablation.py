@@ -195,8 +195,39 @@ def test_ablation_real_dry_run_writes_plan_without_evidence_csv(
     assert manifest["run_count"] == 4
     assert manifest["budget_preflight"]["status"] == "ready"
     assert manifest["expected_llm_call_range"]["max"] == 52
+    assert manifest["budget_batch_plan"]["batch_count"] == 1
+    assert manifest["budget_batch_plan"]["coverage_run_count"] == 4
     assert "No provider calls were made" in report
     assert "must not pass `verify-ablation-evidence`" in report
+
+
+def test_ablation_real_dry_run_records_budget_batches_when_full_stage_exceeds_budget(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("AGENTICSCIML_MAX_LLM_CALLS", "80")
+
+    result = run_ablation(
+        benchmark_dir=Path("examples/function_approx_faithful_small").resolve(),
+        output_dir=tmp_path,
+        seeds=[0, 1, 2, 3, 4],
+        variants=["root_only", "no_kb", "kb", "random_kb"],
+        mock=False,
+        dry_run=True,
+    )
+
+    plan = json.loads(result.plan_json.read_text(encoding="utf-8"))
+    manifest = json.loads(result.manifest_json.read_text(encoding="utf-8"))
+    report = result.report_md.read_text(encoding="utf-8")
+
+    assert manifest["run_count"] == 20
+    assert manifest["budget_preflight"]["status"] == "blocked_by_budget"
+    assert manifest["budget_batch_plan"]["required_for_execution"] is True
+    assert manifest["budget_batch_plan"]["coverage_run_count"] == 20
+    assert manifest["budget_batch_plan"]["batch_count"] > 1
+    assert plan["budget_batch_plan"]["batches"][0]["expected_llm_call_range"]["max"] <= 80
+    assert "## Budget Batches" in report
 
 
 def test_ablation_real_mode_blocks_on_call_budget_preflight(
@@ -223,6 +254,36 @@ def test_ablation_real_mode_blocks_on_call_budget_preflight(
     assert manifest["budget_preflight"]["status"] == "blocked_by_budget"
     assert manifest["budget_preflight"]["expected_max_llm_calls"] == 80
     assert not (tmp_path / "ablation_runs.csv").exists()
+
+
+def test_ablation_real_mode_can_execute_selected_budget_batch(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("AGENTICSCIML_MAX_LLM_CALLS", "25")
+
+    result = run_ablation(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        seeds=[0],
+        variants=["root_only", "kb"],
+        mock=False,
+        dry_run=False,
+        budget_batch_index=1,
+        llm_client=MockLLMClient(),
+    )
+
+    manifest = json.loads((tmp_path / "real_llm_ablation_manifest.json").read_text(encoding="utf-8"))
+    run_rows = list(csv.DictReader(result.runs_csv.open(encoding="utf-8")))
+
+    assert manifest["full_stage_run_count"] == 2
+    assert manifest["run_count"] == 1
+    assert manifest["selected_budget_batch_index"] == 1
+    assert manifest["budget_preflight"]["status"] == "ready"
+    assert manifest["full_stage_expected_llm_call_range"]["max"] == 26
+    assert manifest["expected_llm_call_range"]["max"] == 4
+    assert [row["variant"] for row in run_rows] == ["root_only"]
 
 
 def test_ablation_real_runner_accepts_injected_llm_without_network(

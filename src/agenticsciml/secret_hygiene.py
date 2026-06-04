@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -16,6 +17,22 @@ SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("openai_api_key_assignment", re.compile(r"\bOPENAI_API_KEY\b\s*[:=]")),
     ("github_token_pattern", re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b")),
     ("generic_bearer_token", re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b")),
+    ("jwt_token_pattern", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")),
+    (
+        "private_key_block",
+        re.compile(
+            r"-----BEGIN (?:RSA |DSA |EC |OPENSSH |)?PRIVATE KEY-----",
+        ),
+    ),
+)
+SENSITIVE_ASSIGNMENT_PATTERN = re.compile(
+    r"""(?ix)
+    (?P<key>\b(?:api[_-]?key|token|secret|password|authorization|credential)s?\b)
+    \s*[:=]\s*
+    (?P<quote>["'])?
+    (?P<value>[A-Za-z0-9._~+/=-]{16,})
+    (?P=quote)?
+    """
 )
 SENSITIVE_ENV_NAMES = {
     "OPENAI_API_KEY",
@@ -86,6 +103,7 @@ def scan_secret_hygiene(root_dir: Path) -> dict[str, Any]:
             continue
         findings.extend(_pattern_findings(path, root, text))
         findings.extend(_env_value_findings(path, root, text, env_values))
+        findings.extend(_sensitive_assignment_findings(path, root, text))
     return {
         "schema_version": 1,
         "root_dir": str(root),
@@ -94,8 +112,9 @@ def scan_secret_hygiene(root_dir: Path) -> dict[str, Any]:
         "findings": findings,
         "skipped": skipped,
         "claim_boundary": (
-            "This scanner checks common secret patterns and configured sensitive env values in "
-            "text run artifacts. It never prints matched secret values."
+            "This scanner checks common secret patterns, high-entropy sensitive assignments, "
+            "private-key/JWT shapes, and configured sensitive env values in text run artifacts. "
+            "It never prints matched secret values and does not prove the absence of every possible secret."
         ),
     }
 
@@ -136,6 +155,28 @@ def _env_value_findings(
     return findings
 
 
+def _sensitive_assignment_findings(path: Path, root: Path, text: str) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    for match in SENSITIVE_ASSIGNMENT_PATTERN.finditer(text):
+        key = match.group("key")
+        value = match.group("value")
+        if _looks_low_risk_literal(value):
+            continue
+        if len(value) < 20 and _shannon_entropy(value) < 3.5:
+            continue
+        findings.append(
+            {
+                "path": _relative_path(path, root),
+                "pattern_id": "sensitive_assignment_value",
+                "line": _line_for_offset(text, match.start()),
+                "key": key,
+                "value_sha256": hashlib.sha256(value.encode("utf-8")).hexdigest(),
+                "match_redacted": True,
+            }
+        )
+    return findings
+
+
 def _sensitive_env_values() -> dict[str, str]:
     values: dict[str, str] = {}
     for name, value in os.environ.items():
@@ -161,3 +202,16 @@ def _relative_path(path: Path, root: Path) -> str:
         return str(path.resolve().relative_to(root))
     except ValueError:
         return str(path.resolve())
+
+
+def _looks_low_risk_literal(value: str) -> bool:
+    lowered = value.lower()
+    return lowered in {"true", "false", "none", "null", "present", "redacted", "placeholder"}
+
+
+def _shannon_entropy(value: str) -> float:
+    if not value:
+        return 0.0
+    counts = {char: value.count(char) for char in set(value)}
+    length = len(value)
+    return -sum((count / length) * math.log2(count / length) for count in counts.values())

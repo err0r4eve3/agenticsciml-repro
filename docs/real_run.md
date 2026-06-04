@@ -189,6 +189,12 @@ shared LLM call-budget preflight. If `expected_llm_call_range.max` exceeds
 `AGENTICSCIML_MAX_LLM_CALLS`, the command exits before provider calls with
 `blocked_by_budget` and writes a blocked report.
 
+Real ablation manifests also include `budget_batch_plan`. When a full planned
+matrix is over the configured call budget, run a single explicit batch with
+`agenticsciml ablate --real --budget-batch-index N`; the manifest keeps the
+full-stage run count and expected call range so partial batches cannot be
+mistaken for complete Stage A evidence.
+
 After a real or mock run completes, inspect the trace quality gate:
 
 ```bash

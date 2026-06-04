@@ -61,10 +61,15 @@
   `expected_llm_call_range` 和 `budget_preflight`；真实模式若 estimated max calls 超过
   `AGENTICSCIML_MAX_LLM_CALLS`，会在 provider call 前写 blocked report 并退出。runtime
   ledger 继续执行 token/cost 预算。
+- Real ablation manifest 现在写入 `budget_batch_plan`；当 full Stage A 矩阵超过当前
+  call budget 时，可用显式 `--budget-batch-index N` 只执行一个预算内 batch。manifest
+  保留 `full_stage_run_count` 和 `full_stage_expected_llm_call_range`，防止 partial
+  batch 被误读为完整多 seed evidence。
 - `smoke-llm` 新增 `--llm-fast-mode`，与 ablation runner 的 latency-sensitive real-run
   路径保持一致。
 - 新增 CLI `secret-hygiene`，扫描 run artifact 文本文件中的常见 token pattern 和当前
-  敏感 env value 泄漏。报告只包含路径、规则名和 env 变量名，不打印 secret 值。
+  敏感 env value 泄漏。扫描器现在也覆盖 JWT/private-key 形状和敏感字段赋值；报告只包含
+  路径、规则名、env 变量名和 hash，不打印 secret 值。
 - `multi_seed_ablation.ablation_output_dir` 现在会让 orchestrator 重新生成
   `reports/multi_seed_ablation_verified_manifest.json`，再纳入
   `reports/multi_seed_ablation_evidence.json` 和 scientific readiness；手写 manifest
