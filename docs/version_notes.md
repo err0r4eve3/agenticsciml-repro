@@ -46,6 +46,12 @@
 - 新增 `agenticsciml.ablation_evidence` 和 CLI `verify-ablation-evidence`，可以读取
   `ablation_runs.csv` / `ablation_summary.csv`，验证至少两个 seed、至少一个 non-baseline
   ablation variant、每个 ablation variant 的 seed 覆盖、verifier 和 artifact digest。
+- `agenticsciml ablate` 现在支持显式 `--real` 路径和 no-key-safe `--dry-run`。dry-run
+  只写 `real_llm_ablation_plan.json`、`real_llm_ablation_manifest.json` 和
+  `ablation_report.md`，不会写可被 verifier 接受的 `ablation_runs.csv`；真实路径会在
+  provider call 前写 plan/manifest，并为每个 run 写 `llm_call_ledger.jsonl`。ablation
+  输出仍固定 `scientific_claim=not_supported`，底层 run 的 claim boundary 单独保存在
+  `run_evidence_mode` / `run_scientific_claim`。
 - `multi_seed_ablation.ablation_output_dir` 现在会让 orchestrator 重新生成
   `reports/multi_seed_ablation_verified_manifest.json`，再纳入
   `reports/multi_seed_ablation_evidence.json` 和 scientific readiness；手写 manifest

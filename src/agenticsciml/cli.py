@@ -157,9 +157,15 @@ def cmd_ablate(args: argparse.Namespace) -> int:
         output_dir=Path(args.output_dir).resolve(),
         seeds=args.seeds,
         variants=variants,
-        mock=True,
+        mock=not args.real,
+        dry_run=args.dry_run,
+        timeout_s=args.timeout_s,
+        llm_timeout_s=args.llm_timeout_s,
+        llm_max_retries=args.llm_max_retries,
+        llm_fast_mode=args.llm_fast_mode,
     )
-    print(result.summary_csv.resolve())
+    output_path = result.summary_csv or result.plan_json or result.report_md
+    print(output_path.resolve())
     return 0
 
 
@@ -507,6 +513,30 @@ def build_parser() -> argparse.ArgumentParser:
     ablate.add_argument("--seeds", nargs="+", type=int, default=[0])
     ablate.add_argument("--variants", default=",".join(DEFAULT_VARIANTS))
     ablate.add_argument("--output-dir", default="runs/ablation")
+    ablate.add_argument("--real", action="store_true", help="run ablation with a real LLM provider")
+    ablate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="with --real, write the ablation plan and manifest without provider calls",
+    )
+    ablate.add_argument("--timeout-s", type=int, default=60)
+    ablate.add_argument(
+        "--llm-timeout-s",
+        type=float,
+        default=None,
+        help="real LLM provider HTTP timeout in seconds; defaults to OPENAI_TIMEOUT_S",
+    )
+    ablate.add_argument(
+        "--llm-max-retries",
+        type=int,
+        default=None,
+        help="real LLM provider retry count; defaults to OPENAI_MAX_RETRIES, which defaults to 0",
+    )
+    ablate.add_argument(
+        "--llm-fast-mode",
+        action="store_true",
+        help="route unspecified agent reasoning_effort defaults to low for latency-sensitive real ablations",
+    )
     ablate.set_defaults(func=cmd_ablate)
 
     verify_ablation = sub.add_parser("verify-ablation-evidence")

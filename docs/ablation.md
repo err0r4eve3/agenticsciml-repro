@@ -41,6 +41,35 @@ uv run --python 3.11 --extra dev python scripts/run_ablation.py \
   --output-dir runs/ablation
 ```
 
+真实 LLM ablation 必须显式使用 `--real`。在没有凭证或预算确认前，先用
+`--dry-run` 生成计划和预算 manifest；该路径不调用 provider，也不会写
+`ablation_runs.csv` / `ablation_summary.csv`，因此不能被
+`verify-ablation-evidence` 当作真实 ablation evidence：
+
+```bash
+uv run --python 3.11 --extra dev agenticsciml ablate examples/function_approx \
+  --real \
+  --dry-run \
+  --seeds 0 1 2 \
+  --variants root_only,kb,branch_context,no_branch_context \
+  --output-dir runs/real-llm-ablation
+```
+
+真正调用 provider 时必须去掉 `--dry-run`，并使用 real LLM extra、凭证和预算
+环境变量。该命令会在 provider call 前写出 `real_llm_ablation_plan.json` 与
+`real_llm_ablation_manifest.json`，每个 run 还会写 `llm_call_ledger.jsonl`：
+
+```bash
+export OPENAI_API_KEY=<redacted>
+export OPENAI_MODEL=gpt-5-mini
+export AGENTICSCIML_MAX_LLM_CALLS=400
+uv run --python 3.11 --extra real-llm agenticsciml ablate examples/function_approx \
+  --real \
+  --seeds 0 1 2 \
+  --variants root_only,kb,branch_context,no_branch_context \
+  --output-dir runs/real-llm-ablation
+```
+
 验证已有 ablation 输出是否能作为 readiness evidence：
 
 ```bash
@@ -59,6 +88,10 @@ uv run --python 3.11 --extra dev agenticsciml verify-ablation-evidence runs/abla
 - `ablation_runs.csv`：每个 variant/seed 的 run-level 指标。
 - `ablation_summary.csv`：按 variant 聚合的 median、mean、std、best、worst、IQR、valid runs。
 - `ablation_report.md`：人类可读报告。
+- `real_llm_ablation_plan.json`：real/dry-run 模式的计划文件，列出 benchmark、seed、
+  variant、evolution config 和预期 artifact。
+- `real_llm_ablation_manifest.json`：real/dry-run 模式的 provider/model、package、
+  budget 和 plan hash manifest。
 - `multi_seed_ablation_verified_manifest.json`：可选的验证 manifest，供 run config 的
   `multi_seed_ablation.ablation_output_dir` 或 `--multi-seed-ablation-json` 指向原始
   ablation 输出后由 orchestrator 重新生成并附加到 run artifact。
@@ -92,6 +125,12 @@ Mock-mode ablation 只验证：
 `scientific_claim=not_supported`。不要把 mock-mode improvement 当作 SciML
 结论，更不能把它解释成 emergent discovery。真实 LLM ablation 至少需要多
 seed、固定预算、成本统计和失败样本审查。
+
+真实 LLM ablation CSV 会标注 `evidence_mode=real_llm_ablation` 和
+`scientific_claim=not_supported`；每个底层 run 自己的 evidence boundary 保存在
+`run_evidence_mode` / `run_scientific_claim`。即使 provider call 成功，ablation 输出也只
+是 workflow contrast evidence，不能绕过 paper workflow readiness、domain review 或
+paper-like benchmark gate。
 
 ## Readiness Evidence
 

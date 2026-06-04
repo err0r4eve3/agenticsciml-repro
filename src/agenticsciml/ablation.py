@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import csv
+import hashlib
+import importlib.metadata
 import json
+import os
 import statistics
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -10,10 +14,17 @@ from typing import Any
 from agenticsciml.config import EvolutionConfig, ExperimentConfig
 from agenticsciml.evidence import (
     EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE,
+    EVIDENCE_MODE_REAL_LLM_ABLATION,
     LLM_MODE_MOCK,
+    LLM_MODE_REAL,
     SCIENTIFIC_CLAIM_NOT_SUPPORTED,
 )
+from agenticsciml.llm.base import LLMClient
+from agenticsciml.llm.budget import LLMBudget
+from agenticsciml.llm.capabilities import capabilities_for_openai_compatible
 from agenticsciml.llm.mock import MockLLMClient
+from agenticsciml.llm.openai_adapter import OpenAIAdapter
+from agenticsciml.llm_smoke import _RecordingLLMClient
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 
 
@@ -31,8 +42,11 @@ DEFAULT_VARIANTS = (
 
 @dataclass(frozen=True, slots=True)
 class AblationResult:
-    summary_csv: Path
+    summary_csv: Path | None
     report_md: Path
+    runs_csv: Path | None = None
+    plan_json: Path | None = None
+    manifest_json: Path | None = None
 
 
 def run_ablation(
@@ -42,16 +56,45 @@ def run_ablation(
     seeds: list[int],
     variants: list[str] | None = None,
     mock: bool = True,
+    dry_run: bool = False,
+    timeout_s: int = 60,
+    llm_timeout_s: float | None = None,
+    llm_max_retries: int | None = None,
+    llm_fast_mode: bool = False,
+    llm_client: LLMClient | None = None,
 ) -> AblationResult:
-    if not mock:
-        raise ValueError("run_ablation currently supports mock mode only.")
+    if mock and dry_run:
+        raise ValueError("ablation dry-run is only supported with real LLM mode.")
     selected_variants = variants or list(DEFAULT_VARIANTS)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if not mock:
+        return _run_real_ablation(
+            benchmark_dir=benchmark_dir,
+            output_dir=output_dir,
+            seeds=seeds,
+            variants=selected_variants,
+            dry_run=dry_run,
+            timeout_s=timeout_s,
+            llm_timeout_s=llm_timeout_s,
+            llm_max_retries=llm_max_retries,
+            llm_fast_mode=llm_fast_mode,
+            llm_client=llm_client,
+        )
 
     run_rows: list[dict[str, Any]] = []
     for variant in selected_variants:
         for seed in seeds:
-            run_rows.append(_run_variant(benchmark_dir, output_dir, variant, seed))
+            run_rows.append(
+                _run_variant(
+                    benchmark_dir,
+                    output_dir,
+                    variant,
+                    seed,
+                    mock=True,
+                    timeout_s=timeout_s,
+                )
+            )
 
     runs_csv = output_dir / "ablation_runs.csv"
     _write_csv(runs_csv, run_rows)
@@ -60,20 +103,121 @@ def run_ablation(
     _write_csv(summary_csv, summary_rows)
     report_md = output_dir / "ablation_report.md"
     report_md.write_text(_render_report(summary_rows), encoding="utf-8")
-    return AblationResult(summary_csv=summary_csv, report_md=report_md)
+    return AblationResult(summary_csv=summary_csv, report_md=report_md, runs_csv=runs_csv)
 
 
-def _run_variant(benchmark_dir: Path, output_dir: Path, variant: str, seed: int) -> dict[str, Any]:
-    config = _variant_config(variant, seed)
+def _run_real_ablation(
+    *,
+    benchmark_dir: Path,
+    output_dir: Path,
+    seeds: list[int],
+    variants: list[str],
+    dry_run: bool,
+    timeout_s: int,
+    llm_timeout_s: float | None,
+    llm_max_retries: int | None,
+    llm_fast_mode: bool,
+    llm_client: LLMClient | None,
+) -> AblationResult:
+    budget = LLMBudget.from_env()
+    plan = _build_real_ablation_plan(
+        benchmark_dir=benchmark_dir,
+        output_dir=output_dir,
+        seeds=seeds,
+        variants=variants,
+        timeout_s=timeout_s,
+        dry_run=dry_run,
+    )
+    plan_path = output_dir / "real_llm_ablation_plan.json"
+    plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True, allow_nan=False), encoding="utf-8")
+    manifest = _build_real_ablation_manifest(plan, llm_client=llm_client, budget=budget)
+    manifest_path = output_dir / "real_llm_ablation_manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False),
+        encoding="utf-8",
+    )
+    report_md = output_dir / "ablation_report.md"
+    if dry_run:
+        report_md.write_text(_render_real_dry_run_report(plan), encoding="utf-8")
+        return AblationResult(
+            summary_csv=None,
+            report_md=report_md,
+            plan_json=plan_path,
+            manifest_json=manifest_path,
+        )
+
+    try:
+        inner_llm = llm_client or OpenAIAdapter(timeout_s=llm_timeout_s, max_retries=llm_max_retries)
+    except Exception as exc:
+        report_md.write_text(_render_real_failure_report(plan, "adapter_init_error", exc), encoding="utf-8")
+        raise
+
+    run_rows: list[dict[str, Any]] = []
+    try:
+        for entry in plan["runs"]:
+            variant = str(entry["variant"])
+            seed = int(entry["seed"])
+            expected_run_dir = output_dir / "runs" / str(entry["experiment_id"])
+            ledger_path = expected_run_dir / "llm_call_ledger.jsonl"
+            if ledger_path.exists():
+                ledger_path.unlink()
+            recording_llm = _RecordingLLMClient(inner_llm, ledger_path, budget)
+            run_rows.append(
+                _run_variant(
+                    benchmark_dir,
+                    output_dir,
+                    variant,
+                    seed,
+                    mock=False,
+                    timeout_s=timeout_s,
+                    llm_fast_mode=llm_fast_mode,
+                    llm_client=recording_llm,
+                )
+            )
+    except Exception as exc:
+        report_md.write_text(_render_real_failure_report(plan, "orchestrator_error", exc), encoding="utf-8")
+        raise
+
+    runs_csv = output_dir / "ablation_runs.csv"
+    _write_csv(runs_csv, run_rows)
+    summary_rows = _aggregate(run_rows)
+    summary_csv = output_dir / "ablation_summary.csv"
+    _write_csv(summary_csv, summary_rows)
+    report_md.write_text(_render_report(summary_rows), encoding="utf-8")
+    return AblationResult(
+        summary_csv=summary_csv,
+        report_md=report_md,
+        runs_csv=runs_csv,
+        plan_json=plan_path,
+        manifest_json=manifest_path,
+    )
+
+
+def _run_variant(
+    benchmark_dir: Path,
+    output_dir: Path,
+    variant: str,
+    seed: int,
+    *,
+    mock: bool,
+    timeout_s: int,
+    llm_fast_mode: bool = False,
+    llm_client: LLMClient | None = None,
+) -> dict[str, Any]:
+    config = _variant_config(variant, seed, timeout_s=timeout_s)
     experiment_id = f"{variant}-seed-{seed}"
     run_config = ExperimentConfig(
         experiment_id=experiment_id,
         benchmark_dir=benchmark_dir,
         output_dir=output_dir / "runs",
         evolution=config,
-        use_mock=True,
+        use_mock=mock,
+        llm_fast_mode=llm_fast_mode,
     )
-    run_dir = AgenticSciMLOrchestrator(run_config, MockLLMClient()).run()
+    llm = MockLLMClient() if mock else llm_client
+    if llm is None:
+        raise RuntimeError("real ablation requires an LLM client")
+    run_dir = AgenticSciMLOrchestrator(run_config, llm).run()
     tree = json.loads((run_dir / "tree.json").read_text(encoding="utf-8"))
     metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
     nodes = tree["nodes"]
@@ -107,12 +251,17 @@ def _run_variant(benchmark_dir: Path, output_dir: Path, variant: str, seed: int)
             )
         )
     )
+    run_llm_mode = str(metadata.get("llm_mode") or (LLM_MODE_MOCK if mock else LLM_MODE_REAL))
+    run_evidence_mode = str(metadata.get("evidence_mode") or "")
+    run_scientific_claim = str(metadata.get("scientific_claim") or "")
     return {
         "variant": variant,
         "seed": seed,
-        "evidence_mode": EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE,
-        "llm_mode": LLM_MODE_MOCK,
+        "evidence_mode": EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE if mock else EVIDENCE_MODE_REAL_LLM_ABLATION,
+        "llm_mode": run_llm_mode,
         "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
+        "run_evidence_mode": run_evidence_mode,
+        "run_scientific_claim": run_scientific_claim,
         "run_dir": str(run_dir),
         "branch_context_enabled": bool(metadata.get("branch_context_enabled", False)),
         "champion_node_id": champion["node_id"],
@@ -131,11 +280,12 @@ def _run_variant(benchmark_dir: Path, output_dir: Path, variant: str, seed: int)
     }
 
 
-def _variant_config(variant: str, seed: int) -> EvolutionConfig:
+def _variant_config(variant: str, seed: int, *, timeout_s: int = 60) -> EvolutionConfig:
     common = {
         "parallel_mutations": 1,
         "max_debug_retries": 1,
         "random_seed": seed,
+        "timeout_s": timeout_s,
     }
     if variant == "root_only":
         return EvolutionConfig(max_iterations=0, use_kb=True, **common)
@@ -166,9 +316,137 @@ def _variant_config(variant: str, seed: int) -> EvolutionConfig:
             use_branch_context=False,
             parallel_mutations=2,
             max_debug_retries=1,
+            timeout_s=timeout_s,
             random_seed=seed,
         )
     raise ValueError(f"Unknown ablation variant: {variant}")
+
+
+def _build_real_ablation_plan(
+    *,
+    benchmark_dir: Path,
+    output_dir: Path,
+    seeds: list[int],
+    variants: list[str],
+    timeout_s: int,
+    dry_run: bool,
+) -> dict[str, Any]:
+    runs: list[dict[str, Any]] = []
+    for variant in variants:
+        for seed in seeds:
+            config = _variant_config(variant, seed, timeout_s=timeout_s)
+            runs.append(
+                {
+                    "variant": variant,
+                    "seed": seed,
+                    "experiment_id": f"{variant}-seed-{seed}",
+                    "evolution": config.to_dict(),
+                }
+            )
+    expected_run_artifacts = [
+        artifact
+        for entry in runs
+        for artifact in [
+            f"runs/{entry['experiment_id']}/run_metadata.json",
+            f"runs/{entry['experiment_id']}/tree.json",
+            f"runs/{entry['experiment_id']}/checkpoint.json",
+            f"runs/{entry['experiment_id']}/trace_summary.json",
+            f"runs/{entry['experiment_id']}/reports/scientific_result_card.json",
+            f"runs/{entry['experiment_id']}/llm_call_ledger.jsonl",
+        ]
+    ]
+    return {
+        "schema_version": 1,
+        "benchmark_dir": str(benchmark_dir),
+        "output_dir": str(output_dir),
+        "seeds": list(seeds),
+        "variants": list(variants),
+        "timeout_s": timeout_s,
+        "timeout_scope": "generated solution subprocesses; provider HTTP request timeout is adapter-specific",
+        "execution_mode": "dry_run" if dry_run else "real",
+        "real_mode_explicit": not dry_run,
+        "provider_calls_enabled": not dry_run,
+        "evidence_mode": EVIDENCE_MODE_REAL_LLM_ABLATION,
+        "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
+        "runs": runs,
+        "expected_artifacts": [
+            "real_llm_ablation_plan.json",
+            "real_llm_ablation_manifest.json",
+            "ablation_report.md",
+            "ablation_runs.csv",
+            "ablation_summary.csv",
+            *expected_run_artifacts,
+        ],
+        "claim_boundary": {
+            "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
+            "paper_score_reproduction": False,
+            "emergent_discovery_supported": False,
+            "notes": (
+                "Real LLM ablation is workflow contrast evidence only until completed runs, "
+                "multi-seed coverage, failure review, and paper/workflow readiness gates are satisfied."
+            ),
+        },
+    }
+
+
+def _build_real_ablation_manifest(
+    plan: dict[str, Any],
+    *,
+    llm_client: LLMClient | None,
+    budget: LLMBudget,
+) -> dict[str, Any]:
+    provider_capabilities = _provider_capabilities(llm_client)
+    run_count = len(plan.get("runs", []))
+    return {
+        "schema_version": 1,
+        "execution_mode": plan["execution_mode"],
+        "real_mode_explicit": plan["real_mode_explicit"],
+        "provider": provider_capabilities["provider"],
+        "model": getattr(llm_client, "model", None) or os.environ.get("OPENAI_MODEL", "gpt-5-mini"),
+        "adapter_type": getattr(llm_client, "adapter_type", None) or provider_capabilities["adapter_type"],
+        "provider_capabilities": provider_capabilities,
+        "python_version": sys.version.split()[0],
+        "package_versions": _package_versions(),
+        "seeds": plan["seeds"],
+        "variants": plan["variants"],
+        "run_count": run_count,
+        "timeout_s": plan["timeout_s"],
+        "timeout_scope": plan["timeout_scope"],
+        "output_dir": plan["output_dir"],
+        "plan_hash": _hash_payload(plan),
+        "config_hash": _hash_payload({"runs": plan["runs"], "benchmark_dir": plan["benchmark_dir"]}),
+        "token_budget": budget.to_dict(),
+        "expected_llm_call_range": {
+            "min": max(1, run_count * 6),
+            "max": max(1, run_count * 80),
+        },
+        "claim_boundary": plan["claim_boundary"],
+    }
+
+
+def _provider_capabilities(llm_client: LLMClient | None) -> dict[str, Any]:
+    capabilities = getattr(llm_client, "provider_capabilities", None)
+    if isinstance(capabilities, dict):
+        return dict(capabilities)
+    if capabilities is not None and hasattr(capabilities, "to_dict"):
+        return dict(capabilities.to_dict())
+    return capabilities_for_openai_compatible(os.environ.get("OPENAI_BASE_URL")).to_dict()
+
+
+def _package_versions() -> dict[str, str | None]:
+    packages = ("agenticsciml", "openai", "numpy")
+    versions: dict[str, str | None] = {}
+    for package in packages:
+        try:
+            versions[package] = importlib.metadata.version(package)
+        except importlib.metadata.PackageNotFoundError:
+            versions[package] = None
+    return versions
+
+
+def _hash_payload(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _champion(nodes: list[dict[str, Any]]) -> dict[str, Any]:
@@ -209,8 +487,12 @@ def _aggregate(run_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         summary.append(
             {
                 "variant": variant,
-                "evidence_mode": EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE,
+                "evidence_mode": _joined_unique(row.get("evidence_mode", "") for row in rows)
+                or EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE,
+                "llm_mode": _joined_unique(row.get("llm_mode", "") for row in rows),
                 "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
+                "run_evidence_mode": _joined_unique(row.get("run_evidence_mode", "") for row in rows),
+                "run_scientific_claim": _joined_unique(row.get("run_scientific_claim", "") for row in rows),
                 "branch_context_enabled": any(_truthy(row.get("branch_context_enabled")) for row in rows),
                 "higher_is_better": higher_is_better,
                 "runs": len(rows),
@@ -329,12 +611,25 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 def _render_report(summary_rows: list[dict[str, Any]]) -> str:
+    evidence_mode = _joined_unique(row.get("evidence_mode", "") for row in summary_rows)
+    if not evidence_mode:
+        evidence_mode = EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE
+    boundary = (
+        "Mock-mode ablation checks workflow behavior, variant switches, and artifact production. "
+        "It cannot prove emergent discovery or paper-score reproduction."
+        if evidence_mode == EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE
+        else (
+            "Real LLM ablation checks controlled workflow contrasts with real provider calls. "
+            "It still cannot prove emergent discovery or paper-score reproduction without "
+            "paper/readiness gates, failure review, and domain validation."
+        )
+    )
     lines = [
         "# Ablation Report",
         "",
-        f"Evidence mode: `{EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE}`.",
+        f"Evidence mode: `{evidence_mode}`.",
         "",
-        "Mock-mode ablation checks workflow behavior, variant switches, and artifact production. It cannot prove emergent discovery or paper-score reproduction.",
+        boundary,
         "",
         "| Variant | Runs | Valid runs | Champion score median | Champion/root improvement median | Valid solution rate mean |",
         "| --- | ---: | ---: | ---: | ---: | ---: |",
@@ -362,3 +657,51 @@ def _render_report(summary_rows: list[dict[str, Any]]) -> str:
         ]
     )
     return "\n".join(lines)
+
+
+def _render_real_dry_run_report(plan: dict[str, Any]) -> str:
+    lines = [
+        "# Real LLM Ablation Dry Run",
+        "",
+        f"Evidence mode: `{EVIDENCE_MODE_REAL_LLM_ABLATION}`.",
+        "",
+        "No provider calls were made and no `ablation_runs.csv` was written. This dry-run bundle must not pass `verify-ablation-evidence`.",
+        "",
+        f"Benchmark: `{plan['benchmark_dir']}`",
+        f"Run count: `{len(plan.get('runs', []))}`",
+        f"Variants: `{','.join(str(item) for item in plan.get('variants', []))}`",
+        f"Seeds: `{','.join(str(item) for item in plan.get('seeds', []))}`",
+        "",
+        "## Claim Boundary",
+        "",
+        "- Scientific claim support: `false`.",
+        "- Paper score reproduction: `false`.",
+        "- Emergent discovery support: `false`.",
+        "",
+        "## Planned Runs",
+        "",
+        "| Variant | Seed | Experiment ID |",
+        "| --- | ---: | --- |",
+    ]
+    for entry in plan.get("runs", []):
+        lines.append(f"| {entry['variant']} | {entry['seed']} | `{entry['experiment_id']}` |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _render_real_failure_report(plan: dict[str, Any], failure_kind: str, exc: Exception) -> str:
+    return "\n".join(
+        [
+            "# Real LLM Ablation Failed",
+            "",
+            f"Evidence mode: `{EVIDENCE_MODE_REAL_LLM_ABLATION}`.",
+            "",
+            f"Failure kind: `{failure_kind}`.",
+            f"Error type: `{type(exc).__name__}`.",
+            "",
+            "The run remains blocked. Do not treat this output as multi-seed ablation evidence.",
+            "",
+            f"Planned run count: `{len(plan.get('runs', []))}`.",
+            "",
+        ]
+    )
