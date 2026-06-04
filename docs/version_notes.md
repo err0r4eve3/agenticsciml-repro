@@ -9,6 +9,10 @@
 
 追加迭代：
 
+- 新增 GitHub Actions CI：`fast-evidence-gates` 运行 benchmark catalog、sandbox execution、
+  evidence、ablation evidence 和 paper gap report 的快速测试；`full-pytest` 运行
+  `uv run --frozen --python 3.11 --extra dev pytest -q`。CI 只验证仓库测试与证据门控回归，
+  不代表 real LLM、多 seed ablation 或 paper-level scientific claim 已完成。
 - 新增 `agenticsciml.paper_gap_report` 和 CLI `paper-gap-report`，从 benchmark
   fidelity metadata 与 supplied run artifacts 生成 `paper_gap_report.json/md`。报告会检查
   benchmark fidelity、paper equivalence、completed run metadata、trace quality gate、
