@@ -39,14 +39,18 @@ def test_collect_ablation_batches_writes_complete_outputs(tmp_path: Path, monkey
     manifest = json.loads(result.manifest_json.read_text(encoding="utf-8"))
     rows = list(csv.DictReader(result.runs_csv.open(encoding="utf-8")))
     summary = list(csv.DictReader(result.summary_csv.open(encoding="utf-8")))
+    report_md = result.manifest_json.parent / "ablation_report.md"
 
     assert result.passed is True
     assert manifest["collection_status"] == "complete"
     assert manifest["full_stage_plan_hash"] == stage_manifest["full_stage_plan_hash"]
     assert manifest["expected_run_count"] == 1
     assert manifest["collected_run_count"] == 1
+    assert manifest["created_outputs"]["report_md"] == str(report_md)
     assert rows[0]["variant"] == "root_only"
     assert summary[0]["variant"] == "root_only"
+    assert report_md.is_file()
+    assert "Ablation Report" in report_md.read_text(encoding="utf-8")
 
 
 def test_collect_ablation_batches_requires_allow_partial(tmp_path: Path, monkeypatch) -> None:

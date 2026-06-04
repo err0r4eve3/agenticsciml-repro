@@ -108,7 +108,8 @@ collector 会要求 batch 与 canonical stage plan 的 `full_stage_plan_hash`、
 `benchmark_content_hash`、planned experiment IDs 和 claim boundary 一致；每个 batch
 还必须有通过的 `secret_hygiene_report.json` 和 run-level `trace_summary.json`。缺 run
 时只有显式 `--allow-partial` 才会写 `collection_status=partial`；完整覆盖才会写
-`collection_status=complete`。
+`collection_status=complete`。collector 输出 `ablation_runs.csv`、重新聚合的
+`ablation_summary.csv`、`ablation_report.md` 和 `batch_collection_manifest.json`。
 
 真实 ablation 完成后，先做 artifact secret hygiene 扫描：
 

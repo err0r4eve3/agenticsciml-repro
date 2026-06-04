@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agenticsciml.ablation import _aggregate, _write_csv
+from agenticsciml.ablation import _aggregate, _render_report, _write_csv
 from agenticsciml.evidence import EVIDENCE_MODE_REAL_LLM_ABLATION, SCIENTIFIC_CLAIM_NOT_SUPPORTED
 from agenticsciml.storage import _atomic_write_text
 
@@ -97,8 +97,10 @@ def collect_ablation_batches(
     output_dir.mkdir(parents=True, exist_ok=True)
     runs_csv = output_dir / "ablation_runs.csv"
     summary_csv = output_dir / "ablation_summary.csv"
+    report_md = output_dir / "ablation_report.md"
     _write_csv(runs_csv, ordered_rows)
     _write_csv(summary_csv, summary_rows)
+    _atomic_write_text(report_md, _render_report(summary_rows))
     manifest = {
         "schema_version": 1,
         "source_type": "ablation_batch_collection",
@@ -121,6 +123,7 @@ def collect_ablation_batches(
         "created_outputs": {
             "runs_csv": str(runs_csv),
             "summary_csv": str(summary_csv),
+            "report_md": str(report_md),
             "manifest_json": str(output_dir / "batch_collection_manifest.json"),
         },
         "claim_boundary": (
