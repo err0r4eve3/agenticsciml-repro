@@ -1,6 +1,6 @@
 # Benchmark 与实验设计
 
-[返回文档树](index.md) · 相关文档：[论文机制笔记](paper_notes.md)、[Benchmark Fidelity Levels](fidelity_levels.md)、[Real LLM 运行](real_run.md)、[Ablation 说明](ablation.md)
+[返回文档树](index.md) · 相关文档：[论文机制笔记](paper_notes.md)、[论文算法 Reference Primitives](paper_algorithm_primitives.md)、[Benchmark Fidelity Levels](fidelity_levels.md)、[Real LLM 运行](real_run.md)、[Ablation 说明](ablation.md)
 
 ## 目标
 
@@ -112,6 +112,14 @@ uv run --python 3.11 --extra dev agenticsciml benchmarks --json
 The plain table includes `fidelity_level` and the maximum real-LLM
 `scientific_claim`; the JSON output includes explicit mock/real claim
 boundaries so proxy tasks cannot be mistaken for paper-score reproduction.
+
+## Paper-Listed Algorithm Primitives
+
+`GET /api/algorithms` exposes six `status=reference_implementation` entries
+mapped to the paper's champion strategy summaries. They live in
+`src/agenticsciml/paper_algorithms.py` and remain local primitives for prompt
+seeding and unit-level verification. They do not change benchmark scores,
+evaluator contracts, champion selection, or paper-score claim boundaries.
 
 ## 离线验证矩阵
 

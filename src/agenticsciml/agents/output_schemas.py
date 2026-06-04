@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
 class StrictOutputModel(BaseModel):
@@ -31,6 +31,7 @@ class ProposalOutput(StrictOutputModel):
     mutation_plan: list[str]
     expected_effect: str
     risks: list[str]
+    kb_application: dict[str, Any] = Field(default_factory=dict)
 
 
 class EngineerOutput(StrictOutputModel):
@@ -41,6 +42,7 @@ class EngineerOutput(StrictOutputModel):
     patch: str = ""
     files_changed: list[str]
     full_file_map: dict[str, str]
+    implemented_kb_points: list[str] = Field(default_factory=list)
 
 
 class DebuggerOutput(StrictOutputModel):
@@ -69,6 +71,15 @@ class RetrievalOutput(StrictOutputModel):
     entry_id: str | None = None
 
 
+class VisualAuditOutput(StrictOutputModel):
+    summary: str
+    physical_consistency_checks: list[str]
+    visual_artifacts_reviewed: list[str]
+    warnings: list[str]
+    actual_image_inputs_used: bool = False
+    analysis_mode: str
+
+
 OUTPUT_MODELS: dict[str, type[StrictOutputModel]] = {
     "analysis": ResultAnalysisOutput,
     "data_analyst": DataAnalysisOutput,
@@ -81,6 +92,7 @@ OUTPUT_MODELS: dict[str, type[StrictOutputModel]] = {
     "retriever": RetrievalOutput,
     "root_engineer": RootEngineerOutput,
     "selector": SelectorOutput,
+    "visual_audit": VisualAuditOutput,
 }
 
 

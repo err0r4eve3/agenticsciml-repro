@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import json
+import os
 import shutil
 import sys
+import tempfile
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -41,8 +45,18 @@ BLOCKED_IMPORT_ROOTS = {
 BLOCKED_CALLS = {
     "os.remove",
     "os.rmdir",
+    "os.chmod",
     "os.system",
+    "os.symlink",
     "os.unlink",
+    "Path.chmod",
+    "Path.hardlink_to",
+    "Path.symlink_to",
+    "Path.unlink",
+    "pathlib.Path.chmod",
+    "pathlib.Path.hardlink_to",
+    "pathlib.Path.symlink_to",
+    "pathlib.Path.unlink",
     "shutil.rmtree",
     "subprocess.call",
     "subprocess.check_call",
@@ -64,11 +78,21 @@ def private_eval_dir_for_workspace(workspace: Path) -> Path:
     return workspace.parent / "private_eval" / workspace.name
 
 
-def prepare_solution_workspace(benchmark_dir: Path, workspace: Path) -> None:
+def prepare_solution_workspace(
+    benchmark_dir: Path,
+    workspace: Path,
+    *,
+    run_inputs_dir: Path | None = None,
+) -> dict[str, Any]:
     workspace.mkdir(parents=True, exist_ok=True)
     old_evaluator_dir = workspace / ".evaluator"
     if old_evaluator_dir.exists():
         shutil.rmtree(old_evaluator_dir)
+    old_private_eval_dir = private_eval_dir_for_workspace(workspace)
+    if run_inputs_dir is not None and old_private_eval_dir.exists():
+        shutil.rmtree(old_private_eval_dir)
+    if run_inputs_dir is not None:
+        return _prepare_solution_workspace_from_run_inputs(benchmark_dir, workspace, run_inputs_dir)
     evaluator_dir = private_eval_dir_for_workspace(workspace)
     evaluator_dir.mkdir(parents=True, exist_ok=True)
     for filename in BENCHMARK_FILES:
@@ -104,6 +128,153 @@ def prepare_solution_workspace(benchmark_dir: Path, workspace: Path) -> None:
             shutil.move(str(generated_validation), evaluator_dir / "val_data.npz")
     if (workspace / "val_data.npz").exists():
         (workspace / "val_data.npz").unlink()
+    return {
+        "schema_version": 1,
+        "layout": "per_solution_legacy",
+        "storage_dedup_fallback": "copy",
+        "public_dir": None,
+        "private_eval_dir": str(evaluator_dir),
+    }
+
+
+def _prepare_solution_workspace_from_run_inputs(
+    benchmark_dir: Path,
+    workspace: Path,
+    run_inputs_dir: Path,
+) -> dict[str, Any]:
+    manifest = _ensure_run_inputs(benchmark_dir, run_inputs_dir)
+    public_dir = run_inputs_dir / "public"
+    fallback_modes: list[str] = []
+    for filename in BENCHMARK_FILES + ["train_data.npz"]:
+        source = public_dir / filename
+        if not source.exists():
+            continue
+        target = workspace / filename
+        fallback_modes.append(_link_or_copy_public_input(source, target))
+    layout = {
+        **manifest,
+        "solution_workspace": str(workspace),
+        "solution_public_input_mode": "copy" if "copy" in fallback_modes else "symlink",
+    }
+    if layout["solution_public_input_mode"] == "copy":
+        layout["storage_dedup_fallback"] = "copy"
+        _write_run_inputs_manifest(run_inputs_dir, layout)
+    if not (workspace / "train_data.npz").exists():
+        raise RuntimeError("Run-level public inputs did not provide train_data.npz")
+    if (workspace / "val_data.npz").exists():
+        (workspace / "val_data.npz").unlink()
+    return layout
+
+
+def _ensure_run_inputs(benchmark_dir: Path, run_inputs_dir: Path) -> dict[str, Any]:
+    public_dir = run_inputs_dir / "public"
+    private_dir = run_inputs_dir / "private_eval"
+    public_dir.mkdir(parents=True, exist_ok=True)
+    private_dir.mkdir(parents=True, exist_ok=True)
+    for filename in BENCHMARK_FILES:
+        source = benchmark_dir / filename
+        if source.exists():
+            _copy_if_changed(source, public_dir / filename)
+    evaluate_source = benchmark_dir / "evaluate.py"
+    if evaluate_source.exists():
+        _copy_if_changed(evaluate_source, private_dir / "evaluate.py")
+
+    train_source = benchmark_dir / "train_data.npz"
+    validation_source = benchmark_dir / "val_data.npz"
+    if train_source.exists() and validation_source.exists():
+        _copy_if_changed(train_source, public_dir / "train_data.npz")
+        _copy_if_changed(validation_source, private_dir / "val_data.npz")
+    elif train_source.exists() != validation_source.exists():
+        existing = train_source if train_source.exists() else validation_source
+        missing = validation_source if train_source.exists() else train_source
+        raise RuntimeError(f"Partial benchmark data artifacts are not allowed: found {existing}, missing {missing}")
+    elif not (public_dir / "train_data.npz").exists() or not (private_dir / "val_data.npz").exists():
+        with tempfile.TemporaryDirectory(prefix="agenticsciml-run-inputs-", dir=run_inputs_dir) as tmp:
+            tmp_path = Path(tmp)
+            result = run_command(
+                tmp_path,
+                [
+                    sys.executable,
+                    str(benchmark_dir / "generate_data.py"),
+                    "--seed",
+                    "0",
+                    "--output-dir",
+                    str(tmp_path),
+                ],
+                timeout_s=20,
+            )
+            if result.exit_code != 0:
+                raise RuntimeError(result.combined_output)
+            _copy_if_changed(tmp_path / "train_data.npz", public_dir / "train_data.npz")
+            _copy_if_changed(tmp_path / "val_data.npz", private_dir / "val_data.npz")
+
+    manifest = {
+        "schema_version": 1,
+        "layout": "run_level_inputs_v1",
+        "public_dir": "run_inputs/public",
+        "private_eval_dir": "run_inputs/private_eval",
+        "public_files": sorted(path.name for path in public_dir.iterdir() if path.is_file()),
+        "private_eval_files": sorted(path.name for path in private_dir.iterdir() if path.is_file()),
+        "storage_dedup_fallback": "symlink",
+        "private_label_boundary": (
+            "Generated solution workspaces receive public inputs only. evaluate.py and val_data.npz "
+            "remain in run_inputs/private_eval and are used only by the trusted evaluator phase."
+        ),
+    }
+    _write_run_inputs_manifest(run_inputs_dir, manifest)
+    return manifest
+
+
+def _write_run_inputs_manifest(run_inputs_dir: Path, manifest: dict[str, Any]) -> None:
+    path = run_inputs_dir / "manifest.json"
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp:
+            tmp_path = Path(tmp.name)
+            tmp.write(json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False))
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        if tmp_path is not None and tmp_path.exists():
+            tmp_path.unlink()
+
+
+def _link_or_copy_public_input(source: Path, target: Path) -> str:
+    if target.exists() or target.is_symlink():
+        target.unlink()
+    try:
+        os.symlink(source, target)
+        return "symlink"
+    except OSError:
+        shutil.copy2(source, target)
+        return "copy"
+
+
+def _copy_if_changed(source: Path, target: Path) -> None:
+    if target.exists() and _file_digest(source) == _file_digest(target):
+        _mark_read_only(target)
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        target.chmod(0o644)
+        target.unlink()
+    shutil.copy2(source, target)
+    _mark_read_only(target)
+
+
+def _mark_read_only(path: Path) -> None:
+    try:
+        path.chmod(0o444)
+    except OSError:
+        pass
 
 
 def _file_digest(path: Path) -> str | None:
@@ -112,9 +283,9 @@ def _file_digest(path: Path) -> str | None:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _guarded_fingerprints(workspace: Path) -> dict[str, str | None]:
+def _guarded_fingerprints(workspace: Path, evaluator_dir: Path | None = None) -> dict[str, str | None]:
     fingerprints = {filename: _file_digest(workspace / filename) for filename in GUARDED_FILES}
-    evaluator_dir = private_eval_dir_for_workspace(workspace)
+    evaluator_dir = evaluator_dir or private_eval_dir_for_workspace(workspace)
     fingerprints["private_eval/evaluate.py"] = _file_digest(evaluator_dir / "evaluate.py")
     fingerprints["private_eval/val_data.npz"] = _file_digest(evaluator_dir / "val_data.npz")
     return fingerprints
@@ -123,8 +294,9 @@ def _guarded_fingerprints(workspace: Path) -> dict[str, str | None]:
 def _guardrail_violation(
     workspace: Path,
     before: dict[str, str | None],
+    evaluator_dir: Path | None = None,
 ) -> str | None:
-    after = _guarded_fingerprints(workspace)
+    after = _guarded_fingerprints(workspace, evaluator_dir=evaluator_dir)
     changed = [filename for filename, digest in before.items() if after.get(filename) != digest]
     if changed:
         return "Guardrail violation: generated solution modified guarded evaluator file(s): " + ", ".join(changed)
@@ -264,6 +436,7 @@ def train_and_evaluate(
     workspace: Path,
     contract: EvaluationContract,
     timeout_s: int,
+    private_eval_dir: Path | None = None,
 ) -> RunResult:
     static_result = _static_guardrail_result(workspace)
     if static_result is not None:
@@ -280,7 +453,7 @@ def train_and_evaluate(
         ("predict", contract.predict_command),
         ("evaluate", contract.evaluate_command),
     ]
-    evaluator_dir = private_eval_dir_for_workspace(workspace)
+    evaluator_dir = private_eval_dir or private_eval_dir_for_workspace(workspace)
     validation_path = evaluator_dir / "val_data.npz"
 
     for phase, command in commands:
@@ -321,7 +494,7 @@ def train_and_evaluate(
                     stderr="\n".join(all_stderr),
                     duration_s=total_duration,
                 )
-        guarded_before = _guarded_fingerprints(workspace)
+        guarded_before = _guarded_fingerprints(workspace, evaluator_dir=evaluator_dir)
         normalized = _phase_command(phase, command, evaluator_dir)
         last_command = normalized
         env = None
@@ -365,7 +538,7 @@ def train_and_evaluate(
                     stderr="\n".join(all_stderr),
                     duration_s=total_duration,
                 )
-        violation = _guardrail_violation(workspace, guarded_before)
+        violation = _guardrail_violation(workspace, guarded_before, evaluator_dir=evaluator_dir)
         if violation:
             all_stderr.append(violation)
             (workspace / "train.log").write_text("\n".join(all_stdout), encoding="utf-8")

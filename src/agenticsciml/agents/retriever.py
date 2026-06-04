@@ -32,6 +32,21 @@ class RetrieverAgent(AgentBase):
         response = entry.entry_id if entry else "none"
         self._save_messages(solution_id, [AgentMessage(self.role, prompt, response)])
         self.storage.save_solution_text(solution_id, "retrieval_query.txt", query)
+        manifest = kb.manifest()
+        self.storage.save_json(
+            f"solutions/{solution_id}/retrieved_kb.json",
+            {
+                "schema_version": 1,
+                "enabled": enabled,
+                "retrieval_mode": "disabled" if not enabled else "random" if random_mode else "lexical",
+                "query": query,
+                "selected_entry_id": entry.entry_id if entry else None,
+                "selected_entry": entry.provenance() if entry else None,
+                "kb_manifest": manifest,
+                "paper_kb_equivalent": bool(manifest.get("paper_kb_equivalent")),
+                "coverage_status": manifest.get("coverage_status"),
+            },
+        )
         if entry:
             self.storage.save_solution_text(
                 solution_id,

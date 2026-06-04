@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import base64
 import json
+import mimetypes
 import os
+from pathlib import Path
 from typing import Any
 
 from agenticsciml.agents.output_schemas import (
@@ -24,6 +27,17 @@ def _timeout_from_env() -> float:
     return timeout
 
 
+def _max_retries_from_env() -> int:
+    raw = os.environ.get("OPENAI_MAX_RETRIES", "0")
+    try:
+        max_retries = int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"OPENAI_MAX_RETRIES must be an integer, got {raw!r}.") from exc
+    if max_retries < 0:
+        raise RuntimeError(f"OPENAI_MAX_RETRIES must be non-negative, got {raw!r}.")
+    return max_retries
+
+
 class OpenAIAdapter(LLMClient):
     def __init__(
         self,
@@ -31,12 +45,16 @@ class OpenAIAdapter(LLMClient):
         api_key: str | None = None,
         base_url: str | None = None,
         timeout_s: float | None = None,
+        max_retries: int | None = None,
     ):
         raw_model = model or os.environ.get("OPENAI_MODEL", "gpt-5-mini")
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self.base_url = base_url or os.environ.get("OPENAI_BASE_URL")
         self.model = _normalize_model_name(raw_model, self.base_url)
         self.timeout_s = timeout_s if timeout_s is not None else _timeout_from_env()
+        self.max_retries = max_retries if max_retries is not None else _max_retries_from_env()
+        if self.max_retries < 0:
+            raise RuntimeError(f"max_retries must be non-negative, got {self.max_retries!r}.")
         self.provider_capabilities: ProviderCapabilities = capabilities_for_openai_compatible(self.base_url)
         self.provider_name = self.provider_capabilities.provider
         self.adapter_type = self.provider_capabilities.adapter_type
@@ -47,7 +65,11 @@ class OpenAIAdapter(LLMClient):
             from openai import OpenAI
         except ImportError as exc:
             raise RuntimeError("Install the real-llm extra to use OpenAIAdapter.") from exc
-        client_kwargs = {"api_key": self.api_key, "timeout": self.timeout_s}
+        client_kwargs = {
+            "api_key": self.api_key,
+            "timeout": self.timeout_s,
+            "max_retries": self.max_retries,
+        }
         if self.base_url:
             client_kwargs["base_url"] = self.base_url
         self.client = OpenAI(**client_kwargs)
@@ -57,20 +79,31 @@ class OpenAIAdapter(LLMClient):
         prompt: str,
         system: str | None = None,
         temperature: float = 0.0,
+        reasoning_effort: str | None = None,
     ) -> str:
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            temperature=temperature,
+        request_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        if reasoning_effort is not None:
+            request_kwargs["reasoning_effort"] = reasoning_effort
+        self.last_call_metadata = self._metadata(
+            method="complete_text",
+            schema_name=None,
+            response=None,
+            reasoning_effort=reasoning_effort,
         )
+        response = self.client.chat.completions.create(**request_kwargs)
         self.last_call_metadata = self._metadata(
             method="complete_text",
             schema_name=None,
             response=response,
+            reasoning_effort=reasoning_effort,
         )
         return response.choices[0].message.content or ""
 
@@ -80,6 +113,7 @@ class OpenAIAdapter(LLMClient):
         schema_name: str,
         system: str | None = None,
         temperature: float = 0.0,
+        reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
         if (
             self.provider_capabilities.supports_responses
@@ -91,13 +125,124 @@ class OpenAIAdapter(LLMClient):
                 schema_name,
                 system=system,
                 temperature=temperature,
+                reasoning_effort=reasoning_effort,
             )
         return self._complete_json_compatible(
             prompt,
             schema_name,
             system=system,
             temperature=temperature,
+            reasoning_effort=reasoning_effort,
         )
+
+    def complete_json_with_images(
+        self,
+        prompt: str,
+        schema_name: str,
+        image_paths: list[Path],
+        system: str | None = None,
+        temperature: float = 0.0,
+        reasoning_effort: str | None = None,
+    ) -> dict[str, Any]:
+        if not image_paths:
+            raise ValueError("complete_json_with_images requires at least one image path.")
+        if not (
+            self.provider_capabilities.supports_responses
+            and self.provider_capabilities.supports_structured_outputs
+            and self.provider_capabilities.supports_image_inputs
+        ):
+            if self.provider_capabilities.supports_image_inputs:
+                return self._complete_json_with_images_compatible(
+                    prompt,
+                    schema_name,
+                    image_paths,
+                    system=system,
+                    temperature=temperature,
+                    reasoning_effort=reasoning_effort,
+                )
+            raise RuntimeError("Image JSON calls require a provider with image input support.")
+        model = output_model_for(schema_name)
+        if model is None:
+            raise RuntimeError(f"No structured output schema registered for {schema_name}.")
+        request_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "input": _response_multimodal_input(prompt, system, image_paths),
+            "temperature": temperature,
+            "text_format": model,
+        }
+        if reasoning_effort is not None:
+            request_kwargs["reasoning"] = {"effort": reasoning_effort}
+        self.last_call_metadata = self._metadata(
+            method="complete_json_with_images",
+            schema_name=schema_name,
+            response=None,
+            reasoning_effort=reasoning_effort,
+        )
+        self.last_call_metadata["image_input_count"] = len(image_paths)
+        self.last_call_metadata["image_input_filenames"] = [path.name for path in image_paths]
+        response = self.client.responses.parse(**request_kwargs)
+        self.last_call_metadata = self._metadata(
+            method="complete_json_with_images",
+            schema_name=schema_name,
+            response=response,
+            reasoning_effort=reasoning_effort,
+        )
+        self.last_call_metadata["image_input_count"] = len(image_paths)
+        self.last_call_metadata["image_input_filenames"] = [path.name for path in image_paths]
+        parsed = _extract_parsed_response(response)
+        if parsed is None:
+            raise RuntimeError(f"Model did not return parsed structured output for {schema_name}.")
+        if hasattr(parsed, "model_dump"):
+            payload = parsed.model_dump(exclude_none=True)
+        elif isinstance(parsed, dict):
+            payload = parsed
+        else:
+            raise RuntimeError(f"Parsed structured output for {schema_name} has unsupported type.")
+        return validate_output_payload(payload, schema_name=schema_name)
+
+    def _complete_json_with_images_compatible(
+        self,
+        prompt: str,
+        schema_name: str,
+        image_paths: list[Path],
+        system: str | None,
+        temperature: float,
+        reasoning_effort: str | None,
+    ) -> dict[str, Any]:
+        json_prompt = _compatible_json_prompt(prompt, schema_name)
+        request_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": _chat_multimodal_messages(json_prompt, system, image_paths),
+            "temperature": temperature,
+        }
+        if reasoning_effort is not None:
+            request_kwargs["reasoning_effort"] = reasoning_effort
+        self.last_call_metadata = self._metadata(
+            method="complete_json_with_images",
+            schema_name=schema_name,
+            response=None,
+            reasoning_effort=reasoning_effort,
+        )
+        self.last_call_metadata["image_input_count"] = len(image_paths)
+        self.last_call_metadata["image_input_filenames"] = [path.name for path in image_paths]
+        response = self.client.chat.completions.create(**request_kwargs)
+        self.last_call_metadata = self._metadata(
+            method="complete_json_with_images",
+            schema_name=schema_name,
+            response=response,
+            reasoning_effort=reasoning_effort,
+        )
+        self.last_call_metadata["image_input_count"] = len(image_paths)
+        self.last_call_metadata["image_input_filenames"] = [path.name for path in image_paths]
+        text = response.choices[0].message.content or ""
+        json_text = _extract_json_object_text(text)
+        try:
+            payload = json.loads(json_text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Model did not return valid JSON for {schema_name}: {text[:300]}") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"Model JSON for {schema_name} must be an object.")
+        return validate_output_payload(payload, schema_name=schema_name)
 
     def _complete_json_responses(
         self,
@@ -105,20 +250,37 @@ class OpenAIAdapter(LLMClient):
         schema_name: str,
         system: str | None,
         temperature: float,
+        reasoning_effort: str | None,
     ) -> dict[str, Any]:
         model = output_model_for(schema_name)
         if model is None:
-            return self._complete_json_compatible(prompt, schema_name, system=system, temperature=temperature)
-        response = self.client.responses.parse(
-            model=self.model,
-            input=_response_input(prompt, system),
-            temperature=temperature,
-            text_format=model,
+            return self._complete_json_compatible(
+                prompt,
+                schema_name,
+                system=system,
+                temperature=temperature,
+                reasoning_effort=reasoning_effort,
+            )
+        request_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "input": _response_input(prompt, system),
+            "temperature": temperature,
+            "text_format": model,
+        }
+        if reasoning_effort is not None:
+            request_kwargs["reasoning"] = {"effort": reasoning_effort}
+        self.last_call_metadata = self._metadata(
+            method="complete_json",
+            schema_name=schema_name,
+            response=None,
+            reasoning_effort=reasoning_effort,
         )
+        response = self.client.responses.parse(**request_kwargs)
         self.last_call_metadata = self._metadata(
             method="complete_json",
             schema_name=schema_name,
             response=response,
+            reasoning_effort=reasoning_effort,
         )
         parsed = _extract_parsed_response(response)
         if parsed is None:
@@ -137,9 +299,15 @@ class OpenAIAdapter(LLMClient):
         schema_name: str,
         system: str | None,
         temperature: float,
+        reasoning_effort: str | None,
     ) -> dict[str, Any]:
         json_prompt = _compatible_json_prompt(prompt, schema_name)
-        text = self.complete_text(json_prompt, system=system, temperature=temperature)
+        text = self.complete_text(
+            json_prompt,
+            system=system,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+        )
         json_text = _extract_json_object_text(text)
         try:
             payload = json.loads(json_text)
@@ -149,16 +317,28 @@ class OpenAIAdapter(LLMClient):
             raise RuntimeError(f"Model JSON for {schema_name} must be an object.")
         return validate_output_payload(payload, schema_name=schema_name)
 
-    def _metadata(self, *, method: str, schema_name: str | None, response: Any) -> dict[str, Any]:
-        return {
+    def _metadata(
+        self,
+        *,
+        method: str,
+        schema_name: str | None,
+        response: Any,
+        reasoning_effort: str | None,
+    ) -> dict[str, Any]:
+        metadata = {
             "provider": self.provider_name,
             "model": self.model,
             "method": method,
             "schema_name": schema_name,
             "adapter_type": self.adapter_type,
             "provider_capabilities": self.provider_capabilities.to_dict(),
+            "timeout_s": self.timeout_s,
+            "max_retries": self.max_retries,
             "usage": _usage_metadata(response),
         }
+        if reasoning_effort is not None:
+            metadata["reasoning_effort"] = reasoning_effort
+        return metadata
 
 
 def _response_input(prompt: str, system: str | None) -> list[dict[str, str]]:
@@ -167,6 +347,62 @@ def _response_input(prompt: str, system: str | None) -> list[dict[str, str]]:
         items.append({"role": "system", "content": system})
     items.append({"role": "user", "content": prompt})
     return items
+
+
+def _response_multimodal_input(
+    prompt: str,
+    system: str | None,
+    image_paths: list[Path],
+) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    if system:
+        items.append({"role": "system", "content": system})
+    content: list[dict[str, object]] = [{"type": "input_text", "text": prompt}]
+    for image_path in image_paths:
+        content.append(
+            {
+                "type": "input_image",
+                "image_url": _image_data_url(image_path),
+                "detail": "auto",
+            }
+        )
+    items.append({"role": "user", "content": content})
+    return items
+
+
+def _chat_multimodal_messages(
+    prompt: str,
+    system: str | None,
+    image_paths: list[Path],
+) -> list[dict[str, object]]:
+    messages: list[dict[str, object]] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    content: list[dict[str, object]] = [{"type": "text", "text": prompt}]
+    for image_path in image_paths:
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": _image_data_url(image_path),
+                    "detail": "auto",
+                },
+            }
+        )
+    messages.append({"role": "user", "content": content})
+    return messages
+
+
+def _image_data_url(path: Path) -> str:
+    if not path.exists() or not path.is_file():
+        raise FileNotFoundError(f"Image input artifact not found: {path}")
+    mime_type = mimetypes.guess_type(path.name)[0]
+    if mime_type is None and path.suffix.lower() == ".svg":
+        mime_type = "image/svg+xml"
+    if mime_type is None or not mime_type.startswith("image/"):
+        raise ValueError(f"Image input artifact must have an image MIME type: {path.name}")
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
 
 
 def _normalize_model_name(model: str, base_url: str | None) -> str:

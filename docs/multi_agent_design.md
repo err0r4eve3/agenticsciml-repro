@@ -115,6 +115,9 @@ AgenticSciML 的每次架构或实验边界变化，都应能从 `docs/index.md`
 - `tracing`：保存 prompt、response、stdout、stderr、score 和 artifact。
 - `guardrails`：禁止修改 evaluator、禁止删除工作区外文件、测试禁止联网、限制无限循环和资源消耗。
 - `static sandbox checks`：运行 generated `solution.py` 前先阻断网络模块、子进程、危险删除操作和明显绝对路径写入。
+- `strategy fidelity inspector`：若 run 带有可机器审计的 manual strategy locks，
+  在执行 generated `solution.py` 前检查 required / forbidden terms、imports 和 calls，
+  并把结果写入 `solutions/<id>/policy_fidelity_report.json` 与 guardrail trace。
 
 SciML 的 evaluator 应尽量是 deterministic code，而不是 LLM judge。
 
@@ -174,7 +177,8 @@ Phase 4: Champion export
 - `AgentBase.require_inputs()` 将 `AgentSpec.input_schema` 接入运行时，缺少输入字段会 fail closed 并写入 guardrail trace。
 - `AgentBase.complete_json_checked()` 默认使用 `AgentSpec.output_schema` 校验代码消费的 LLM 输出。
 - `DataAnalystAgent` 会生成 `reports/data_observations.json` 和 `reports/data_overview.svg`，
-  prompt 只消费训练数据观察摘要，不接触 private validation labels。
+  以及可复跑的 `reports/data_eda.py` / `reports/data_eda.json`。prompt 只消费训练数据观察
+  和 replayable EDA 摘要，不接触 private validation labels。
 - `ResultAnalystAgent` 会生成 `solution_observations.json` 和
   `prediction_overview.svg`，prompt 只消费 `predict_input.npz`、`predictions.npz`、
   `eval.json` 和日志摘要，保持 prediction-only 边界。
@@ -188,9 +192,24 @@ Phase 4: Champion export
   不足名额再由 deterministic `SearchPolicy` 用 recent improvement、diverse underexplored
   和 `max_children_per_node` 约束补齐。默认 `selector_vote_count=3`，这是同一
   provider 的多票 evidence；除非后续显式配置多 provider，不声明论文级异构
-  selector ensemble。
+  selector ensemble。若配置 `selector_panel`，默认每个 member 一票，并记录 member、
+  configured model、actual model、provider、source 和 deterministic diversity flags；
+  mock run 中多个 configured member 仍不等同真实异构 provider evidence。
+- Selector policy 是 checkpoint 的一部分：`checkpoint.json` 保存
+  `selector_policy_digest`，resume 时禁止静默切换 selector role config 或 panel
+  config。Selector 真正投票时会保留 latest view 与
+  `reports/selector_votes/selection_*.json` 历史；早期节点数不足、尚未进入 mature
+  selection 阶段时，metadata 用 `selector_voting_exercised=false` 明确表示 panel 只是
+  configured，没有实际投票证据。
+- Analysis Base 会在每个 child mutation 前写出
+  `solutions/<solution_id>/analysis_context.json`，把 mutation parent、已有 sibling
+  children、uncle nodes 和缺失报告分别结构化记录。Proposer prompt 使用
+  parent/sibling/uncle 关系标签，而不是无类型 related report 拼接。
 - `RetrievalQueryBuilder` 用 benchmark metadata、parent analysis、failure kind、method tags、score trend 和 leaderboard top-k 构造 KB query；`use_kb` 与 `random_kb` 可用于 ablation。
 - `SolutionNode` 持久化 selector/retriever 需要的结构化元数据，包括 `method_tags`、`failure_kind`、`score_delta_from_parent`、`num_debug_attempts`、`benchmark_name` 和 `contract_hash`。
+- `EmergenceAudit` 会为每个 solution 写入 `emergence_report.json`，只给出
+  `candidate_emergent` 等保守标签；它检查 KB/catalog overlap、prior-result 证据、
+  score improvement 和 policy fidelity，不输出论文级 proved emergent discovery。
 - `trace_summary.json` 汇总 `trace.jsonl`，用 required span types 和 guardrail failures 形成最小 trace quality gate。
 - `run_metadata.json` 汇总 wall time、champion、solution count 和按 role 聚合的 LLM 调用统计。
 

@@ -33,9 +33,23 @@
 `Problem.md`、`Requirements.md`、`Evaluation.md`、`Data_config.json`、
 `generate_data.py`、`evaluate.py` 和 `guidelines.md` 决定。
 
+当前 KB 是 `local_kb_seed`，不是论文 70-entry knowledge base 的等价复现。
+`KnowledgeBase.manifest()` 会暴露 `entry_count`、`paper_reference_entry_count=70`、
+`coverage_status`、`provenance_complete`、`missing_provenance_entry_ids` 和
+`paper_kb_equivalent=false`；只有条目数达到论文参考规模且每条具备基本 provenance
+时，manifest 才能标记为 paper-equivalent。Retriever 每次调用都会在对应 solution
+workspace 写入 `retrieved_kb.json`，记录 retrieval mode、查询、条目 provenance 和 KB
+coverage 状态。`retrieved_kb.md` 继续作为人类可读摘要。
+
+`paper_workflow` claim gate 要求 `paper_kb_equivalent=true`。在当前 KB 仍为
+`local_kb_seed` 时，即使 workflow 可以运行，也只能支持 workflow-proxy evidence。
+
 ## 知识库写入规则
 
 - 每个条目必须说明适用 benchmark、来源、可尝试的 mutation idea、边界和风险。
+- `index.json` 条目应尽量提供 `source_title`、`source_url_or_doi`、`source_type`、
+  `task_tags` 和 `implementation_snippet_available`，使 run artifact 可以审计 KB
+  provenance。
 - 不粘贴论文或公开仓库的大段原文/源码；只保留短摘要、路径和可验证 URL。
 - 不引入新 runtime dependency，除非后续任务明确把 benchmark 升级到更高 fidelity level。
 - 不把 KB 条目写成隐藏推理提示；要求 agent 输出 concise rationale summary、implementation plan、expected effect 和 risks。

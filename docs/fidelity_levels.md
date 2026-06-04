@@ -18,6 +18,12 @@
 | `faithful-small` | 使用同类 SciML 模型、损失、数据结构或 PDE/operator 目标，但缩小数据规模和训练预算。 | low-budget scientific smoke evidence |
 | `paper-like` | 尽量贴近论文数据、训练预算、模型类别和指标，可用于论文趋势对比。 | paper-comparison candidate evidence |
 
+每个 benchmark API payload 还会暴露 machine-checkable fidelity matrix：
+`paper_scale_target`、`local_fixture_scope`、`metric_delta`、
+`hidden_label_protocol`、`training_budget_delta`、`solver_dependency_delta`、
+`missing_requirements` 和 `paper_benchmark_equivalent`。这些字段用于 UI 和
+readiness 展示证据缺口，不提升 benchmark 等级。
+
 ## Claim Rules
 
 - `proxy` 不得被描述为论文全量 SciML 复现。
@@ -25,6 +31,31 @@
 - real LLM + `proxy` benchmark 也只能是 `proxy_workflow_only`。
 - 只有 real LLM + `faithful-small` 或 `paper-like` 才能进入科学结果讨论，但仍需要多 seed、ablation 和失败样本审查。
 - 分数必须来自固定 evaluator，不允许 LLM judge 生成科学分数。
+
+## Claim Gate
+
+运行请求默认使用 `claim_level=workflow_proxy`。该级别允许当前 mock、proxy、
+faithful-small 和 custom proxy benchmark bundle 跑通工作流，但 `claim_gate` 必须明确
+输出：
+
+- `paper_level_claim_supported=false`
+- `scientific_claim_supported=false`
+- `evaluator_trust_level=synthetic_proxy` 或其他非论文级信任标记
+- `paper_benchmark_equivalent=false`，除非 benchmark matrix 和人工审批证明等价
+
+`claim_level=paper_workflow` 是 fail-closed 门禁。当前仓库大多数 run 不能通过是预期
+行为；只有全部条件满足才允许启动并支持 paper-level claim：
+
+- real LLM mode，不是 mock/dry-run；
+- benchmark fidelity 为 `paper-like`；
+- `domain_evaluator_approved=true` 且记录 reviewer/notes；
+- `paper_benchmark_approved=true`；
+- selector panel 有至少两个真实异构 provider/model 的投票证据；
+- KB manifest 标记 `paper_kb_equivalent=true`，而不是 `local_kb_seed`；
+- Data/Result Analyst 实际使用 multimodal image input，而不是只读文本 artifact。
+
+Trace summary 会检查 overclaim consistency：如果 metadata 或 workflow-start trace 声称
+paper/scientific support，但 `claim_gate` 不支持，则 quality gate fail closed。
 
 ## OpenAI Agents SDK Alignment
 

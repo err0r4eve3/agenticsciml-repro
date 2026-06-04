@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -10,13 +12,16 @@ from agenticsciml.agents import (
     EvaluatorAgent,
     ProposerAgent,
     ResultAnalystAgent,
+    RootEngineerAgent,
     SelectorAgent,
 )
 from agenticsciml.agents.base import ArtifactMissingError, InputContractError
+from agenticsciml.agents.selector import build_selector_vote_result
 from agenticsciml.agents.specs import AGENT_SPECS, AgentSpec, PromptTemplate
-from agenticsciml.benchmarks import ProblemBundle
+from agenticsciml.benchmarks import BenchmarkContractFactory, ProblemBundle
 from agenticsciml.llm.base import LLMClient
 from agenticsciml.llm.mock import MockLLMClient
+from agenticsciml.reporting.trace_summary import summarize_trace
 from agenticsciml.storage import ExperimentStorage
 
 
@@ -47,6 +52,16 @@ class RecordingLLM(LLMClient):
                 "strengths": ["score recorded"],
                 "weaknesses": ["prediction-only plots do not expose labels"],
                 "next_steps": ["compare with sibling observations"],
+            }
+        if schema_name == "root_engineer":
+            return {"proposal": "plain isolated baseline", "code": "class MODEL:\n    pass\n"}
+        if schema_name == "proposal":
+            return {
+                "title": "Use labeled analysis base",
+                "diagnosis": "Parent and relative reports are available.",
+                "mutation_plan": ["Preserve parent strengths", "Avoid sibling weakness"],
+                "expected_effect": "Better scoped mutation",
+                "risks": ["Analysis context may be sparse"],
             }
         return {
             "metric_name": "validation_mse",
@@ -114,17 +129,109 @@ def test_data_analyst_writes_training_observation_artifacts(tmp_path: Path) -> N
 
     manifest_path = storage.run_dir / "reports" / "data_observations.json"
     svg_path = storage.run_dir / "reports" / "data_overview.svg"
+    eda_script_path = storage.run_dir / "reports" / "data_eda.py"
+    eda_output_path = storage.run_dir / "reports" / "data_eda.json"
+    structured_path = storage.run_dir / "reports" / "data_analysis_structured.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    eda_output = json.loads(eda_output_path.read_text(encoding="utf-8"))
+    structured = json.loads(structured_path.read_text(encoding="utf-8"))
 
     assert manifest["benchmark_name"] == "function_approx"
     assert manifest["source_mode"] in {"generated_seed0", "repo_existing"}
     assert manifest["plots"][0]["path"] == "reports/data_overview.svg"
+    assert manifest["multimodal_evidence"]["plot_artifact_generated"] is True
+    assert manifest["multimodal_evidence"]["actual_image_inputs_used"] is False
+    assert manifest["multimodal_evidence"]["analysis_mode"] == "text_artifact_summary_only"
     assert manifest["arrays"]["x_train"]["shape"] == [200, 1]
     assert manifest["arrays"]["u_train"]["shape"] == [200, 1]
     assert "val_data" not in manifest_path.read_text(encoding="utf-8")
     assert svg_path.exists()
+    assert eda_script_path.exists()
+    assert eda_output["privacy_boundary"] == "training_data_only_no_private_labels"
+    assert eda_output["array_checks"][0]["status"] in {"ok", "warning"}
+    assert structured["benchmark_name"] == "function_approx"
+    assert structured["benchmark_family"] == "function approximation"
+    assert structured["evaluation_metric"] == "validation_mse"
+    assert structured["training_array_keys"] == ["u_train", "x_train"]
+    assert structured["private_label_boundary"] == "training_data_only_no_validation_labels"
+    assert any("Function approximation" in item for item in structured["task_specific_observations"])
+    assert "val_data" not in eda_output_path.read_text(encoding="utf-8")
     assert "Observation manifest:" in llm.last_prompt
+    assert "Replayable EDA summary:" in llm.last_prompt
     assert "reports/data_overview.svg" in llm.last_prompt
+
+
+def test_data_analyst_structured_output_is_benchmark_specific(tmp_path: Path) -> None:
+    first_storage = ExperimentStorage.create(tmp_path, "function")
+    second_storage = ExperimentStorage.create(tmp_path, "poisson")
+
+    DataAnalystAgent(RecordingLLM(), first_storage).analyze(Path("examples/function_approx"))
+    DataAnalystAgent(RecordingLLM(), second_storage).analyze(Path("examples/poisson_lshape"))
+
+    first = json.loads((first_storage.run_dir / "reports" / "data_analysis_structured.json").read_text(encoding="utf-8"))
+    second = json.loads((second_storage.run_dir / "reports" / "data_analysis_structured.json").read_text(encoding="utf-8"))
+
+    assert first["benchmark_name"] == "function_approx"
+    assert second["benchmark_name"] == "poisson_lshape"
+    assert first["benchmark_family"] != second["benchmark_family"]
+    assert first["task_specific_observations"] != second["task_specific_observations"]
+
+
+def test_data_analysis_structured_json_schema_rejects_generic_template_output(tmp_path: Path) -> None:
+    run_dir = tmp_path / "generic-template"
+    reports_dir = run_dir / "reports"
+    reports_dir.mkdir(parents=True)
+    (run_dir / "run_metadata.json").write_text("{}", encoding="utf-8")
+    (reports_dir / "data_analysis_structured.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "benchmark_name": "poisson_lshape",
+                "benchmark_family": "PINN elliptic PDE",
+                "evaluation_metric": "relative_l2",
+                "training_array_keys": ["x_train", "u_train"],
+                "task_specific_observations": [
+                    "The data has numeric arrays.",
+                    "The model should fit the training distribution.",
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = summarize_trace(run_dir)
+
+    specificity = summary["artifact_consistency"]["data_analysis_specificity"]
+    assert specificity["checked"] is True
+    assert specificity["passed"] is False
+    assert "task_specific_observations lack benchmark-specific terms" in specificity["warnings"]
+
+
+def test_data_eda_script_replays_training_npz_only(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    DataAnalystAgent(RecordingLLM(), storage).analyze(Path("examples/function_approx"))
+    train_path = tmp_path / "train_data.npz"
+    output_path = tmp_path / "eda-replay.json"
+    np.savez(train_path, x_train=np.array([[0.0], [1.0]]), u_train=np.array([[2.0], [3.0]]))
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(storage.run_dir / "reports" / "data_eda.py"),
+            "--train-data",
+            str(train_path),
+            "--output",
+            str(output_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert completed.returncode == 0
+    assert payload["privacy_boundary"] == "training_data_only_no_private_labels"
+    assert payload["arrays"]["x_train"]["shape"] == [2, 1]
 
 
 def test_result_analyst_writes_prediction_only_observation_artifacts(tmp_path: Path) -> None:
@@ -148,6 +255,9 @@ def test_result_analyst_writes_prediction_only_observation_artifacts(tmp_path: P
     assert manifest["solution_id"] == "solution_001"
     assert manifest["privacy_boundary"] == "prediction_only_no_validation_labels"
     assert manifest["plots"][0]["path"] == "solutions/solution_001/prediction_overview.svg"
+    assert manifest["multimodal_evidence"]["plot_artifact_generated"] is True
+    assert manifest["multimodal_evidence"]["actual_image_inputs_used"] is False
+    assert manifest["multimodal_evidence"]["analysis_mode"] == "text_artifact_summary_only"
     assert manifest["arrays"]["predict_input.x_val"]["shape"] == [5, 1]
     assert manifest["arrays"]["predictions.predictions"]["shape"] == [5, 1]
     assert svg_path.exists()
@@ -155,6 +265,27 @@ def test_result_analyst_writes_prediction_only_observation_artifacts(tmp_path: P
     assert "prediction_overview.svg" in llm.last_prompt
     assert "val_data" not in llm.last_prompt
     assert "u_val" not in llm.last_prompt
+
+
+def test_root_engineer_prompt_excludes_strategy_seed_context(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    llm = RecordingLLM()
+    bundle = ProblemBundle.load(Path("examples/function_approx"))
+    contract = BenchmarkContractFactory.create_contract(bundle)
+
+    RootEngineerAgent(llm, storage).generate(
+        "solution_000",
+        problem_bundle=bundle,
+        contract=contract,
+        guidelines="Follow local evaluator only.",
+        data_report="Data analyst saw smooth x_train observations.",
+        problem_intake_context="User wants sparse sensors and no future leakage.",
+    )
+
+    assert "User wants sparse sensors" in llm.last_prompt
+    assert "strategy seed catalogs" in llm.last_prompt
+    assert "Human/Planner Selected Strategy Seeds" not in llm.last_prompt
+    assert "paper_cylinder_bandlimited_filter" not in llm.last_prompt
 
 
 def test_selector_votes_always_include_best_and_tie_break_by_loss(tmp_path: Path) -> None:
@@ -184,7 +315,59 @@ def test_selector_votes_always_include_best_and_tie_break_by_loss(tmp_path: Path
 
     assert result.selected_parent_ids == ["best", "promising"]
     assert result.vote_counts == {"promising": 2, "worse_loss": 2}
-    assert (storage.run_dir / "reports" / "selector_votes.json").exists()
+    artifact = json.loads((storage.run_dir / "reports" / "selector_votes.json").read_text(encoding="utf-8"))
+    assert artifact["schema_version"] == 2
+    assert artifact["ensemble_mode"] == "single_provider_multi_vote"
+    assert artifact["selector_panel_members"][0]["member_id"] == "selector"
+    assert "adapter_type" in artifact["selector_panel_members"][0]
+    assert "provider_capabilities" in artifact["selector_panel_members"][0]
+    assert artifact["votes"][0]["provider_capabilities"] == {}
+    assert artifact["selector_diversity"]["panel_repeated_members"] is True
+    assert artifact["selector_diversity"]["heterogeneous_selector_evidence"] is False
+    assert "not heterogeneous selector ensemble evidence" in artifact["claim_boundary"]
+
+
+def test_selector_vote_result_deduplicates_and_filters_ballots() -> None:
+    candidates = [
+        {"node_id": "best", "score": {"value": 0.1, "higher_is_better": False}},
+        {"node_id": "promising", "score": {"value": 0.2, "higher_is_better": False}},
+        {"node_id": "other", "score": {"value": 0.3, "higher_is_better": False}},
+    ]
+    result = build_selector_vote_result(
+        candidates=candidates,
+        best_node_id="best",
+        max_to_select=2,
+        votes=[
+            {
+                "member_id": "selector_alpha",
+                "selected_parent_ids": [
+                    "promising",
+                    "promising",
+                    "best",
+                    "missing",
+                    "other",
+                    "other",
+                ],
+                "rationale": "duplicates and invalid ids should not overweight a candidate",
+            }
+        ],
+        ensemble_mode="configured_selector_panel",
+        panel_members=[
+            {
+                "member_id": "selector_alpha",
+                "role": "selector",
+                "configured_model": "gpt-5-mini",
+                "actual_model": "gpt-5-mini",
+                "provider": "OpenAICompatibleLLMClient",
+                "source": "selector_panel",
+            }
+        ],
+        claim_boundary="test",
+    )
+
+    assert result.votes[0]["selected_parent_ids"] == ["promising", "other"]
+    assert result.vote_counts == {"other": 1, "promising": 1}
+    assert result.selected_parent_ids == ["best", "promising"]
 
 
 def test_agents_save_transcripts_and_structured_outputs(tmp_path: Path) -> None:
@@ -204,8 +387,10 @@ def test_agents_save_transcripts_and_structured_outputs(tmp_path: Path) -> None:
     )
 
     assert proposal.title
+    assert proposal.kb_application["proposal_adopted_points"]
     assert selection == ["solution_000"]
     assert (storage.run_dir / "solutions" / "solution_001" / "proposal.md").exists()
+    assert "KB Application" in (storage.run_dir / "solutions" / "solution_001" / "proposal.md").read_text(encoding="utf-8")
     assert (storage.run_dir / "solutions" / "solution_001" / "critic.md").exists()
     assert (storage.run_dir / "transcripts" / "selector.json").exists()
 
@@ -291,6 +476,29 @@ def test_agent_span_trace_includes_spec_metadata(tmp_path: Path) -> None:
     trace_text = (storage.run_dir / "trace.jsonl").read_text(encoding="utf-8")
     assert '"state_node": "mutation proposal"' in trace_text
     assert '"spec_role": "proposer"' in trace_text
+
+
+def test_proposer_prompt_uses_labeled_analysis_base_context(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    llm = RecordingLLM()
+
+    ProposerAgent(llm, storage).debate(
+        solution_id="solution_001",
+        parent_summary="score=1.0",
+        kb_entry=None,
+        related_reports=[
+            "Parent analysis:\n- node_id=solution_000 path=solutions/solution_000/analysis.md\n  summary: root report",
+            "Sibling analyses:\n- node_id=solution_002 path=solutions/solution_002/analysis.md\n  summary: sibling report",
+            "Uncle analyses:\n- node_id=solution_003 path=solutions/solution_003/analysis.md\n  summary: uncle report",
+        ],
+        use_critic=False,
+    )
+
+    assert "Analysis Base context (parent/sibling/uncle reports)" in llm.last_prompt
+    assert "Parent analysis" in llm.last_prompt
+    assert "Sibling analyses" in llm.last_prompt
+    assert "Uncle analyses" in llm.last_prompt
+    assert "Related reports" not in llm.last_prompt
 
 
 def test_critic_agent_writes_structured_artifact(tmp_path: Path) -> None:

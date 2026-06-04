@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import types
+from pathlib import Path
 from typing import Any
 
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
@@ -20,24 +21,40 @@ class FakeResponses:
     def parse(self, **kwargs: Any) -> object:
         FakeResponses.last_kwargs = kwargs
         model = kwargs["text_format"]
-        return types.SimpleNamespace(
-            output_parsed=model(
+        if model.__name__ == "VisualAuditOutput":
+            parsed = model(
+                summary="Vision audit saw the diagnostic plots.",
+                physical_consistency_checks=["image_input_received", "prediction_only"],
+                visual_artifacts_reviewed=["visual_field_diagnostic.svg"],
+                warnings=[],
+                actual_image_inputs_used=True,
+                analysis_mode="real_visual_provider_image_input",
+            )
+        else:
+            parsed = model(
                 title="Native proposal",
                 diagnosis="Root underfits.",
                 mutation_plan=["Add features."],
                 expected_effect="Lower validation MSE.",
                 risks=["May overfit."],
-            ),
+            )
+        return types.SimpleNamespace(
+            output_parsed=parsed,
             usage=types.SimpleNamespace(input_tokens=10, output_tokens=5, total_tokens=15),
         )
 
 
 class FakeChatCompletions:
     response_text = "{}"
+    raised_exc: Exception | None = None
     last_kwargs: dict[str, Any] | None = None
 
     def create(self, **kwargs: Any) -> object:
         FakeChatCompletions.last_kwargs = kwargs
+        if FakeChatCompletions.raised_exc is not None:
+            exc = FakeChatCompletions.raised_exc
+            FakeChatCompletions.raised_exc = None
+            raise exc
         return types.SimpleNamespace(
             choices=[types.SimpleNamespace(message=types.SimpleNamespace(content=self.response_text))],
             usage=types.SimpleNamespace(prompt_tokens=7, completion_tokens=3, total_tokens=10),
@@ -56,12 +73,17 @@ class FakeChatOpenAI(FakeOpenAI):
         self.chat = types.SimpleNamespace(completions=FakeChatCompletions())
 
 
+class APITimeoutError(RuntimeError):
+    pass
+
+
 def test_openai_adapter_supports_base_url_env(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("OPENAI_MODEL", "deepseekv4pro")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://api.deepseek.com")
     monkeypatch.setenv("OPENAI_TIMEOUT_S", "120")
+    monkeypatch.setenv("OPENAI_MAX_RETRIES", "2")
     FakeOpenAI.last_kwargs = None
 
     adapter = OpenAIAdapter()
@@ -69,13 +91,61 @@ def test_openai_adapter_supports_base_url_env(monkeypatch) -> None:
     assert adapter.model == "deepseek-v4-pro"
     assert adapter.base_url == "https://api.deepseek.com"
     assert adapter.timeout_s == 120.0
+    assert adapter.max_retries == 2
     assert FakeOpenAI.last_kwargs == {
         "api_key": "test-key",
         "base_url": "https://api.deepseek.com",
+        "max_retries": 2,
         "timeout": 120.0,
     }
     assert adapter.provider_capabilities.adapter_type == "openai_compatible_chat"
     assert adapter.provider_capabilities.supports_structured_outputs is False
+    assert adapter.provider_capabilities.supports_image_inputs is False
+
+
+def test_openai_adapter_marks_gatexflow_as_multimodal_chat(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-5-mini")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.gatexflow.com/v1")
+    monkeypatch.setenv("OPENAI_TIMEOUT_S", "120")
+    FakeOpenAI.last_kwargs = None
+
+    adapter = OpenAIAdapter()
+
+    assert adapter.base_url == "https://api.gatexflow.com/v1"
+    assert FakeOpenAI.last_kwargs == {
+        "api_key": "test-key",
+        "base_url": "https://api.gatexflow.com/v1",
+        "max_retries": 0,
+        "timeout": 120.0,
+    }
+    assert adapter.provider_capabilities.adapter_type == "openai_compatible_multimodal_chat"
+    assert adapter.provider_capabilities.supports_structured_outputs is False
+    assert adapter.provider_capabilities.supports_image_inputs is True
+
+
+def test_openai_adapter_marks_error_forever_as_multimodal_chat(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-5-mini")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.error-forever.com/v1")
+    monkeypatch.setenv("OPENAI_TIMEOUT_S", "120")
+    FakeOpenAI.last_kwargs = None
+
+    adapter = OpenAIAdapter()
+
+    assert adapter.base_url == "https://api.error-forever.com/v1"
+    assert FakeOpenAI.last_kwargs == {
+        "api_key": "test-key",
+        "base_url": "https://api.error-forever.com/v1",
+        "max_retries": 0,
+        "timeout": 120.0,
+    }
+    assert adapter.provider_capabilities.adapter_type == "openai_compatible_multimodal_chat"
+    assert adapter.provider_capabilities.provider == "api.error-forever.com"
+    assert adapter.provider_capabilities.supports_structured_outputs is False
+    assert adapter.provider_capabilities.supports_image_inputs is True
 
 
 def test_openai_adapter_omits_base_url_when_unset(monkeypatch) -> None:
@@ -89,9 +159,11 @@ def test_openai_adapter_omits_base_url_when_unset(monkeypatch) -> None:
 
     assert adapter.base_url is None
     assert adapter.timeout_s == 60.0
-    assert FakeOpenAI.last_kwargs == {"api_key": "test-key", "timeout": 60.0}
+    assert adapter.max_retries == 0
+    assert FakeOpenAI.last_kwargs == {"api_key": "test-key", "max_retries": 0, "timeout": 60.0}
     assert adapter.provider_capabilities.adapter_type == "openai_native_responses"
     assert adapter.provider_capabilities.supports_structured_outputs is True
+    assert adapter.provider_capabilities.supports_image_inputs is True
 
 
 def test_openai_adapter_rejects_invalid_timeout_env(monkeypatch) -> None:
@@ -105,6 +177,19 @@ def test_openai_adapter_rejects_invalid_timeout_env(monkeypatch) -> None:
         assert "OPENAI_TIMEOUT_S must be positive" in str(exc)
     else:
         raise AssertionError("OpenAIAdapter accepted non-positive timeout")
+
+
+def test_openai_adapter_rejects_invalid_max_retries_env(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_MAX_RETRIES", "-1")
+
+    try:
+        OpenAIAdapter()
+    except RuntimeError as exc:
+        assert "OPENAI_MAX_RETRIES must be non-negative" in str(exc)
+    else:
+        raise AssertionError("OpenAIAdapter accepted negative max retries")
 
 
 def test_openai_adapter_uses_native_structured_outputs_when_available(monkeypatch) -> None:
@@ -121,6 +206,88 @@ def test_openai_adapter_uses_native_structured_outputs_when_available(monkeypatc
     assert FakeResponses.last_kwargs["text_format"].__name__ == "ProposalOutput"
     assert adapter.last_call_metadata is not None
     assert adapter.last_call_metadata["usage"]["completion_tokens"] == 5
+
+
+def test_openai_adapter_passes_reasoning_effort_to_native_responses(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeNativeOpenAI))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    FakeResponses.last_kwargs = None
+
+    adapter = OpenAIAdapter(model="gpt-5.5")
+    adapter.complete_json("return proposal", "proposal", reasoning_effort="xhigh")
+
+    assert FakeResponses.last_kwargs is not None
+    assert FakeResponses.last_kwargs["reasoning"] == {"effort": "xhigh"}
+    assert adapter.last_call_metadata is not None
+    assert adapter.last_call_metadata["reasoning_effort"] == "xhigh"
+
+
+def test_openai_adapter_sends_image_inputs_to_native_responses(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeNativeOpenAI))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    FakeResponses.last_kwargs = None
+    image_path = tmp_path / "visual_field_diagnostic.svg"
+    image_path.write_text("<svg xmlns='http://www.w3.org/2000/svg'></svg>", encoding="utf-8")
+
+    adapter = OpenAIAdapter(model="gpt-5-mini")
+    payload = adapter.complete_json_with_images(
+        "audit image",
+        "visual_audit",
+        [image_path],
+        reasoning_effort="high",
+    )
+
+    assert payload["actual_image_inputs_used"] is True
+    assert FakeResponses.last_kwargs is not None
+    user_message = FakeResponses.last_kwargs["input"][-1]
+    assert user_message["role"] == "user"
+    assert user_message["content"][0] == {"type": "input_text", "text": "audit image"}
+    assert user_message["content"][1]["type"] == "input_image"
+    assert user_message["content"][1]["image_url"].startswith("data:image/svg+xml;base64,")
+    assert user_message["content"][1]["detail"] == "auto"
+    assert adapter.last_call_metadata is not None
+    assert adapter.last_call_metadata["method"] == "complete_json_with_images"
+    assert adapter.last_call_metadata["image_input_count"] == 1
+
+
+def test_openai_adapter_sends_image_inputs_to_gatexflow_chat(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeChatOpenAI))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.gatexflow.com/v1")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-5-mini")
+    FakeChatCompletions.last_kwargs = None
+    FakeChatCompletions.response_text = (
+        '{"summary":"Vision audit saw the diagnostic plots.",'
+        '"physical_consistency_checks":["image_input_received","prediction_only"],'
+        '"visual_artifacts_reviewed":["visual_field_diagnostic.svg"],'
+        '"warnings":[],"actual_image_inputs_used":true,'
+        '"analysis_mode":"real_visual_provider_image_input"}'
+    )
+    image_path = tmp_path / "visual_field_diagnostic.svg"
+    image_path.write_text("<svg xmlns='http://www.w3.org/2000/svg'></svg>", encoding="utf-8")
+
+    adapter = OpenAIAdapter(model="gpt-5-mini")
+    payload = adapter.complete_json_with_images(
+        "audit image",
+        "visual_audit",
+        [image_path],
+        reasoning_effort="high",
+    )
+
+    assert payload["actual_image_inputs_used"] is True
+    assert FakeChatCompletions.last_kwargs is not None
+    user_message = FakeChatCompletions.last_kwargs["messages"][-1]
+    assert user_message["role"] == "user"
+    assert user_message["content"][0]["type"] == "text"
+    assert "Required JSON Schema" in user_message["content"][0]["text"]
+    assert user_message["content"][1]["type"] == "image_url"
+    assert user_message["content"][1]["image_url"]["url"].startswith("data:image/svg+xml;base64,")
+    assert user_message["content"][1]["image_url"]["detail"] == "auto"
+    assert adapter.last_call_metadata is not None
+    assert adapter.last_call_metadata["method"] == "complete_json_with_images"
+    assert adapter.last_call_metadata["image_input_count"] == 1
 
 
 def test_openai_adapter_compatible_json_fallback_still_rejects_schema_drift(monkeypatch) -> None:
@@ -153,15 +320,50 @@ def test_openai_adapter_compatible_json_prompt_includes_schema_types(monkeypatch
     )
 
     adapter = OpenAIAdapter(model="deepseekv4pro")
-    payload = adapter.complete_json("return proposal", "proposal")
+    payload = adapter.complete_json("return proposal", "proposal", reasoning_effort="xhigh")
 
     assert payload["risks"] == ["r"]
     assert FakeChatCompletions.last_kwargs is not None
+    assert FakeChatCompletions.last_kwargs["reasoning_effort"] == "xhigh"
     message = FakeChatCompletions.last_kwargs["messages"][-1]["content"]
     assert "Required JSON Schema" in message
     assert '"risks"' in message
     assert '"type": "array"' in message
     assert "Arrays must be JSON arrays" in message
+    assert adapter.last_call_metadata is not None
+    assert adapter.last_call_metadata["timeout_s"] == 60.0
+    assert adapter.last_call_metadata["max_retries"] == 0
+    assert adapter.last_call_metadata["reasoning_effort"] == "xhigh"
+
+
+def test_openai_adapter_refreshes_metadata_before_failed_chat_call(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeChatOpenAI))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.error-forever.com/v1")
+    FakeChatCompletions.response_text = (
+        '{"title":"Proposal","diagnosis":"x","mutation_plan":["y"],'
+        '"expected_effect":"z","risks":["r"]}'
+    )
+
+    adapter = OpenAIAdapter(model="gpt-5-mini", timeout_s=12, max_retries=0)
+    adapter.complete_json("return proposal", "proposal", reasoning_effort="low")
+    FakeChatCompletions.raised_exc = APITimeoutError("Request timed out.")
+
+    try:
+        adapter.complete_json("return root", "root_engineer", reasoning_effort="medium")
+    except APITimeoutError:
+        pass
+    else:
+        raise AssertionError("Fake chat timeout was not raised")
+
+    assert adapter.last_call_metadata is not None
+    assert adapter.last_call_metadata["method"] == "complete_text"
+    assert adapter.last_call_metadata["model"] == "gpt-5-mini"
+    assert adapter.last_call_metadata["provider"] == "api.error-forever.com"
+    assert adapter.last_call_metadata["reasoning_effort"] == "medium"
+    assert adapter.last_call_metadata["timeout_s"] == 12
+    assert adapter.last_call_metadata["max_retries"] == 0
+    assert adapter.last_call_metadata["usage"] == {}
 
 
 def test_openai_adapter_compatible_json_extracts_object_from_wrapped_text(monkeypatch) -> None:

@@ -153,6 +153,7 @@ def test_llm_smoke_dry_run_writes_plan_without_api_key(tmp_path: Path, monkeypat
     assert manifest["expected_llm_call_range"]["min"] > 0
     assert manifest["provider_capabilities"]["provider"] == "openai"
     assert manifest["provider_capabilities"]["supports_structured_outputs"] is True
+    assert manifest["provider_capabilities"]["supports_image_inputs"] is True
     assert manifest["token_budget"]["max_calls"] is None
 
 

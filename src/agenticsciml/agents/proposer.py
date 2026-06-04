@@ -6,11 +6,32 @@ from typing import Any
 from agenticsciml.agents.base import AgentBase
 from agenticsciml.agents.critic import CriticAgent
 from agenticsciml.agents.specs import PromptTemplate
+from agenticsciml.operator_scheduler import operator_assignment_context
 from agenticsciml.state import AgentMessage, Proposal
 
 
 class ProposerAgent(AgentBase):
     role = "proposer"
+
+    def __init__(
+        self,
+        llm,
+        storage,
+        default_temperature: float = 0.0,
+        default_reasoning_effort: str | None = None,
+        critic_llm=None,
+        critic_temperature: float = 0.0,
+        critic_reasoning_effort: str | None = None,
+    ):
+        super().__init__(
+            llm,
+            storage,
+            default_temperature=default_temperature,
+            default_reasoning_effort=default_reasoning_effort,
+        )
+        self.critic_llm = critic_llm or llm
+        self.critic_temperature = critic_temperature
+        self.critic_reasoning_effort = critic_reasoning_effort
 
     def debate(
         self,
@@ -20,6 +41,9 @@ class ProposerAgent(AgentBase):
         related_reports: list[str],
         use_critic: bool = True,
         branch_context: dict[str, Any] | None = None,
+        problem_intake_context: str | None = None,
+        strategy_seed_context: str | None = None,
+        operator_assignment: dict[str, Any] | None = None,
     ) -> Proposal:
         self.require_inputs(
             {
@@ -28,6 +52,9 @@ class ProposerAgent(AgentBase):
                 "kb_entry": kb_entry,
                 "related_reports": related_reports,
                 "branch_context": branch_context,
+                "problem_intake_context": problem_intake_context,
+                "strategy_seed_context": strategy_seed_context,
+                "operator_assignment": operator_assignment,
             }
         )
         messages: list[AgentMessage] = []
@@ -35,11 +62,27 @@ class ProposerAgent(AgentBase):
         context = (
             f"Parent summary:\n{parent_summary}\n\n"
             f"KB entry:\n{kb_entry or 'none'}\n\n"
-            f"Related reports:\n{chr(10).join(related_reports) if related_reports else 'none'}\n\n"
+            "Analysis Base context (parent/sibling/uncle reports):\n"
+            f"{chr(10).join(related_reports) if related_reports else 'none'}\n\n"
             "Branch context:\n"
-            f"{json.dumps(branch_context or {}, indent=2, sort_keys=True)}"
+            f"{json.dumps(branch_context or {}, indent=2, sort_keys=True)}\n\n"
+            "User problem-intake context (non-contract):\n"
+            f"{problem_intake_context or 'none'}\n\n"
+            "Strategy seeds:\n"
+            f"{strategy_seed_context or 'none'}\n\n"
+            "Assigned mutation operator:\n"
+            f"{operator_assignment_context(operator_assignment)}"
         )
-        critic = CriticAgent(self.llm, self.storage) if use_critic else None
+        critic = (
+            CriticAgent(
+                self.critic_llm,
+                self.storage,
+                default_temperature=self.critic_temperature,
+                default_reasoning_effort=self.critic_reasoning_effort,
+            )
+            if use_critic
+            else None
+        )
         proposal_hint = "No proposal yet; critique the diagnostic framing."
         for round_index in range(1, 5):
             if round_index < 3:
@@ -62,8 +105,10 @@ class ProposerAgent(AgentBase):
                 critic_context = "\n".join(f"- {item}" for item in critic_feedback) or "No critic feedback."
                 prompt = PromptTemplate(
                     "Proposer round 4: return final implementation-ready proposal as JSON "
-                    "with title, diagnosis, mutation_plan, expected_effect, risks. "
-                    "`mutation_plan` and `risks` must be JSON arrays of strings, not strings.\n\n"
+                    "with title, diagnosis, mutation_plan, expected_effect, risks, and optional "
+                    "kb_application. `mutation_plan` and `risks` must be JSON arrays of strings, not strings. "
+                    "If a KB entry is present, include kb_application with actionable_points and "
+                    "proposal_adopted_points so later audit can distinguish retrieved-only from adopted KB.\n\n"
                     "{context}\n\nCritic feedback to address:\n{critic_feedback}"
                 ).render({"context": context, "critic_feedback": critic_context})
                 data = self.complete_json_checked(

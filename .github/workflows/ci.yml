@@ -40,6 +40,7 @@ jobs:
           tests/test_benchmark_catalog.py
           tests/test_execution.py
           tests/test_evidence.py
+          tests/test_ablation_evidence.py
           tests/test_paper_gap_report.py
 
   full-pytest:

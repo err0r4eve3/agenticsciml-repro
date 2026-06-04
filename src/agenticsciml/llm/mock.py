@@ -4,6 +4,7 @@ import json
 import re
 from typing import Any
 
+from agenticsciml.llm.capabilities import ProviderCapabilities
 from agenticsciml.llm.base import LLMClient
 from agenticsciml.patching import make_unified_patch, solution_digest
 
@@ -146,12 +147,46 @@ if __name__ == "__main__":
 '''.strip()
 
 
+def _solution_id_index(prompt: str) -> int:
+    match = re.search(r"solution_id:\s*solution_(\d+)", prompt)
+    return int(match.group(1)) if match else 1
+
+
+def _fourier_ridge_variant(prompt: str) -> str:
+    index = max(1, _solution_id_index(prompt))
+    order = min(12, 4 + index)
+    ridge = f"{10 ** (-(5 + min(index, 4))):.0e}"
+    jump = 0.10 + 0.03 * (index % 5)
+    code = FOURIER_RIDGE_SOLUTION
+    code = code.replace(
+        "def __init__(self, order=4, ridge=1e-5):",
+        f"def __init__(self, order={order}, ridge={ridge}):",
+    )
+    code = code.replace("z[:, :1] > 0.15", f"z[:, :1] > {jump:.2f}")
+    return code
+
+
 class MockLLMClient(LLMClient):
+    model = "mock"
+    provider_name = "MockLLMClient"
+    adapter_type = "mock_local"
+    provider_capabilities = ProviderCapabilities(
+        provider="MockLLMClient",
+        adapter_type="mock_local",
+        supports_responses=False,
+        supports_structured_outputs=True,
+        supports_image_inputs=False,
+        supports_usage=False,
+        supports_trace_export=False,
+        supports_prompt_cache=False,
+    )
+
     def complete_text(
         self,
         prompt: str,
         system: str | None = None,
         temperature: float = 0.0,
+        reasoning_effort: str | None = None,
     ) -> str:
         if "data analyst" in prompt.lower():
             return (
@@ -171,6 +206,7 @@ class MockLLMClient(LLMClient):
         schema_name: str,
         system: str | None = None,
         temperature: float = 0.0,
+        reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
         name = schema_name.lower()
         if name == "selector":
@@ -189,6 +225,10 @@ class MockLLMClient(LLMClient):
                 ],
                 "expected_effect": "The child should reduce validation MSE on oscillatory regions and the jump.",
                 "risks": ["The fixed jump location may not generalize to other datasets."],
+                "kb_application": {
+                    "actionable_points": ["feature expansion", "stable low-budget fitting"],
+                    "proposal_adopted_points": ["feature expansion", "stable low-budget fitting"],
+                },
             }
         if name == "root_engineer":
             return {
@@ -198,17 +238,19 @@ class MockLLMClient(LLMClient):
         if name == "engineer":
             match = re.search(r"parent_digest:\s*([a-f0-9]{64})", prompt)
             parent_digest = match.group(1) if match else solution_digest(ROOT_SOLUTION + "\n")
+            target_code = _fourier_ridge_variant(prompt)
             return {
-                "mutation_summary": "Mutated the baseline into Fourier ridge regression.",
-                "expected_effect": "Lower validation error on smooth, oscillatory, and multi-output proxy tasks.",
+                "mutation_summary": "Mutated the parent into a deterministic Fourier ridge variant.",
+                "expected_effect": "Lower or diversified validation error on smooth, oscillatory, and multi-output proxy tasks.",
                 "risks": ["The fixed feature basis may underfit high-dimensional targets."],
                 "parent_digest": parent_digest,
                 "patch": make_unified_patch(
                     prompt.split("Parent code:\n", 1)[1] if "Parent code:\n" in prompt else ROOT_SOLUTION + "\n",
-                    FOURIER_RIDGE_SOLUTION + "\n",
+                    target_code + "\n",
                 ),
                 "files_changed": ["solution.py"],
-                "full_file_map": {"solution.py": FOURIER_RIDGE_SOLUTION + "\n"},
+                "full_file_map": {"solution.py": target_code + "\n"},
+                "implemented_kb_points": ["feature expansion", "stable low-budget fitting"],
             }
         if name == "analysis":
             return {

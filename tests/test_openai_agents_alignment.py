@@ -71,6 +71,30 @@ class RaisingThenValidJsonLLM(FlakyJsonLLM):
         }
 
 
+class APITimeoutError(RuntimeError):
+    pass
+
+
+class TimeoutThenValidJsonLLM(FlakyJsonLLM):
+    def complete_json(
+        self,
+        prompt: str,
+        schema_name: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+    ) -> dict[str, Any]:
+        self.calls += 1
+        if self.calls == 1:
+            raise APITimeoutError("Request timed out.")
+        return {
+            "title": "Valid proposal",
+            "diagnosis": "Root underfits.",
+            "mutation_plan": ["Add features."],
+            "expected_effect": "Lower validation MSE.",
+            "risks": ["May overfit."],
+        }
+
+
 class ExtraFieldProposalLLM(FlakyJsonLLM):
     def complete_json(
         self,
@@ -86,6 +110,50 @@ class ExtraFieldProposalLLM(FlakyJsonLLM):
             "expected_effect": "Lower validation MSE.",
             "risks": ["May overfit."],
             "unknown": "schema drift",
+        }
+
+
+class ReasoningCaptureLLM(LLMClient):
+    def __init__(self):
+        self.calls: list[dict[str, Any]] = []
+
+    def complete_text(
+        self,
+        prompt: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+        reasoning_effort: str | None = None,
+    ) -> str:
+        self.calls.append(
+            {
+                "method": "complete_text",
+                "temperature": temperature,
+                "reasoning_effort": reasoning_effort,
+            }
+        )
+        return "ok"
+
+    def complete_json(
+        self,
+        prompt: str,
+        schema_name: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+        reasoning_effort: str | None = None,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            {
+                "method": "complete_json",
+                "temperature": temperature,
+                "reasoning_effort": reasoning_effort,
+            }
+        )
+        return {
+            "title": "Valid proposal",
+            "diagnosis": "Root underfits.",
+            "mutation_plan": ["Add features."],
+            "expected_effect": "Lower validation MSE.",
+            "risks": ["May overfit."],
         }
 
 
@@ -145,6 +213,31 @@ def test_agent_json_output_is_retried_and_schema_checked(tmp_path: Path) -> None
     assert data["diagnosis"] == "Root underfits."
 
 
+def test_agent_base_routes_default_reasoning_effort_to_llm(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    llm = ReasoningCaptureLLM()
+    agent = AgentBase(
+        llm,
+        storage,
+        default_temperature=0.3,
+        default_reasoning_effort="xhigh",
+    )
+
+    assert agent.complete_text(prompt="summarize") == "ok"
+    data = agent.complete_json_checked(
+        prompt="return a proposal",
+        schema_name="proposal",
+        required_fields=("title", "diagnosis", "mutation_plan", "expected_effect", "risks"),
+        retries=0,
+    )
+
+    assert data["title"] == "Valid proposal"
+    assert llm.calls == [
+        {"method": "complete_text", "temperature": 0.3, "reasoning_effort": "xhigh"},
+        {"method": "complete_json", "temperature": 0.3, "reasoning_effort": "xhigh"},
+    ]
+
+
 def test_agent_json_output_fails_closed_after_retry_budget(tmp_path: Path) -> None:
     storage = ExperimentStorage.create(tmp_path, "demo")
     agent = AgentBase(AlwaysInvalidJsonLLM(), storage)
@@ -199,6 +292,34 @@ def test_agent_json_exception_is_retried_and_traced(tmp_path: Path) -> None:
         and "invalid json payload" in event["metadata"].get("error", "")
         for event in events
     )
+
+
+def test_agent_json_timeout_is_not_schema_retried(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    llm = TimeoutThenValidJsonLLM()
+    agent = ProposerAgent(llm, storage)
+
+    with pytest.raises(StructuredOutputError) as exc:
+        agent.complete_json_checked(
+            prompt="return a proposal",
+            schema_name="proposal",
+            retries=1,
+        )
+    events = [
+        json.loads(line)
+        for line in (storage.run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert llm.calls == 1
+    assert "APITimeoutError" in str(exc.value)
+    failed_generations = [
+        event
+        for event in events
+        if event["event_type"] == "generation_span"
+        and event["name"] == "proposer"
+        and event["metadata"].get("error_type") == "APITimeoutError"
+    ]
+    assert len(failed_generations) == 1
 
 
 def test_proposer_final_round_uses_critic_feedback(tmp_path: Path) -> None:
@@ -365,3 +486,38 @@ def test_agents_md_requires_openai_agents_sdk_alignment() -> None:
     assert "structured outputs" in text
     assert "guardrails" in text
     assert "tracing" in text
+
+
+def test_agenticsciml_assistant_governance_is_documented() -> None:
+    agents = Path("AGENTS.md").read_text(encoding="utf-8")
+    skill = Path(".agents/skills/agenticsciml-chatui-operator/SKILL.md").read_text(encoding="utf-8")
+    contract = Path("docs/agenticsciml_assistant.md").read_text(encoding="utf-8")
+    index = Path("docs/index.md").read_text(encoding="utf-8")
+
+    assert "AgenticSciML Assistant Boundaries" in agents
+    assert "Scientific Claim Policy" in agents
+    assert "ChatUI And Tool Policy" in agents
+    assert "`/api/solver/chat` is an internal algorithm-tool endpoint, not an OpenAI Apps" in agents
+    assert "Prompt Injection Boundary" in agents
+
+    assert "version: 0.4.0" in skill
+    assert "not an MCP server" in skill
+    assert "account_id" in skill
+    assert "assistant_mode" in skill
+    assert "reasoning_effort=high" in skill
+    assert "GET /api/solver/settings" in skill
+    assert "GET /api/algorithms" in skill
+    assert "GET /api/paper-tasks" in skill
+    assert "GET /api/agent-roles" in skill
+    assert "Valid Action Categories" in skill
+    assert "Real LLM Mode" in skill
+    assert "Prompt Injection Handling" in skill
+
+    assert "Future MCP Wrapper Contract" in contract
+    assert "readOnlyHint" in contract
+    assert "destructiveHint" in contract
+    assert "openWorldHint" in contract
+    assert "agenticsciml.validate_claim" in contract
+    assert "Do not make ChatUI a free-form group chat controller" in contract
+
+    assert "agenticsciml_assistant.md" in index

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from inspect import Parameter, signature
 from typing import Any
 
 from agenticsciml.llm.base import LLMClient
@@ -26,9 +27,17 @@ class InputContractError(RuntimeError):
 class AgentBase:
     role = "agent"
 
-    def __init__(self, llm: LLMClient, storage: ExperimentStorage):
+    def __init__(
+        self,
+        llm: LLMClient,
+        storage: ExperimentStorage,
+        default_temperature: float = 0.0,
+        default_reasoning_effort: str | None = None,
+    ):
         self.llm = llm
         self.storage = storage
+        self.default_temperature = default_temperature
+        self.default_reasoning_effort = default_reasoning_effort
         self.spec: AgentSpec | None = AGENT_SPECS.get(self.role)
 
     def _spec_metadata(self) -> dict[str, Any]:
@@ -83,10 +92,18 @@ class AgentBase:
         self,
         prompt: str,
         system: str | None = None,
-        temperature: float = 0.0,
+        temperature: float | None = None,
+        reasoning_effort: str | None = None,
     ) -> str:
+        call_temperature = self.default_temperature if temperature is None else temperature
+        call_reasoning_effort = self._call_reasoning_effort(reasoning_effort)
         started = time.monotonic()
-        response = self.llm.complete_text(prompt, system=system, temperature=temperature)
+        response = self._llm_complete_text(
+            prompt,
+            system=system,
+            temperature=call_temperature,
+            reasoning_effort=call_reasoning_effort,
+        )
         self.storage.record_trace(
             "generation_span",
             self.role,
@@ -98,7 +115,8 @@ class AgentBase:
                 "prompt_token_estimate": self._estimate_tokens(prompt),
                 "response_token_estimate": self._estimate_tokens(response),
                 "duration_s": time.monotonic() - started,
-                "temperature": temperature,
+                "temperature": call_temperature,
+                **self._reasoning_trace_metadata(call_reasoning_effort),
                 **self._llm_call_metadata(),
             },
         )
@@ -110,9 +128,12 @@ class AgentBase:
         schema_name: str,
         required_fields: tuple[str, ...] | None = None,
         system: str | None = None,
-        temperature: float = 0.0,
+        temperature: float | None = None,
+        reasoning_effort: str | None = None,
         retries: int = 1,
     ) -> dict[str, Any]:
+        call_temperature = self.default_temperature if temperature is None else temperature
+        call_reasoning_effort = self._call_reasoning_effort(reasoning_effort)
         if required_fields is None:
             if self.spec is None:
                 raise StructuredOutputError(
@@ -124,11 +145,12 @@ class AgentBase:
         for attempt in range(retries + 1):
             started = time.monotonic()
             try:
-                data = self.llm.complete_json(
+                data = self._llm_complete_json(
                     current_prompt,
                     schema_name,
                     system=system,
-                    temperature=temperature,
+                    temperature=call_temperature,
+                    reasoning_effort=call_reasoning_effort,
                 )
             except Exception as exc:
                 last_error = (
@@ -150,6 +172,8 @@ class AgentBase:
                         "duration_s": time.monotonic() - started,
                         "field_count": 0,
                         "error_type": type(exc).__name__,
+                        "temperature": call_temperature,
+                        **self._reasoning_trace_metadata(call_reasoning_effort),
                         **self._llm_call_metadata(),
                     },
                 )
@@ -164,6 +188,8 @@ class AgentBase:
                         "error": last_error,
                     },
                 )
+                if _is_non_retryable_llm_api_error(exc):
+                    raise StructuredOutputError(last_error) from exc
                 current_prompt = (
                     f"{prompt}\n\nPrevious output failed schema validation: {last_error}. "
                     "Return corrected JSON only."
@@ -202,6 +228,8 @@ class AgentBase:
                     "response_token_estimate": self._estimate_tokens(response_text),
                     "duration_s": time.monotonic() - started,
                     "field_count": len(data),
+                    "temperature": call_temperature,
+                    **self._reasoning_trace_metadata(call_reasoning_effort),
                     **self._llm_call_metadata(),
                 },
             )
@@ -291,10 +319,71 @@ class AgentBase:
             "llm_call_id",
             "method",
             "model",
+            "max_retries",
             "provider",
             "provider_capabilities",
+            "reasoning_effort",
             "schema_name",
             "span_kind",
+            "timeout_s",
             "usage",
         }
         return {key: value for key, value in metadata.items() if key in allowed}
+
+    def _call_reasoning_effort(self, override: str | None) -> str | None:
+        return self.default_reasoning_effort if override is None else override
+
+    def _reasoning_trace_metadata(self, reasoning_effort: str | None) -> dict[str, str]:
+        return {"reasoning_effort": reasoning_effort} if reasoning_effort is not None else {}
+
+    def _llm_complete_text(
+        self,
+        prompt: str,
+        *,
+        system: str | None,
+        temperature: float,
+        reasoning_effort: str | None,
+    ) -> str:
+        kwargs: dict[str, Any] = {"system": system, "temperature": temperature}
+        if reasoning_effort is not None and _accepts_reasoning_effort(self.llm.complete_text):
+            kwargs["reasoning_effort"] = reasoning_effort
+        return self.llm.complete_text(prompt, **kwargs)
+
+    def _llm_complete_json(
+        self,
+        prompt: str,
+        schema_name: str,
+        *,
+        system: str | None,
+        temperature: float,
+        reasoning_effort: str | None,
+    ) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {"system": system, "temperature": temperature}
+        if reasoning_effort is not None and _accepts_reasoning_effort(self.llm.complete_json):
+            kwargs["reasoning_effort"] = reasoning_effort
+        return self.llm.complete_json(prompt, schema_name, **kwargs)
+
+
+def _accepts_reasoning_effort(method: Any) -> bool:
+    try:
+        method_signature = signature(method)
+    except (TypeError, ValueError):
+        return True
+    parameters = method_signature.parameters
+    if "reasoning_effort" in parameters:
+        return True
+    return any(parameter.kind == Parameter.VAR_KEYWORD for parameter in parameters.values())
+
+
+def _is_non_retryable_llm_api_error(exc: Exception) -> bool:
+    name = type(exc).__name__
+    if "Timeout" in name:
+        return True
+    return name in {
+        "APIConnectionError",
+        "APIStatusError",
+        "AuthenticationError",
+        "BadRequestError",
+        "PermissionDeniedError",
+        "RateLimitError",
+    }
