@@ -9,6 +9,10 @@
 
 追加迭代：
 
+- 新增 [PR Split Plan](pr_split_plan.md)，把 `codex/chatui-workbench-redesign` 收敛为
+  evidence/reporting、benchmark catalog、algorithm/reference primitives 和 ChatUI/web
+  hardening 四个 stacked PR 的拆分边界。该计划只约束 review 与验证顺序，不提升
+  scientific claim，也不替代 real LLM 多 seed ablation。
 - 新增 GitHub Actions CI：`fast-evidence-gates` 运行 benchmark catalog、sandbox execution、
   evidence、ablation evidence 和 paper gap report 的快速测试；`full-pytest` 运行
   `uv run --frozen --python 3.11 --extra dev pytest -q`。CI 只验证仓库测试与证据门控回归，
