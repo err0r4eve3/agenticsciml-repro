@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 from agenticsciml.ablation_evidence import build_multi_seed_ablation_verified_manifest
+from agenticsciml.ablation_collect import collect_ablation_batches
 from agenticsciml.ablation import DEFAULT_VARIANTS, run_ablation
 from agenticsciml.benchmarks import list_benchmarks
 from agenticsciml.config import (
@@ -190,6 +191,18 @@ def cmd_verify_ablation_evidence(args: argparse.Namespace) -> int:
     )
     print(output_json)
     return 0 if manifest["verified"] is True else 1
+
+
+def cmd_collect_ablation_batches(args: argparse.Namespace) -> int:
+    result = collect_ablation_batches(
+        stage_plan_dir=Path(args.stage_plan).resolve(),
+        batch_dirs=[Path(item).resolve() for item in args.batch_dir],
+        output_dir=Path(args.output_dir).resolve(),
+        allow_partial=args.allow_partial,
+        allow_legacy_missing_full_stage_hash=args.allow_legacy_missing_full_stage_hash,
+    )
+    print(result.manifest_json.resolve())
+    return 0 if result.passed or args.allow_partial else 1
 
 
 def cmd_plan_paper_workflow(args: argparse.Namespace) -> int:
@@ -567,6 +580,14 @@ def build_parser() -> argparse.ArgumentParser:
     verify_ablation.add_argument("--expected-variants", default="")
     verify_ablation.add_argument("--output-json")
     verify_ablation.set_defaults(func=cmd_verify_ablation_evidence)
+
+    collect_ablation = sub.add_parser("collect-ablation-batches")
+    collect_ablation.add_argument("--stage-plan", required=True)
+    collect_ablation.add_argument("--batch-dir", action="append", required=True)
+    collect_ablation.add_argument("--output-dir", required=True)
+    collect_ablation.add_argument("--allow-partial", action="store_true")
+    collect_ablation.add_argument("--allow-legacy-missing-full-stage-hash", action="store_true")
+    collect_ablation.set_defaults(func=cmd_collect_ablation_batches)
 
     paper_workflow = sub.add_parser("plan-paper-workflow")
     paper_workflow.add_argument("benchmark_dir")

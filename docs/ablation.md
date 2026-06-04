@@ -77,6 +77,10 @@ uv run --python 3.11 --extra real-llm agenticsciml ablate examples/function_appr
 每个 batch 都不超过当前 call budget。要执行某个 batch，必须显式指定
 `--budget-batch-index`；这会只运行该 batch，同时在 manifest 中保留
 `full_stage_run_count`、`full_stage_expected_llm_call_range` 和完整 `budget_batch_plan`。
+manifest 还会保留 `full_stage_plan_hash`；该 hash 标识完整矩阵身份，不随
+`output_dir` 或 selected batch 改变。`budget_batch_plan` 同时区分
+`full_stage_budget_status`、`batch_plan_status` 和 `batching_required`，避免把
+“batch 可执行”误读成“完整矩阵可一次执行”。
 不要把单个 batch 当作完整 Stage A evidence：
 
 ```bash
@@ -88,6 +92,23 @@ uv run --python 3.11 --extra real-llm agenticsciml ablate examples/function_appr
   --budget-batch-index 1 \
   --output-dir runs/faithful-small-stage-a-batch-001
 ```
+
+多个 batch 完成后不要手工拼 CSV。使用 collector 校验 batch identity 并重算 summary：
+
+```bash
+uv run --python 3.11 --extra dev agenticsciml collect-ablation-batches \
+  --stage-plan runs/faithful-small-stage-a-plan \
+  --batch-dir runs/faithful-small-stage-a-batch-001 \
+  --batch-dir runs/faithful-small-stage-a-batch-002 \
+  --output-dir runs/faithful-small-stage-a-collected \
+  --allow-partial
+```
+
+collector 会要求 batch 与 canonical stage plan 的 `full_stage_plan_hash`、
+`benchmark_content_hash`、planned experiment IDs 和 claim boundary 一致；每个 batch
+还必须有通过的 `secret_hygiene_report.json` 和 run-level `trace_summary.json`。缺 run
+时只有显式 `--allow-partial` 才会写 `collection_status=partial`；完整覆盖才会写
+`collection_status=complete`。
 
 真实 ablation 完成后，先做 artifact secret hygiene 扫描：
 
@@ -120,7 +141,9 @@ uv run --python 3.11 --extra dev agenticsciml verify-ablation-evidence runs/abla
 - `real_llm_ablation_plan.json`：real/dry-run 模式的计划文件，列出 benchmark、seed、
   variant、evolution config 和预期 artifact。
 - `real_llm_ablation_manifest.json`：real/dry-run 模式的 provider/model、package、
-  budget、budget preflight、budget batch plan 和 plan hash manifest。
+  budget、budget preflight、budget batch plan、full-stage hash 和 plan hash manifest。
+- `batch_collection_manifest.json`：`collect-ablation-batches` 写出的 batch 聚合
+  manifest，标注 complete/partial、缺失 run、legacy batch 和 claim boundary。
 - `multi_seed_ablation_verified_manifest.json`：可选的验证 manifest，供 run config 的
   `multi_seed_ablation.ablation_output_dir` 或 `--multi-seed-ablation-json` 指向原始
   ablation 输出后由 orchestrator 重新生成并附加到 run artifact。
