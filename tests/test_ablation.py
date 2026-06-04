@@ -7,7 +7,13 @@ import sys
 from pathlib import Path
 
 from agenticsciml.ablation import _aggregate, run_ablation
-from agenticsciml.evidence import EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE, SCIENTIFIC_CLAIM_NOT_SUPPORTED
+from agenticsciml.evidence import (
+    EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE,
+    EVIDENCE_MODE_REAL_LLM_ABLATION,
+    LLM_MODE_REAL,
+    SCIENTIFIC_CLAIM_NOT_SUPPORTED,
+)
+from agenticsciml.llm.mock import MockLLMClient
 
 
 def test_ablation_runner_writes_summary_and_report(tmp_path: Path) -> None:
@@ -146,6 +152,113 @@ def test_cli_ablate_command_runs_mock_pipeline(tmp_path: Path, cli_env: dict[str
     assert summary_path.name == "ablation_summary.csv"
     assert {row["variant"] for row in rows} == {"root_only", "kb"}
     assert (summary_path.parent / "ablation_report.md").exists()
+
+
+def test_ablation_real_dry_run_writes_plan_without_evidence_csv(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    result = run_ablation(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        seeds=[0, 1],
+        variants=["root_only", "kb"],
+        mock=False,
+        dry_run=True,
+    )
+
+    assert result.summary_csv is None
+    assert result.runs_csv is None
+    assert result.plan_json is not None
+    assert result.manifest_json is not None
+    assert result.plan_json.exists()
+    assert result.manifest_json.exists()
+    assert result.report_md.exists()
+    assert not (tmp_path / "ablation_runs.csv").exists()
+    assert not (tmp_path / "ablation_summary.csv").exists()
+
+    plan = json.loads(result.plan_json.read_text(encoding="utf-8"))
+    manifest = json.loads(result.manifest_json.read_text(encoding="utf-8"))
+    report = result.report_md.read_text(encoding="utf-8")
+
+    assert plan["execution_mode"] == "dry_run"
+    assert plan["real_mode_explicit"] is False
+    assert plan["provider_calls_enabled"] is False
+    assert plan["evidence_mode"] == EVIDENCE_MODE_REAL_LLM_ABLATION
+    assert plan["scientific_claim"] == SCIENTIFIC_CLAIM_NOT_SUPPORTED
+    assert len(plan["runs"]) == 4
+    assert manifest["execution_mode"] == "dry_run"
+    assert manifest["run_count"] == 4
+    assert "No provider calls were made" in report
+    assert "must not pass `verify-ablation-evidence`" in report
+
+
+def test_ablation_real_runner_accepts_injected_llm_without_network(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    result = run_ablation(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        seeds=[0],
+        variants=["root_only"],
+        mock=False,
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+
+    assert result.summary_csv is not None
+    assert result.runs_csv is not None
+    run_rows = list(csv.DictReader(result.runs_csv.open(encoding="utf-8")))
+    summary_rows = list(csv.DictReader(result.summary_csv.open(encoding="utf-8")))
+
+    assert len(run_rows) == 1
+    assert run_rows[0]["evidence_mode"] == EVIDENCE_MODE_REAL_LLM_ABLATION
+    assert run_rows[0]["llm_mode"] == LLM_MODE_REAL
+    assert run_rows[0]["scientific_claim"] == SCIENTIFIC_CLAIM_NOT_SUPPORTED
+    assert run_rows[0]["run_evidence_mode"].startswith("real_llm_")
+    assert summary_rows[0]["evidence_mode"] == EVIDENCE_MODE_REAL_LLM_ABLATION
+    assert summary_rows[0]["scientific_claim"] == SCIENTIFIC_CLAIM_NOT_SUPPORTED
+    ledger_path = Path(run_rows[0]["run_dir"]) / "llm_call_ledger.jsonl"
+    assert ledger_path.exists()
+    assert ledger_path.read_text(encoding="utf-8").strip()
+
+
+def test_cli_ablate_real_dry_run_is_no_key_safe(tmp_path: Path, cli_env: dict[str, str]) -> None:
+    env = dict(cli_env)
+    env.pop("OPENAI_API_KEY", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenticsciml.cli",
+            "ablate",
+            "examples/function_approx",
+            "--real",
+            "--dry-run",
+            "--seeds",
+            "0",
+            "--variants",
+            "root_only",
+            "--output-dir",
+            str(tmp_path),
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+
+    plan_path = Path(result.stdout.strip().splitlines()[-1])
+    assert plan_path == tmp_path / "real_llm_ablation_plan.json"
+    assert plan_path.exists()
+    assert (tmp_path / "real_llm_ablation_manifest.json").exists()
+    assert (tmp_path / "ablation_report.md").exists()
+    assert not (tmp_path / "ablation_runs.csv").exists()
 
 
 def test_ablation_aggregate_respects_score_direction() -> None:

@@ -136,6 +136,12 @@ The ablation command writes `ablation_runs.csv`, `ablation_summary.csv`, and
 validate workflow shape and reporting only, not emergent discovery or
 paper-score reproduction.
 
+Real LLM ablation requires explicit `--real`. Use `--real --dry-run` first to
+write `real_llm_ablation_plan.json`, `real_llm_ablation_manifest.json`, and a
+blocked report without API calls or evidence CSVs. A real provider run writes
+the same plan/manifest before calls plus per-run `llm_call_ledger.jsonl`; the
+ablation output still uses `scientific_claim=not_supported`.
+
 ## Documentation Tree
 
 中文文档入口在 [docs/index.md](docs/index.md)。新增项目说明、设计笔记、
