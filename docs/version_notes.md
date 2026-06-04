@@ -2,6 +2,30 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-06-04 Evidence Split Gate
+
+本次从大 PR 中拆出第一批可独立 review 的 evidence/reporting 收敛项。
+
+已实现能力：
+
+- 新增 `agenticsciml.paper_gap_report` 和 CLI `paper-gap-report`，从 benchmark
+  fidelity metadata 与 supplied run artifacts 生成 `paper_gap_report.json/md`。
+- 报告检查 benchmark fidelity、paper equivalence、completed run metadata、trace quality
+  gate、real LLM mode、multi-seed ablation、scientific readiness 和 claim gate support；
+  任何缺口都保持 `blocked`。
+- 新增 GitHub Actions CI：`fast-evidence-gates` 运行 catalog、sandbox、evidence 和
+  paper gap report 的快速测试；`full-pytest` 运行完整 pytest。
+- 新增 [PR Split Plan](pr_split_plan.md)，定义后续 evidence、benchmark、algorithm 和
+  ChatUI stacked PR 的拆分边界与验证命令。
+
+边界：
+
+- 这些 artifact 只盘点证据缺口，不把 champion 分数升级成论文分数或科学发现声明。
+- CI 只验证仓库测试与证据门控回归，不代表 real LLM、多 seed ablation 或
+  paper-level scientific claim 已完成。
+- 后续 readiness gate、benchmark、algorithm catalog 和 ChatUI hardening 继续按
+  [PR Split Plan](pr_split_plan.md) 拆分。
+
 ## 2026-05-16 ChatUI 实验操作台
 
 新增本地优先 Web 控制面：[ChatUI 实验操作台](chatui_console.md)。
