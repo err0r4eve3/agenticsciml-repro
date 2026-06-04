@@ -30,6 +30,30 @@ SHRED-ROM / PySHRED / Nature Communications 结果；如果没有真正实现 LS
 - 不运行 SHRED-ROM 原始代码，不使用原始数据，不训练 LSTM/RNN，不声明论文分数。
 - 分数和 scientific claim 仍只来自本仓库 evaluator 与 run artifacts。
 
+## 2026-05-17 Algorithm Reference Primitive Split
+
+本轮拆出 algorithm catalog / reference primitive / method substrate 切片。
+
+已实现能力：
+
+- 新增 `algorithm_catalog`，把论文启发的本地 strategy seed 记录成带 claim boundary 的
+  catalog entry。
+- 新增 `paper_algorithms`，提供 dependency-light NumPy reference primitives，覆盖
+  function approximation、Poisson、Burgers、operator learning、reaction-diffusion 和
+  cylinder wake sparse-sensor reconstruction 的局部 helper。
+- 新增 `method_substrate` 和 `method_templates`，记录 action、blueprint、method
+  fingerprint、reward 和 experience cache 的可审计合约。
+- 新增 `operator_scheduler` 和 `strategy_inspector`，用于把 selected strategy seed 转成
+  deterministic mutation guidance，并审计 required/forbidden term。
+
+边界：
+
+- Algorithm catalog entries 是 planning 与 prompt-seeding aids，不是 evaluated
+  implementation。
+- Reference primitives 只验证本地数学/形状性质，不代表 paper-score reproduction。
+- 分数、champion 和 scientific claim 仍只能来自 fixed evaluator、run artifact 和
+  fail-closed readiness gate。
+
 ## 2026-06-04 Evidence Split Gate
 
 本次从大 PR 中拆出第一批可独立 review 的 evidence/reporting 收敛项。
