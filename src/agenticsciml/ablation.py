@@ -67,10 +67,13 @@ def run_ablation(
     llm_timeout_s: float | None = None,
     llm_max_retries: int | None = None,
     llm_fast_mode: bool = False,
+    budget_batch_index: int | None = None,
     llm_client: LLMClient | None = None,
 ) -> AblationResult:
     if mock and dry_run:
         raise ValueError("ablation dry-run is only supported with real LLM mode.")
+    if mock and budget_batch_index is not None:
+        raise ValueError("budget batch selection is only supported with real LLM mode.")
     selected_variants = variants or list(DEFAULT_VARIANTS)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -85,6 +88,7 @@ def run_ablation(
             llm_timeout_s=llm_timeout_s,
             llm_max_retries=llm_max_retries,
             llm_fast_mode=llm_fast_mode,
+            budget_batch_index=budget_batch_index,
             llm_client=llm_client,
         )
 
@@ -123,6 +127,7 @@ def _run_real_ablation(
     llm_timeout_s: float | None,
     llm_max_retries: int | None,
     llm_fast_mode: bool,
+    budget_batch_index: int | None,
     llm_client: LLMClient | None,
 ) -> AblationResult:
     budget = LLMBudget.from_env()
@@ -134,6 +139,9 @@ def _run_real_ablation(
         timeout_s=timeout_s,
         dry_run=dry_run,
     )
+    plan = _with_budget_batch_plan(plan, budget)
+    if budget_batch_index is not None:
+        plan = _select_budget_batch(plan, budget_batch_index)
     plan_path = output_dir / "real_llm_ablation_plan.json"
     plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True, allow_nan=False), encoding="utf-8")
     manifest = _build_real_ablation_manifest(plan, llm_client=llm_client, budget=budget)
@@ -358,18 +366,6 @@ def _build_real_ablation_plan(
                     "expected_llm_call_range": expected_call_range,
                 }
             )
-    expected_run_artifacts = [
-        artifact
-        for entry in runs
-        for artifact in [
-            f"runs/{entry['experiment_id']}/run_metadata.json",
-            f"runs/{entry['experiment_id']}/tree.json",
-            f"runs/{entry['experiment_id']}/checkpoint.json",
-            f"runs/{entry['experiment_id']}/trace_summary.json",
-            f"runs/{entry['experiment_id']}/reports/scientific_result_card.json",
-            f"runs/{entry['experiment_id']}/llm_call_ledger.jsonl",
-        ]
-    ]
     expected_llm_call_range = combine_llm_call_ranges(
         [
             dict(entry["expected_llm_call_range"])
@@ -392,14 +388,7 @@ def _build_real_ablation_plan(
         "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
         "runs": runs,
         "expected_llm_call_range": expected_llm_call_range,
-        "expected_artifacts": [
-            "real_llm_ablation_plan.json",
-            "real_llm_ablation_manifest.json",
-            "ablation_report.md",
-            "ablation_runs.csv",
-            "ablation_summary.csv",
-            *expected_run_artifacts,
-        ],
+        "expected_artifacts": _real_ablation_expected_artifacts(runs),
         "claim_boundary": {
             "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
             "paper_score_reproduction": False,
@@ -410,6 +399,171 @@ def _build_real_ablation_plan(
             ),
         },
     }
+
+
+def _with_budget_batch_plan(plan: dict[str, Any], budget: LLMBudget) -> dict[str, Any]:
+    updated = dict(plan)
+    updated["budget_batch_plan"] = _build_budget_batch_plan(
+        list(plan.get("runs", [])),
+        max_calls=budget.max_calls,
+    )
+    return updated
+
+
+def _select_budget_batch(plan: dict[str, Any], budget_batch_index: int) -> dict[str, Any]:
+    if budget_batch_index < 1:
+        raise ValueError("--budget-batch-index must be >= 1")
+    batch_plan = plan.get("budget_batch_plan")
+    if not isinstance(batch_plan, dict):
+        raise ValueError("budget batch plan is missing")
+    batches = batch_plan.get("batches")
+    if not isinstance(batches, list):
+        raise ValueError("budget batch plan has no batches")
+    selected_batch = next(
+        (
+            batch
+            for batch in batches
+            if isinstance(batch, dict) and int(batch.get("batch_index", -1)) == budget_batch_index
+        ),
+        None,
+    )
+    if selected_batch is None:
+        raise ValueError(f"Unknown budget batch index: {budget_batch_index}")
+    if selected_batch.get("status") != "ready":
+        raise ValueError(f"Budget batch {budget_batch_index} is not ready")
+    experiment_ids = {
+        str(experiment_id)
+        for experiment_id in selected_batch.get("experiment_ids", [])
+        if isinstance(experiment_id, str)
+    }
+    selected_runs = [
+        dict(entry)
+        for entry in plan.get("runs", [])
+        if str(entry.get("experiment_id")) in experiment_ids
+    ]
+    if len(selected_runs) != int(selected_batch.get("run_count", 0)):
+        raise ValueError(f"Budget batch {budget_batch_index} does not match planned runs")
+    selected = dict(plan)
+    selected["full_stage_run_count"] = len(plan.get("runs", []))
+    selected["full_stage_expected_llm_call_range"] = dict(plan.get("expected_llm_call_range") or {})
+    selected["selected_budget_batch_index"] = budget_batch_index
+    selected["budget_batch_selection"] = dict(selected_batch)
+    selected["runs"] = selected_runs
+    selected["expected_llm_call_range"] = combine_llm_call_ranges(
+        [
+            dict(entry["expected_llm_call_range"])
+            for entry in selected_runs
+            if isinstance(entry.get("expected_llm_call_range"), dict)
+        ]
+    )
+    selected["expected_artifacts"] = _real_ablation_expected_artifacts(selected_runs)
+    return selected
+
+
+def _build_budget_batch_plan(runs: list[dict[str, Any]], *, max_calls: int | None) -> dict[str, Any]:
+    total_call_range = combine_llm_call_ranges(
+        [
+            dict(entry["expected_llm_call_range"])
+            for entry in runs
+            if isinstance(entry.get("expected_llm_call_range"), dict)
+        ]
+    )
+    if max_calls is None:
+        return {
+            "schema_version": 1,
+            "status": "not_configured",
+            "configured_max_llm_calls": None,
+            "required_for_execution": False,
+            "planned_run_count": len(runs),
+            "coverage_run_count": len(runs),
+            "total_expected_llm_call_range": total_call_range,
+            "batch_count": 1 if runs else 0,
+            "batches": [_budget_batch(1, runs)] if runs else [],
+            "blocked_runs": [],
+            "strategy": "single_batch_without_call_budget",
+        }
+    batches: list[dict[str, Any]] = []
+    blocked_runs: list[dict[str, Any]] = []
+    current_runs: list[dict[str, Any]] = []
+    current_max = 0
+    for entry in runs:
+        call_range = dict(entry.get("expected_llm_call_range") or {})
+        entry_max = int(call_range.get("max", 0))
+        if entry_max > max_calls:
+            blocked_runs.append(
+                {
+                    "experiment_id": str(entry.get("experiment_id")),
+                    "variant": str(entry.get("variant")),
+                    "seed": int(entry.get("seed", 0)),
+                    "expected_llm_call_range": call_range,
+                    "status": "single_run_exceeds_budget",
+                }
+            )
+            continue
+        if current_runs and current_max + entry_max > max_calls:
+            batches.append(_budget_batch(len(batches) + 1, current_runs))
+            current_runs = []
+            current_max = 0
+        current_runs.append(entry)
+        current_max += entry_max
+    if current_runs:
+        batches.append(_budget_batch(len(batches) + 1, current_runs))
+    coverage_run_count = sum(int(batch["run_count"]) for batch in batches)
+    return {
+        "schema_version": 1,
+        "status": "blocked_by_budget" if blocked_runs else "ready",
+        "configured_max_llm_calls": max_calls,
+        "required_for_execution": int(total_call_range.get("max", 0)) > max_calls,
+        "planned_run_count": len(runs),
+        "coverage_run_count": coverage_run_count,
+        "total_expected_llm_call_range": total_call_range,
+        "batch_count": len(batches),
+        "batches": batches,
+        "blocked_runs": blocked_runs,
+        "strategy": "greedy_by_expected_max_calls",
+    }
+
+
+def _budget_batch(batch_index: int, runs: list[dict[str, Any]]) -> dict[str, Any]:
+    call_range = combine_llm_call_ranges(
+        [
+            dict(entry["expected_llm_call_range"])
+            for entry in runs
+            if isinstance(entry.get("expected_llm_call_range"), dict)
+        ]
+    )
+    return {
+        "batch_index": batch_index,
+        "status": "ready",
+        "run_count": len(runs),
+        "experiment_ids": [str(entry["experiment_id"]) for entry in runs],
+        "variants": sorted({str(entry["variant"]) for entry in runs}),
+        "seeds": sorted({int(entry["seed"]) for entry in runs}),
+        "expected_llm_call_range": call_range,
+    }
+
+
+def _real_ablation_expected_artifacts(runs: list[dict[str, Any]]) -> list[str]:
+    expected_run_artifacts = [
+        artifact
+        for entry in runs
+        for artifact in [
+            f"runs/{entry['experiment_id']}/run_metadata.json",
+            f"runs/{entry['experiment_id']}/tree.json",
+            f"runs/{entry['experiment_id']}/checkpoint.json",
+            f"runs/{entry['experiment_id']}/trace_summary.json",
+            f"runs/{entry['experiment_id']}/reports/scientific_result_card.json",
+            f"runs/{entry['experiment_id']}/llm_call_ledger.jsonl",
+        ]
+    ]
+    return [
+        "real_llm_ablation_plan.json",
+        "real_llm_ablation_manifest.json",
+        "ablation_report.md",
+        "ablation_runs.csv",
+        "ablation_summary.csv",
+        *expected_run_artifacts,
+    ]
 
 
 def _build_real_ablation_manifest(
@@ -438,6 +592,8 @@ def _build_real_ablation_manifest(
         "seeds": plan["seeds"],
         "variants": plan["variants"],
         "run_count": run_count,
+        "full_stage_run_count": plan.get("full_stage_run_count", run_count),
+        "selected_budget_batch_index": plan.get("selected_budget_batch_index"),
         "timeout_s": plan["timeout_s"],
         "timeout_scope": plan["timeout_scope"],
         "output_dir": plan["output_dir"],
@@ -445,7 +601,13 @@ def _build_real_ablation_manifest(
         "config_hash": _hash_payload({"runs": plan["runs"], "benchmark_dir": plan["benchmark_dir"]}),
         "token_budget": budget.to_dict(),
         "expected_llm_call_range": expected_llm_call_range,
+        "full_stage_expected_llm_call_range": plan.get(
+            "full_stage_expected_llm_call_range",
+            expected_llm_call_range,
+        ),
         "budget_preflight": budget_preflight,
+        "budget_batch_plan": plan.get("budget_batch_plan"),
+        "budget_batch_selection": plan.get("budget_batch_selection"),
         "claim_boundary": plan["claim_boundary"],
     }
 
@@ -711,6 +873,7 @@ def _render_real_dry_run_report(plan: dict[str, Any]) -> str:
     ]
     for entry in plan.get("runs", []):
         lines.append(f"| {entry['variant']} | {entry['seed']} | `{entry['experiment_id']}` |")
+    lines.extend(_budget_batch_markdown(plan))
     lines.append("")
     return "\n".join(lines)
 
@@ -760,7 +923,43 @@ def _render_real_budget_blocked_report(plan: dict[str, Any], preflight: dict[str
             "",
             *blocker_lines,
             "",
+            *_budget_batch_markdown(plan),
             f"Planned run count: `{len(plan.get('runs', []))}`.",
             "",
         ]
     )
+
+
+def _budget_batch_markdown(plan: dict[str, Any]) -> list[str]:
+    batch_plan = plan.get("budget_batch_plan")
+    if not isinstance(batch_plan, dict):
+        return []
+    batches = batch_plan.get("batches")
+    if not isinstance(batches, list) or not batches:
+        return []
+    lines = [
+        "",
+        "## Budget Batches",
+        "",
+        f"- status: `{batch_plan.get('status')}`",
+        f"- configured max calls: `{batch_plan.get('configured_max_llm_calls')}`",
+        f"- full expected max calls: `{dict(batch_plan.get('total_expected_llm_call_range') or {}).get('max')}`",
+        f"- required for execution: `{batch_plan.get('required_for_execution')}`",
+        "",
+        "| Batch | Runs | Expected max calls | Experiment IDs |",
+        "| ---: | ---: | ---: | --- |",
+    ]
+    for batch in batches:
+        if not isinstance(batch, dict):
+            continue
+        call_range = dict(batch.get("expected_llm_call_range") or {})
+        experiment_ids = ",".join(str(item) for item in batch.get("experiment_ids", []))
+        lines.append(
+            f"| {batch.get('batch_index')} | {batch.get('run_count')} | "
+            f"{call_range.get('max')} | `{experiment_ids}` |"
+        )
+    selected_index = plan.get("selected_budget_batch_index")
+    if selected_index is not None:
+        lines.extend(["", f"Selected budget batch: `{selected_index}`."])
+    lines.append("")
+    return lines

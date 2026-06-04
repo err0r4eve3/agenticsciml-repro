@@ -72,13 +72,32 @@ uv run --python 3.11 --extra real-llm agenticsciml ablate examples/function_appr
   --output-dir runs/real-llm-ablation
 ```
 
+如果完整矩阵超过当前 `AGENTICSCIML_MAX_LLM_CALLS`，dry-run/blocked manifest 会写
+`budget_batch_plan`。该计划按每个 run 的 `expected_llm_call_range.max` 贪心切分，
+每个 batch 都不超过当前 call budget。要执行某个 batch，必须显式指定
+`--budget-batch-index`；这会只运行该 batch，同时在 manifest 中保留
+`full_stage_run_count`、`full_stage_expected_llm_call_range` 和完整 `budget_batch_plan`。
+不要把单个 batch 当作完整 Stage A evidence：
+
+```bash
+uv run --python 3.11 --extra real-llm agenticsciml ablate examples/function_approx_faithful_small \
+  --real \
+  --llm-fast-mode \
+  --seeds 0 1 2 3 4 \
+  --variants root_only,no_kb,kb,random_kb \
+  --budget-batch-index 1 \
+  --output-dir runs/faithful-small-stage-a-batch-001
+```
+
 真实 ablation 完成后，先做 artifact secret hygiene 扫描：
 
 ```bash
 uv run --python 3.11 --extra dev agenticsciml secret-hygiene runs/real-llm-ablation --fail-on-findings
 ```
 
-该扫描只报告路径和规则名，不打印匹配到的 secret 值。
+该扫描覆盖常见 provider token pattern、JWT/private-key 形状、敏感字段赋值、以及
+当前敏感 env value 的精确匹配；报告只包含路径、规则名、变量名和 hash，不打印匹配到的
+secret 值。它是 run artifact 卫生门，不是完整 DLP 证明。
 
 验证已有 ablation 输出是否能作为 readiness evidence：
 
@@ -101,7 +120,7 @@ uv run --python 3.11 --extra dev agenticsciml verify-ablation-evidence runs/abla
 - `real_llm_ablation_plan.json`：real/dry-run 模式的计划文件，列出 benchmark、seed、
   variant、evolution config 和预期 artifact。
 - `real_llm_ablation_manifest.json`：real/dry-run 模式的 provider/model、package、
-  budget、budget preflight 和 plan hash manifest。
+  budget、budget preflight、budget batch plan 和 plan hash manifest。
 - `multi_seed_ablation_verified_manifest.json`：可选的验证 manifest，供 run config 的
   `multi_seed_ablation.ablation_output_dir` 或 `--multi-seed-ablation-json` 指向原始
   ablation 输出后由 orchestrator 重新生成并附加到 run artifact。

@@ -164,6 +164,7 @@ def cmd_ablate(args: argparse.Namespace) -> int:
         llm_timeout_s=args.llm_timeout_s,
         llm_max_retries=args.llm_max_retries,
         llm_fast_mode=args.llm_fast_mode,
+        budget_batch_index=args.budget_batch_index,
     )
     output_path = result.summary_csv or result.plan_json or result.report_md
     print(output_path.resolve())
@@ -547,6 +548,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--llm-fast-mode",
         action="store_true",
         help="route unspecified agent reasoning_effort defaults to low for latency-sensitive real ablations",
+    )
+    ablate.add_argument(
+        "--budget-batch-index",
+        type=int,
+        default=None,
+        help=(
+            "with --real, execute only one preflight-planned budget batch; "
+            "the full-stage batch plan remains recorded in the manifest"
+        ),
     )
     ablate.set_defaults(func=cmd_ablate)
 
