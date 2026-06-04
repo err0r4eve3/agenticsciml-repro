@@ -17,6 +17,7 @@ from agenticsciml.evidence import (
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.capabilities import ProviderCapabilities, capabilities_for_openai_compatible
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator, EvaluationApprovalRequired
+from agenticsciml.reporting.trace_summary import summarize_trace
 from agenticsciml.state import AnalysisReport, SolutionNode, SolutionScore
 
 
@@ -202,6 +203,65 @@ class VisionAuditLLM(MockLLMClient):
             "actual_image_inputs_used": True,
             "analysis_mode": "real_visual_provider_image_input",
         }
+
+
+class FlakyVisionAuditLLM(VisionAuditLLM):
+    def complete_json_with_images(
+        self,
+        prompt: str,
+        schema_name: str,
+        image_paths: list[Path],
+        system: str | None = None,
+        temperature: float = 0.0,
+        reasoning_effort: str | None = None,
+    ) -> dict[str, Any]:
+        if len(self.image_calls) == 0:
+            self.image_calls.append(list(image_paths))
+            self.last_call_metadata = {
+                "provider": self.provider_name,
+                "model": self.model,
+                "method": "complete_json_with_images",
+                "schema_name": schema_name,
+                "adapter_type": self.adapter_type,
+                "provider_capabilities": self.provider_capabilities.to_dict(),
+                "reasoning_effort": reasoning_effort,
+                "image_input_count": len(image_paths),
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+            raise ValueError("visual_audit output failed typed schema validation: summary field required")
+        return super().complete_json_with_images(
+            prompt,
+            schema_name,
+            image_paths,
+            system=system,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+        )
+
+
+class AlwaysInvalidVisionAuditLLM(FlakyVisionAuditLLM):
+    def complete_json_with_images(
+        self,
+        prompt: str,
+        schema_name: str,
+        image_paths: list[Path],
+        system: str | None = None,
+        temperature: float = 0.0,
+        reasoning_effort: str | None = None,
+    ) -> dict[str, Any]:
+        self.image_calls.append(list(image_paths))
+        self.last_call_metadata = {
+            "provider": self.provider_name,
+            "model": self.model,
+            "method": "complete_json_with_images",
+            "schema_name": schema_name,
+            "adapter_type": self.adapter_type,
+            "provider_capabilities": self.provider_capabilities.to_dict(),
+            "reasoning_effort": reasoning_effort,
+            "image_input_count": len(image_paths),
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+        raise ValueError("visual_audit output failed typed schema validation: summary field required")
 
 
 class ProviderAwareMockLLM(MockLLMClient):
@@ -511,6 +571,87 @@ def test_real_visual_audit_records_actual_image_input_with_capable_provider(tmp_
         and event["metadata"].get("actual_image_inputs_used") is True
         for event in trace_events
     )
+
+
+def test_real_visual_audit_retries_schema_failure_without_final_guardrail_failure(
+    tmp_path: Path,
+) -> None:
+    llm = FlakyVisionAuditLLM()
+    config = ExperimentConfig(
+        experiment_id="real-visual-audit-retry-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+        agents={
+            "visual_audit": AgentConfig(
+                role="visual_audit",
+                model="fake-vision-real",
+                reasoning_effort="xhigh",
+            )
+        },
+        visual_audit_mode="real",
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, llm).run()
+
+    visual_report = json.loads(
+        (run_dir / "solutions" / "solution_000" / "visual_audit_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    summary = summarize_trace(run_dir)
+
+    assert len(llm.image_calls) == 2
+    assert visual_report["actual_image_inputs_used"] is True
+    assert visual_report["visual_provider_attempts"] == 2
+    assert summary["quality_gate"]["passed"] is True
+    assert not summary["guardrail_failures"]
+    assert any(
+        event["name"] == "visual_audit"
+        and event["event_type"] == "generation_span"
+        and event["metadata"].get("retryable") is True
+        and event["metadata"].get("status") == "retryable_schema_failure"
+        for event in trace_events
+    )
+    assert any(
+        event["name"] == "visual_audit"
+        and event["event_type"] == "generation_span"
+        and event["metadata"].get("passed") is True
+        and event["metadata"].get("attempt") == 2
+        for event in trace_events
+    )
+
+
+def test_real_visual_audit_fails_closed_after_schema_retry_budget(tmp_path: Path) -> None:
+    llm = AlwaysInvalidVisionAuditLLM()
+    config = ExperimentConfig(
+        experiment_id="real-visual-audit-retry-fail-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+        visual_audit_mode="real",
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, llm).run()
+
+    visual_report = json.loads(
+        (run_dir / "solutions" / "solution_000" / "visual_audit_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    summary = summarize_trace(run_dir)
+
+    assert len(llm.image_calls) == 2
+    assert visual_report["actual_image_inputs_used"] is False
+    assert visual_report["analysis_mode"] == "real_visual_provider_failed"
+    assert summary["quality_gate"]["passed"] is False
+    assert any(failure["name"] == "visual_audit:image_input" for failure in summary["guardrail_failures"])
 
 
 def test_run_writes_domain_selector_paper_and_multiseed_readiness_artifacts(tmp_path: Path) -> None:

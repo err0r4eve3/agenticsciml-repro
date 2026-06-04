@@ -31,6 +31,10 @@
   `reasoning_effort` 的 agent role 会降到 `low`，显式 per-role override 继续优先。
   该字段写入 config 和 run metadata，用于降低真实 provider latency；它不改变
   benchmark fidelity、selector heterogeneity 或 scientific claim gate。
+- `visual_audit_mode=real` 的真实图像审计现在对 provider 返回的 schema-miss JSON
+  做一次受控重试。首次缺字段会作为 retryable generation 诊断记录，不污染最终
+  trace quality gate；若重试后仍失败，继续写 `visual_audit:image_input` guardrail
+  failure，保持 fail-closed。
 - 新增 `agenticsciml.ablation_evidence` 和 CLI `verify-ablation-evidence`，可以读取
   `ablation_runs.csv` / `ablation_summary.csv`，验证至少两个 seed、至少一个 non-baseline
   ablation variant、每个 ablation variant 的 seed 覆盖、verifier 和 artifact digest。

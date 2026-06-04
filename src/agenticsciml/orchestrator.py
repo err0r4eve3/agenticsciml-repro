@@ -2117,16 +2117,46 @@ class AgenticSciMLOrchestrator:
             f"Benchmark: {self.problem_bundle.benchmark_name}\n"
             f"Existing deterministic checks: {report.get('physical_consistency_checks')}\n"
         )
-        try:
-            response = self.llm.complete_json_with_images(
-                prompt,
-                "visual_audit",
-                image_paths,
-                system="You are a conservative scientific visualization auditor.",
-                temperature=0.0,
-                reasoning_effort=self._reasoning_effort_for_role("visual_audit"),
-            )
-        except Exception as exc:
+        response: dict[str, object] | None = None
+        last_error: Exception | None = None
+        max_attempts = 2
+        current_prompt = prompt
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = self.llm.complete_json_with_images(
+                    current_prompt,
+                    "visual_audit",
+                    image_paths,
+                    system="You are a conservative scientific visualization auditor.",
+                    temperature=0.0,
+                    reasoning_effort=self._reasoning_effort_for_role("visual_audit"),
+                )
+                break
+            except Exception as exc:
+                last_error = exc
+                metadata = getattr(self.llm, "last_call_metadata", None)
+                trace_metadata = {
+                    "solution_id": node.node_id,
+                    "attempt": attempt,
+                    "max_attempts": max_attempts,
+                    "retryable": attempt < max_attempts,
+                    "status": "retryable_schema_failure" if attempt < max_attempts else "failed",
+                    "image_input_count": len(image_paths),
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
+                if isinstance(metadata, dict):
+                    trace_metadata.update(metadata)
+                self.storage.record_trace("generation_span", "visual_audit", trace_metadata)
+                if attempt < max_attempts:
+                    current_prompt = (
+                        f"{prompt}\n\nPrevious visual_audit JSON failed validation: "
+                        f"{type(exc).__name__}: {exc}. Return corrected JSON only with exactly these "
+                        "required fields: summary, physical_consistency_checks, visual_artifacts_reviewed, "
+                        "warnings, actual_image_inputs_used, analysis_mode."
+                    )
+        if response is None:
+            exc = last_error or RuntimeError("visual audit provider did not return a response")
             report["analysis_mode"] = "real_visual_provider_failed"
             warnings = report.get("warnings")
             if isinstance(warnings, list):
@@ -2139,12 +2169,14 @@ class AgenticSciMLOrchestrator:
                     "passed": False,
                     "error_type": type(exc).__name__,
                     "error": str(exc),
+                    "attempts": max_attempts,
                 },
             )
             return
         report["actual_image_inputs_used"] = True
         report["analysis_mode"] = "real_visual_provider_image_input"
         report["visual_provider_output"] = response
+        report["visual_provider_attempts"] = max_attempts if last_error is not None else 1
         report["summary"] = str(response.get("summary", report.get("summary", "")))
         checks = response.get("physical_consistency_checks")
         if isinstance(checks, list):
@@ -2167,6 +2199,7 @@ class AgenticSciMLOrchestrator:
         trace_metadata = {
             "solution_id": node.node_id,
             "passed": True,
+            "attempt": max_attempts if last_error is not None else 1,
             "image_input_count": len(image_paths),
             "actual_image_inputs_used": True,
         }
