@@ -2,6 +2,1052 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-05-27 Paper Workflow Evidence Modules
+
+本轮继续推进科学证据链，但仍不默认启动 real LLM、不跑昂贵 paper-scale 训练，也不把
+`faithful-small` 或 mock run 写成科学发现。
+
+追加迭代：
+
+- 新增 [PR Split Plan](pr_split_plan.md)，把 `codex/chatui-workbench-redesign` 收敛为
+  evidence/reporting、benchmark catalog、algorithm/reference primitives 和 ChatUI/web
+  hardening 四个 stacked PR 的拆分边界。该计划只约束 review 与验证顺序，不提升
+  scientific claim，也不替代 real LLM 多 seed ablation。
+- 新增 GitHub Actions CI：`fast-evidence-gates` 运行 benchmark catalog、sandbox execution、
+  evidence、ablation evidence 和 paper gap report 的快速测试；`full-pytest` 运行
+  `uv run --frozen --python 3.11 --extra dev pytest -q`。CI 只验证仓库测试与证据门控回归，
+  不代表 real LLM、多 seed ablation 或 paper-level scientific claim 已完成。
+- 新增 `agenticsciml.paper_gap_report` 和 CLI `paper-gap-report`，从 benchmark
+  fidelity metadata 与 supplied run artifacts 生成 `paper_gap_report.json/md`。报告会检查
+  benchmark fidelity、paper equivalence、completed run metadata、trace quality gate、
+  real LLM mode、multi-seed ablation、scientific readiness 和 claim gate support；任何缺口
+  都保持 `blocked`，不会把 champion 分数升级成论文分数或科学发现声明。
+- Real LLM provider budget hardening：`OpenAIAdapter` 默认设置 `max_retries=0`，
+  避免 OpenAI SDK 隐式重试把 `OPENAI_TIMEOUT_S` 放大成多倍墙钟等待；可通过
+  `OPENAI_MAX_RETRIES`、`--llm-timeout-s` 和 `--llm-max-retries` 显式覆盖。trace
+  generation span 与 `run_metadata.json` 会记录 provider HTTP `timeout_s` /
+  `max_retries`，并继续与生成解的 sandbox `--timeout-s` 分开。Agent-level
+  JSON retry 仍用于坏 JSON / schema drift，但 `APITimeoutError` 等 provider API
+  边界错误会立即 fail closed；adapter 会在发起请求前刷新 call metadata，避免失败
+  trace 误用上一轮成功调用的 usage 或 reasoning 设置。
+- RootEngineer prompt 减负：仍保留 ProblemBundle、EvaluationContract JSON、
+  guidelines 和 data analysis context，但使用紧凑 contract JSON、较短上下文窗口和
+  明确的 NumPy-only compact baseline 指令，降低 OpenAI-compatible chat endpoint
+  生成完整 `solution.py` 的超时概率。若 provider/model 仍不能在预算内返回 root code，
+  run 继续按真实 provider failure 记录，不用 mock 或本地模板冒充 real LLM 解。
+- CLI / Web run request 新增 `llm_fast_mode`（CLI: `--llm-fast-mode`）：未显式设置
+  `reasoning_effort` 的 agent role 会降到 `low`，显式 per-role override 继续优先。
+  该字段写入 config 和 run metadata，用于降低真实 provider latency；它不改变
+  benchmark fidelity、selector heterogeneity 或 scientific claim gate。
+- `visual_audit_mode=real` 的真实图像审计现在对 provider 返回的 schema-miss JSON
+  做一次受控重试。首次缺字段会作为 retryable generation 诊断记录，不污染最终
+  trace quality gate；若重试后仍失败，继续写 `visual_audit:image_input` guardrail
+  failure，保持 fail-closed。
+- 新增 `agenticsciml.ablation_evidence` 和 CLI `verify-ablation-evidence`，可以读取
+  `ablation_runs.csv` / `ablation_summary.csv`，验证至少两个 seed、至少一个 non-baseline
+  ablation variant、每个 ablation variant 的 seed 覆盖、verifier 和 artifact digest。
+- `multi_seed_ablation.ablation_output_dir` 现在会让 orchestrator 重新生成
+  `reports/multi_seed_ablation_verified_manifest.json`，再纳入
+  `reports/multi_seed_ablation_evidence.json` 和 scientific readiness；手写 manifest
+  仍只是外部声明路径，不替代原始 ablation 输出。
+- 新增 `agenticsciml.paper_workflow_readiness` 和 CLI `plan-paper-workflow`，把真实多模态
+  provider、异构 real selector、paper-like benchmark manifest、领域审批 packet、
+  paper-equivalent KB、multi-seed ablation、资源约束和专家蓝图统一成预执行门禁包。
+  当前环境缺真实 provider 凭证时，该命令会生成 blocked artifact，而不会伪造 real run。
+- 新增 `agenticsciml.iteration_campaign` 和 CLI `plan-iteration-campaign`，可以把 60 轮
+  后续迭代拆成 batch/round artifact。每轮绑定 readiness check、目标 artifact、
+  validation command 和 claim boundary；被真实凭证、paper-like 数据或领域审批阻塞的轮次
+  会显式标记 `blocked_by_readiness`。
+- 新增 CLI `record-iteration-round`，用于把某一 planned 轮次绑定到实际 evidence artifact、
+  SHA-256 digest 和验证命令，写出 `iteration_round_XXX_record.json` 并更新 campaign
+  进度。被 readiness blocker 卡住的轮次不能被记录为完成。
+- 新增 CLI `verify-iteration-campaign`，可重新校验 completed round 的 record、evidence
+  digest 和 campaign 计数；证据文件被篡改、record 缺失或计数不一致时会 fail closed。
+- `record-iteration-round` 现在要求记录 validation exit code 和 validation output artifact；
+  `verify-iteration-campaign` 会重新校验 validation output digest，并在验证命令失败或输出被改时阻塞。
+- `verify-iteration-campaign --require-complete` 可作为 60 轮 campaign 的最终完成审计：
+  未完成、仍 blocked 或计数不一致时返回失败；默认模式仍只校验已完成轮次的证据完整性。
+- `verify-iteration-campaign` 现在还会校验 campaign round schema：round index 必须唯一连续，
+  status 必须在 `planned` / `blocked_by_readiness` / `completed` 内，否则 fail closed。
+- Campaign verifier 还会比对固定 target sequence 与 per-round target/readiness/validation/batch
+  metadata，防止通过手工改 JSON 把被阻塞或困难轮次替换成更容易完成的目标。
+- Completed round record 会被反向对账到 campaign round：schema/version、target、readiness
+  check、previous status、validation command 和 campaign-side evidence digest 不一致时 fail closed。
+- Campaign round evidence、validation output 和 record 文件引用必须解析在 campaign 目录内；
+  绝对路径、`..` 逃逸或 symlink 逃逸都会被拒绝或在 verification 中 fail closed。
+- Completed round 的 `evidence_record_path` 必须使用规范文件名
+  `iteration_round_XXX_record.json`，不能指向同目录下任意 JSON。
+- Campaign verifier 会从 rounds 重新计算 `batches` 摘要，batch range、target 列表、
+  planned/blocked/completed/remaining 计数不一致时 fail closed。
+- Campaign verifier 现在也会校验顶层 metadata：`campaign_version`、`claim_boundary`、
+  `paper_workflow_readiness_status` 和 `status` 必须与 blocker 状态一致，防止把仍 blocked
+  的 campaign 手工改成 ready 或科学发现证据。
+- Completed round record 的 `claim_boundary` 也会被 verifier 对账；单轮工程证据不能被
+  手工改写成真实科学发现声明。
+- `requires_external_asset=true` 的 campaign round 若仍携带 `blocked_by`，不能通过手工
+  record 或 digest 被验收为 completed。
+- Campaign artifact 会保存 `paper_workflow_readiness_checks`；verifier 会从 failed checks
+  重建顶层 `readiness_blockers`、每轮预期 `blocked_by` 和外部资产 blocked 状态。
+  `record-iteration-round` 也会拒绝先清空 blocker 列表或抹掉 round blocker 再记录完成的
+  外部资产轮次。
+- 新增 `agenticsciml.real_problem_closure` 和 CLI `plan-real-problem-closure`，输出
+  `real_problem_closure_plan.json/md`，把“能否依靠多智能体解决真实问题”拆成 real LLM、
+  真实多模态输入、异构 real selector、paper-like benchmark、paper-equivalent KB、
+  领域审批、多 seed/ablation、资源蓝图和 completed-run audit。该 gate 继续固定
+  `multi_agent_real_problem_claim_supported=false`，直到所有 proof artifact 都存在。
+- 新增 [Real Problem Evidence Closure](real_problem_evidence_closure.md) 和执行计划
+  `docs/superpowers/plans/2026-06-01-real-problem-evidence-closure.md`，明确哪些模块能由本地
+  工程补齐，哪些必须由真实外部资产、领域专家和 completed run 补齐。
+- `AgentConfig` / Web `AgentModelRequest` 支持 per-member `base_url`。selector panel
+  可以在不记录 API key 的前提下，为不同 selector member 指定不同 OpenAI-compatible
+  provider endpoint。
+- CLI 新增 `--selector-panel-json`，用于声明带 `model`、`base_url`、`temperature` 和
+  `reasoning_effort` 的 selector panel；旧的 `--selector-panel-models` 仍可用于简单模型列表。
+- selector vote provenance 新增 `configured_base_url`，`selector_heterogeneity.json`
+  会基于 runtime votes 中的实际 provider/model 判断异构 evidence。
+- 新增回归测试用本地 fake provider 验证 per-member `base_url` 会产生
+  `unique_providers=["api.deepseek.com", "openai"]`，并让
+  `heterogeneous_selector_evidence=true`。该测试不调用外部模型，不代表真实 provider
+  已完成科学运行。
+- `visual_audit_mode=real` 现在会生成 provider 兼容的 PNG 诊断图，并只把
+  PNG/JPEG/GIF/WebP 这类真实图像格式传给 image-capable provider；SVG 仍作为本地
+  artifact 保留。run metadata 也显式记录 top-level `visual_audit_mode`。
+- 新增 `agenticsciml.selector_evidence` 和 CLI `generate-selector-evidence`，可从
+  completed run 的 `reports/selector_votes.json` 生成
+  `reports/selector_evidence_packet.json/md`。packet 要求至少两个非 mock、不同 runtime
+  member 的异构 provider/model votes；它只补 selector 证据，不替代 evaluator 或科学 claim gate。
+- `plan-paper-workflow`、`plan-real-problem-closure` 和 `plan-iteration-campaign` 支持
+  `--selector-evidence-json`，可以把已生成的 selector evidence packet 纳入 readiness；
+  ready packet 只解除 `heterogeneous_real_selector` blocker，不会绕过其他 paper workflow gate。
+- 新增 `agenticsciml.reference_capability_matrix` 和 CLI `build-reference-capability-matrix`，
+  把 AgenticSciML / ATHENA / GRAFT-ATHENA / AI Fluid Scientist / agent-systems scaling /
+  材料发现资料中的可离线机制映射到本地 artifact、fail-closed blocker、no-key path 和未来
+  real-run requirement；同时检查 problem intake 是否包含 hypothesis、observable、metric、
+  failure modes、physical constraints 和 domain review checklist。
+- `plan-paper-workflow`、`plan-real-problem-closure` 和 `plan-iteration-campaign` 支持
+  `--problem-intake-json`，并在输出中嵌入 `reference_capability_matrix`。该 matrix 只报告
+  参考机制覆盖度，仍固定 `scientific_claim_supported=false`。
+- 新增 `agenticsciml.llm_problem_context` 和 CLI `build-llm-problem-context`，在不调用 real LLM
+  的测试条件下，把完整 problem intake、`expert_blueprint_id`、CPU/GPU/timeout/dependency/data
+  limits 和 reference matrix 整理成未来真实 LLM agent 可直接消费的 `llm_problem_context_pack.json/md`。
+- `llm_problem_context_pack` 为 `data_analyst`、`root_engineer`、`proposer`、`critic`、
+  `engineer`、`debugger`、`selector`、`result_analyst` 和 `visual_audit` 固定输入、输出 schema、
+  禁止动作、stop condition、证据 artifact 与默认 role-level `reasoning_effort`；Python orchestrator
+  仍拥有 evaluation scoring、champion selection、selector eligibility、sandbox、trace、artifact writes
+  和 claim gate。
+- `visual_audit` 现在纳入默认 role model policy 和 Web/CLI role override 范围；真实图像审计会读取
+  `visual_audit` 的 `reasoning_effort`，不再借用 `result_analyst`。
+- `plan-paper-workflow`、`plan-real-problem-closure` 和 `plan-iteration-campaign` 现在会嵌入同一份
+  `llm_problem_context_pack`。缺 problem intake 字段、专家蓝图或资源限制时 pack 保持 blocked；
+  该 pack 只提升未来 real LLM 输入质量，不替代 LLM 执行，也不支持科学 claim。
+
+已实现：
+
+- OpenAI native Responses adapter 新增 `complete_json_with_images(...)`，真实 visual audit
+  可以把已生成的 PNG 诊断图作为 image input 发送给支持图像输入的 provider；OpenAI-compatible
+  chat 和 mock 路径仍默认不支持。
+- `https://api.gatexflow.com/v1` 和 `https://api.error-forever.com/v1` 作为
+  OpenAI-compatible multimodal chat provider 处理：文本 JSON 仍走本地 schema validation，
+  `visual_audit_mode=real` 可通过 chat image content 发送诊断图像。
+- `visual_audit_mode=real` 现在只有在 provider capability 明确
+  `supports_image_inputs=true` 且图像请求成功时才记录 `actual_image_inputs_used=true`。
+- 新增 run-level evidence artifacts：
+  `reports/domain_approval.json`、`reports/paper_like_benchmark_dossier.json`、
+  `reports/selector_heterogeneity.json` 和 `reports/multi_seed_ablation_evidence.json`。
+- `reports/scientific_discovery_readiness.json` 现在会纳入上述 artifacts，而不是只看配置字段；
+  domain approval、paper-like benchmark、异构 selector、多 seed/ablation 都有独立 blocker。
+- CLI/Web/Problem Intake 继续传播 `multi_seed_ablation`；ChatUI solver request 也能携带
+  domain reviewer/notes 与 paper benchmark approval。
+- `docs/paper_workflow_readiness.md` 记录真实运行前的统一 gate、模板 artifact 和 claim
+  boundary。
+
+验证：
+
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_llm_problem_context.py tests/test_reference_capability_matrix.py tests/test_paper_workflow_readiness.py tests/test_real_problem_closure.py tests/test_iteration_campaign.py tests/test_web_api.py tests/test_orchestrator_cli.py::test_real_visual_audit_records_actual_image_input_with_capable_provider -q`：90 passed。
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_openai_adapter.py::test_openai_adapter_marks_error_forever_as_multimodal_chat tests/test_openai_adapter.py::test_openai_adapter_marks_gatexflow_as_multimodal_chat tests/test_openai_adapter.py::test_openai_adapter_sends_image_inputs_to_gatexflow_chat -q`：3 passed。
+- `PYTHONPATH=src uv run --python 3.11 --extra dev python -m compileall -q src/agenticsciml`：通过。
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest -q`：469 passed。
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_evidence.py tests/test_openai_adapter.py::test_openai_adapter_sends_image_inputs_to_native_responses tests/test_orchestrator_cli.py::test_real_visual_audit_records_actual_image_input_with_capable_provider tests/test_orchestrator_cli.py::test_run_writes_domain_selector_paper_and_multiseed_readiness_artifacts -q`：12 passed。
+
+边界：
+
+- 这些模块是证据入口和 fail-closed gate，不等于已经具备真实科学发现。
+- paper-like benchmark 仍需要真实 paper-equivalent 数据、预算、evaluator 和审批；当前
+  `cylinder_wake_reconstruction_faithful_small` 仍是 `faithful-small` pilot。
+- 多 seed/ablation manifest 必须标记 `verified=true`、记录 `verified_by`/reviewer、
+  满足至少 2 个 seed 和至少 1 个 ablation variant；orchestrator 会把声明 manifest
+  固化为 run artifact 后再让 readiness 对应检查通过。它仍不替代实际实验和失败样本复核。
+
+## 2026-05-25 Scientific Discovery Evidence Chain
+
+本轮根据 NotebookLM notebook `Agentic AI for Scientific Computing and Finite Element Methods`
+中的 AgenticSciML、ATHENA、GRAFT-ATHENA、ALL-FEM、AI Fluid Scientist、
+agent-systems scaling 与材料发现资料，先升级科学证据链。默认不启动 real LLM，
+不跑昂贵多 seed 训练，也不把 mock/custom-proxy/faithful-small 结果写成新科学发现。
+
+已实现：
+
+- 新增 `reports/scientific_discovery_readiness.json/md`。报告 fail-closed 检查
+  paper-like benchmark、real LLM、异构 selector、paper-equivalent KB、真实图像输入、
+  领域专家审批、多 seed/ablation、失败归因、专家蓝图和资源约束；只有全部满足且
+  claim gate 允许时，`scientific_claim_supported` 才能为 `true`。
+- 新增 prediction-only 视觉审计层。每个 solution 写入
+  `visual_audit_report.json`，并生成 field / residual proxy / boundary proxy SVG；
+  `actual_image_inputs_used=true` 只允许真实 vision provider 实际接收图像后记录。
+- 新增 method experience artifact。每个 solution 写入
+  `method_experience_record.json`，run 级写入 `method_experience_cache.json` 和
+  `method_experience_substrate.json`，使用 `MethodPath`、`ScientificReward` 和
+  `ExperienceSubstrate` 记录 exact fingerprint 与 benchmark-family 经验。
+- selector vote provenance 增加 `adapter_type` 和 `provider_capabilities`；
+  `ProviderCapabilities` 增加 `supports_image_inputs`。OpenAI native Responses 记录为
+  支持 image input，GatexFlow compatible multimodal chat 记录为支持 image input；
+  其他 OpenAI-compatible chat 和 mock 默认不支持。
+- CLI / Web / Problem Intake 增加 `visual_audit_mode`、`resource_constraints` 和
+  `expert_blueprint_id`。custom benchmark 仍只能生成 `workflow_proxy` scaffold。
+- CLI `run` 增加 `--agent-models-json`，可为普通 agent role 指定 `model`、
+  `base_url`、`temperature` 和 `reasoning_effort`；selector ensemble 仍使用
+  `--selector-panel-json`。导出的 `run_metadata.json.agent_models` 记录每个
+  role 的配置来源、实际模型、provider 和 adapter。
+- `trace_summary.json` 增加 scientific readiness consistency check，防止
+  `run_metadata.json` 夸大 readiness 或 scientific claim。
+- 新增 [Scientific Discovery Evidence Digest](scientific_discovery_evidence.md)，记录
+  NotebookLM 来源、工程映射和明确不做项。
+
+验证：
+
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_evidence.py tests/test_trace_reporting.py -q`：63 passed。
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_llm_and_agents.py tests/test_method_substrate.py tests/test_retrieval.py -q`：40 passed。
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_web_api.py tests/test_orchestrator_cli.py -q`：89 passed。
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest -q`：403 passed。
+
+边界：
+
+- 本轮没有启动 real LLM、没有 fine-tune、没有真实实验闭环、没有 paper-like benchmark
+  升级，也没有多 seed/ablation 结论。
+- `visual_audit_report.json` 默认是 prediction-only artifact，不读取 private labels；
+  mock 或纯文本分析不支持 scientific claim。
+- `method_experience_cache.json` 只支持 exact fingerprint 和 benchmark-family 复用；
+  不声明 metric-space self-improvement 或自主扩展 action space。
+- `cylinder_wake_reconstruction_faithful_small` 可作为主 pilot，`burgers_pinn_faithful_small`
+  可作为低成本 smoke；二者仍是 `faithful-small`，不能写成 paper-like 或 paper-score evidence。
+
+## 2026-05-24 KS Custom Proxy Goal Smoke
+
+本轮用一维 Kuramoto-Sivashinsky 短时预测 surrogate 作为 Goal 级新问题，跑通
+`solver/chat -> custom proxy benchmark scaffold -> account-scoped mock run -> operator evidence`
+链路，并修复两个 smoke 暴露的问题。
+
+已修复：
+
+- `solver/chat` 的 Problem Intake planner 现在会把 `account_id` 传入 custom benchmark
+  scaffold，避免 Agent 模式返回的 `start_run` action 指向账号目录中不存在的 benchmark。
+- `OperatorScheduler` 现在把 `custom operator learning`、`custom temporal regression`
+  等 custom family 归一到已有兼容键；包含 `kuramoto` / `sivashinsky` 的 custom proxy
+  benchmark 会保留 planner 选出的 finite-difference residual、DeepONet/FNO 和
+  reaction-diffusion helper seeds，而不是退回 baseline fallback。
+
+Goal smoke 结果：
+
+- account: `goal-ks`
+- run: `mock-20260524-154613`
+- run_dir: `.agenticsciml/accounts/goal-ks/runs/mock-20260524-154613`
+- solution_count: 7
+- operator_assignment_count: 6 / 6
+- operators: `finite_difference_residual_probe`, `deeponet_operator`,
+  `fno_lite_operator`, `paper_reaction_diffusion_fno_helpers`
+- mutation_status_counts: `changed_score_moved=6`, `root=1`
+- innovation_claim_level: `workflow_exploration_only`
+- scientific_novelty_supported: `false`
+
+边界：该 KS run 使用自动生成的 deterministic custom proxy evaluator scaffold，只证明
+workflow 能处理新问题并产生可审计 artifacts，不支持科学结论或论文分数复现。
+
+验证：
+
+- `PYTHONPATH=src uv run --python 3.11 --extra web --extra dev pytest tests/test_operator_scheduler.py tests/test_search_policy.py tests/test_orchestrator_cli.py tests/test_web_api.py -q`：98 passed。
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest -q`：401 passed。
+
+## 2026-05-24 Evolution Operator Scheduler
+
+本轮把 evolution 从“algorithm catalog 只作为 prompt seed”升级为默认启用的
+`auto-audited` mutation operator 调度。调度仍是 workflow guidance，不改变 evaluator、
+selector、champion selection 或 artifact 事实来源。
+
+已实现：
+
+- 新增 deterministic `OperatorScheduler`，根据 benchmark family、手选算法、parent、
+  branch context 和历史 mutation health 为每个 child 分配 operator。
+- 每个 child 写入 `operator_assignment.json`，并把 operator guidance 注入
+  Proposer / Engineer prompt；`method_tags` 增加 `operator:<id>` 和 `axis:<axis>`。
+- same-parent fanout 会尽量分配不同 mutation axis，降低 sibling 重复风险。
+- `mutation_effect_report.json` 增加 operator id、mutation axis、expected terms 和
+  static evidence；`evolution_health.json` 增加 per-operator assigned/evaluated/
+  duplicate/plateau/improved/best-improvement 统计。
+- `innovation_report.json` 汇总 operator coverage，但继续固定为
+  `workflow_exploration_only`，不支持 scientific novelty 或 paper-level discovery。
+- Web `/api/algorithms` 暴露 operator metadata；`/api/runs/{id}/solutions` 返回
+  operator assignment 和 operator health；前端第三页显示 `auto-audited` scheduler、
+  operator、axis、mutation status 和 score delta。
+- `evolution_health.json` 追加 operator assignment consistency audit：记录 child 覆盖率、
+  缺失 assignment、method tag 不一致和 assignment warning，避免调度证据链静默断裂。
+
+验证：
+
+- `PYTHONPATH=src uv run --python 3.11 --extra web --extra dev pytest tests/test_operator_scheduler.py tests/test_search_policy.py tests/test_orchestrator_cli.py tests/test_web_api.py -q`：97 passed。
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest -q`：399 passed。
+- `cd frontend && npm run build`：通过。
+- `git diff --check`：通过。
+
+边界：
+
+- operator 不是已验证实现，也不是算法正确性证明；有效性只能从 evaluator score、
+  mutation effect 和 run artifacts 判断。
+- 本轮不新增真实可执行算法模板库，先把调度与审计链路补齐。
+
+## 2026-05-23 Flow Smoke Iteration
+
+本轮继续对 Web 控制面和浏览器 dispatch 做 live smoke。测试发现当前运行中的旧
+FastAPI 进程返回的 `/api/algorithms` payload 缺少 `features` /
+`features_zh` / `problem_fit` / `problem_fit_zh` 字段时，最新前端会在进入第三页
+算法库时崩溃。已将前端算法卡片改为兼容旧 payload：缺少双语字段时回退到
+`description`、`compatible_benchmark_families` 和 `safety_notes`，避免发布或重启
+不同步导致空白页。
+
+验证：
+
+- `PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python scripts/web_workflow_smoke.py --base-url http://127.0.0.1:8876 --skip-code-server-live`
+- `cd frontend && npm run build`
+- `cd frontend && node ../scripts/web_ui_dispatch_e2e.mjs --base-url http://127.0.0.1:5173 --timeout-ms 45000`
+- `node scripts/web_ui_dispatch_e2e.mjs --base-url http://127.0.0.1:8876 --timeout-ms 45000`
+
+边界：
+
+- `--expect-code-server-websocket` 仍会暴露本机 code-server sidecar 未按当前 workspace
+  成功建立 WebSocket 的问题；本轮先修前端兼容性，code-server live sidecar / 反代路径
+  仍需单独排查。
+
+后续排查确认远端 `ociChuncheon` 的 code-server 反代和浏览器 WebSocket 能通过
+`scripts/web_ui_dispatch_e2e.mjs --expect-code-server-websocket`；本机失败来自
+`/tmp/agenticsciml-code-server-4.117.0` 不完整，缺少正常 `bin/code-server` /
+`out/node/entry`，导致 `/`、`?folder` 和静态资源 404。README 已移除旧的
+`PASSWORD=` 启动示例，统一为 `--auth none` + loopback / 上游账号鉴权边界。
+
+进一步 artifact 审计发现默认 mock engineer 在第二轮迭代会重复输出同一个 Fourier
+ridge 实现，导致 `evolution_health.json` 出现 `duplicate_parent` warning。已将
+engineer prompt 中的 `solution_id` 暴露给 mock LLM，并让 mock engineer 按
+`solution_001`、`solution_002` 等生成不同的确定性 Fourier ridge 参数变体。这样 mock
+run 仍只代表 workflow shape，但演示和 smoke 中的多步迭代不再默认退化为重复代码。
+
+继续跑“新问题 -> custom proxy benchmark -> run”的远端端到端测试时发现：自定义
+benchmark 没有 `kb/index.json`，child mutation 仍会尝试加载 KB 并触发
+`FileNotFoundError`，导致 run exported 但 trace quality gate 失败。已将缺失 KB
+处理为 `coverage_status=missing` 的空 KB，retriever 会写出 `retrieved_kb.json`
+并继续 workflow；自定义 proxy benchmark 的回归测试现在会至少跑一个 child，并要求
+trace quality gate 通过。
+
+20 轮 live validation 的 trace 审计发现：已生成的 `trace_summary.json` 质量门通过，
+但顶层没有输出 `claim_gate`，单独查看 trace summary 时无法机器读取 claim boundary。
+已将 `claim_gate` 作为 trace summary 顶层字段输出，优先来自 `run_metadata.json`，
+其次来自 workflow-start trace；这只补齐审计可见性，不改变 evaluator score 或
+quality gate 判定。
+
+同一轮 problem-intake 测试还发现：明显不在 catalog 的问题在未启用 custom scaffold
+时会被低置信度 fallback 到某个 faithful-small benchmark；ChatUI Agent 中“求解一个新问题”
+也可能因为没有出现“run/mock/实验”等触发词而不进入规划。已收紧 problem-intake：
+低置信度 catalog match 会返回 `status=needs_manual_benchmark`、`run_allowed=false`
+和空 actions；同时 ChatUI Agent 对“求解/benchmark/解法”也会进入 planner，并在用户明确
+说明 `not in catalog` / `新问题` / `自定义` 时生成 custom proxy benchmark action。
+
+## 2026-05-23 Innovation Audit Iteration
+
+40 轮创新性迭代发现：已有 `emergence_report.json` 和 `evolution_health.json` 能分别说明
+单个 solution 的 candidate emergence 与代码/分数健康，但缺少 run-level “这轮探索到底
+有哪些创新轴、证据来自哪里、哪些声明被禁止”的总览。已新增保守的 innovation audit：
+
+- 每次导出 run 时写入 `reports/innovation_report.json` 和
+  `reports/innovation_report.md`。
+- 报告只输出 `innovation_claim_level=workflow_exploration_only`，并固定
+  `scientific_novelty_supported=false`、`paper_level_discovery_supported=false`。
+- 报告汇总 novelty axes：representation/features、physics/residual、
+  optimization/schedule、sensor/field processing、algorithm composition 和
+  debugging/robustness。
+- 报告记录 per-solution innovation signals、method tags、mutation status、KB usage
+  和 emergence claim level，给后续人工复核提供证据入口。
+- Web `/api/runs/{id}/solutions` 增加 `innovation_report` 摘要；第三页 evidence
+  区显示 innovation axes、candidate emergence 与 claim boundary。
+- ChatUI Ask 模式现在能回答“总结这个 run 的创新性”，并明确提醒该报告不支持科学创新或
+  论文级发现声明。
+
+边界：
+
+- innovation audit 是 workflow exploration evidence，不是科学新发现证明。
+- candidate emergence 仍只来自保守静态/结构化审计；需要真实多模型、多 seed、权威
+  evaluator 和领域专家复核后，才能讨论科学意义。
+
+## 2026-05-19 Senior Review Issue Closure
+
+本次按学长审计文档逐项补齐 4 个可信度问题的留档、artifact 和 UI/API 证据展示。所有新增报告都定位为
+workflow evidence，不改变 evaluator score，也不支持论文级科学结论。
+
+已实现：
+
+- 新增 [学长审计 Issue 留档](senior_review_issues.md)，逐项记录原始问题、证据、根因、
+  修复方案、验证命令和可转发答复。
+- Issue 1：child solution 新增 `kb_application_report.json`；`ProposerAgent` 支持可选
+  `kb_application`，`EngineerAgent` 保存 `engineering_response.json` 和
+  `implemented_kb_points`，并对 PINN/KB 关键点做轻量静态证据检查。若 engineer
+  声称实现但代码没有对应静态信号，报告降级为 `unverified`。
+- Issue 2：orchestrator 新 run 使用 `run_inputs/public/` 和
+  `run_inputs/private_eval/`。solution workspace 只通过 symlink/copy fallback 暴露公共输入，
+  private evaluator 不进入 solution workspace；Web artifact browser 拒绝浏览
+  `run_inputs/private_eval/` 原始内容。
+- Issue 3：child solution 新增 `mutation_effect_report.json`，run 级新增
+  `reports/evolution_health.json`，记录 code digest、proposal digest、diff line count、
+  duplicate-of、score delta 和 plateau warning。
+- Issue 4：Data Analyst 新增 `reports/data_analysis_structured.json`，`data_analysis.md`
+  从结构化 JSON 渲染；trace summary 增加 `data_analysis_specificity` warning，并拒绝
+  没有 benchmark-specific terms 的通用模板式 observation。
+- Web `/api/runs/{id}/solutions` 返回 `kb_application`、`mutation_effect` 和
+  `evolution_health` 摘要；前端第三页 evidence table 显示 KB usage、mutation status、
+  unique code、duplicate、plateau 和 best improvement。
+
+验证：
+
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_llm_and_agents.py::test_data_analyst_writes_training_observation_artifacts tests/test_llm_and_agents.py::test_data_analyst_structured_output_is_benchmark_specific tests/test_retrieval.py::test_kb_application_report_warns_when_budgeted_pinn_entry_is_not_adopted -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_retrieval.py::test_kb_application_report_marks_claimed_but_unverified_adoption_as_warning tests/test_retrieval.py::test_kb_application_report_passes_when_budgeted_pinn_signals_are_actually_present -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_execution.py::test_run_level_inputs_deduplicate_public_data_and_keep_private_eval_out_of_solution -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_execution.py::test_private_eval_dir_is_only_passed_explicitly_to_train_and_evaluate tests/test_execution.py::test_public_input_copy_fallback_preserves_deduplication_contract_when_symlink_fails -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_trace_reporting.py::test_trace_summary_reports_data_analysis_specificity_warnings -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_orchestrator_cli.py::test_full_mock_pipeline_generates_tree_and_champion -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_orchestrator_cli.py::test_duplicate_child_code_is_marked_in_mutation_and_evolution_health -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_orchestrator_cli.py::test_plateau_without_duplicate_code_is_explained_in_mutation_and_evolution_health -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_web_api.py::test_selector_votes_and_solutions_are_read_only_evidence -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_web_api.py::test_artifact_browser_rejects_private_eval_inputs tests/test_llm_and_agents.py::test_data_analysis_structured_json_schema_rejects_generic_template_output -q`
+
+边界：
+
+- KB static evidence 是轻量信号，不证明算法正确或科学有效。
+- `run_inputs/public` 在 symlink 不可用的平台会 fallback 为 copy，并写入 manifest。
+- `evolution_health` 解释分数停滞原因，不替代 evaluator 区分度改造。
+- structured data analysis 仍只读取 training data，不接触 private validation labels。
+
+## 2026-05-19 ATHENA / GRAFT Method Template Library
+
+本次在上一轮 `method_substrate` 合约之上，把 NotebookLM / Pro 提炼出的论文方法机制
+落为保守的 source-grounded template library。默认 runtime selector、catalog、
+evaluator 和 orchestrator 行为不变。
+
+已实现：
+
+- 新增 `src/agenticsciml/method_templates.py`，定义 `MethodTemplate`、
+  `MethodTemplateLibrary`、`athena_graft_method_library()` 和 `asr_trace_record()`。
+- 内置 `hena_asr_mapping`、`expert_blueprint_constraint`、
+  `factored_method_path`、`method_fingerprint_cache` 和
+  `local_experience_record_template` 五个模板。
+- 内置模板显式保持 `runtime_enabled=False`、`evaluated_algorithm=False`、
+  `paper_score_claim=False` 和 `autonomous_discovery_claim=False`。
+- 模板实例化会走 `ExpertBlueprint` validation，并生成 deterministic `MethodPath`。
+- `asr_trace_record()` 生成 `A_n -> S_n -> R_n` 结构化 payload，但不写 run artifact。
+- `ExperienceSubstrate` 增加 best-reward 查询 helper，要求混合 metric 显式指定
+  `metric`，并按 `higher_is_better` / lower-is-better 方向选择历史记录。
+- 新增 [ATHENA / GRAFT-ATHENA 方法映射](athena_graft_methods.md)，记录每个方法机制的
+  来源、项目落点和 overclaim boundary。
+
+验证：
+
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_method_substrate.py tests/test_method_templates.py -q`
+
+边界：
+
+- 本轮仍不实现 contextual bandit、GRAFT metric embedding、概率树学习、自动 action-space
+  expansion 或 runtime parent-selection 集成。
+- 模板是 planning / traceability aids，不是 evaluated algorithms。
+
+## 2026-05-19 ATHENA / GRAFT Method Substrate Contract
+
+本次把两篇新增参考文献中的可安全落地机制纳入 NotebookLM，并将 NotebookLM / Pro
+复审后的最小建议固化为 deterministic local contract，而不是直接改变 selector、
+catalog 或 evaluator 运行行为。
+
+已实现：
+
+- 新增 `src/agenticsciml/method_substrate.py`，定义 `MethodAction`、
+  `ExpertBlueprint`、`MethodPath`、`ScientificReward`、`ExperienceRecord` 和
+  `ExperienceSubstrate`。
+- `MethodPath` 使用 canonical JSON 生成稳定 fingerprint，保留 action 顺序作为方法路径
+  语义，并排除 `source_scope` 等 provenance 字段，避免来源说明改变方法 identity。
+- `ExpertBlueprint` 可验证 allowed family、required parameters 和 forbidden
+  parameters。
+- `ScientificReward` 拒绝非有限数值，避免 `NaN` / `Infinity` 进入经验记录。
+- `ExperienceSubstrate` 使用本地 JSON cache 和 atomic write 保存 method fingerprint
+  到 reward artifact 的映射，并允许同一 fingerprint 保留多条经验记录。
+- 新增 [Method Substrate 合约](method_substrate.md)，并从 docs tree 挂载。
+- 更新 [论文机制笔记](paper_notes.md)，记录 ATHENA / GRAFT-ATHENA 的本地解释和
+  claim boundary。
+
+验证：
+
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_method_substrate.py -q`
+
+边界：
+
+- 本轮不声称已实现 GRAFT 概率树学习、跨领域自改进、自动 action-space expansion、
+  ATHENA/GRAFT-ATHENA 论文分数或 autonomous scientific discovery。
+- 该模块暂不接入运行路径；后续若要让 selector/retriever 使用经验 cache，需要单独补
+  trace schema、resume safety、claim gate 和更广测试。
+
+## 2026-05-18 Claim Gate And Evidence Boundary Hardening
+
+本次按论文对齐复审优先项补齐 claim gate 和证据边界硬化。默认运行仍是
+`workflow_proxy`，可用于验证 AgenticSciML workflow、artifact plumbing 和本地
+evaluator contract；`paper_workflow` 变成严格 fail-closed 门禁，当前 proxy /
+faithful-small / custom scaffold 默认不能被写成论文级科学证据。
+
+已实现：
+
+- `ExperimentConfig`、Web run/readiness/problem-intake 请求、run metadata、
+  workflow-start trace、trace summary 和 Web run response 增加 `claim_level` 与
+  `claim_gate`。
+- `workflow_proxy` claim gate 允许当前 mock/proxy/custom scaffold run，但固定输出
+  `paper_level_claim_supported=false` 和 `scientific_claim_supported=false`。
+- `paper_workflow` 要求 real mode、`paper-like` benchmark、domain evaluator approval、
+  paper benchmark approval、异构 selector evidence、paper-equivalent KB provenance 和
+  actual multimodal image evidence；缺失任一条件时 readiness 和 `/api/runs` fail closed。
+- Trace summary 增加 overclaim consistency check：metadata 或 workflow-start trace 若
+  声称 paper/scientific support 但 claim gate 不支持，则 quality gate 失败。
+- Custom problem intake 可见字段改为 workflow-proxy evaluator scaffold / custom proxy
+  benchmark bundle，并写入 `evaluator_trust_level=synthetic_proxy`、
+  `domain_evaluator_present=false`、`metric_validated_by_domain_expert=false`、
+  `paper_benchmark_equivalent=false` 和
+  `requires_replacement_for_scientific_claim=true`。
+- KB 条目支持 provenance 字段；Retriever 持久化 `retrieved_kb.json` 和
+  `kb_manifest`，当前 KB 明确标记为 `local_kb_seed` / `paper_kb_equivalent=false`。
+  `paper_kb_equivalent` 需要条目数达到论文参考规模且每条具备基本 provenance。
+- Data Analyst / Result Analyst observation manifest 记录 `multimodal_evidence`；当前
+  adapter 未传 vision image，因此 `actual_image_inputs_used=false`，只能支持
+  workflow proxy。
+- 前端第三页改为“算法库 / Paper Workflow Evidence”，展示 claim gate、KB coverage、
+  selector diversity 和 multimodal evidence 状态。
+
+验证：
+
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_evidence.py tests/test_web_api.py tests/test_trace_reporting.py -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_execution.py -q`
+- `PYTHONPATH=src uv run --python 3.11 --extra dev pytest tests/test_retrieval.py tests/test_llm_and_agents.py tests/test_orchestrator_cli.py -q`
+
+边界：
+
+- 本轮不实现真正 vision/multimodal provider 调用，不补齐论文 70-entry KB，也不重写
+  selector、evaluator、champion selection 或 artifact schema。
+- `paper_workflow` 通过不了不是回归；在当前证据不足时阻断论文级 claim 是预期行为。
+
+## 2026-05-18 Workflow-Proxy EDA And Evaluator Scaffold
+
+本次把非 catalog 问题从单一 proxy evaluator 推进到可审计的 workflow-proxy EDA +
+evaluator scaffold bundle。
+
+已实现：
+
+- `POST /api/problem-intake/plan` 在 `allow_custom_benchmark=true` 时会在当前账号
+  namespace 下生成 `.agenticsciml/accounts/<account_id>/benchmarks/<custom_id>/`
+  benchmark bundle。
+- 生成的 bundle 包含 `Problem.md`、`Requirements.md`、`Evaluation.md`、
+  `Data_config.json`、`Benchmark_spec.json`、`evaluator_synthesis.json`、
+  `evaluator_synthesis.md`、`generate_data.py`、`evaluate.py`、`guidelines.md`、
+  `eda/data_eda.py`、`eda/data_eda_seed0.json` 和 `eda/data_overview_seed0.svg`。
+- `evaluator_synthesis.json` 记录 typed scaffold spec：problem class、data schema、
+  metric schema、prediction-only/private-label 边界、EDA artifacts、quality gates 和
+  synthesis limits。边界字段统一为 `evidence_level=workflow_proxy`、
+  `approval_scope=workflow_proxy_run_only`、`workflow_proxy_run_requires_human_review=false`、
+  `scientific_claim_requires_human_domain_review=true` 和
+  `paper_level_claim_supported=false`。
+- `eda/data_eda.py` 是可复跑的 training-data-only EDA 脚本；`eda/data_eda_seed0.json`
+  和 `eda/data_overview_seed0.svg` 是 seed0 proxy data 的可审计 EDA 输出。
+- `Benchmark_spec.json` 可被 `ProblemBundle.load()` 动态识别，不需要把每个临时问题
+  写入 checked-in `BENCHMARKS` catalog。
+- `generate_data.py` 生成确定性的训练/验证代理数据；`evaluate.py` 使用私有验证标签
+  计算 `custom_proxy_relative_l2`，继续走 prediction-only evaluation boundary。
+- `evaluation_contract.json` 的 benchmark source manifest 会绑定
+  `evaluator_synthesis.json`、`evaluator_synthesis.md` 和 EDA artifacts 的 digest，避免
+  evaluator 合成证据与最终 contract 脱钩。
+- Planner 返回的 `start_run` action 会指向生成的 custom proxy benchmark，并保留
+  `problem_intake`、`planner_snapshot`、algorithm strategy seeds、account namespace 和
+  run budget。`planner_snapshot.generated_custom_benchmark` 同步记录 evidence/review
+  boundary，避免把可运行 workflow proxy 误读成 domain-reviewed evaluator。
+
+验证：
+
+- `tests/test_web_api.py::test_problem_intake_custom_benchmark_generates_runnable_evaluator`
+  覆盖 custom problem 生成 workflow-proxy EDA/evaluator scaffold bundle 后可立即启动 mock
+  run，并写出 `evaluation_contract.json` 与 `solutions/solution_000/eval.json`，且
+  contract source manifest 绑定 synthesis/EDA artifacts。
+
+边界：
+
+- workflow-proxy EDA/evaluator scaffold 是 deterministic workflow proxy，只能证明 AgenticSciML
+  loop、artifact plumbing、training-only EDA 和 private-label evaluation boundary 可运行。
+- 它不是 paper-like benchmark，不支持科学结论、paper score reproduction 或真实有限元
+  指标声明；需要人工替换/审查 domain evaluator 后才能提升证据等级。
+
+## 2026-05-18 Selector Panel Provenance
+
+本次补齐 selector ensemble 的配置与证据层，但仍保持 claim boundary：默认
+`selector_vote_count` 只是同一 selector 路径多票，不自动声明论文级异构模型 panel。
+
+已实现：
+
+- `ExperimentConfig` 新增 `selector_panel`，可配置多个 selector member 的 model、
+  temperature 和 reasoning effort。
+- CLI 新增 `--selector-panel-models`，Web API `POST /api/runs` /
+  `/api/problem-intake/plan` 支持 `selector_panel`。
+- 有 `selector_panel` 时，orchestrator 默认按 panel member 一成员一票 cast vote，避免
+  因 `selector_vote_count` 与 panel 长度不一致造成成员权重不均；没有配置时保留现有
+  single-selector multi-vote 行为。
+- `reports/selector_votes.json` 使用 `schema_version=2`，新增 `ensemble_mode`、
+  `selector_panel_members`、per-vote `member_id`、`configured_model`、`actual_model`、
+  `provider`、`source`、`selector_diversity` 和 `claim_boundary`。其中
+  `selector_diversity` 明确记录 `mock_evidence`、actual model/provider diversity、
+  panel member/vote count、repeated-member 状态和 `heterogeneous_selector_evidence`。
+- 每次 selector 真正参与 parent selection 时，除了覆盖 `reports/selector_votes.json`
+  作为 latest view，还会写入
+  `reports/selector_votes/selection_000001.json` 这类 per-selection artifact，避免
+  多轮 run 丢失早期 vote rationale 和 panel provenance。
+- `checkpoint.json` 和 `run_metadata.json` 记录 `selector_policy` 与
+  `selector_policy_digest`。Resume 时若 selector vote schema、single/panel mode、
+  selector role config 或 panel config 改变，会 fail closed，且在拒绝前不覆盖旧
+  `config.json`。
+- `run_metadata.json` 新增 `selector_panel` runtime metadata，记录实际 selector panel
+  证据来源，并用 `selector_voting_exercised` / `selector_vote_events` 区分“配置了
+  panel”和“selector 实际参与了本 run 的选择”。
+
+验证：
+
+- `tests/test_llm_and_agents.py` 覆盖默认 selector votes 仍标注为
+  `single_provider_multi_vote`，并覆盖单张 ballot 内重复/非法 ID 不会重复计票。
+- `tests/test_orchestrator_cli.py` 覆盖 configured selector panel 的 per-member vote
+  provenance，以及两成员 panel 不因默认 `selector_vote_count=3` 产生第三张偏置票。
+- `tests/test_orchestrator_cli.py` 还覆盖 per-selection vote artifact retention、
+  early-stage no-vote metadata，以及 resume selector policy mismatch fail-closed。
+- `tests/test_web_api.py` 覆盖 Web run request 会持久化 selector panel config 和 metadata。
+
+边界：
+
+- Mock run 中 `actual_model=mock`，即使配置了多个 member，也只能说明 panel 配置和
+  provenance 管线可用；只有真实 provider/model provenance 不同时，才能作为异构
+  selector evidence。
+
+## 2026-05-18 Data Analyst Replayable EDA
+
+本次继续补论文 workflow 缺口，把 Data Analyst 的训练集观察从单次 summary 扩展为
+可复跑 EDA artifact。
+
+已实现：
+
+- `DataAnalystAgent` 继续只读取 training data，不接触 private validation labels。
+- 新增 `reports/data_eda.py`：一个可复跑的训练 `.npz` EDA 脚本，会拒绝明显的私有
+  label 路径，并输出数组统计。
+- 新增 `reports/data_eda.json`：保存训练集-only array checks、plot checks、
+  modeling notes、replay command 和 claim boundary。
+- Data Analyst prompt 增加 `Replayable EDA summary`，让后续 root/evaluator 看到的是
+  可审计 EDA 摘要，而不是只依赖自然语言观察。
+
+验证：
+
+- `tests/test_llm_and_agents.py` 覆盖 EDA script/json 写入、prompt 注入和脚本 replay。
+- `tests/test_orchestrator_cli.py` 覆盖完整 mock run 生成 EDA artifacts。
+
+边界：
+
+- 这仍是 deterministic local EDA，不是论文级自动生成任意 EDA 程序或任意 evaluator
+  synthesis；它只加强 workflow traceability 和训练数据观察可复验性。
+
+## 2026-05-18 Typed Analysis Base Context
+
+本次根据 Pro 复审建议，补齐论文 workflow 中 Analysis Base 的可审计上下文边界。
+
+已实现：
+
+- 每个 child mutation 在 proposal 前写入
+  `solutions/<solution_id>/analysis_context.json`。
+- artifact 明确区分 `parent_report`、`sibling_reports`、`uncle_reports` 和
+  `omitted_reports`，不再只把若干 analysis summary 作为无类型字符串塞进 prompt。
+- sibling 定义为 mutation parent 已存在的 children；uncle 定义为 mutation parent
+  的 parent 的其他 children。缺失 node 或 analysis report 会写入 `omitted_reports`
+  和原因，避免静默丢上下文。
+- Proposer prompt 的上下文标题改为
+  `Analysis Base context (parent/sibling/uncle reports)`，并保留关系标签。
+
+验证：
+
+- `tests/test_orchestrator_cli.py` 覆盖 parent/sibling/uncle 抽取、缺失报告记录、
+  child mutation artifact 落盘。
+- `tests/test_llm_and_agents.py` 覆盖 Proposer prompt 使用关系标签。
+
+边界：
+
+- Analysis Base context 只是 workflow traceability，不证明论文级 emergent discovery、
+  异构 selector ensemble 或 paper-score reproduction。
+
+## 2026-05-18 Paper Workflow P0 Alignment
+
+本次修复论文工作流对齐审查中的三个 P0 边界：root baseline 隔离、evaluation
+approval pause、以及非库内问题不能被错误当作已有 benchmark 运行。
+
+已实现：
+
+- Root Engineer prompt 不再包含 human/planner selected strategy seeds；这些策略种子只允许
+  进入后续 proposer/engineer mutation 上下文，避免污染单 agent root baseline。
+- Orchestrator 新增 `evaluation_approval.json` 审批门。默认 mock 流程仍可
+  `auto_approved` 兼容现有测试和 CLI；当 `auto_approve_evaluation=False` 或 CLI 使用
+  `--require-evaluation-approval` 时，会在 root 生成前暂停，要求人工审查
+  `evaluation_contract.json`、`reports/evaluation_contract.md`、data analysis 和 benchmark
+  文件后把状态改为 `approved`，再用 `--resume` 继续。
+- Resume 支持 evaluation-pending pre-root run：该状态不写空 solution-tree checkpoint，
+  避免把“尚未生成 root”的审批暂停误报为合法 solution tree。
+- `POST /api/problem-intake/plan` 支持 `allow_custom_benchmark=true` 的安全路径：早期
+  版本只返回 scaffold；当前版本会生成本地 deterministic proxy evaluator bundle，并
+  返回可运行的 `start_run` action，但仍把 evidence 标记为 proxy / not supported。
+
+验证：
+
+- `tests/test_llm_and_agents.py` 覆盖 root prompt 不包含策略种子段。
+- `tests/test_orchestrator_cli.py` 覆盖 evaluation approval pending、approval 后 resume
+  生成 root。
+- `tests/test_web_api.py` 覆盖 custom proxy benchmark scaffold response。
+
+边界：
+
+- 当前自动 evaluator 仍是 workflow proxy，不是 paper-style Data Analyst 自动合成真实
+  领域 evaluator；非库内问题可以跑通流程，但不能据此声称科学有效。
+- Selector ensemble 仍是当前单 selector 多票机制，不是 GPT/Grok/Gemini 多 provider
+  panel。
+
+## 2026-05-18 Role Model Policy Defaults
+
+本次把角色级模型设置从“全员默认 0.0 temperature + 无 reasoning effort”改为按角色
+职责分配的默认 policy。
+
+已实现：
+
+- 确定性/执行类 role 使用低温：`evaluator=0.00/high`、
+  `root_engineer=0.10/xhigh`、`engineer=0.10/xhigh`、`debugger=0.05/xhigh`、
+  `selector=0.05/high`、`retriever=0.00/medium`。
+- 创造/分析类 role 使用更高温度：`proposer=0.55/xhigh`、
+  `critic=0.35/high`、`data_analyst=0.35/high`、`result_analyst=0.30/high`。
+- 视觉证据审计 role 使用保守设置：`visual_audit=0.00/high`；真实图像审计调用会读取
+  `visual_audit` role override，而不是借用 `result_analyst`。
+- Orchestrator 在没有用户 override 时直接使用这些 defaults；用户传入 role override
+  时仍优先生效。
+- `GET /api/agent-roles` 和 `GET /api/solver/settings` 会返回 role default policy，
+  前端 Layered model routing 面板也会展示对应默认值。
+- `run_metadata.json` 的 `agent_models` 现在记录所有 role 的有效 policy，并用
+  `source=role_default | request_override` 标识来源。
+
+边界：
+
+- role default 不改变模型 ID；没有 role model override 时仍使用后端当前 adapter/model。
+- Mock run 继续只验证工作流形状，不产生科学结论。
+
+## 2026-05-18 Reasoning Effort Routing
+
+本次把 role-level `reasoning_effort` 从审计字段升级为真实 provider 参数。
+
+已实现：
+
+- ChatUI/API 允许 `low | medium | high | xhigh`，`GET /api/solver/settings`
+  返回同一组选项。
+- Orchestrator 会把每个 role 的 `reasoning_effort` 传入对应 agent；Proposer 内部
+  Critic 调用也使用 Critic role 配置。
+- `OpenAIAdapter` 在 OpenAI-native Responses 路径传 `reasoning={"effort": ...}`，
+  在 OpenAI-compatible Chat Completions 路径传 `reasoning_effort=...`。
+- `generation_span` 和 real LLM smoke ledger 会记录实际请求的 `reasoning_effort`。
+
+边界：
+
+- 默认模式仍保持 `ask=medium`、`plan=high`、`agent=high`；`xhigh` 只在显式覆盖时使用。
+- `none` 和 `minimal` 是官方可见枚举，但本轮不暴露在默认 UI，避免部分模型或兼容
+  endpoint 不支持时误配置。
+
+## 2026-05-18 Candidate Emergence Audit
+
+本次根据 NotebookLM 对 AgenticSciML emergent discovery 定义的证据表，新增保守的
+候选涌现审计层。ChatGPT Pro 复核已准备非敏感 prompt，但本轮被 Chrome 登录态阻塞，
+页面显示会话过期；因此代码实现依据当前仓库事实和 NotebookLM 的来源综合，不把 Pro
+作为已完成复核证据。
+
+已实现：
+
+- 新增 `agenticsciml.emergence_audit`。它对每个 solution 的 proposal、analysis、
+  engineering summary、method tags、KB entries、algorithm catalog、parent/root score
+  和 `policy_fidelity_report.json` 做确定性审计。
+- Orchestrator 在每个 evaluated/failed node 形成后写入
+  `solutions/<id>/emergence_report.json`，并记录 `tool_span=emergence_audit`。
+- 审计报告只允许保守标签：`not_assessed`、`kb_direct`、`catalog_seeded`、
+  `prior_result_adapted`、`implementation_unfaithful` 和 `candidate_emergent`。
+  当前不会输出 `proved_emergent_discovery`。
+- `candidate_emergent` 需要同时满足：低 KB/catalog 直接重叠、有 prior-result 适配证据、
+  相对 parent 的 evaluator score 改善、且 policy fidelity artifact 存在并通过。
+- `GET /api/runs/{id}/solutions` 返回 `emergence_audit` 摘要；solution artifact index
+  增加 `emergence_report.json`。
+- 前端 Solution loss/tree 表新增 emergence claim 列，显示保守标签和 blocking gap 数量。
+- readiness artifact capture requirements 增加
+  `solutions/*/emergence_report.json`。
+
+验证：
+
+- `tests/test_emergence_audit.py` 覆盖 missing artifacts、direct KB match 和
+  candidate-emergent 三种判定。
+- `tests/test_orchestrator_cli.py` 覆盖 mock run 会生成 per-solution
+  `emergence_report.json`，且不会产生强 discovery claim。
+- `tests/test_web_api.py` 覆盖 solution summary 和 readiness artifact requirement。
+
+边界：
+
+- 该审计只提供候选标签，不是论文级涌现发现证明。
+- Mock run 仍必须保持 `scientific_claim=not_supported`。
+- 真正接近论文声明还需要 real LLM、多 seed、KB/no-KB/random-KB ablation、失败样本审查
+  、物理/可视一致性检查和外部复核。
+
+## 2026-05-18 Strategy Fidelity Inspector
+
+本次根据 NotebookLM 对 ATHENA Inspector / AgenticSciML KB symptom mapping 的建议，
+把上一轮 manual strategy locks 继续推进到执行前 guardrail。
+
+已实现：
+
+- 新增 `agenticsciml.strategy_inspector`。它对 `solution.py` 做确定性静态检查，
+  支持 `required_terms`、`forbidden_terms`、`required_imports`、`forbidden_imports`、
+  `required_call_names` 和 `forbidden_call_names`。
+- Orchestrator 在 `train_and_evaluate` 前运行 inspector。若 required lock 的可机器
+  检查条件失败，会写入 `solutions/<id>/policy_fidelity_report.json`，记录
+  `guardrail_span=strategy_fidelity_inspector`，并以 `guardrail_error` 标记 failed node。
+- readiness normalization 会保留 `manual_strategy_locks.inspection` 和同名顶层条件字段，
+  避免 Web/API 启动路径丢失用户提供的审计约束。
+- `GET /api/runs/{id}/solutions` 现在会返回每个 solution 的 `policy_fidelity` 摘要；
+  solution artifact index 也会列出 `policy_fidelity_report.json`。
+- readiness artifact capture requirements 增加
+  `solutions/*/policy_fidelity_report.json`。
+
+验证：
+
+- `tests/test_strategy_inspector.py` 覆盖 required / forbidden 条件、lock text 标记语法和
+  非结构化 lock 的非阻断行为。
+- `tests/test_orchestrator_cli.py` 覆盖不符合 required lock 的 generated solution 会在执行前
+  fail closed。
+
+边界：
+
+- Inspector 只检查明确写出的机器可审计条件；普通自然语言 lock 仍只作为 planning context。
+- 该检查不是科学验证，不证明策略有效，也不替代 evaluator score 或真实 run artifact。
+
+## 2026-05-17 算法库双语说明
+
+本次增强第三页算法库的信息密度和中英双语兼容。
+
+已实现：
+
+- `/api/algorithms` 的每个算法条目新增中文说明、English / 中文 `features`、
+  English / 中文 `problem_fit` 和中文边界提醒。
+- 前端算法库新增 `中文` / `EN` 切换；每张算法卡片都明确展示“特点”和“对应问题”，
+  同时保留 family、status、compatible benchmark families、implementation path 和
+  选择按钮。
+- 浏览器 E2E 脚本新增算法库语言切换检查，避免未来 UI 回退成单语纯描述。
+
+边界：
+
+- 双语目录仍只是人工选择和 Problem Intake 的 strategy seed，不是已评估实现。
+- 分数、champion 和 scientific claim 仍只能来自 evaluator、trace 和 run artifacts。
+
+## 2026-05-17 Run Readiness / Strategy Audit
+
+本次根据 NotebookLM 现有研究和一次性 Pro 复核，把下一轮迭代落在启动前的
+Inspector-style pre-run audit，而不是继续增加 benchmark 或自动生成 evaluator。
+
+已实现：
+
+- 新增纯确定性 `agenticsciml.readiness` 检查层：输入 benchmark catalog、
+  algorithm catalog、selected algorithm ids、manual strategy locks、branch context、
+  run budget 和 real-mode gate，输出 `run_readiness.v1` 报告。
+- 新增 `POST /api/run-readiness/preview`。该端点不调用 LLM、不联网、不执行代码，
+  只返回 `ready` / `ready_with_warnings` / `blocked`、checks、benchmark fidelity
+  preview、algorithm seed preview、strategy lock preview、real-mode gates 和 artifact
+  capture requirements。
+- `POST /api/runs` 现在会为非 dry-run 生成并持久化
+  `planning/readiness_report.json`；`config.json` 保存完整 readiness report，
+  `run_metadata.json` 保存 `readiness_summary`。
+- 前端 Paper Workflow Evidence 页的 `Run Config` 区域新增 `检查 run readiness` 操作，展示
+  blocker/warning、benchmark fidelity、strategy seed 数量和 pre-run audit 边界。
+- readiness 把 algorithm catalog 条目继续标注为 `strategy_seed`，不会把它们提升为
+  已评估实现；proxy / faithful-small claim boundary 仍必须由 run artifacts 和
+  evaluator 结果支撑。
+- real mode 缺少二次确认或服务端开关时，readiness preview 会返回 blocker；实际
+  run 启动仍沿用既有 fail-closed Web API gate。
+
+验证：
+
+- `tests/test_web_api.py` 覆盖 readiness preview、unknown algorithm / real-mode blocker、
+  mock run 持久化 readiness report 和无 hidden chain-of-thought 字段。
+- 前端类型和打包用 `npm run build` 验证。
+
+边界：
+
+- readiness 是启动前一致性审计，不是科学验证、不是 evaluator 合成、不是论文分数复现。
+- manual strategy locks 是用户假设/约束，不是事实；当前只记录并检查继承期望。
+- 后续可在 run evidence/report endpoint 中复用同一套 claim-boundary 语言。
+
+## 2026-05-17 Manual Strategy Locks UI
+
+本次继续把 readiness 审计往实际工作台推进：前端 Paper Workflow Evidence 页新增 `Strategy Locks`
+面板，允许用户把高阶数学直觉或约束作为人工锁定输入。
+
+已实现：
+
+- 前端新增 strategy lock 状态、增删改 UI、kind / scope 选择和非空过滤。
+- `检查 run readiness` 会携带 `manual_strategy_locks` 与
+  `branch_context.expected_inherited_lock_ids`，让 readiness preview 可以显示锁定策略和
+  branch inheritance 期望。
+- `启动配置 run` 和 Agent action 启动路径都会把当前非空 strategy locks 传给后端；
+  后端既有 readiness artifact 会随 run 保存。
+- 文档明确 strategy locks 是用户假设/约束，不是科学事实，也不改变 evaluator。
+
+验证：
+
+- `npm run build`
+- 浏览器 smoke：打开远端/本地 Paper Workflow Evidence 页，添加 lock 后刷新 readiness，确认
+  `strategy seeds` / warnings 区域正常渲染。
+
+## 2026-05-17 ChatUI workflow live smoke
+
+本次新增可重复运行的 Web 控制面 smoke，用于在本地或部署环境中检查 ChatUI 依赖的
+核心 API contract 与 code-server sidecar 边界。
+
+已实现：
+
+- 新增 `scripts/web_workflow_smoke.py`，只通过 HTTP 调用 live FastAPI，不 import
+  后端内部函数。
+- smoke 覆盖 `ask` / `plan` / `agent` 三种模式：Ask 不返回 actions，Plan 只返回
+  `open_code_server` 建议 action，Agent 可从高上下文 cylinder wake 问题自动选择
+  benchmark、algorithm seed 和 mock run budget。
+- smoke 增加负向边界检查：Agent 模式拒绝 shared repo workspace；real mode 未带
+  `real_confirmed=true` 时拒绝启动；第二个账号 namespace 不能读取第一个账号的 run
+  detail、selector votes、solution summaries、run artifact 或 code-server run
+  workspace。
+- smoke 会同步创建账号 namespace 下的 mock run，并检查 passing `trace_summary`、
+  selector votes、solution loss/tree、champion workspace 和 code-server workspace 列表。
+- code-server 检查确认 API payload 不携带 password/token，命令提示使用
+  `code-server --auth none --bind-addr 127.0.0.1:8080 ...`；默认还会探测 live
+  sidecar HTML 是否仍出现 password login。
+- smoke 默认拒绝非 loopback code-server URL。远端部署如果通过
+  `AGENTICSCIML_CODE_SERVER_URL` 返回 HTTPS 上游鉴权入口，需要显式加
+  `--allow-non-loopback-code-server-url`。
+- smoke 支持 `--expect-repo-root-contains <release-sha>`，用于远端发布后检查 Web API
+  是否仍停留在旧 release。
+- 新增 `scripts/web_ui_dispatch_e2e.mjs`，使用 `playwright-core` 和本机 Chrome
+  channel 做真实浏览器 E2E，覆盖第一页 ChatUI Ask/Plan/Agent 分发、Agent 打开第二页
+  VS Code Web、第二页侧栏 ChatUI、第三页算法库边界，以及可选 code-server WebSocket
+  路径检查。WebSocket 检查现在会等待连接稳定、捕获浏览器控制台中的 `403` / `1006`
+  错误，并检查 iframe 内没有 workbench connection failure。
+- 远端 nginx 反代 code-server 时必须保留端口化 Host。VS Code server 块应传
+  `proxy_set_header Host $http_host` 和
+  `proxy_set_header X-Forwarded-Host $http_host`，否则 code-server origin guard 会把浏览器
+  `Origin: https://host:port` 与上游 `Host: host` 判为不匹配，WebSocket 握手返回
+  `403`，前端表现为 `WebSocket close with status code 1006`。
+- 第二页 IDE 的右侧 ChatUI 侧栏支持拖动调整宽度和折叠，侧栏与 VS Code Web 之间改为
+  细弱分隔线；浏览器 E2E 会验证 resize、collapse 和展开路径。
+
+验证：
+
+- `PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python scripts/web_workflow_smoke.py --base-url http://127.0.0.1:8765`
+- `node scripts/web_ui_dispatch_e2e.mjs --base-url http://127.0.0.1:8765 --expect-code-server-websocket`
+
+边界：
+
+- 该 smoke 产生的是 mock workflow shape evidence，不是 scientific evidence。
+- 本地账号 namespace 仍不是认证/授权系统；cross-account negative checks 只能证明
+  目录解析不会混用账号 run。公网部署仍需上游账号鉴权和反代路径校验。
+- 脚本默认假设 FastAPI 和 code-server 已经由部署或本地 session 启动；没有 sidecar
+  时可加 `--skip-code-server-live` 只检查 API payload。
+
+## 2026-05-17 Problem Intake 与人工算法选择
+
+本次补齐 Paper Workflow Evidence 页中更接近论文入口的使用方式：高阶用户先完整描述问题，再由
+agent 控制面自动评选 benchmark、算法 seed 和 run budget；人工算法库仍可手动选择。
+
+已实现：
+
+- 新增 `POST /api/problem-intake/plan`，输入完整问题描述、requirements、
+  evaluation、data description、run budget 和人工选择的 algorithm ids。
+- planner 在当前本地 benchmark catalog 内返回推荐 benchmark、候选 benchmark 排序、
+  algorithm rankings、selected strategy seeds、run config 和可展示的 `start_run`
+  action。
+- 前端 Paper Workflow Evidence 页新增 `Problem Intake` 表单，支持自动评选 benchmark 与解法 seed。
+- 算法库卡片支持人工选择；已选 algorithm ids 会进入 `POST /api/runs`。
+- `ExperimentConfig` 新增 `strategy_seed_ids`、`problem_intake` 和
+  `planner_snapshot`，并写入 `config.json`。
+- `run_metadata.json` 记录 `strategy_seed_ids`、数量、完整 problem intake 和 planner
+  snapshot；run 目录同时写入 `planning/problem_intake.json` 作为可审计规划工件。
+- Root Engineer、Proposer 和 Engineer prompt 新增 strategy seed context，使人工或
+  planner 选出的算法真正参与候选解法构思。
+- Root Engineer、Proposer 和 Engineer prompt 同时接收 problem-intake context，但固定
+  标注为非权威上下文：只能指导生成策略，不能覆盖 `ProblemBundle`、
+  `EvaluationContract`、guidelines、sandbox rules 或 evaluator contract。
+- Web resume 会在未显式覆盖时读取既有 `config.json`，保留 benchmark、
+  `strategy_seed_ids`、`agent_models`、`problem_intake` 和 `planner_snapshot`，避免
+  前端的轻量 resume payload 清空原 run 的策略种子和审计上下文。
+- `/api/solver/chat` 的 `agent` / `plan` 模式现在可以识别高上下文求解请求，复用
+  Problem Intake planner 自动评选 benchmark、algorithm seeds 和 run budget，并返回
+  带 `problem_intake` / `planner_snapshot` 的 `start_run` action。
+- 前端 Agent action dispatcher 现在按 action payload 启动 run，而不是退回当前 UI
+  state，避免 Agent 自动评选出的 benchmark 或 seed 被陈旧选择覆盖。
+
+边界：
+
+- planner 只在当前本地 catalog 中做受控映射，不创建新 evaluator、不改写 benchmark
+  contract，也不宣称选中算法已经有效。
+- problem intake 不是 evaluator 合成机制；当前只能作为生成类 agent 的非权威上下文，
+  具体评分仍完全来自既有 benchmark contract。
+- 真正的全流程仍由 Python orchestrator 生成 root、选择 parent、展开 solution tree、
+  执行 evaluator、写 trace/leaderboard/champion。
+
+## 2026-05-17 Paper Workflow Evidence Page
+
+本次把第三页“算法库”升级为 AgenticSciML Paper Workflow Evidence 页，第一页纯 ChatUI 和第二页
+VS Code Web + 侧栏 ChatUI 保持轻量，不展示 benchmark/run 工作台。
+
+已实现：
+
+- 新增 `src/agenticsciml/paper_tasks.py` 和 `GET /api/paper-tasks`，按 `S1.1` 到
+  `S1.6` 返回本地 benchmark、paper reference primitive、figure label、local SVG
+  artifact 约定和 claim boundary。
+- 新增 `GET /api/runs/{id}/selector-votes`，只读读取
+  `reports/selector_votes.json`，缺失时返回空状态。
+- 新增 `GET /api/runs/{id}/solutions`，从 `tree.json`、`leaderboard.csv` 与
+  `solutions/*/eval.json` 汇总 node、parent、status、score/loss、delta、method tags
+  和本地 figure artifact。
+- `POST /api/runs` 新增 `target_solution_count`、`max_children_per_node` 和
+  `agent_models`；`target_solution_count` 会被转换为确定性的
+  `EvolutionConfig.max_iterations + parallel_mutations` 预算。
+- 新增 `GET /api/agent-roles`，前端可为 Data Analyst、Evaluator、Root Engineer、
+  Retriever、Proposer、Critic、Engineer、Debugger、Result Analyst 和 Selector 配置
+  role-level `model`、`temperature` 与 provider-routed `reasoning_effort`。
+- orchestrator 支持 role-based LLM routing：默认继续使用单一 adapter；只有配置 role
+  override 时才为该 role 选择模型。`config.json` 和 `run_metadata.json` 记录实际
+  `agent_models` map。
+- 第三页新增 Paper Tasks、Run Config、Layered model routing、Selector votes、
+  Solution loss/tree 和 Local figures 区域。
+
+验证：
+
+- `uv run --python 3.11 --extra web --extra dev pytest tests/test_web_api.py -q`
+- `cd frontend && npm run build`
+
+边界：
+
+- Paper Workflow Evidence 页只展示本地 evidence 和 paper-section 对齐信息，不复制论文图片本体。
+- `faithful-small` / `proxy` benchmark 和 mock run 仍不是 paper-score evidence。
+- 前端不接管 evaluator、selector、champion selection、solution tree schema 或
+  artifact schema。
+
 ## 2026-05-17 S1.6 Cylinder Wake Faithful-Small Benchmark
 
 本轮按 Pro 复核建议补齐论文 S1.6 的 faithful-small benchmark。Pro 的关键约束是：
@@ -20,7 +1066,7 @@ SHRED-ROM / PySHRED / Nature Communications 结果；如果没有真正实现 LS
 - KB 新增 SHRED-ROM / PySHRED source-grounded note，记录 temporal sensor
   history、shallow decoder、POD/low-rank basis 的启发和边界。
 - benchmark catalog 新增
-  `cylinder_wake_reconstruction_faithful_small`。
+  `cylinder_wake_reconstruction_faithful_small`，并更新相关算法目录示例。
 - 测试新增 S1.6 faithful-small 的 shape/window/no-future-leakage/evaluator
   断言。
 
@@ -30,53 +1076,155 @@ SHRED-ROM / PySHRED / Nature Communications 结果；如果没有真正实现 LS
 - 不运行 SHRED-ROM 原始代码，不使用原始数据，不训练 LSTM/RNN，不声明论文分数。
 - 分数和 scientific claim 仍只来自本仓库 evaluator 与 run artifacts。
 
-## 2026-05-17 Algorithm Reference Primitive Split
+## 2026-05-17 Web API 边界加固
 
-本轮拆出 algorithm catalog / reference primitive / method substrate 切片。
+本次收紧 ChatUI / VS Code Web 远端部署前最关键的控制面边界：
 
-已实现能力：
-
-- 新增 `algorithm_catalog`，把论文启发的本地 strategy seed 记录成带 claim boundary 的
-  catalog entry。
-- 新增 `paper_algorithms`，提供 dependency-light NumPy reference primitives，覆盖
-  function approximation、Poisson、Burgers、operator learning、reaction-diffusion 和
-  cylinder wake sparse-sensor reconstruction 的局部 helper。
-- 新增 `method_substrate` 和 `method_templates`，记录 action、blueprint、method
-  fingerprint、reward 和 experience cache 的可审计合约。
-- 新增 `operator_scheduler` 和 `strategy_inspector`，用于把 selected strategy seed 转成
-  deterministic mutation guidance，并审计 required/forbidden term。
+- `POST /api/runs` 的 real mode 现在需要请求体 `real_confirmed=true`，且服务端必须设置
+  `AGENTICSCIML_ENABLE_REAL_WEB_RUNS=1`。
+- account-scoped Web 请求强制使用 `.agenticsciml/accounts/<account_id>/runs/`，并拒绝
+  自定义 `output_dir`、`benchmark_dir` 或 path-like benchmark。
+- shared repo code-server workspace 默认禁用；本地开发要显式设置
+  `AGENTICSCIML_ALLOW_REPO_WORKSPACE=1`。
+- 前端 real action 面板新增显式确认按钮，确认后才会向后端发送
+  `real_confirmed=true`。
 
 边界：
 
-- Algorithm catalog entries 是 planning 与 prompt-seeding aids，不是 evaluated
-  implementation。
-- Reference primitives 只验证本地数学/形状性质，不代表 paper-score reproduction。
-- 分数、champion 和 scientific claim 仍只能来自 fixed evaluator、run artifact 和
-  fail-closed readiness gate。
+- 账号 namespace 仍不是认证/授权系统；公开部署仍需要反向代理/账号 session、系统
+  用户/容器隔离和 secret 管理。
+- 这些改动不改变 orchestrator、evaluator、selector、champion selection 或 artifact schema。
 
-## 2026-06-04 Evidence Split Gate
+## 2026-05-17 论文算法 Reference Primitives
 
-本次从大 PR 中拆出第一批可独立 review 的 evidence/reporting 收敛项。
+新增文档：[论文算法 Reference Primitives](paper_algorithm_primitives.md)。
 
-已实现能力：
+本次把 AgenticSciML 论文结果区列出的 6 个 champion strategy 落成本地
+dependency-light reference primitives，并通过算法目录暴露。
 
-- 新增 `agenticsciml.paper_gap_report` 和 CLI `paper-gap-report`，从 benchmark
-  fidelity metadata 与 supplied run artifacts 生成 `paper_gap_report.json/md`。
-- 报告检查 benchmark fidelity、paper equivalence、completed run metadata、trace quality
-  gate、real LLM mode、multi-seed ablation、scientific readiness 和 claim gate support；
-  任何缺口都保持 `blocked`。
-- 新增 GitHub Actions CI：`fast-evidence-gates` 运行 catalog、sandbox、evidence 和
-  paper gap report 的快速测试；`full-pytest` 运行完整 pytest。
-- 新增 [PR Split Plan](pr_split_plan.md)，定义后续 evidence、benchmark、algorithm 和
-  ChatUI stacked PR 的拆分边界与验证命令。
+已实现：
+
+- 新增 `src/agenticsciml/paper_algorithms.py`，覆盖 sigmoid-gated MoE、Poisson
+  particular-plus-residual + corner-biased sampling、Burgers staged PINN schedule
+  / self-adaptive weights / RAR helpers、linear bias-free DeepONet branch、
+  reaction-diffusion derivative-enhanced loss / hard BC-IC / spectral smoothing
+  helpers，以及 cylinder wake U-FNO/CNO-style bandlimited filter。
+- `src/agenticsciml/algorithm_catalog.py` 新增 6 个
+  `status=reference_implementation` 的 paper champion strategy entries，并记录
+  `source_scope` 与 `implementation_path`。
+- 新增 `tests/test_paper_algorithms.py`，验证数学性质、shape、determinism、
+  catalog exposure 和 no-overclaim 边界。
+- Web API 算法目录测试现在检查 reference implementation entries 会正确暴露。
+- repo-local skill `.agents/skills/agenticsciml-chatui-operator/SKILL.md` 记录
+  算法目录现在可包含 reference primitives，但仍不代表 benchmark score 或
+  scientific claim。
 
 边界：
 
-- 这些 artifact 只盘点证据缺口，不把 champion 分数升级成论文分数或科学发现声明。
-- CI 只验证仓库测试与证据门控回归，不代表 real LLM、多 seed ablation 或
-  paper-level scientific claim 已完成。
-- 后续 readiness gate、benchmark、algorithm catalog 和 ChatUI hardening 继续按
-  [PR Split Plan](pr_split_plan.md) 拆分。
+- 这些 primitives 是本地构件和 prompt-seeding aids，不是完整论文训练管线。
+- 不改变 evaluator、benchmark contract、champion selection 或 paper-score
+  reproduction claim。
+- 分数和 scientific claim 仍只能来自 benchmark evaluator 和 run artifacts。
+
+## 2026-05-17 ChatUI ask/plan/agent 模式
+
+本次把 ChatUI 的交互授权拆成 `ask` / `plan` / `agent` 三种模式，并默认使用
+`ask`。
+
+已实现：
+
+- `/api/solver/chat` 新增 `assistant_mode` 输入和输出回显。
+- `/api/solver/chat` 新增 `model_settings` 回显，并允许请求覆盖
+  `reasoning_effort` 和 `temperature`。
+- `GET /api/solver/settings` 作为前端读取模式默认模型设置的只读来源，ChatUI 和
+  IDE 侧边栏会在模式切换控件旁显示当前 `thinking/temp`。
+- 三种模式的默认设置分别为：`ask` 使用 `reasoning_effort=medium`、
+  `temperature=0.2`；`plan` 使用 `reasoning_effort=high`、`temperature=0.35`；
+  `agent` 使用 `reasoning_effort=high`、`temperature=0.1`。
+- `ask` 模式现在直接回答身份、能力、项目、benchmark、算法、run、trace、
+  artifact 和边界问题；只有动作型请求才提示切换到 `plan` 或 `agent`，且不返回
+  可执行 actions。
+- `plan` 模式返回结构化建议 actions，但前端不会自动分发。
+- `agent` 模式才调用既有安全分发器执行 `start_run`、`resume_run`、
+  `open_code_server` 或 `summarize_artifact`。
+- `agent` 模式要求当前 `account_id`，并拒绝 shared repo workspace；前端默认
+  `workspace_scope=account`。
+- ChatUI 首页 composer 和 VS Code Web 右侧 Agent 面板都提供三段切换控件。
+- 删除 ChatUI 首页里“像 ChatGPT 一样输入问题或任务”的文案。
+- repo-local skill 升级到 `version: 0.3.4`，记录三种模式边界、Ask 普通问答语义
+  和模型设置。
+
+边界：
+
+- `agent` 模式仍不能绕过 real LLM 显式确认、evaluator、selector、champion
+  selection 或 artifact schema。
+- `agent` 模式只能操作当前账号创建的 workspace/run/solution，不能跨账号操作。
+- `plan` 模式只展示动作计划，不代表用户已经授权执行。
+
+## 2026-05-17 账号隔离工作空间与算法目录
+
+本次继续迭代 ChatUI / VS Code Web / 算法库三页结构，新增本地账号 namespace 和
+算法策略目录。
+
+已实现：
+
+- 新增 `GET /api/accounts` / `POST /api/accounts`，创建
+  `.agenticsciml/accounts/<account_id>/workspace/` 与独立 `runs/` 目录。
+- run、artifact、SSE、code-server workspace 和 `/api/solver/chat` 支持可选
+  `account_id`；未传时保持旧 shared `runs/` 兼容，前端默认使用 `local` 账号。
+- `GET /api/code-server/workspaces?account_id=<id>` 只返回该账号下的独立
+  code-server 目录，不混入 shared repo 根目录。
+- 新增 `GET /api/algorithms` 和 `src/agenticsciml/algorithm_catalog.py`，提供
+  MLP、Fourier feature、PINN、weak-form PINN、XPINN、DeepONet、FNO-lite、
+  kernel surrogate、low-rank operator、sparse sensor reconstruction、SINDy
+  sparse discovery 等策略条目。它们是 planning / prompt-seeding aids，不是
+  已验证科学结果。
+- 前端左侧增加本地账号切换/创建；`VS Code` 工作空间选择页展示账号隔离目录；
+  进入编辑态后仍只保留 VS Code Web iframe 和右侧 ChatUI。
+- `算法库` 页新增算法策略卡片，同时继续承载 benchmark/run/trace/artifact 工作台。
+- repo-local skill `.agents/skills/agenticsciml-chatui-operator/SKILL.md` 升级到
+  `version: 0.3.1`，记录本地账号 namespace、算法目录和 code-server workspace
+  边界。
+
+边界：
+
+- 本地账号 namespace 不是公网认证、ACL 或多租户安全模型。
+- 算法目录不绕过 evaluator、selector、champion selection 或 artifact schema。
+- `.agenticsciml/` 属于本地生成状态，不提交到 Git。
+
+## 2026-05-17 AgenticSciML Assistant 规范
+
+新增文档：[AgenticSciML Assistant 规范](agenticsciml_assistant.md)。
+
+本次是一次性 Pro 复审辅助后的治理和 tool-contract 文档更新，未修改运行时代码。已
+落地：
+
+- `AGENTS.md` 新增 AgenticSciML Assistant 行为边界、scientific claim policy、
+  ChatUI/tool policy、code-server sidecar policy 和 prompt-injection boundary。
+- repo-local skill `.agents/skills/agenticsciml-chatui-operator/SKILL.md` 升级到
+  `version: 0.2.0`，明确 `/api/solver/chat` 是 internal algorithm-tool endpoint，
+  不是 MCP server。
+- 新增未来 MCP wrapper 合约草案：tool listing、JSON Schema input/output、
+  structured content、`readOnlyHint` / `destructiveHint` / `openWorldHint`、
+  approval policy 和 non-goals。
+- 更新 ChatUI 文档，记录 hardened public code-server sidecar 条件和
+  `/api/solver/chat` / future MCP wrapper 的边界。
+
+边界：
+
+- 当前仍不发布 OpenAI App/MCP server。
+- 不把 evaluator、selector、champion selection、artifact schema 或 score rewrite
+  暴露为 tool。
+- Pro 输出只作为外部建议；最终规则以仓库源码、测试、官方文档和本次 checked-in
+  文档为准。
+
+同日后续 UI 调整：
+
+- `VS Code` 页改为工作空间选择入口，参考 UnitaryLab workspace 页的信息结构。
+- 新增 `GET /api/code-server/workspaces`，列出 repo、run、champion 和
+  `solutions/solution_*` 的独立代码目录及对应 code-server URL。
+- 选择 workspace 后，AI IDE 编辑态只显示 VS Code Web iframe 和右侧 ChatUI
+  侧边栏，不再显示实验工作台、workspace 说明块、启动命令或 sidecar 边界卡。
 
 ## 2026-05-16 ChatUI 实验操作台
 
@@ -89,16 +1237,38 @@ SHRED-ROM / PySHRED / Nature Communications 结果；如果没有真正实现 LS
   read-only artifact browsing、code-server URL 生成和 `/api/solver/chat` 算法 tool。
 - `/api/solver/chat` 只做意图解析和结构化 action 返回，不接管 Python
   orchestrator 的状态机、evaluator、solution tree 或 champion selection。
-- React/Vite ChatUI 前端提供左侧对话控制、中间 run dashboard 和右侧
-  code-server sidecar 入口。
+- React/Vite ChatUI 前端提供 UnitaryLab 风格的分页式本地工作台：左侧功能栏
+  切换 `ChatUI`、`VS Code Web` 和 `算法库`。
+- `ChatUI` 页保持纯对话界面；`VS Code Web` 页只显示 code-server workspace
+  和右侧可收起 ChatUI Agent 侧边栏；benchmark/run/gate、
+  dashboard、trace 和 artifact 工作台集中放到 `算法库` 页。
+- ChatUI 主入口用于自然语言交互和切换到算法库 / VS Code Web；实验运行与证据
+  浏览从算法库页进入。
+- 前端视觉调整为 Claude Code 风格的暖米色工作台，保留本地实验控制台的高密度
+  信息结构。
+- Agent 面板会展示 `/api/solver/chat` 返回的结构化 actions、warnings、
+  artifact refs 和 trace refs；`real` mode action 默认拦截为显式确认状态。
 - repo-local skill `.agents/skills/agenticsciml-chatui-operator/SKILL.md` 记录
   ChatUI 操作顺序、artifact 检查顺序、code-server 安全边界和禁止事项。
 
 边界：
 
 - 第一版只面向本地 loopback，不是公网 SaaS。
-- code-server 由用户单独启动，必须使用本机 auth；ChatUI 只生成 workspace 链接。
+- code-server 由用户单独启动，默认使用 `--auth none`，但只能置于 loopback 或上游账号
+  鉴权之后；ChatUI 只生成 workspace 链接。
 - mock run 仍只支持 workflow-shape evidence，不支持科学复现结论。
+
+## 2026-05-17 code-server 上游账号鉴权边界
+
+code-server sidecar 的建议启动方式从本机 password 改为：
+
+```bash
+code-server --auth none --bind-addr 127.0.0.1:8080 <workspace>
+```
+
+API 返回的 `command_hint` 不再包含 `PASSWORD=`，并新增 `auth_mode=upstream_account`
+标识。公开部署时必须由 ChatUI session、Cloudflare Access、nginx `auth_request` 或等价
+账号鉴权保护 code-server 入口；不得把 `--auth none` 的 sidecar 直接暴露到公网。
 
 ## 2026-05-14 OpenAI Agents SDK 升级复盘
 
@@ -148,7 +1318,8 @@ backend、human review pause/resume 和 MCP/hosted tools sidecar。
   使用本地 Pydantic schema fail closed。
 - OpenAI-compatible provider support：`OpenAIAdapter` 可通过
   `OPENAI_BASE_URL` 指向 DeepSeek 等兼容 endpoint，并通过
-  `OPENAI_TIMEOUT_S` 设置 provider 请求超时。
+  `OPENAI_TIMEOUT_S` 设置 provider 请求超时；当 role 配置了
+  `reasoning_effort` 时，兼容 Chat Completions 请求会携带同名参数。
 - DeepSeek real-run hardening：`OpenAIAdapter` 会把 `deepseekv4pro` /
   `deepseekv4flash` 规范为 DeepSeek API 接受的 `deepseek-v4-pro` /
   `deepseek-v4-flash`；OpenAI-compatible chat JSON fallback 会把 Pydantic

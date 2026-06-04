@@ -1,21 +1,41 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
 import time
 import json
 from pathlib import Path
 
+from agenticsciml.ablation_evidence import build_multi_seed_ablation_verified_manifest
 from agenticsciml.ablation import DEFAULT_VARIANTS, run_ablation
 from agenticsciml.benchmarks import list_benchmarks
-from agenticsciml.config import EvolutionConfig, ExperimentConfig
+from agenticsciml.config import (
+    DEFAULT_AGENT_ROLE_MODEL_SETTINGS,
+    EXPERT_BLUEPRINT_IDS,
+    VISUAL_AUDIT_MODES,
+    AgentConfig,
+    EvolutionConfig,
+    ExperimentConfig,
+)
+from agenticsciml.iteration_campaign import (
+    record_iteration_round_evidence,
+    write_iteration_campaign,
+    write_iteration_campaign_verification,
+)
+from agenticsciml.llm_problem_context import write_llm_problem_context_pack
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.llm_smoke import DEFAULT_SMOKE_VARIANTS, run_llm_smoke, verify_llm_smoke_output
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
+from agenticsciml.paper_workflow_readiness import write_paper_workflow_readiness_bundle
 from agenticsciml.paper_gap_report import write_paper_gap_report
+from agenticsciml.real_problem_closure import write_real_problem_closure_plan
+from agenticsciml.reference_capability_matrix import write_reference_capability_matrix
 from agenticsciml.reporting import write_sdk_trace_export, write_trace_summary
+from agenticsciml.selector_evidence import write_selector_evidence_packet
+from agenticsciml.storage import _atomic_write_text
 
 
 def _default_experiment_id(mock: bool) -> str:
@@ -77,9 +97,26 @@ def cmd_run(args: argparse.Namespace) -> int:
         output_dir=Path(args.output_dir).resolve(),
         evolution=evolution,
         use_mock=args.mock,
+        agents=_agent_configs_from_role_payloads(
+            _json_object_arg(args.agent_models_json, "--agent-models-json")
+        ),
+        selector_panel=[
+            _agent_config_from_selector_payload(index, payload)
+            for index, payload in enumerate(_selector_panel_payloads(args), start=1)
+        ],
+        visual_audit_mode=args.visual_audit_mode,
+        resource_constraints=_json_object_arg(args.resource_constraints_json, "--resource-constraints-json"),
+        expert_blueprint_id=args.expert_blueprint_id,
+        multi_seed_ablation=_json_object_arg(args.multi_seed_ablation_json, "--multi-seed-ablation-json"),
+        llm_fast_mode=args.llm_fast_mode,
+        auto_approve_evaluation=not args.require_evaluation_approval,
         resume=args.resume,
     )
-    llm = MockLLMClient() if args.mock else OpenAIAdapter()
+    llm = (
+        MockLLMClient()
+        if args.mock
+        else OpenAIAdapter(timeout_s=args.llm_timeout_s, max_retries=args.llm_max_retries)
+    )
     run_dir = AgenticSciMLOrchestrator(config, llm).run()
     print(run_dir.resolve())
     return 0
@@ -126,6 +163,57 @@ def cmd_ablate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_verify_ablation_evidence(args: argparse.Namespace) -> int:
+    source = {
+        "ablation_output_dir": str(Path(args.output_dir).resolve()),
+        "verified_by": args.verified_by,
+        "expected_seeds": args.expected_seeds,
+        "expected_variants": _split_csv(args.expected_variants),
+    }
+    manifest = build_multi_seed_ablation_verified_manifest(source)
+    output_json = (
+        Path(args.output_json).resolve()
+        if args.output_json
+        else Path(args.output_dir).resolve() / "multi_seed_ablation_verified_manifest.json"
+    )
+    _atomic_write_text(
+        output_json,
+        json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False),
+    )
+    print(output_json)
+    return 0 if manifest["verified"] is True else 1
+
+
+def cmd_plan_paper_workflow(args: argparse.Namespace) -> int:
+    selector_panel = _json_array_arg(args.selector_panel_json, "--selector-panel-json")
+    result = write_paper_workflow_readiness_bundle(
+        benchmark_dir=Path(args.benchmark_dir).resolve(),
+        output_dir=Path(args.output_dir).resolve(),
+        selector_panel=selector_panel,
+        selector_evidence_path=Path(args.selector_evidence_json).resolve()
+        if args.selector_evidence_json
+        else None,
+        problem_intake=_json_object_file_arg(args.problem_intake_json, "--problem-intake-json")
+        if args.problem_intake_json
+        else {},
+        resource_constraints=_json_object_arg(args.resource_constraints_json, "--resource-constraints-json"),
+        expert_blueprint_id=args.expert_blueprint_id,
+        domain_approval_path=Path(args.domain_approval_json).resolve()
+        if args.domain_approval_json
+        else None,
+        ablation_output_dir=Path(args.ablation_output_dir).resolve()
+        if args.ablation_output_dir
+        else None,
+        expected_seeds=args.expected_seeds,
+        expected_variants=_split_csv(args.expected_variants),
+        env=os.environ,
+    )
+    print(result["paths"]["plan_json"])
+    if args.fail_on_blockers and result["bundle"]["status"] == "blocked":
+        return 1
+    return 0
+
+
 def cmd_paper_gap_report(args: argparse.Namespace) -> int:
     result = write_paper_gap_report(
         output_dir=Path(args.output_dir).resolve(),
@@ -134,6 +222,132 @@ def cmd_paper_gap_report(args: argparse.Namespace) -> int:
     )
     print(result["paths"]["report_json"])
     if args.fail_on_gaps and result["report"]["status"] == "blocked":
+        return 1
+    return 0
+
+
+def cmd_generate_selector_evidence(args: argparse.Namespace) -> int:
+    result = write_selector_evidence_packet(
+        Path(args.run_dir).resolve(),
+        output_dir=Path(args.output_dir).resolve() if args.output_dir else None,
+    )
+    print(result["paths"]["packet_json"])
+    if args.fail_on_blockers and result["packet"]["status"] == "blocked":
+        return 1
+    return 0
+
+
+def cmd_build_reference_capability_matrix(args: argparse.Namespace) -> int:
+    result = write_reference_capability_matrix(
+        output_dir=Path(args.output_dir).resolve(),
+        problem_intake=_json_object_file_arg(args.problem_intake_json, "--problem-intake-json")
+        if args.problem_intake_json
+        else {},
+        expert_blueprint_id=args.expert_blueprint_id,
+    )
+    print(result["paths"]["matrix_json"])
+    if args.fail_on_blockers and result["matrix"]["status"] == "blocked":
+        return 1
+    return 0
+
+
+def cmd_build_llm_problem_context(args: argparse.Namespace) -> int:
+    result = write_llm_problem_context_pack(
+        output_dir=Path(args.output_dir).resolve(),
+        problem_intake=_json_object_file_arg(args.problem_intake_json, "--problem-intake-json")
+        if args.problem_intake_json
+        else {},
+        expert_blueprint_id=args.expert_blueprint_id,
+        resource_constraints=_json_object_arg(args.resource_constraints_json, "--resource-constraints-json"),
+    )
+    print(result["paths"]["pack_json"])
+    if args.fail_on_blockers and result["pack"]["status"] == "blocked":
+        return 1
+    return 0
+
+
+def cmd_plan_real_problem_closure(args: argparse.Namespace) -> int:
+    selector_panel = _json_array_arg(args.selector_panel_json, "--selector-panel-json")
+    result = write_real_problem_closure_plan(
+        benchmark_dir=Path(args.benchmark_dir).resolve(),
+        output_dir=Path(args.output_dir).resolve(),
+        selector_panel=selector_panel,
+        selector_evidence_path=Path(args.selector_evidence_json).resolve()
+        if args.selector_evidence_json
+        else None,
+        problem_intake=_json_object_file_arg(args.problem_intake_json, "--problem-intake-json")
+        if args.problem_intake_json
+        else {},
+        resource_constraints=_json_object_arg(args.resource_constraints_json, "--resource-constraints-json"),
+        expert_blueprint_id=args.expert_blueprint_id,
+        domain_approval_path=Path(args.domain_approval_json).resolve()
+        if args.domain_approval_json
+        else None,
+        ablation_output_dir=Path(args.ablation_output_dir).resolve()
+        if args.ablation_output_dir
+        else None,
+        expected_seeds=args.expected_seeds,
+        expected_variants=_split_csv(args.expected_variants),
+        env=os.environ,
+    )
+    print(result["paths"]["plan_json"])
+    if args.fail_on_blockers and result["plan"]["status"] == "blocked":
+        return 1
+    return 0
+
+
+def cmd_plan_iteration_campaign(args: argparse.Namespace) -> int:
+    selector_panel = _json_array_arg(args.selector_panel_json, "--selector-panel-json")
+    result = write_iteration_campaign(
+        benchmark_dir=Path(args.benchmark_dir).resolve(),
+        output_dir=Path(args.output_dir).resolve(),
+        rounds=args.rounds,
+        batch_size=args.batch_size,
+        selector_panel=selector_panel,
+        selector_evidence_path=Path(args.selector_evidence_json).resolve()
+        if args.selector_evidence_json
+        else None,
+        problem_intake=_json_object_file_arg(args.problem_intake_json, "--problem-intake-json")
+        if args.problem_intake_json
+        else {},
+        resource_constraints=_json_object_arg(args.resource_constraints_json, "--resource-constraints-json"),
+        expert_blueprint_id=args.expert_blueprint_id,
+        domain_approval_path=Path(args.domain_approval_json).resolve()
+        if args.domain_approval_json
+        else None,
+        ablation_output_dir=Path(args.ablation_output_dir).resolve()
+        if args.ablation_output_dir
+        else None,
+        expected_seeds=args.expected_seeds,
+        expected_variants=_split_csv(args.expected_variants),
+        env=os.environ,
+    )
+    print(result["paths"]["campaign_json"])
+    return 0
+
+
+def cmd_record_iteration_round(args: argparse.Namespace) -> int:
+    record = record_iteration_round_evidence(
+        Path(args.campaign_json).resolve(),
+        round_index=args.round_index,
+        evidence_path=Path(args.evidence_path),
+        validation_command=args.validation_command,
+        validation_exit_code=args.validation_exit_code,
+        validation_output_path=Path(args.validation_output_path),
+        notes=args.notes,
+    )
+    campaign_dir = Path(args.campaign_json).resolve().parent
+    print(campaign_dir / f"iteration_round_{record['round_index']:03d}_record.json")
+    return 0
+
+
+def cmd_verify_iteration_campaign(args: argparse.Namespace) -> int:
+    result = write_iteration_campaign_verification(
+        Path(args.campaign_json).resolve(),
+        require_complete=args.require_complete,
+    )
+    print(result["path"])
+    if args.fail_on_issues and result["verification"]["passed"] is not True:
         return 1
     return 0
 
@@ -208,6 +422,23 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-iterations", type=int, default=1)
     run.add_argument("--parallel-mutations", type=int, default=2)
     run.add_argument("--timeout-s", type=int, default=60)
+    run.add_argument(
+        "--llm-timeout-s",
+        type=float,
+        default=None,
+        help="real LLM provider HTTP timeout in seconds; defaults to OPENAI_TIMEOUT_S",
+    )
+    run.add_argument(
+        "--llm-max-retries",
+        type=int,
+        default=None,
+        help="real LLM provider retry count; defaults to OPENAI_MAX_RETRIES, which defaults to 0",
+    )
+    run.add_argument(
+        "--llm-fast-mode",
+        action="store_true",
+        help="route unspecified agent reasoning_effort defaults to low for latency-sensitive real runs",
+    )
     run.add_argument("--output-dir", default="runs")
     run.add_argument("--experiment-id")
     run.add_argument("--dry-run", action="store_true")
@@ -216,6 +447,41 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--random-seed", type=int, default=0)
     run.add_argument("--no-branch-context", action="store_true")
     run.add_argument("--selector-vote-count", type=int, default=3)
+    run.add_argument("--visual-audit-mode", choices=sorted(VISUAL_AUDIT_MODES), default="off")
+    run.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
+    run.add_argument(
+        "--resource-constraints-json",
+        default="{}",
+        help="JSON object describing CPU/GPU/time/dependency/data limits for readiness artifacts",
+    )
+    run.add_argument(
+        "--multi-seed-ablation-json",
+        default="{}",
+        help="JSON object describing verified multi-seed or ablation evidence for readiness artifacts",
+    )
+    run.add_argument(
+        "--agent-models-json",
+        default="{}",
+        help=(
+            "JSON object keyed by agent role; each value may include model, base_url, "
+            "temperature, and reasoning_effort"
+        ),
+    )
+    run.add_argument(
+        "--selector-panel-models",
+        default="",
+        help="comma-separated selector panel model names; records per-member selector vote provenance",
+    )
+    run.add_argument(
+        "--selector-panel-json",
+        default="[]",
+        help="JSON array of selector member objects with model, optional base_url, temperature, and reasoning_effort",
+    )
+    run.add_argument(
+        "--require-evaluation-approval",
+        action="store_true",
+        help="write evaluation_approval.json and pause before root generation until status is approved",
+    )
     run.add_argument("--resume", action="store_true")
     run.set_defaults(func=cmd_run)
 
@@ -243,6 +509,37 @@ def build_parser() -> argparse.ArgumentParser:
     ablate.add_argument("--output-dir", default="runs/ablation")
     ablate.set_defaults(func=cmd_ablate)
 
+    verify_ablation = sub.add_parser("verify-ablation-evidence")
+    verify_ablation.add_argument("output_dir")
+    verify_ablation.add_argument("--verified-by", required=True)
+    verify_ablation.add_argument("--expected-seeds", nargs="+", type=int, default=[])
+    verify_ablation.add_argument("--expected-variants", default="")
+    verify_ablation.add_argument("--output-json")
+    verify_ablation.set_defaults(func=cmd_verify_ablation_evidence)
+
+    paper_workflow = sub.add_parser("plan-paper-workflow")
+    paper_workflow.add_argument("benchmark_dir")
+    paper_workflow.add_argument("--output-dir", default="runs/paper-workflow-readiness")
+    paper_workflow.add_argument(
+        "--selector-panel-json",
+        default="[]",
+        help="JSON array of selector member objects with model and optional base_url",
+    )
+    paper_workflow.add_argument(
+        "--resource-constraints-json",
+        default="{}",
+        help="JSON object with cpu, gpu, timeout_s, dependency_limits, and data_limits",
+    )
+    paper_workflow.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
+    paper_workflow.add_argument("--selector-evidence-json")
+    paper_workflow.add_argument("--problem-intake-json")
+    paper_workflow.add_argument("--domain-approval-json")
+    paper_workflow.add_argument("--ablation-output-dir")
+    paper_workflow.add_argument("--expected-seeds", nargs="+", type=int, default=[])
+    paper_workflow.add_argument("--expected-variants", default="")
+    paper_workflow.add_argument("--fail-on-blockers", action="store_true")
+    paper_workflow.set_defaults(func=cmd_plan_paper_workflow)
+
     paper_gap = sub.add_parser("paper-gap-report")
     paper_gap.add_argument(
         "--benchmark-dir",
@@ -259,6 +556,94 @@ def build_parser() -> argparse.ArgumentParser:
     paper_gap.add_argument("--output-dir", default="runs/paper-gap-report")
     paper_gap.add_argument("--fail-on-gaps", action="store_true")
     paper_gap.set_defaults(func=cmd_paper_gap_report)
+
+    selector_evidence = sub.add_parser("generate-selector-evidence")
+    selector_evidence.add_argument("run_dir")
+    selector_evidence.add_argument("--output-dir")
+    selector_evidence.add_argument("--fail-on-blockers", action="store_true")
+    selector_evidence.set_defaults(func=cmd_generate_selector_evidence)
+
+    reference_matrix = sub.add_parser("build-reference-capability-matrix")
+    reference_matrix.add_argument("--output-dir", default="runs/reference-capability-matrix")
+    reference_matrix.add_argument("--problem-intake-json")
+    reference_matrix.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
+    reference_matrix.add_argument("--fail-on-blockers", action="store_true")
+    reference_matrix.set_defaults(func=cmd_build_reference_capability_matrix)
+
+    llm_context = sub.add_parser("build-llm-problem-context")
+    llm_context.add_argument("--output-dir", default="runs/llm-problem-context")
+    llm_context.add_argument("--problem-intake-json")
+    llm_context.add_argument(
+        "--resource-constraints-json",
+        default="{}",
+        help="JSON object with cpu, gpu, timeout_s, dependency_limits, and data_limits",
+    )
+    llm_context.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
+    llm_context.add_argument("--fail-on-blockers", action="store_true")
+    llm_context.set_defaults(func=cmd_build_llm_problem_context)
+
+    real_problem = sub.add_parser("plan-real-problem-closure")
+    real_problem.add_argument("benchmark_dir")
+    real_problem.add_argument("--output-dir", default="runs/real-problem-closure")
+    real_problem.add_argument(
+        "--selector-panel-json",
+        default="[]",
+        help="JSON array of selector member objects with model and optional base_url",
+    )
+    real_problem.add_argument(
+        "--resource-constraints-json",
+        default="{}",
+        help="JSON object with cpu, gpu, timeout_s, dependency_limits, and data_limits",
+    )
+    real_problem.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
+    real_problem.add_argument("--selector-evidence-json")
+    real_problem.add_argument("--problem-intake-json")
+    real_problem.add_argument("--domain-approval-json")
+    real_problem.add_argument("--ablation-output-dir")
+    real_problem.add_argument("--expected-seeds", nargs="+", type=int, default=[])
+    real_problem.add_argument("--expected-variants", default="")
+    real_problem.add_argument("--fail-on-blockers", action="store_true")
+    real_problem.set_defaults(func=cmd_plan_real_problem_closure)
+
+    campaign = sub.add_parser("plan-iteration-campaign")
+    campaign.add_argument("benchmark_dir")
+    campaign.add_argument("--rounds", type=int, default=60)
+    campaign.add_argument("--batch-size", type=int, default=10)
+    campaign.add_argument("--output-dir", default="runs/iteration-campaign")
+    campaign.add_argument(
+        "--selector-panel-json",
+        default="[]",
+        help="JSON array of selector member objects with model and optional base_url",
+    )
+    campaign.add_argument(
+        "--resource-constraints-json",
+        default="{}",
+        help="JSON object with cpu, gpu, timeout_s, dependency_limits, and data_limits",
+    )
+    campaign.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
+    campaign.add_argument("--selector-evidence-json")
+    campaign.add_argument("--problem-intake-json")
+    campaign.add_argument("--domain-approval-json")
+    campaign.add_argument("--ablation-output-dir")
+    campaign.add_argument("--expected-seeds", nargs="+", type=int, default=[])
+    campaign.add_argument("--expected-variants", default="")
+    campaign.set_defaults(func=cmd_plan_iteration_campaign)
+
+    record_round = sub.add_parser("record-iteration-round")
+    record_round.add_argument("campaign_json")
+    record_round.add_argument("--round", dest="round_index", type=int, required=True)
+    record_round.add_argument("--evidence-path", required=True)
+    record_round.add_argument("--validation-command", required=True)
+    record_round.add_argument("--validation-exit-code", type=int, required=True)
+    record_round.add_argument("--validation-output-path", required=True)
+    record_round.add_argument("--notes", default="")
+    record_round.set_defaults(func=cmd_record_iteration_round)
+
+    verify_campaign = sub.add_parser("verify-iteration-campaign")
+    verify_campaign.add_argument("campaign_json")
+    verify_campaign.add_argument("--require-complete", action="store_true")
+    verify_campaign.add_argument("--fail-on-issues", action="store_true")
+    verify_campaign.set_defaults(func=cmd_verify_iteration_campaign)
 
     smoke_llm = sub.add_parser("smoke-llm")
     smoke_llm.add_argument("benchmark_dir")
@@ -287,6 +672,110 @@ def build_parser() -> argparse.ArgumentParser:
     benchmarks.add_argument("--json", action="store_true")
     benchmarks.set_defaults(func=cmd_benchmarks)
     return parser
+
+
+def _split_csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _selector_panel_payloads(args: argparse.Namespace) -> list[dict[str, object]]:
+    payload = json.loads(args.selector_panel_json)
+    if not isinstance(payload, list):
+        raise ValueError("--selector-panel-json must be a JSON array")
+    if payload:
+        result: list[dict[str, object]] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                raise ValueError("--selector-panel-json items must be JSON objects")
+            result.append(dict(item))
+        return result
+    return [{"model": model} for model in _split_csv(args.selector_panel_models)]
+
+
+def _agent_configs_from_role_payloads(payload: dict[str, object]) -> dict[str, AgentConfig]:
+    known_roles = set(DEFAULT_AGENT_ROLE_MODEL_SETTINGS)
+    unknown_roles = sorted(set(payload) - known_roles)
+    if unknown_roles:
+        raise ValueError("--agent-models-json unknown role(s): " + ", ".join(unknown_roles))
+    result: dict[str, AgentConfig] = {}
+    for role, value in payload.items():
+        if not isinstance(value, dict):
+            raise ValueError("--agent-models-json values must be JSON objects")
+        model = str(value.get("model", "")).strip()
+        if not model:
+            raise ValueError(f"--agent-models-json {role} model is required")
+        base_url_value = value.get("base_url")
+        base_url = str(base_url_value).strip() if base_url_value is not None else None
+        defaults = DEFAULT_AGENT_ROLE_MODEL_SETTINGS[role]
+        result[role] = AgentConfig(
+            role=role,
+            model=model,
+            temperature=float(value.get("temperature", defaults["temperature"])),
+            reasoning_effort=(
+                str(value["reasoning_effort"])
+                if value.get("reasoning_effort") is not None
+                else None
+            ),
+            base_url=base_url or None,
+        )
+    return result
+
+
+def _agent_config_from_selector_payload(index: int, payload: dict[str, object]) -> AgentConfig:
+    model = str(payload.get("model", "")).strip()
+    if not model:
+        raise ValueError("--selector-panel-json selector member model is required")
+    base_url_value = payload.get("base_url")
+    base_url = str(base_url_value).strip() if base_url_value is not None else None
+    return AgentConfig(
+        role=str(payload.get("role") or f"selector_{index:03d}"),
+        model=model,
+        temperature=float(payload.get("temperature", 0.05)),
+        reasoning_effort=(
+            str(payload["reasoning_effort"])
+            if payload.get("reasoning_effort") is not None
+            else "high"
+        ),
+        base_url=base_url or None,
+    )
+
+
+def _json_object_arg(value: str, label: str) -> dict[str, object]:
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{label} must be a JSON object: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} must be a JSON object")
+    return payload
+
+
+def _json_object_file_arg(value: str, label: str) -> dict[str, object]:
+    path = Path(value)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise ValueError(f"{label} file does not exist: {path}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{label} must contain a JSON object: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} must contain a JSON object")
+    return payload
+
+
+def _json_array_arg(value: str, label: str) -> list[dict[str, object]]:
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{label} must be a JSON array: {exc}") from exc
+    if not isinstance(payload, list):
+        raise ValueError(f"{label} must be a JSON array")
+    result: list[dict[str, object]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            raise ValueError(f"{label} items must be JSON objects")
+        result.append(dict(item))
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:

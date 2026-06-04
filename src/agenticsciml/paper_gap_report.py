@@ -5,13 +5,12 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from agenticsciml.benchmarks import BenchmarkSpec, benchmark_for_path, list_benchmarks
-from agenticsciml.evidence import LLM_MODE_REAL
+from agenticsciml.evidence import CLAIM_GATE_ALLOWED, LLM_MODE_REAL
 from agenticsciml.storage import _atomic_write_text
 
 
 PAPER_GAP_REPORT_SCHEMA_VERSION = 1
 COMPLETED_RUN_STATES = {"completed", "exported", "finalized"}
-CLAIM_GATE_ALLOWED = "allowed"
 
 
 def build_paper_gap_report(
@@ -152,7 +151,7 @@ def _benchmark_specs(benchmark_dirs: Sequence[Path] | None) -> list[BenchmarkSpe
 
 
 def _benchmark_gap_report(spec: BenchmarkSpec, runs: list[dict[str, Any]]) -> dict[str, Any]:
-    matrix = _fidelity_matrix(spec)
+    matrix = spec.fidelity_matrix()
     gap_items = [
         _gap_item(
             check_id="benchmark_fidelity",
@@ -303,23 +302,6 @@ def _run_evidence_summary(run_dir: Path) -> dict[str, Any]:
             "scientific_discovery_readiness": "reports/scientific_discovery_readiness.json",
             "multi_seed_ablation_evidence": "reports/multi_seed_ablation_evidence.json",
         },
-    }
-
-
-def _fidelity_matrix(spec: BenchmarkSpec) -> dict[str, Any]:
-    paper_equivalent = spec.fidelity_level == "paper-like"
-    return {
-        "paper_scale_target": spec.paper_task_name,
-        "local_fixture_scope": spec.fidelity_level,
-        "metric_delta": "paper-equivalent" if paper_equivalent else spec.paper_gap_notes,
-        "hidden_label_protocol": "trusted local evaluator with hidden validation labels",
-        "training_budget_delta": "paper-scale" if paper_equivalent else "reduced local budget",
-        "solver_dependency_delta": {
-            "requires_torch": spec.requires_torch,
-            "requires_gpu": spec.requires_gpu,
-        },
-        "missing_requirements": [] if paper_equivalent else [spec.paper_gap_notes],
-        "paper_benchmark_equivalent": paper_equivalent,
     }
 
 

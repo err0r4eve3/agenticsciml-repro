@@ -41,11 +41,27 @@ uv run --python 3.11 --extra dev python scripts/run_ablation.py \
   --output-dir runs/ablation
 ```
 
+验证已有 ablation 输出是否能作为 readiness evidence：
+
+```bash
+uv run --python 3.11 --extra dev agenticsciml verify-ablation-evidence runs/ablation \
+  --verified-by ablation-reviewer \
+  --expected-seeds 0 1 2 \
+  --expected-variants root_only,kb,random_kb
+```
+
+该命令读取 `ablation_runs.csv`、`ablation_summary.csv` 和可选
+`ablation_report.md`，写出 `multi_seed_ablation_verified_manifest.json`。manifest
+只验证本地输出形状、seed 覆盖和 non-baseline ablation variant 覆盖；它不是科学发现声明。
+
 ## Outputs
 
 - `ablation_runs.csv`：每个 variant/seed 的 run-level 指标。
 - `ablation_summary.csv`：按 variant 聚合的 median、mean、std、best、worst、IQR、valid runs。
 - `ablation_report.md`：人类可读报告。
+- `multi_seed_ablation_verified_manifest.json`：可选的验证 manifest，供 run config 的
+  `multi_seed_ablation.ablation_output_dir` 或 `--multi-seed-ablation-json` 指向原始
+  ablation 输出后由 orchestrator 重新生成并附加到 run artifact。
 - `runs/<variant>-seed-<seed>/`：每个实验的完整 run artifacts。
 
 run-level 指标至少包含：
@@ -76,3 +92,12 @@ Mock-mode ablation 只验证：
 `scientific_claim=not_supported`。不要把 mock-mode improvement 当作 SciML
 结论，更不能把它解释成 emergent discovery。真实 LLM ablation 至少需要多
 seed、固定预算、成本统计和失败样本审查。
+
+## Readiness Evidence
+
+`multi_seed_ablation` 可以继续记录外部 reviewer 声明，但更强的路径是提供
+`ablation_output_dir`、`verified_by`、`expected_seeds` 和 `expected_variants`。orchestrator
+会读取本地 ablation 输出，生成 `reports/multi_seed_ablation_verified_manifest.json`，
+并把它纳入 `reports/multi_seed_ablation_evidence.json`。只有至少两个 seed、至少一个
+非 `root_only` ablation variant、每个 ablation variant 都覆盖至少两个 seed，且 verifier
+存在时，该证据才会通过 readiness 的 multi-seed/ablation gate。

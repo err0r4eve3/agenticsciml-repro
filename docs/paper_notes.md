@@ -1,6 +1,6 @@
 # Paper Notes: AgenticSciML
 
-[返回文档树](index.md) · 相关文档：[多 Agent 设计方法](multi_agent_design.md)、[版本说明](version_notes.md)
+[返回文档树](index.md) · 相关文档：[多 Agent 设计方法](multi_agent_design.md)、[论文算法 Reference Primitives](paper_algorithm_primitives.md)、[版本说明](version_notes.md)
 
 Sources checked:
 
@@ -8,6 +8,10 @@ Sources checked:
 - arXiv HTML v2 methods and supplementary table of contents.
 - npj Artificial Intelligence article page, published 2026-04-30 as an early
   unedited manuscript.
+- arXiv abstract page for `2605.11117v1`, submitted on 2026-05-11:
+  GRAFT-ATHENA.
+- arXiv abstract page for `2512.03476v2`, submitted on 2025-12-03 and revised
+  on 2026-05-08: ATHENA.
 
 ## Workflow Phases
 
@@ -23,7 +27,8 @@ Sources checked:
 ## Agent Roles
 
 - Data Analyst: inspects public training data and writes `data_analysis.md`,
-  `data_observations.json`, and `data_overview.svg`.
+  `data_observations.json`, `data_overview.svg`, and replayable EDA artifacts
+  `data_eda.py` / `data_eda.json`.
 - Evaluator: creates `evaluate.py`, `guidelines.md`, and the scoring contract.
 - Root Engineer: creates the first baseline solution without KB or debate.
 - Retriever: selects 0-1 relevant KB entries for a parent solution.
@@ -58,6 +63,26 @@ The local implementation uses prediction-only evaluation. `solution.py` sees
 training data during validate/train and only `x_val` during predict. It writes
 `predictions.npz`; trusted evaluator code reads private `u_val` labels and
 computes the metric without importing `solution.py`.
+
+## ATHENA / GRAFT-ATHENA Update
+
+ATHENA describes a HENA loop where structural actions `A_n` are selected from
+expert-blueprint-guided combinatorial spaces, translated into executable code
+`S_n`, and evaluated into scientific rewards `R_n`. GRAFT-ATHENA adds a
+factored-tree framing: a method is an ordered path through a reduced action
+space, and the path can be treated as a stable fingerprint for later retrieval
+or experience accumulation.
+
+The local implementation now captures only the safe deterministic subset in
+[Method Substrate 合约](method_substrate.md) and
+[ATHENA / GRAFT-ATHENA 方法映射](athena_graft_methods.md): blueprint-bounded
+`MethodAction` objects, ordered `MethodPath` fingerprints, finite
+`ScientificReward` records, local JSON `ExperienceSubstrate` records,
+source-grounded method templates, and explicit `A_n -> S_n -> R_n` trace
+payloads. This is a workflow traceability contract, not a claim that the
+project implements GRAFT's probabilistic policy factorization, cross-domain
+self-improvement, autonomous action-space expansion, or the ATHENA paper's
+reported performance.
 
 ## Benchmark Coverage
 
@@ -94,6 +119,16 @@ budget, prompt set, model mix, or reported scores.
 The retriever may return zero or one KB entry per mutation to avoid context
 pollution. The analysis base supplies parent, sibling, and uncle reports so new
 children can build on nearby successes and failures.
+
+## Paper-Listed Algorithm Primitives
+
+The local algorithm layer now includes reference primitives for the six champion
+strategy summaries reported in the paper results section: sigmoid-gated MoE,
+Poisson particular-plus-residual decomposition with corner-biased sampling,
+Burgers staged PINN schedule helpers, linear bias-free DeepONet branch mapping,
+reaction-diffusion FNO-style derivative/constraint helpers, and cylinder
+U-FNO/CNO-style bandlimited decoder filtering. Details and claim boundaries are
+recorded in [论文算法 Reference Primitives](paper_algorithm_primitives.md).
 
 ## MVP Interpretation
 

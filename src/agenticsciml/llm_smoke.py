@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from inspect import Parameter, signature
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +64,7 @@ class _RecordingLLMClient(LLMClient):
         prompt: str,
         system: str | None = None,
         temperature: float = 0.0,
+        reasoning_effort: str | None = None,
     ) -> str:
         return self._record_call(
             method="complete_text",
@@ -70,7 +72,14 @@ class _RecordingLLMClient(LLMClient):
             prompt=prompt,
             system=system,
             temperature=temperature,
-            call=lambda: self.inner.complete_text(prompt, system=system, temperature=temperature),
+            reasoning_effort=reasoning_effort,
+            call=lambda: _call_inner_complete_text(
+                self.inner,
+                prompt,
+                system=system,
+                temperature=temperature,
+                reasoning_effort=reasoning_effort,
+            ),
         )
 
     def complete_json(
@@ -79,6 +88,7 @@ class _RecordingLLMClient(LLMClient):
         schema_name: str,
         system: str | None = None,
         temperature: float = 0.0,
+        reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
         return self._record_call(
             method="complete_json",
@@ -86,7 +96,15 @@ class _RecordingLLMClient(LLMClient):
             prompt=prompt,
             system=system,
             temperature=temperature,
-            call=lambda: self.inner.complete_json(prompt, schema_name, system=system, temperature=temperature),
+            reasoning_effort=reasoning_effort,
+            call=lambda: _call_inner_complete_json(
+                self.inner,
+                prompt,
+                schema_name,
+                system=system,
+                temperature=temperature,
+                reasoning_effort=reasoning_effort,
+            ),
         )
 
     def _record_call(
@@ -97,6 +115,7 @@ class _RecordingLLMClient(LLMClient):
         prompt: str,
         system: str | None,
         temperature: float,
+        reasoning_effort: str | None,
         call: Any,
     ) -> Any:
         prompt_tokens = _estimate_tokens(prompt)
@@ -122,6 +141,8 @@ class _RecordingLLMClient(LLMClient):
             "temperature": temperature,
             "started_at_unix": started_wall,
         }
+        if reasoning_effort is not None:
+            record["reasoning_effort"] = reasoning_effort
         try:
             response = call()
         except Exception as exc:
@@ -674,6 +695,7 @@ def _validate_llm_call_ledger_entry(
         "prompt_token_estimate",
         "response_token_estimate",
         "temperature",
+        "reasoning_effort",
         "started_at_unix",
         "success",
         "duration_s",
@@ -731,6 +753,16 @@ def _validate_llm_call_ledger_entry(
         issues.append(f"{prefix} success must be true for completed smoke evidence")
         _required_non_empty_string(entry.get("error_type"), f"{prefix} error_type", issues)
     _validate_finite_number(entry.get("temperature"), f"{prefix} temperature", issues)
+    reasoning_effort = entry.get("reasoning_effort")
+    if reasoning_effort is not None and reasoning_effort not in {
+        "none",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+    }:
+        issues.append(f"{prefix} reasoning_effort is invalid")
     _validate_non_negative_finite_number(entry.get("duration_s"), f"{prefix} duration_s", issues)
     _validate_positive_finite_number(entry.get("started_at_unix"), f"{prefix} started_at_unix", issues)
     return issues
@@ -1216,7 +1248,7 @@ def _hash_text(text: str) -> str:
 
 
 def _trace_call_metadata(record: dict[str, Any]) -> dict[str, Any]:
-    return {
+    metadata = {
         "llm_call_id": record["call_id"],
         "span_kind": record["span_kind"],
         "provider": record["provider"],
@@ -1226,6 +1258,51 @@ def _trace_call_metadata(record: dict[str, Any]) -> dict[str, Any]:
         "method": record["method"],
         "schema_name": record["schema_name"],
     }
+    if "reasoning_effort" in record:
+        metadata["reasoning_effort"] = record["reasoning_effort"]
+    return metadata
+
+
+def _call_inner_complete_text(
+    inner: LLMClient,
+    prompt: str,
+    *,
+    system: str | None,
+    temperature: float,
+    reasoning_effort: str | None,
+) -> str:
+    kwargs: dict[str, Any] = {"system": system, "temperature": temperature}
+    if reasoning_effort is not None and _accepts_reasoning_effort(inner.complete_text):
+        kwargs["reasoning_effort"] = reasoning_effort
+    return inner.complete_text(prompt, **kwargs)
+
+
+def _call_inner_complete_json(
+    inner: LLMClient,
+    prompt: str,
+    schema_name: str,
+    *,
+    system: str | None,
+    temperature: float,
+    reasoning_effort: str | None,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {"system": system, "temperature": temperature}
+    if reasoning_effort is not None and _accepts_reasoning_effort(inner.complete_json):
+        kwargs["reasoning_effort"] = reasoning_effort
+    return inner.complete_json(prompt, schema_name, **kwargs)
+
+
+def _accepts_reasoning_effort(method: Any) -> bool:
+    try:
+        method_signature = signature(method)
+    except (TypeError, ValueError):
+        return True
+    if "reasoning_effort" in method_signature.parameters:
+        return True
+    return any(
+        parameter.kind == Parameter.VAR_KEYWORD
+        for parameter in method_signature.parameters.values()
+    )
 
 
 def _default_provider_capabilities() -> Any:
@@ -1253,6 +1330,7 @@ def _llm_provider_capabilities(llm_client: LLMClient | None) -> dict[str, object
         "adapter_type": getattr(llm_client, "adapter_type", type(llm_client).__name__ if llm_client is not None else "unknown"),
         "supports_responses": False,
         "supports_structured_outputs": False,
+        "supports_image_inputs": False,
         "supports_usage": False,
         "supports_trace_export": False,
         "supports_prompt_cache": False,
@@ -1282,6 +1360,7 @@ def _validate_provider_capabilities(value: Any, label: str, issues: list[str]) -
         "adapter_type": str,
         "supports_responses": bool,
         "supports_structured_outputs": bool,
+        "supports_image_inputs": bool,
         "supports_usage": bool,
         "supports_trace_export": bool,
         "supports_prompt_cache": bool,

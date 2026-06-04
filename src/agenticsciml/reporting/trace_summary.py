@@ -12,6 +12,7 @@ from agenticsciml.state import (
     validate_solution_tree_graph_payload,
 )
 from agenticsciml.trace_contracts import FanoutTraceMetadata, fanout_trace_references
+from agenticsciml.evidence import CLAIM_GATE_BLOCKED
 
 
 REQUIRED_EVENT_TYPES = (
@@ -96,6 +97,7 @@ def summarize_trace(run_dir: Path) -> dict[str, Any]:
         }
     )
     artifact_consistency = _check_artifact_consistency(run_dir, events)
+    claim_gate = _summary_claim_gate(run_dir, events)
     quality_passed = (
         not missing_event_types
         and not guardrail_failures
@@ -107,12 +109,28 @@ def summarize_trace(run_dir: Path) -> dict[str, Any]:
         "agent_roles": agent_roles,
         "guardrail_failures": guardrail_failures,
         "artifact_consistency": artifact_consistency,
+        "claim_gate": claim_gate,
         "quality_gate": {
             "passed": quality_passed,
             "required_event_types": list(REQUIRED_EVENT_TYPES),
             "missing_event_types": missing_event_types,
         },
     }
+
+
+def _summary_claim_gate(run_dir: Path, events: list[dict[str, Any]]) -> dict[str, Any] | None:
+    metadata_path = run_dir / "run_metadata.json"
+    if metadata_path.exists():
+        try:
+            run_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            run_metadata = None
+        if isinstance(run_metadata, dict) and isinstance(run_metadata.get("claim_gate"), dict):
+            return dict(run_metadata["claim_gate"])
+    workflow_metadata = _workflow_start_metadata(events)
+    if isinstance(workflow_metadata, dict) and isinstance(workflow_metadata.get("claim_gate"), dict):
+        return dict(workflow_metadata["claim_gate"])
+    return None
 
 
 def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -167,6 +185,8 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
         _check_trace_event_sequence(issues, events)
     _check_workflow_lifecycle_sequence(issues, events)
     _check_run_state_consistency(issues, run_metadata, workflow_metadata, workflow_end_metadata)
+    _check_claim_gate_consistency(issues, run_metadata, workflow_metadata)
+    scientific_readiness = _check_scientific_discovery_readiness_consistency(issues, run_dir, run_metadata)
     trace_node_reference_counts = _check_solution_artifact_consistency(
         issues,
         run_dir,
@@ -176,11 +196,14 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
         checkpoint,
         events,
     )
+    data_analysis_specificity = _check_data_analysis_specificity(run_dir)
 
     return {
         "checked": True,
         "passed": not issues,
         "issues": issues,
+        "scientific_discovery_readiness": scientific_readiness,
+        "data_analysis_specificity": data_analysis_specificity,
         "trace_node_reference_events_checked": trace_node_reference_counts["checked"],
         "trace_node_reference_events_skipped": trace_node_reference_counts["skipped"],
         "trace_node_reference_events_checked_by_name": trace_node_reference_counts["checked_by_name"],
@@ -192,6 +215,164 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
         "trace_node_references_checked_by_name": trace_node_reference_counts["references_checked_by_name"],
         "trace_node_reference_node_coverage": trace_node_reference_counts["node_coverage"],
         "trace_node_lifecycle_stage_coverage": trace_node_reference_counts["lifecycle_stage_coverage"],
+    }
+
+
+def _check_data_analysis_specificity(run_dir: Path) -> dict[str, Any]:
+    path = run_dir / "reports" / "data_analysis_structured.json"
+    if not path.exists():
+        return {
+            "checked": False,
+            "passed": False,
+            "warnings": ["reports/data_analysis_structured.json is missing"],
+        }
+    warnings: list[str] = []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return {"checked": True, "passed": False, "warnings": [f"invalid structured data analysis JSON: {exc}"]}
+    if not isinstance(payload, dict):
+        return {"checked": True, "passed": False, "warnings": ["structured data analysis must be a JSON object"]}
+    benchmark_name = payload.get("benchmark_name")
+    array_keys = payload.get("training_array_keys")
+    task_observations = payload.get("task_specific_observations")
+    text_blob = json.dumps(payload, sort_keys=True, default=str).lower()
+    if not isinstance(benchmark_name, str) or not benchmark_name:
+        warnings.append("benchmark_name is missing")
+    elif benchmark_name.lower() not in text_blob:
+        warnings.append("benchmark_name is not referenced in structured analysis text")
+    if not isinstance(array_keys, list) or not array_keys:
+        warnings.append("training_array_keys is missing")
+    if not isinstance(task_observations, list) or not task_observations:
+        warnings.append("task_specific_observations is missing")
+    elif not _task_observations_have_specific_terms(payload, task_observations):
+        warnings.append("task_specific_observations lack benchmark-specific terms")
+    return {"checked": True, "passed": not warnings, "warnings": warnings}
+
+
+def _task_observations_have_specific_terms(
+    payload: dict[str, Any],
+    task_observations: list[Any],
+) -> bool:
+    observation_text = " ".join(str(item).lower() for item in task_observations)
+    terms: set[str] = set()
+    for value in (
+        payload.get("benchmark_name"),
+        payload.get("benchmark_family"),
+        payload.get("evaluation_metric"),
+    ):
+        if isinstance(value, str):
+            terms.update(_specificity_tokens(value))
+    array_keys = payload.get("training_array_keys")
+    if isinstance(array_keys, list):
+        for item in array_keys:
+            if isinstance(item, str):
+                terms.add(item.lower())
+                terms.update(_specificity_tokens(item))
+    return bool(terms) and any(term in observation_text for term in terms)
+
+
+def _specificity_tokens(value: str) -> set[str]:
+    return {
+        token
+        for token in value.replace("_", " ").replace("-", " ").lower().split()
+        if len(token) >= 3
+        and token
+        not in {
+            "the",
+            "and",
+            "with",
+            "metric",
+            "data",
+            "fit",
+            "model",
+            "train",
+            "training",
+            "validation",
+        }
+    }
+
+
+def _check_claim_gate_consistency(
+    issues: list[str],
+    run_metadata: dict[str, Any] | None,
+    workflow_metadata: dict[str, Any] | None,
+) -> None:
+    if run_metadata is None:
+        return
+    claim_gate = run_metadata.get("claim_gate")
+    if not isinstance(claim_gate, dict):
+        if (
+            run_metadata.get("paper_level_claim_supported") is True
+            or run_metadata.get("scientific_claim_supported") is True
+            or (
+                isinstance(workflow_metadata, dict)
+                and isinstance(workflow_metadata.get("claim_gate"), dict)
+            )
+        ):
+            issues.append("run_metadata.json claim_gate is missing or invalid")
+        return
+    paper_supported = claim_gate.get("paper_level_claim_supported") is True
+    scientific_supported = claim_gate.get("scientific_claim_supported") is True
+    if claim_gate.get("status") == CLAIM_GATE_BLOCKED and (paper_supported or scientific_supported):
+        issues.append("claim_gate blocked status cannot support paper or scientific claims")
+    if run_metadata.get("paper_level_claim_supported") is True and not paper_supported:
+        issues.append("run_metadata.json paper_level_claim_supported overclaims claim_gate")
+    if run_metadata.get("scientific_claim_supported") is True and not scientific_supported:
+        issues.append("run_metadata.json scientific_claim_supported overclaims claim_gate")
+    if workflow_metadata is not None:
+        workflow_gate = workflow_metadata.get("claim_gate")
+        if not isinstance(workflow_gate, dict):
+            issues.append("trace workflow start claim_gate is missing or invalid")
+        else:
+            _compare_metadata_value(
+                issues,
+                "claim_gate claim_level",
+                claim_gate.get("claim_level"),
+                workflow_gate.get("claim_level"),
+                "run_metadata.json",
+                "trace workflow start",
+            )
+            _compare_metadata_value(
+                issues,
+                "claim_gate paper_level_claim_supported",
+                claim_gate.get("paper_level_claim_supported"),
+                workflow_gate.get("paper_level_claim_supported"),
+                "run_metadata.json",
+                "trace workflow start",
+            )
+
+
+def _check_scientific_discovery_readiness_consistency(
+    issues: list[str],
+    run_dir: Path,
+    run_metadata: dict[str, Any] | None,
+) -> dict[str, Any]:
+    path = run_dir / "reports" / "scientific_discovery_readiness.json"
+    if not path.exists():
+        return {"checked": False, "passed": True, "path": "reports/scientific_discovery_readiness.json"}
+    readiness = _read_optional_json_file(path, issues)
+    if not isinstance(readiness, dict):
+        issues.append("reports/scientific_discovery_readiness.json is invalid")
+        return {"checked": True, "passed": False, "path": "reports/scientific_discovery_readiness.json"}
+    supported = readiness.get("scientific_claim_supported") is True
+    if run_metadata is not None and run_metadata.get("scientific_claim_supported") is True and not supported:
+        issues.append("run_metadata.json scientific_claim_supported overclaims scientific discovery readiness")
+    metadata_readiness = run_metadata.get("scientific_discovery_readiness") if run_metadata else None
+    if isinstance(metadata_readiness, dict):
+        if metadata_readiness.get("scientific_claim_supported") is True and not supported:
+            issues.append("run_metadata.json scientific_discovery_readiness overclaims readiness report")
+    return {
+        "checked": True,
+        "passed": supported or not (
+            run_metadata is not None and run_metadata.get("scientific_claim_supported") is True
+        ),
+        "path": "reports/scientific_discovery_readiness.json",
+        "status": readiness.get("status"),
+        "scientific_claim_supported": supported,
+        "blocker_count": len(readiness.get("blockers", []))
+        if isinstance(readiness.get("blockers"), list)
+        else 0,
     }
 
 

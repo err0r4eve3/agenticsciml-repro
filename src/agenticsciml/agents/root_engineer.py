@@ -18,6 +18,7 @@ class RootEngineerAgent(AgentBase):
         contract: EvaluationContract,
         guidelines: str,
         data_report: str | None = None,
+        problem_intake_context: str | None = None,
     ) -> str:
         self.require_inputs(
             {
@@ -26,25 +27,34 @@ class RootEngineerAgent(AgentBase):
                 "contract": contract,
                 "guidelines": guidelines,
                 "data_report": data_report,
+                "problem_intake_context": problem_intake_context,
             }
         )
+        compact_contract = json.dumps(contract.to_dict(), sort_keys=True, separators=(",", ":"))
         prompt = (
             "Generate the root single-agent baseline solution.py. "
-            "Do not use KB or multi-agent debate. Return JSON with proposal and code.\n\n"
+            "Do not use KB, strategy seed catalogs, or multi-agent debate. "
+            "Return JSON with proposal and code. Keep the root baseline compact: "
+            "prefer NumPy-only regression or interpolation code, avoid optional heavy dependencies, "
+            "and keep solution.py under about 160 lines unless the contract absolutely requires more.\n\n"
+            "## User Problem Intake Context (Non-Contract)\n\n"
+            f"{problem_intake_context or 'No user problem-intake context provided.'}\n\n"
             "## ProblemBundle Summary\n\n"
             f"{problem_bundle.summary()}\n\n"
             "## Problem.md\n\n"
-            f"{problem_bundle.problem_md[:2500]}\n\n"
+            f"{problem_bundle.problem_md[:1800]}\n\n"
             "## Requirements.md\n\n"
-            f"{problem_bundle.requirements_md[:2500]}\n\n"
+            f"{problem_bundle.requirements_md[:1600]}\n\n"
             "## Evaluation.md\n\n"
-            f"{problem_bundle.evaluation_md[:2500]}\n\n"
+            f"{problem_bundle.evaluation_md[:1600]}\n\n"
             "## EvaluationContract JSON\n\n"
-            f"{json.dumps(contract.to_dict(), indent=2, sort_keys=True)}\n\n"
+            f"{compact_contract}\n\n"
             "## guidelines.md\n\n"
-            f"{guidelines[:2500]}\n\n"
+            f"{guidelines[:1800]}\n\n"
             "## data_analysis.md\n\n"
-            f"{data_report or 'No data analysis report available.'}\n\n"
+            f"{(data_report or 'No data analysis report available.')[:1800]}\n\n"
+            "Root baseline isolation: human/planner-selected strategy seeds are intentionally excluded "
+            "from this prompt. They may guide later mutations only after the baseline exists.\n\n"
             "Forbidden actions: do not read validation data, do not modify evaluator files, "
             "do not use network or subprocess calls.\n"
             "Contract reminder: solution.py must define class MODEL and support "

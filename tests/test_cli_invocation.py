@@ -7,7 +7,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from agenticsciml.cli import build_parser
+import pytest
+
+from agenticsciml.cli import _agent_configs_from_role_payloads, build_parser
 
 
 def test_run_cli_accepts_selector_vote_count() -> None:
@@ -32,6 +34,65 @@ def test_run_cli_defaults_to_three_selector_votes() -> None:
     args = parser.parse_args(["run", "examples/function_approx", "--mock"])
 
     assert args.selector_vote_count == 3
+
+
+def test_run_cli_accepts_real_llm_timeout_and_retry_budget() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "run",
+            "examples/function_approx",
+            "--llm-timeout-s",
+            "30",
+            "--llm-max-retries",
+            "1",
+            "--llm-fast-mode",
+        ]
+    )
+
+    assert args.llm_timeout_s == 30.0
+    assert args.llm_max_retries == 1
+    assert args.llm_fast_mode is True
+
+
+def test_run_cli_accepts_agent_model_overrides() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "run",
+            "examples/function_approx",
+            "--mock",
+            "--agent-models-json",
+            (
+                '{"root_engineer":{"model":"gpt-5.5","base_url":"https://api.gatexflow.com/v1",'
+                '"temperature":0.1,"reasoning_effort":"xhigh"},'
+                '"retriever":{"model":"gpt-5.4-mini","temperature":0.0}}'
+            ),
+        ]
+    )
+    payload = json.loads(args.agent_models_json)
+
+    assert payload["root_engineer"]["model"] == "gpt-5.5"
+    assert payload["root_engineer"]["reasoning_effort"] == "xhigh"
+    assert payload["retriever"]["model"] == "gpt-5.4-mini"
+
+    configs = _agent_configs_from_role_payloads(payload)
+    assert configs["root_engineer"].base_url == "https://api.gatexflow.com/v1"
+    assert configs["root_engineer"].temperature == 0.1
+    assert configs["root_engineer"].reasoning_effort == "xhigh"
+    assert configs["retriever"].model == "gpt-5.4-mini"
+    assert configs["retriever"].temperature == 0.0
+
+    defaulted = _agent_configs_from_role_payloads({"proposer": {"model": "gpt-5.5"}})
+    assert defaulted["proposer"].temperature == 0.55
+    assert defaulted["proposer"].reasoning_effort is None
+
+
+def test_run_cli_rejects_unknown_agent_model_role() -> None:
+    with pytest.raises(ValueError, match="unknown role"):
+        _agent_configs_from_role_payloads({"planner": {"model": "gpt-5.5"}})
 
 
 def test_module_cli_smoke_dry_run_is_not_real_evidence(tmp_path: Path, cli_env: dict[str, str]) -> None:

@@ -17,6 +17,8 @@ available, so this project implements a source-grounded approximation:
   parallel child mutation jobs, evaluation, and analysis
 - benchmark-aware 0-1 knowledge-base retrieval per mutation, with deterministic
   `random_kb` mode for ablation
+- dependency-light reference primitives for the six paper-listed champion
+  strategies, exposed through the algorithm catalog without paper-score claims
 - proposer/critic debate with concise rationale summaries
 - typed Pydantic schemas for code-consumed agent JSON outputs
 - engineer and debugger roles around generated code
@@ -73,11 +75,20 @@ The Web console keeps the Python orchestrator as the source of truth. It exposes
 benchmark listing, mock/real/dry-run launch, run status, SSE trace events,
 read-only artifact browsing, `/api/solver/chat` as the algorithm tool boundary,
 and a code-server sidecar link. Start code-server separately on loopback with
-auth before opening the VS Code Web link:
+upstream account/auth protection before opening the VS Code Web link:
 
 ```bash
-PASSWORD=<local-token> code-server --bind-addr 127.0.0.1:8080 /path/to/workspace
+code-server --auth none --bind-addr 127.0.0.1:8080 /path/to/workspace
 ```
+
+The Web API hardens deployment-facing defaults:
+
+- account-scoped requests are forced into `.agenticsciml/accounts/<account_id>/`
+  and must use benchmark catalog names;
+- shared repo code-server workspace links require
+  `AGENTICSCIML_ALLOW_REPO_WORKSPACE=1`;
+- real Web runs require both request-level `real_confirmed=true` and server-side
+  `AGENTICSCIML_ENABLE_REAL_WEB_RUNS=1`.
 
 Run a mock ablation suite:
 
@@ -197,3 +208,10 @@ The MVP validates orchestration, persistence, evaluation contracts, and
 deterministic mock behavior first. The benchmark catalog now mixes engineering
 proxies with six faithful-small tasks; none of these are full paper-score
 reproductions.
+
+The algorithm catalog also exposes six `status=reference_implementation`
+entries in `agenticsciml.paper_algorithms` for the paper's champion strategy
+summaries: sigmoid-gated MoE, Poisson decomposition/sampling, staged Burgers
+PINN helpers, linear bias-free DeepONet, reaction-diffusion FNO helpers, and
+cylinder wake bandlimited filtering. These are unit-tested local primitives,
+not paper-scale training pipelines.

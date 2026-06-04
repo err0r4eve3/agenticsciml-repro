@@ -90,11 +90,25 @@ class ExperimentStorage:
             _atomic_write_text(path, text)
             return path
 
+    def save_bytes(self, relative_path: str | Path, data: bytes) -> Path:
+        with self._lock:
+            path = self.run_dir / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write_bytes(path, data)
+            return path
+
     def save_solution_text(self, solution_id: str, filename: str, text: str) -> Path:
         with self._lock:
             workspace = self.create_solution_workspace(solution_id)
             path = workspace / filename
             _atomic_write_text(path, text)
+            return path
+
+    def save_solution_bytes(self, solution_id: str, filename: str, data: bytes) -> Path:
+        with self._lock:
+            workspace = self.create_solution_workspace(solution_id)
+            path = workspace / filename
+            _atomic_write_bytes(path, data)
             return path
 
     def save_transcript(
@@ -127,6 +141,28 @@ def _atomic_write_text(path: Path, text: str) -> None:
         ) as tmp:
             tmp_path = Path(tmp.name)
             tmp.write(text)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_path, path)
+        _fsync_directory(path.parent)
+    finally:
+        if tmp_path is not None and tmp_path.exists():
+            tmp_path.unlink()
+
+
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "wb",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp:
+            tmp_path = Path(tmp.name)
+            tmp.write(data)
             tmp.flush()
             os.fsync(tmp.fileno())
         os.replace(tmp_path, path)

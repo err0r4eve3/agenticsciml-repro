@@ -6,6 +6,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+VISUAL_AUDIT_MODES = {"off", "mock", "real"}
+EXPERT_BLUEPRINT_IDS = {
+    "piml",
+    "operator_learning",
+    "inverse_reconstruction",
+    "fluid_pde",
+    "numerical_methods",
+}
+
 
 def _path_or_none(value: str | Path | None) -> Path | None:
     if value is None:
@@ -25,6 +34,20 @@ def _validate_hex_digest(name: str, value: Any) -> None:
         int(value, 16)
     except ValueError as exc:
         raise ValueError(f"BenchmarkSourceManifest artifact has non-hex digest: {name}") from exc
+
+
+def _validate_visual_audit_mode(value: str) -> str:
+    if value not in VISUAL_AUDIT_MODES:
+        raise ValueError("visual_audit_mode must be one of: " + ", ".join(sorted(VISUAL_AUDIT_MODES)))
+    return value
+
+
+def _validate_expert_blueprint_id(value: str | None) -> str | None:
+    if value is None or value == "":
+        return None
+    if value not in EXPERT_BLUEPRINT_IDS:
+        raise ValueError("expert_blueprint_id must be one of: " + ", ".join(sorted(EXPERT_BLUEPRINT_IDS)))
+    return value
 
 
 def _manifest_artifact_name(path: str) -> str:
@@ -147,9 +170,19 @@ class AgentConfig:
     role: str
     model: str = "mock"
     temperature: float = 0.0
+    reasoning_effort: str | None = None
+    base_url: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {"role": self.role, "model": self.model, "temperature": self.temperature}
+        payload: dict[str, Any] = {
+            "role": self.role,
+            "model": self.model,
+            "temperature": self.temperature,
+            "reasoning_effort": self.reasoning_effort,
+        }
+        if self.base_url is not None:
+            payload["base_url"] = self.base_url
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AgentConfig":
@@ -157,7 +190,83 @@ class AgentConfig:
             role=str(data["role"]),
             model=str(data.get("model", "mock")),
             temperature=float(data.get("temperature", 0.0)),
+            reasoning_effort=(
+                str(data["reasoning_effort"])
+                if data.get("reasoning_effort") is not None
+                else None
+            ),
+            base_url=(
+                str(data["base_url"]).strip()
+                if data.get("base_url") is not None and str(data["base_url"]).strip()
+                else None
+            ),
         )
+
+
+DEFAULT_AGENT_ROLE_MODEL_SETTINGS: dict[str, dict[str, Any]] = {
+    "data_analyst": {
+        "temperature": 0.35,
+        "reasoning_effort": "high",
+        "rationale": "Analysis needs synthesis across benchmark files while staying evidence-bound.",
+    },
+    "evaluator": {
+        "temperature": 0.0,
+        "reasoning_effort": "high",
+        "rationale": "Evaluation contracts must be deterministic, but contract validation is high-stakes.",
+    },
+    "root_engineer": {
+        "temperature": 0.1,
+        "reasoning_effort": "xhigh",
+        "rationale": "Root solution generation should be stable and deeply reasoned.",
+    },
+    "retriever": {
+        "temperature": 0.0,
+        "reasoning_effort": "medium",
+        "rationale": "Retrieval selection should be deterministic and comparatively lightweight.",
+    },
+    "proposer": {
+        "temperature": 0.55,
+        "reasoning_effort": "xhigh",
+        "rationale": "Proposal generation is the main creative search step and benefits from deeper reasoning.",
+    },
+    "critic": {
+        "temperature": 0.35,
+        "reasoning_effort": "high",
+        "rationale": "Critique needs alternative hypotheses without drifting away from constraints.",
+    },
+    "engineer": {
+        "temperature": 0.1,
+        "reasoning_effort": "xhigh",
+        "rationale": "Patch generation must be reproducible and carefully reasoned.",
+    },
+    "debugger": {
+        "temperature": 0.05,
+        "reasoning_effort": "xhigh",
+        "rationale": "Repair work should be conservative and inspect failure evidence deeply.",
+    },
+    "result_analyst": {
+        "temperature": 0.3,
+        "reasoning_effort": "high",
+        "rationale": "Result summaries need interpretation while preserving evidence boundaries.",
+    },
+    "visual_audit": {
+        "temperature": 0.0,
+        "reasoning_effort": "high",
+        "rationale": "Visual audit should be conservative and image-evidence-bound.",
+    },
+    "selector": {
+        "temperature": 0.05,
+        "reasoning_effort": "high",
+        "rationale": "Parent selection should be stable but still reason over tradeoffs.",
+    },
+}
+
+
+def agent_role_default_model_settings(role: str) -> dict[str, Any]:
+    settings = DEFAULT_AGENT_ROLE_MODEL_SETTINGS.get(role)
+    if settings is None:
+        return {"temperature": 0.0, "reasoning_effort": "medium", "rationale": "Unknown role default."}
+    return dict(settings)
 
 
 @dataclass(slots=True)
@@ -409,8 +518,31 @@ class ExperimentConfig:
     evolution: EvolutionConfig = field(default_factory=EvolutionConfig)
     use_mock: bool = True
     agents: dict[str, AgentConfig] = field(default_factory=dict)
+    selector_panel: list[AgentConfig] = field(default_factory=list)
+    strategy_seed_ids: list[str] = field(default_factory=list)
+    problem_intake: dict[str, Any] = field(default_factory=dict)
+    planner_snapshot: dict[str, Any] = field(default_factory=dict)
+    readiness_report: dict[str, Any] = field(default_factory=dict)
+    claim_level: str = "workflow_proxy"
+    domain_evaluator_approved: bool = False
+    domain_reviewer: str | None = None
+    domain_review_notes: str | None = None
+    paper_benchmark_approved: bool = False
+    visual_audit_mode: str = "off"
+    resource_constraints: dict[str, Any] = field(default_factory=dict)
+    expert_blueprint_id: str | None = None
+    multi_seed_ablation: dict[str, Any] = field(default_factory=dict)
+    llm_fast_mode: bool = False
     auto_approve_evaluation: bool = True
     resume: bool = False
+
+    def __post_init__(self) -> None:
+        self.visual_audit_mode = _validate_visual_audit_mode(str(self.visual_audit_mode))
+        self.expert_blueprint_id = _validate_expert_blueprint_id(self.expert_blueprint_id)
+        if not isinstance(self.resource_constraints, dict):
+            raise ValueError("resource_constraints must be a JSON object")
+        if not isinstance(self.multi_seed_ablation, dict):
+            raise ValueError("multi_seed_ablation must be a JSON object")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -420,6 +552,21 @@ class ExperimentConfig:
             "evolution": self.evolution.to_dict(),
             "use_mock": self.use_mock,
             "agents": {role: cfg.to_dict() for role, cfg in self.agents.items()},
+            "selector_panel": [cfg.to_dict() for cfg in self.selector_panel],
+            "strategy_seed_ids": list(self.strategy_seed_ids),
+            "problem_intake": dict(self.problem_intake),
+            "planner_snapshot": dict(self.planner_snapshot),
+            "readiness_report": dict(self.readiness_report),
+            "claim_level": self.claim_level,
+            "domain_evaluator_approved": self.domain_evaluator_approved,
+            "domain_reviewer": self.domain_reviewer,
+            "domain_review_notes": self.domain_review_notes,
+            "paper_benchmark_approved": self.paper_benchmark_approved,
+            "visual_audit_mode": self.visual_audit_mode,
+            "resource_constraints": dict(self.resource_constraints),
+            "expert_blueprint_id": self.expert_blueprint_id,
+            "multi_seed_ablation": dict(self.multi_seed_ablation),
+            "llm_fast_mode": self.llm_fast_mode,
             "auto_approve_evaluation": self.auto_approve_evaluation,
             "resume": self.resume,
         }
@@ -436,6 +583,56 @@ class ExperimentConfig:
                 role: AgentConfig.from_dict(agent_data)
                 for role, agent_data in data.get("agents", {}).items()
             },
+            selector_panel=[
+                AgentConfig.from_dict(agent_data)
+                for agent_data in data.get("selector_panel", [])
+            ],
+            strategy_seed_ids=[str(item) for item in data.get("strategy_seed_ids", [])],
+            problem_intake=(
+                dict(data["problem_intake"])
+                if isinstance(data.get("problem_intake"), dict)
+                else {}
+            ),
+            planner_snapshot=(
+                dict(data["planner_snapshot"])
+                if isinstance(data.get("planner_snapshot"), dict)
+                else {}
+            ),
+            readiness_report=(
+                dict(data["readiness_report"])
+                if isinstance(data.get("readiness_report"), dict)
+                else {}
+            ),
+            claim_level=str(data.get("claim_level", "workflow_proxy")),
+            domain_evaluator_approved=bool(data.get("domain_evaluator_approved", False)),
+            domain_reviewer=(
+                str(data["domain_reviewer"])
+                if data.get("domain_reviewer") is not None
+                else None
+            ),
+            domain_review_notes=(
+                str(data["domain_review_notes"])
+                if data.get("domain_review_notes") is not None
+                else None
+            ),
+            paper_benchmark_approved=bool(data.get("paper_benchmark_approved", False)),
+            visual_audit_mode=str(data.get("visual_audit_mode", "off")),
+            resource_constraints=(
+                dict(data["resource_constraints"])
+                if isinstance(data.get("resource_constraints"), dict)
+                else {}
+            ),
+            expert_blueprint_id=(
+                str(data["expert_blueprint_id"])
+                if data.get("expert_blueprint_id") is not None
+                else None
+            ),
+            multi_seed_ablation=(
+                dict(data["multi_seed_ablation"])
+                if isinstance(data.get("multi_seed_ablation"), dict)
+                else {}
+            ),
+            llm_fast_mode=bool(data.get("llm_fast_mode", False)),
             auto_approve_evaluation=bool(data.get("auto_approve_evaluation", True)),
             resume=bool(data.get("resume", False)),
         )
