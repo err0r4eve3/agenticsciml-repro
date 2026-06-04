@@ -101,6 +101,49 @@ def test_paper_gap_report_attaches_run_evidence_without_overclaiming(tmp_path: P
     assert report["status"] == "blocked"
 
 
+def test_paper_gap_report_keeps_complete_ablation_bundle_fail_closed(tmp_path: Path) -> None:
+    bundle = tmp_path / "complete-stage-a-collection"
+    bundle.mkdir()
+    (bundle / "multi_seed_ablation_verified_manifest.json").write_text(
+        json.dumps(
+            {
+                "verified": True,
+                "run_count": 20,
+                "seed_count": 5,
+                "variants": ["root_only", "no_kb", "kb", "random_kb"],
+                "scientific_claims": ["not_supported"],
+                "claim_boundary": (
+                    "This manifest verifies local ablation output shape, seed coverage, "
+                    "and variant coverage. It does not prove paper-score improvement or "
+                    "scientific discovery."
+                ),
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    report = build_paper_gap_report(
+        benchmark_dirs=[Path("examples/function_approx_faithful_small")],
+        run_dirs=[bundle],
+    )
+
+    assert report["status"] == "blocked"
+    assert report["summary"]["run_evidence_count"] == 1
+    assert report["summary"]["unmatched_run_count"] == 1
+    run = report["run_evidence"][0]
+    assert run["benchmark_name"] is None
+    assert run["completed_run_artifacts"] is False
+    assert run["trace_quality_gate_passed"] is False
+    assert run["multi_seed_ablation_verified"] is False
+    assert any("run_metadata.json" in issue for issue in run["issues"])
+    benchmark = report["benchmarks"][0]
+    gap_items = {item["check_id"]: item for item in benchmark["gap_items"]}
+    assert gap_items["benchmark_fidelity"]["status"] == "gap"
+    assert gap_items["completed_run_artifacts"]["status"] == "gap"
+    assert gap_items["multi_seed_ablation"]["status"] == "gap"
+
+
 def test_cli_paper_gap_report_writes_json_and_markdown(
     tmp_path: Path,
     cli_env: dict[str, str],
