@@ -9,6 +9,11 @@
 
 追加迭代：
 
+- 新增 `agenticsciml.paper_gap_report` 和 CLI `paper-gap-report`，从 benchmark
+  fidelity metadata 与 supplied run artifacts 生成 `paper_gap_report.json/md`。报告会检查
+  benchmark fidelity、paper equivalence、completed run metadata、trace quality gate、
+  real LLM mode、multi-seed ablation、scientific readiness 和 claim gate support；任何缺口
+  都保持 `blocked`，不会把 champion 分数升级成论文分数或科学发现声明。
 - Real LLM provider budget hardening：`OpenAIAdapter` 默认设置 `max_retries=0`，
   避免 OpenAI SDK 隐式重试把 `OPENAI_TIMEOUT_S` 放大成多倍墙钟等待；可通过
   `OPENAI_MAX_RETRIES`、`--llm-timeout-s` 和 `--llm-max-retries` 显式覆盖。trace

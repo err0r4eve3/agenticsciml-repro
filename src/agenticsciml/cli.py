@@ -30,6 +30,7 @@ from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.llm_smoke import DEFAULT_SMOKE_VARIANTS, run_llm_smoke, verify_llm_smoke_output
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 from agenticsciml.paper_workflow_readiness import write_paper_workflow_readiness_bundle
+from agenticsciml.paper_gap_report import write_paper_gap_report
 from agenticsciml.real_problem_closure import write_real_problem_closure_plan
 from agenticsciml.reference_capability_matrix import write_reference_capability_matrix
 from agenticsciml.reporting import write_sdk_trace_export, write_trace_summary
@@ -209,6 +210,18 @@ def cmd_plan_paper_workflow(args: argparse.Namespace) -> int:
     )
     print(result["paths"]["plan_json"])
     if args.fail_on_blockers and result["bundle"]["status"] == "blocked":
+        return 1
+    return 0
+
+
+def cmd_paper_gap_report(args: argparse.Namespace) -> int:
+    result = write_paper_gap_report(
+        output_dir=Path(args.output_dir).resolve(),
+        benchmark_dirs=[Path(item).resolve() for item in args.benchmark_dir],
+        run_dirs=[Path(item).resolve() for item in args.run_dir],
+    )
+    print(result["paths"]["report_json"])
+    if args.fail_on_gaps and result["report"]["status"] == "blocked":
         return 1
     return 0
 
@@ -526,6 +539,23 @@ def build_parser() -> argparse.ArgumentParser:
     paper_workflow.add_argument("--expected-variants", default="")
     paper_workflow.add_argument("--fail-on-blockers", action="store_true")
     paper_workflow.set_defaults(func=cmd_plan_paper_workflow)
+
+    paper_gap = sub.add_parser("paper-gap-report")
+    paper_gap.add_argument(
+        "--benchmark-dir",
+        action="append",
+        default=[],
+        help="benchmark directory to include; omit to include the catalog",
+    )
+    paper_gap.add_argument(
+        "--run-dir",
+        action="append",
+        default=[],
+        help="completed run directory to attach as evidence; may be repeated",
+    )
+    paper_gap.add_argument("--output-dir", default="runs/paper-gap-report")
+    paper_gap.add_argument("--fail-on-gaps", action="store_true")
+    paper_gap.set_defaults(func=cmd_paper_gap_report)
 
     selector_evidence = sub.add_parser("generate-selector-evidence")
     selector_evidence.add_argument("run_dir")
