@@ -31,6 +31,7 @@ runs/faithful-small-stage-a-collected-complete-main-postreport-20260605
 | Stage A 完整覆盖缺少单一 claim-boundary artifact | closed | `stage_a_claim_card.json` 绑定 collector、verifier、paper gap、secret hygiene 和 plan hash；其中 `scientific_claim=not_supported`、`paper_score_reproduction=false`、`scientific_discovery_claim=false` |
 | 下一阶段 60 轮迭代目标不可审计 | closed | `iteration-campaign/iteration_campaign.json` 生成 60 个 planned/blocked rounds；`verify-iteration-campaign --fail-on-issues` 通过且 `issue_count=0` |
 | real-problem closure 无法接收已完成 run audit，因此即使有真实 run 也会永久阻塞 `completed_run_audit` | closed | `plan-real-problem-closure --completed-run-dir <run>` 会验证 `run_metadata.json`、`trace_summary.json` 和 `reports/scientific_discovery_readiness.json`；只有 trace gate 通过且 claim gate 不冲突时才解除该模块 |
+| GitHub review 页面出现 hidden/bidirectional Unicode warning，可能降低源码审查可信度 | closed | `scripts/scan_unicode_controls.py` 扫描 tracked 源码/文档/配置扩展中的 hidden Unicode control / bidi characters；`.unicode-control-allowlist.json` 默认为空，任何例外必须带 `reason` |
 
 ## 仍开放风险
 
@@ -68,6 +69,10 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli plan-
   --expected-seeds 0 1 2 3 4 \
   --expected-variants root_only,no_kb,kb,random_kb \
   --fail-on-blockers
+```
+
+```bash
+PYTHONPATH=src uv run --python 3.11 --extra dev python scripts/scan_unicode_controls.py
 ```
 
 ## 对外表述边界

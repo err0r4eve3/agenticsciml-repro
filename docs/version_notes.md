@@ -77,6 +77,11 @@
   敏感 env value 泄漏。扫描器现在也覆盖 JWT/private-key 形状和敏感字段赋值；报告只包含
   路径、规则名、env 变量名、位置和非 secret 派生的 `finding_id`，不打印 secret 值，也不保存
   secret 值的 hash。
+- 新增 `scripts/scan_unicode_controls.py` 和 `.unicode-control-allowlist.json`，默认扫描
+  git tracked 的 `.py` / `.md` / `.json` / `.yaml` / `.toml` / `.ts` / `.tsx` /
+  `.css` / `.mjs` 文件中的 hidden Unicode control / bidi characters。未白名单命中会
+  fail closed；白名单条目必须包含 `reason`，用于处理公开 review 页面上的 Unicode warning
+  风险而不扩大 scientific claim。
 - `multi_seed_ablation.ablation_output_dir` 现在会让 orchestrator 重新生成
   `reports/multi_seed_ablation_verified_manifest.json`，再纳入
   `reports/multi_seed_ablation_evidence.json` 和 scientific readiness；手写 manifest
