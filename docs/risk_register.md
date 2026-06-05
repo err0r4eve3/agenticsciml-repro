@@ -30,6 +30,7 @@ runs/faithful-small-stage-a-collected-complete-main-postreport-20260605
 | paper gap report 可能把完整 ablation bundle 误当成 completed orchestrator run | closed | PR [#12](https://github.com/err0r4eve3/agenticsciml-repro/pull/12) 合入；`tests/test_paper_gap_report.py::test_paper_gap_report_keeps_complete_ablation_bundle_fail_closed` 保持 `status=blocked` |
 | Stage A 完整覆盖缺少单一 claim-boundary artifact | closed | `stage_a_claim_card.json` 绑定 collector、verifier、paper gap、secret hygiene 和 plan hash；其中 `scientific_claim=not_supported`、`paper_score_reproduction=false`、`scientific_discovery_claim=false` |
 | 下一阶段 60 轮迭代目标不可审计 | closed | `iteration-campaign/iteration_campaign.json` 生成 60 个 planned/blocked rounds；`verify-iteration-campaign --fail-on-issues` 通过且 `issue_count=0` |
+| real-problem closure 无法接收已完成 run audit，因此即使有真实 run 也会永久阻塞 `completed_run_audit` | closed | `plan-real-problem-closure --completed-run-dir <run>` 会验证 `run_metadata.json`、`trace_summary.json` 和 `reports/scientific_discovery_readiness.json`；只有 trace gate 通过且 claim gate 不冲突时才解除该模块 |
 
 ## 仍开放风险
 
@@ -38,7 +39,7 @@ runs/faithful-small-stage-a-collected-complete-main-postreport-20260605
 | Stage A 仍不是论文分数复现 | open | 补 `paper-like` benchmark、paper-equivalent data/evaluator provenance、private-label protocol 和 hash-bound manifest |
 | 当前 workflow 证据不支持科学发现声明 | open | 完成真实 provider run、`scientific_discovery_readiness`、领域审核和失败样本复核后再升级 claim |
 | paper workflow readiness 仍 blocked | open | 补真实多模态 provider、异构 selector evidence、资源蓝图、领域审批、paper-equivalent KB 和 paper-like benchmark |
-| real-problem closure 仍 blocked | open | 让 `real_llm_execution`、`real_multimodal_input`、`heterogeneous_selector`、`paper_like_benchmark`、`domain_approval`、`completed_run_audit` 等模块全部具备 proof artifact |
+| real-problem closure 仍 blocked | open | 让 `paper_like_benchmark`、`paper_equivalent_kb` 和 `domain_approval` 全部具备 proof artifact；`completed_run_audit` 只能证明 completed run artifact 一致，不能替代这些外部证据 |
 | legacy batch1 缺少新 manifest 字段 | accepted | collector 必须继续显式使用 `--allow-legacy-missing-full-stage-hash`，并在 manifest 中保留 `legacy_batch_manifest_count=1`；不要把该 batch 当作新 schema 原生证据 |
 | 运行 artifact 未提交到 Git | accepted | run artifacts 仍作为本地 evidence bundle 保存，不提交到仓库；长期 claim 必须引用 artifact path、hash 和验证命令 |
 

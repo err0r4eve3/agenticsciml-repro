@@ -10,6 +10,7 @@
 PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli plan-real-problem-closure \
   examples/cylinder_wake_reconstruction_faithful_small \
   --output-dir runs/real-problem-closure \
+  --completed-run-dir runs/<run_id> \
   --selector-panel-json '[{"model":"gpt-5-mini"},{"model":"deepseek-v4-pro","base_url":"https://api.deepseek.com"}]' \
   --resource-constraints-json '{"cpu":"local","gpu":false,"timeout_s":120,"dependency_limits":["numpy"],"data_limits":"faithful-small"}' \
   --problem-intake-json planning/problem_intake.json \
@@ -38,6 +39,17 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli plan-
 - `reference_capability_matrix.md`
 - `llm_problem_context_pack.json`
 - `llm_problem_context_pack.md`
+
+`--completed-run-dir` 可指向一个已完成 run。该目录必须同时包含：
+
+- `run_metadata.json`，且 `run_state` 是 `completed`、`exported` 或 `finalized`，
+  `llm_mode=real`；
+- `trace_summary.json`，且 `quality_gate.passed=true`；
+- `reports/scientific_discovery_readiness.json`，且 `status` 为 `ready` 或 `blocked`，
+  `scientific_claim_supported` 为布尔值。
+
+该输入只解除 `completed_run_audit` 模块的 artifact 存在性与一致性 blocker；如果
+readiness 仍为 `blocked`，它不会把真实问题 closure 或科学 claim 升级为 supported。
 
 ## Closure Modules
 

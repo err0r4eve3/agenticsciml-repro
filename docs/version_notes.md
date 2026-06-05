@@ -126,6 +126,12 @@
   真实多模态输入、异构 real selector、paper-like benchmark、paper-equivalent KB、
   领域审批、多 seed/ablation、资源蓝图和 completed-run audit。该 gate 继续固定
   `multi_agent_real_problem_claim_supported=false`，直到所有 proof artifact 都存在。
+- `plan-real-problem-closure` 新增 `--completed-run-dir`。该参数会验证 completed run
+  目录中的 `run_metadata.json`、`trace_summary.json` 和
+  `reports/scientific_discovery_readiness.json`，只有 `run_state` 已导出、`llm_mode=real`、
+  `trace_summary.quality_gate.passed=true` 且 readiness claim 与 trace claim gate 不冲突时，
+  才解除 `completed_run_audit` 模块。该模块 ready 只证明 run audit artifact 一致，
+  不会绕过 paper-like benchmark、paper-equivalent KB 或 domain review。
 - 新增 [Real Problem Evidence Closure](real_problem_evidence_closure.md) 和执行计划
   `docs/superpowers/plans/2026-06-01-real-problem-evidence-closure.md`，明确哪些模块能由本地
   工程补齐，哪些必须由真实外部资产、领域专家和 completed run 补齐。

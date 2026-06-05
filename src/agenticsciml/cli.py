@@ -309,6 +309,9 @@ def cmd_plan_real_problem_closure(args: argparse.Namespace) -> int:
         else None,
         expected_seeds=args.expected_seeds,
         expected_variants=_split_csv(args.expected_variants),
+        completed_run_dir=Path(args.completed_run_dir).resolve()
+        if args.completed_run_dir
+        else None,
         env=os.environ,
     )
     print(result["paths"]["plan_json"])
@@ -672,6 +675,7 @@ def build_parser() -> argparse.ArgumentParser:
     real_problem.add_argument("--problem-intake-json")
     real_problem.add_argument("--domain-approval-json")
     real_problem.add_argument("--ablation-output-dir")
+    real_problem.add_argument("--completed-run-dir")
     real_problem.add_argument("--expected-seeds", nargs="+", type=int, default=[])
     real_problem.add_argument("--expected-variants", default="")
     real_problem.add_argument("--fail-on-blockers", action="store_true")

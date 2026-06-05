@@ -108,14 +108,13 @@ REAL_PROBLEM_MODULES = (
     {
         "module_id": "completed_run_audit",
         "title": "Completed run audit and claim gate",
-        "readiness_check_ids": (),
+        "readiness_check_ids": ("completed_run_artifacts",),
         "proof_artifacts": (
             "reports/scientific_discovery_readiness.json",
             "trace_summary.json quality_gate=true",
             "run_metadata.json and claim_gate showing claim support only after all checks pass",
         ),
         "completion_mode": "validated_completed_run_required",
-        "always_blocked_until_completed_run": True,
     },
 )
 
@@ -132,6 +131,7 @@ def build_real_problem_closure_plan(
     ablation_output_dir: Path | None = None,
     expected_seeds: list[int] | None = None,
     expected_variants: list[str] | None = None,
+    completed_run_dir: Path | None = None,
     env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     paper_bundle = build_paper_workflow_readiness_bundle(
@@ -152,6 +152,15 @@ def build_real_problem_closure_plan(
         for check in paper_bundle.get("checks", [])
         if isinstance(check, dict) and check.get("check_id")
     }
+    completed_run_audit = _completed_run_audit_readiness(completed_run_dir)
+    checks_by_id["completed_run_artifacts"] = {
+        "check_id": "completed_run_artifacts",
+        "category": "completed_run_audit",
+        "passed": completed_run_audit["ready"],
+        "message": "Completed run metadata, trace summary, and scientific readiness artifact are present.",
+        "next_action": "Run a real paper_workflow experiment and verify scientific_discovery_readiness plus trace_summary.",
+        "evidence": completed_run_audit,
+    }
     modules = [
         _module_status(module, checks_by_id)
         for module in REAL_PROBLEM_MODULES
@@ -166,6 +175,7 @@ def build_real_problem_closure_plan(
         "benchmark": paper_bundle.get("benchmark", {}),
         "paper_workflow_readiness_status": paper_bundle.get("status"),
         "paper_workflow_blockers": paper_bundle.get("blockers", []),
+        "completed_run_audit": completed_run_audit,
         "reference_capability_matrix": paper_bundle.get("reference_capability_matrix", {}),
         "llm_problem_context_pack": paper_bundle.get("llm_problem_context_pack", {}),
         "modules": modules,
@@ -197,6 +207,7 @@ def write_real_problem_closure_plan(
     ablation_output_dir: Path | None = None,
     expected_seeds: list[int] | None = None,
     expected_variants: list[str] | None = None,
+    completed_run_dir: Path | None = None,
     env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -225,6 +236,7 @@ def write_real_problem_closure_plan(
         ablation_output_dir=ablation_output_dir,
         expected_seeds=expected_seeds,
         expected_variants=expected_variants,
+        completed_run_dir=completed_run_dir,
         env=env,
     )
     plan_json = output_dir / "real_problem_closure_plan.json"
@@ -282,9 +294,6 @@ def _module_status(
             blocking_check_ids.append(check_id)
             if check and check.get("next_action"):
                 next_actions.append(str(check["next_action"]))
-    if module.get("always_blocked_until_completed_run") is True:
-        blocking_check_ids.append("completed_run_artifacts")
-        next_actions.append("Run a real paper_workflow experiment and verify scientific_discovery_readiness plus trace_summary.")
     status = "ready" if not blocking_check_ids else "blocked"
     return {
         "module_id": module["module_id"],
@@ -297,3 +306,72 @@ def _module_status(
         "next_actions": next_actions,
         "claim_boundary": "Module readiness is only claimable when its proof artifacts are present and verified.",
     }
+
+
+def _completed_run_audit_readiness(run_dir: Path | None) -> dict[str, Any]:
+    if run_dir is None:
+        return {
+            "ready": False,
+            "path": None,
+            "issues": ["completed_run_dir is missing"],
+        }
+    path = Path(run_dir)
+    issues: list[str] = []
+    run_metadata = _read_json_artifact(path / "run_metadata.json", issues)
+    trace_summary = _read_json_artifact(path / "trace_summary.json", issues)
+    readiness = _read_json_artifact(path / "reports" / "scientific_discovery_readiness.json", issues)
+
+    run_state = run_metadata.get("run_state") if isinstance(run_metadata, dict) else None
+    if run_state not in {"completed", "exported", "finalized"}:
+        issues.append("run_metadata.run_state must be completed, exported, or finalized")
+    llm_mode = run_metadata.get("llm_mode") if isinstance(run_metadata, dict) else None
+    if llm_mode != "real":
+        issues.append("run_metadata.llm_mode must be real")
+    quality_gate = trace_summary.get("quality_gate") if isinstance(trace_summary, dict) else {}
+    if not isinstance(quality_gate, dict) or quality_gate.get("passed") is not True:
+        issues.append("trace_summary.quality_gate.passed must be true")
+    readiness_status = readiness.get("status") if isinstance(readiness, dict) else None
+    if readiness_status not in {"ready", "blocked"}:
+        issues.append("scientific_discovery_readiness.status must be ready or blocked")
+    readiness_claim = readiness.get("scientific_claim_supported") if isinstance(readiness, dict) else None
+    if readiness_claim is not True and readiness_claim is not False:
+        issues.append("scientific_discovery_readiness.scientific_claim_supported must be boolean")
+    trace_claim_gate = trace_summary.get("claim_gate") if isinstance(trace_summary, dict) else {}
+    trace_claim_supported = (
+        trace_claim_gate.get("scientific_claim_supported")
+        if isinstance(trace_claim_gate, dict)
+        else None
+    )
+    if readiness_claim is False and trace_claim_supported is True:
+        issues.append("trace_summary claim_gate must not support scientific claims when readiness is blocked")
+
+    return {
+        "ready": not issues,
+        "path": str(path),
+        "issues": issues,
+        "run_state": run_state,
+        "llm_mode": llm_mode,
+        "trace_quality_gate_passed": quality_gate.get("passed") if isinstance(quality_gate, dict) else None,
+        "scientific_readiness_status": readiness_status,
+        "scientific_claim_supported": readiness_claim,
+        "claim_gate_scientific_claim_supported": trace_claim_supported,
+        "claim_boundary": (
+            "Completed run audit proves the run artifacts are present and internally consistent. "
+            "It does not by itself prove paper-score reproduction, scientific discovery, or real-problem closure."
+        ),
+    }
+
+
+def _read_json_artifact(path: Path, issues: list[str]) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        issues.append(f"{path.name} is missing at {path}")
+        return {}
+    except json.JSONDecodeError as exc:
+        issues.append(f"{path.name} is invalid JSON: {exc}")
+        return {}
+    if not isinstance(payload, dict):
+        issues.append(f"{path.name} must contain a JSON object")
+        return {}
+    return payload
