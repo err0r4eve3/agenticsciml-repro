@@ -186,6 +186,7 @@ def _audit_payload(
             "languages": llm_wiki_audit.get("languages"),
             "manual_editing": llm_wiki_audit.get("manual_editing"),
             "persistence": llm_wiki_audit.get("persistence"),
+            "manual_edit_roundtrip": llm_wiki_audit.get("manual_edit_roundtrip"),
             "artifacts": llm_wiki_audit.get("artifacts"),
         }
     return payload
@@ -276,6 +277,9 @@ def _write_llm_wiki_audit(output_dir: Path) -> dict[str, Any]:
     audit_path = output_dir / "llm_wiki" / "llm_wiki_audit.json"
     _atomic_write_text(graph_path, json.dumps(graph, indent=2, ensure_ascii=False, allow_nan=False))
     issues = _llm_wiki_issues(graph)
+    manual_roundtrip = _manual_wiki_edit_roundtrip(graph, output_dir)
+    if manual_roundtrip["status"] != "passed":
+        issues.append("manual edit roundtrip failed")
     paper_nodes = [node for node in graph.get("nodes", []) if isinstance(node, dict) and node.get("type") == "paper_problem_case"]
     edit_policy = graph.get("edit_policy") if isinstance(graph.get("edit_policy"), dict) else {}
     audit = {
@@ -287,13 +291,55 @@ def _write_llm_wiki_audit(output_dir: Path) -> dict[str, Any]:
         "languages": graph.get("languages"),
         "manual_editing": edit_policy.get("manual_editing"),
         "persistence": edit_policy.get("persistence"),
+        "manual_edit_roundtrip": manual_roundtrip,
         "artifacts": {
             "graph": graph_path.relative_to(output_dir).as_posix(),
             "audit": audit_path.relative_to(output_dir).as_posix(),
+            "manual_edit_roundtrip": manual_roundtrip["path"],
         },
     }
     _atomic_write_text(audit_path, json.dumps(audit, indent=2, ensure_ascii=False, allow_nan=False))
     return audit
+
+
+def _manual_wiki_edit_roundtrip(graph: dict[str, Any], output_dir: Path) -> dict[str, Any]:
+    from agenticsciml.web.app import _validated_llm_wiki_payload
+
+    edited = dict(graph)
+    edited["title"] = f"{graph.get('title', 'AgenticSciML LLM Wiki Knowledge Graph')} - manual edit audit"
+    edited["manual_edit_audit"] = {
+        "status": "simulated_manual_edit",
+        "claim_boundary": "Roundtrip validates editability only; it is not benchmark evidence.",
+    }
+    path = output_dir / "llm_wiki" / "manual_edit_roundtrip.json"
+    try:
+        validated = _validated_llm_wiki_payload(edited)
+        status = (
+            "passed"
+            if validated.get("title") != graph.get("title")
+            and isinstance(validated.get("edit_policy"), dict)
+            and validated["edit_policy"].get("manual_editing") is True
+            and validated["edit_policy"].get("persistence") == "account_scoped_json"
+            else "failed"
+        )
+        error = None
+    except Exception as exc:
+        validated = edited
+        status = "failed"
+        error = str(exc)
+    _atomic_write_text(path, json.dumps(validated, indent=2, ensure_ascii=False, allow_nan=False))
+    return {
+        "status": status,
+        "error": error,
+        "path": path.relative_to(output_dir).as_posix(),
+        "title_changed": validated.get("title") != graph.get("title"),
+        "manual_editing": (validated.get("edit_policy") or {}).get("manual_editing")
+        if isinstance(validated.get("edit_policy"), dict)
+        else None,
+        "persistence": (validated.get("edit_policy") or {}).get("persistence")
+        if isinstance(validated.get("edit_policy"), dict)
+        else None,
+    }
 
 
 def _llm_wiki_issues(graph: dict[str, Any]) -> list[str]:

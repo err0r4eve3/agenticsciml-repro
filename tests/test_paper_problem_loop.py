@@ -24,8 +24,13 @@ def test_paper_problem_loop_audit_writes_passed_bilingual_artifact(tmp_path: Pat
     assert audit["llm_wiki_audit"]["paper_problem_case_count"] == 10
     assert audit["llm_wiki_audit"]["manual_editing"] is True
     assert audit["llm_wiki_audit"]["persistence"] == "account_scoped_json"
+    assert audit["llm_wiki_audit"]["manual_edit_roundtrip"]["status"] == "passed"
+    assert audit["llm_wiki_audit"]["manual_edit_roundtrip"]["title_changed"] is True
+    assert audit["llm_wiki_audit"]["manual_edit_roundtrip"]["persistence"] == "account_scoped_json"
     assert (tmp_path / audit["llm_wiki_audit"]["artifacts"]["graph"]).exists()
     assert (tmp_path / audit["llm_wiki_audit"]["artifacts"]["audit"]).exists()
+    manual_edit_path = tmp_path / audit["llm_wiki_audit"]["artifacts"]["manual_edit_roundtrip"]
+    assert json.loads(manual_edit_path.read_text(encoding="utf-8"))["title"].endswith("manual edit audit")
     assert all(item["source_review_status"] == "ready_for_source_audit" for item in audit["results"])
     assert fno_case["recommended_benchmark"] == "reaction_diffusion_operator_faithful_small"
     assert "fno_lite_operator" in fno_case["selected_algorithm_ids"]

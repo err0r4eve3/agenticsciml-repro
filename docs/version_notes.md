@@ -32,6 +32,8 @@ OKF-like JSON 知识图谱。
 - 循环审计会保存并验证 generated LLM Wiki OKF snapshot：`llm_wiki/llm_wiki_okf.json` 和
   `llm_wiki/llm_wiki_audit.json`。若 OKF 根字段、双语论文节点、边引用或手动编辑持久化边界损坏，
   总审计会 fail closed。
+- Wiki 审计新增隔离 `manual_edit_roundtrip.json`，复用 Web 保存校验验证手动编辑 payload
+  可被规范化为 `account_scoped_json`，但不修改真实 account Wiki。
 
 边界：
 
