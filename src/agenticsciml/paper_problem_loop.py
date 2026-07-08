@@ -141,8 +141,12 @@ def update_paper_problem_loop_index(*, index_path: Path, audit_path: Path, audit
     source_candidate_seen_ids = _source_candidate_seen_ids(rounds)
     source_candidate_available_ids = _source_candidate_available_ids(entry)
     source_candidate_available_count = _source_candidate_available_count(entry, source_candidate_available_ids)
+    source_candidate_seen_set = set(source_candidate_seen_ids)
     source_candidate_current_seen_ids = [
-        source_id for source_id in source_candidate_available_ids if source_id in set(source_candidate_seen_ids)
+        source_id for source_id in source_candidate_available_ids if source_id in source_candidate_seen_set
+    ]
+    source_candidate_pending_ids = [
+        source_id for source_id in source_candidate_available_ids if source_id not in source_candidate_seen_set
     ]
     index = {
         "artifact_type": "agenticsciml_paper_problem_loop_index",
@@ -156,6 +160,12 @@ def update_paper_problem_loop_index(*, index_path: Path, audit_path: Path, audit
         if source_candidate_available_ids
         else None,
         "source_candidate_current_seen_ids": source_candidate_current_seen_ids
+        if source_candidate_available_ids
+        else None,
+        "source_candidate_pending_count": len(source_candidate_pending_ids)
+        if source_candidate_available_ids
+        else None,
+        "source_candidate_pending_ids": source_candidate_pending_ids
         if source_candidate_available_ids
         else None,
         "source_candidate_available_count": source_candidate_available_count,
@@ -212,6 +222,8 @@ def verify_paper_problem_loop(*, output_dir: Path, max_age_s: float | None = Non
         "source_candidate_seen_ids": index.get("source_candidate_seen_ids"),
         "source_candidate_current_seen_count": index.get("source_candidate_current_seen_count"),
         "source_candidate_current_seen_ids": index.get("source_candidate_current_seen_ids"),
+        "source_candidate_pending_count": index.get("source_candidate_pending_count"),
+        "source_candidate_pending_ids": index.get("source_candidate_pending_ids"),
         "source_candidate_available_count": index.get("source_candidate_available_count"),
         "source_candidate_coverage_ratio": index.get("source_candidate_coverage_ratio"),
         "latest_round_id": latest.get("round_id"),
@@ -382,6 +394,7 @@ def _source_candidate_coverage_ratio(*, seen_count: int, available_count: int | 
 def _render_loop_index_markdown(index: dict[str, Any]) -> str:
     latest = index.get("latest") if isinstance(index.get("latest"), dict) else {}
     seen_ids = [str(item) for item in index.get("source_candidate_seen_ids") or []]
+    pending_ids = [str(item) for item in index.get("source_candidate_pending_ids") or []]
     lines = [
         "# Paper Problem Loop Index",
         "",
@@ -390,6 +403,8 @@ def _render_loop_index_markdown(index: dict[str, Any]) -> str:
         f"- Failed round count: {index.get('failed_round_count')}",
         f"- Source candidates seen: {index.get('source_candidate_seen_count')}",
         f"- Source candidate coverage: {index.get('source_candidate_current_seen_count')}/{index.get('source_candidate_available_count')} ({index.get('source_candidate_coverage_ratio')})",
+        f"- Source candidate pending: {index.get('source_candidate_pending_count')}",
+        f"- Pending source candidate ids: {', '.join(pending_ids)}",
         f"- Recent source candidate ids: {', '.join(seen_ids[-20:])}",
         f"- Latest round: {latest.get('round_id')}",
         f"- Latest audit: `{latest.get('audit_json')}`",

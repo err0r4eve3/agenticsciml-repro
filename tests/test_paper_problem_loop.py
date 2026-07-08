@@ -179,6 +179,8 @@ def test_cli_paper_problem_loop_audit_repeat_writes_round_dirs(tmp_path: Path, c
     assert health["issue_count"] == 0
     assert health["source_candidate_seen_count"] == 0
     assert health["source_candidate_current_seen_count"] is None
+    assert health["source_candidate_pending_count"] is None
+    assert health["source_candidate_pending_ids"] is None
     assert health["source_candidate_available_count"] is None
     assert health["source_candidate_coverage_ratio"] is None
 
@@ -254,10 +256,14 @@ def test_cli_paper_problem_loop_audit_repeat_rotates_source_candidates(
     assert index["source_candidate_seen_ids"] == ["source:a1", "source:a2", "source:a3", "source:a4"]
     assert index["source_candidate_current_seen_count"] == 4
     assert index["source_candidate_current_seen_ids"] == ["source:a1", "source:a2", "source:a3", "source:a4"]
+    assert index["source_candidate_pending_count"] == 0
+    assert index["source_candidate_pending_ids"] == []
     assert index["source_candidate_available_count"] == 4
     assert index["source_candidate_coverage_ratio"] == 1.0
     assert health["source_candidate_seen_count"] == 4
     assert health["source_candidate_current_seen_count"] == 4
+    assert health["source_candidate_pending_count"] == 0
+    assert health["source_candidate_pending_ids"] == []
     assert health["source_candidate_available_count"] == 4
     assert health["source_candidate_coverage_ratio"] == 1.0
 
@@ -327,11 +333,17 @@ def test_cli_paper_problem_loop_audit_source_coverage_uses_current_collection(
     run_one_round()
 
     index = json.loads((output_dir / "paper_problem_loop_index.json").read_text(encoding="utf-8"))
+    health = json.loads((output_dir / "paper_problem_loop_health.json").read_text(encoding="utf-8"))
 
     assert index["source_candidate_seen_count"] == 2
     assert index["source_candidate_available_count"] == 4
     assert index["source_candidate_current_seen_count"] == 1
+    assert index["source_candidate_current_seen_ids"] == ["source:b2"]
+    assert index["source_candidate_pending_count"] == 3
+    assert index["source_candidate_pending_ids"] == ["source:b1", "source:b3", "source:b4"]
     assert index["source_candidate_coverage_ratio"] == 0.25
+    assert health["source_candidate_pending_count"] == 3
+    assert health["source_candidate_pending_ids"] == ["source:b1", "source:b3", "source:b4"]
 
 
 def test_cli_verify_paper_problem_loop_health_checks_latest_artifacts(
