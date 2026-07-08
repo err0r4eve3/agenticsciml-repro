@@ -41,6 +41,8 @@ OKF-like JSON 知识图谱。
 - 新增 `verify-paper-problem-loop`，fail-closed 检查顶层索引、Markdown 摘要、最新 audit、LLM Wiki
   OKF/audit/manual-edit artifacts 和可选最新轮时效，便于生产巡检直接返回非零状态。
 - 每轮循环会同步写出顶层 `paper_problem_loop_health.json`，保留最近一次 health 检查结果，避免只能靠人工命令回查。
+- repeat 循环中的 source candidates 现在按 `--source-candidate-limit` 成块轮转，并在 audit/index 中记录
+  `source_candidate_offset` 与 `source_candidate_selection_ids`，避免长期运行只反复解析 source cache 前几条。
 
 边界：
 

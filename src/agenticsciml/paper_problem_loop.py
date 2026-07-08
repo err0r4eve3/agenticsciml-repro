@@ -26,6 +26,7 @@ def write_paper_problem_loop_audit(
     case_limit: int | None = None,
     source_collection_path: Path | None = None,
     source_candidate_limit: int = 3,
+    source_candidate_offset: int = 0,
 ) -> dict[str, Any]:
     from agenticsciml.web.app import CURATED_PAPER_PROBLEM_CASES, ProblemIntakeRequest, _problem_intake_plan_payload
 
@@ -107,12 +108,14 @@ def write_paper_problem_loop_audit(
         output_dir=output_dir,
         source_collection=source_collection,
         limit=source_candidate_limit,
+        offset=source_candidate_offset,
     )
     llm_wiki_audit = _write_llm_wiki_audit(output_dir)
     audit = _audit_payload(
         results,
         source_collection=source_collection,
         source_candidate_results=source_candidate_results,
+        source_candidate_offset=source_candidate_offset,
         llm_wiki_audit=llm_wiki_audit,
     )
     _atomic_write_text(output_dir / AUDIT_JSON, json.dumps(audit, indent=2, ensure_ascii=False, allow_nan=False))
@@ -208,6 +211,8 @@ def _verify_latest_audit(
         "issue_count": len(audit_issues) if isinstance(audit_issues, list) else None,
         "case_count": audit.get("case_count"),
         "source_candidate_count": audit.get("source_candidate_count"),
+        "source_candidate_offset": audit.get("source_candidate_offset"),
+        "source_candidate_selection_ids": audit.get("source_candidate_selection_ids"),
         "prompt_quality_control_ready_count": audit.get("prompt_quality_control_ready_count"),
         "source_candidate_prompt_quality_control_ready_count": audit.get(
             "source_candidate_prompt_quality_control_ready_count"
@@ -303,6 +308,8 @@ def _loop_index_entry(root: Path, audit_path: Path, audit: dict[str, Any]) -> di
         "issue_count": len(audit.get("issues", [])) if isinstance(audit.get("issues"), list) else None,
         "case_count": audit.get("case_count"),
         "source_candidate_count": audit.get("source_candidate_count"),
+        "source_candidate_offset": audit.get("source_candidate_offset"),
+        "source_candidate_selection_ids": audit.get("source_candidate_selection_ids"),
         "prompt_quality_control_ready_count": audit.get("prompt_quality_control_ready_count"),
         "source_candidate_prompt_quality_control_ready_count": audit.get(
             "source_candidate_prompt_quality_control_ready_count"
@@ -325,6 +332,8 @@ def _render_loop_index_markdown(index: dict[str, Any]) -> str:
         f"- Latest audit: `{latest.get('audit_json')}`",
         f"- Latest status: passed={latest.get('passed')} issues={latest.get('issue_count')}",
         f"- Latest cases/source candidates: {latest.get('case_count')}/{latest.get('source_candidate_count')}",
+        f"- Latest source candidate offset: {latest.get('source_candidate_offset')}",
+        f"- Latest source candidate ids: {', '.join(latest.get('source_candidate_selection_ids') or [])}",
         f"- Latest prompt gates: curated={latest.get('prompt_quality_control_ready_count')} source={latest.get('source_candidate_prompt_quality_control_ready_count')}",
         f"- Latest LLM Wiki status: {latest.get('llm_wiki_status')}",
         "",
@@ -352,6 +361,7 @@ def _audit_payload(
     *,
     source_collection: dict[str, Any] | None = None,
     source_candidate_results: list[dict[str, Any]] | None = None,
+    source_candidate_offset: int = 0,
     llm_wiki_audit: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     status_counts: dict[str, int] = {}
@@ -397,7 +407,11 @@ def _audit_payload(
             "created_at": source_collection.get("created_at"),
         }
     if source_candidate_results is not None:
+        payload["source_candidate_offset"] = source_candidate_offset
         payload["source_candidate_count"] = len(source_candidate_results)
+        payload["source_candidate_selection_ids"] = [
+            item.get("paper_id") for item in source_candidate_results if item.get("paper_id")
+        ]
         payload["source_candidate_prompt_quality_control_ready_count"] = sum(
             1 for item in source_candidate_results if _has_required_prompt_controls(item.get("prompt_quality_control_ids"))
         )
@@ -466,6 +480,8 @@ def _render_markdown(audit: dict[str, Any]) -> str:
         lines.extend(
             [
                 f"- source_candidate_count: {audit.get('source_candidate_count')}",
+                f"- source_candidate_offset: {audit.get('source_candidate_offset')}",
+                f"- source_candidate_selection_ids: {', '.join(audit.get('source_candidate_selection_ids') or [])}",
                 f"- source_candidate_prompt_quality_control_ready_count: {audit.get('source_candidate_prompt_quality_control_ready_count')}",
                 f"- source_candidate_context_ready_count: {audit.get('source_candidate_context_ready_count')}",
                 f"- source_candidate_manual_wiki_review_count: {audit.get('source_candidate_manual_wiki_review_count')}",
@@ -619,12 +635,14 @@ def _source_candidate_results(
     output_dir: Path,
     source_collection: dict[str, Any] | None,
     limit: int,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
     if limit <= 0 or not isinstance(source_collection, dict):
         return []
     candidates = source_collection.get("candidates") if isinstance(source_collection.get("candidates"), list) else []
+    candidates = _rotated_source_candidates(candidates, offset)[:limit]
     results: list[dict[str, Any]] = []
-    for index, candidate in enumerate(candidates[:limit], start=1):
+    for index, candidate in enumerate(candidates, start=1):
         if not isinstance(candidate, dict):
             continue
         case = _source_candidate_case(candidate)
@@ -669,6 +687,13 @@ def _source_candidate_results(
             }
         )
     return results
+
+
+def _rotated_source_candidates(candidates: list[Any], offset: int) -> list[Any]:
+    if not candidates:
+        return []
+    start = offset % len(candidates)
+    return candidates[start:] + candidates[:start]
 
 
 def _plan_problem(intake: dict[str, object], expert_blueprint: str) -> dict[str, Any]:

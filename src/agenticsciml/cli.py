@@ -332,6 +332,7 @@ def cmd_paper_problem_loop_audit(args: argparse.Namespace) -> int:
                 case_limit=args.case_limit,
                 source_collection_path=source_collection_path if source_collection_path.exists() else None,
                 source_candidate_limit=args.source_candidate_limit,
+                source_candidate_offset=(round_index - 1) * args.source_candidate_limit if args.repeat else 0,
             )
             update_paper_problem_loop_index(
                 index_path=base_output_dir / LOOP_INDEX_JSON,

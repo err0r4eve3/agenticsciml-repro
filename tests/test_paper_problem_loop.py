@@ -178,6 +178,74 @@ def test_cli_paper_problem_loop_audit_repeat_writes_round_dirs(tmp_path: Path, c
     assert health["issue_count"] == 0
 
 
+def test_cli_paper_problem_loop_audit_repeat_rotates_source_candidates(
+    tmp_path: Path, cli_env: dict[str, str]
+) -> None:
+    output_dir = tmp_path / "paper loop"
+    source_cache = tmp_path / "source_collection.json"
+    source_cache.write_text(
+        json.dumps(
+            {
+                "status": "collected",
+                "candidate_count": 4,
+                "issue_count": 0,
+                "query": "agentic sciml",
+                "created_at": "2026-07-09T00:00:00Z",
+                "candidates": [
+                    {
+                        "id": f"a{index}",
+                        "title": f"Agentic SciML Candidate {index}",
+                        "url": f"https://arxiv.org/abs/2606.0000{index}",
+                        "authors": ["Test Author"],
+                        "published": "2026-06-01",
+                        "summary": "Agentic scientific machine learning benchmark candidate.",
+                        "real_problem": "Audit real scientific ML planning coverage.",
+                        "real_problem_zh": "审计真实科学机器学习规划覆盖。",
+                    }
+                    for index in range(1, 5)
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenticsciml.cli",
+            "paper-problem-loop-audit",
+            "--output-dir",
+            str(output_dir),
+            "--source-collection-json",
+            str(source_cache),
+            "--source-candidate-limit",
+            "2",
+            "--repeat",
+            "--rounds",
+            "2",
+            "--interval-s",
+            "0",
+            "--fail-on-issues",
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+        env=cli_env,
+    )
+
+    audit_paths = [Path(line) for line in result.stdout.splitlines() if line.strip()]
+    first = json.loads(audit_paths[0].read_text(encoding="utf-8"))
+    second = json.loads(audit_paths[1].read_text(encoding="utf-8"))
+    index = json.loads((output_dir / "paper_problem_loop_index.json").read_text(encoding="utf-8"))
+
+    assert first["source_candidate_offset"] == 0
+    assert second["source_candidate_offset"] == 2
+    assert first["source_candidate_selection_ids"] == ["source:a1", "source:a2"]
+    assert second["source_candidate_selection_ids"] == ["source:a3", "source:a4"]
+    assert index["latest"]["source_candidate_selection_ids"] == ["source:a3", "source:a4"]
+
+
 def test_cli_verify_paper_problem_loop_health_checks_latest_artifacts(
     tmp_path: Path, cli_env: dict[str, str]
 ) -> None:
