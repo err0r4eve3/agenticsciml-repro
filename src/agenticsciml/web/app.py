@@ -677,6 +677,12 @@ def create_app() -> FastAPI:
     ) -> dict[str, object]:
         return _paper_problem_loop_review_queue_payload(_resolve_output_dir(output_dir))
 
+    @app.get("/api/paper-problem-loop/llm-wiki")
+    def paper_problem_loop_llm_wiki(
+        output_dir: str = Query(default="runs/paper-problem-loop"),
+    ) -> dict[str, object]:
+        return _paper_problem_loop_llm_wiki_payload(_resolve_output_dir(output_dir))
+
     @app.get("/api/solver/settings")
     def solver_settings() -> dict[str, object]:
         return _solver_settings_payload()
@@ -1690,15 +1696,9 @@ def _read_account_llm_wiki(account_id: str | None) -> dict[str, object] | None:
 
 
 def _paper_problem_loop_review_queue_payload(output_dir: Path) -> dict[str, object]:
-    index = _read_optional_json(output_dir / "paper_problem_loop_index.json") or {}
-    latest = index.get("latest") if isinstance(index.get("latest"), dict) else {}
-    audit_ref = latest.get("audit_json")
-    if not isinstance(audit_ref, str):
+    latest, audit_ref, audit_path, audit = _paper_problem_loop_latest_audit(output_dir)
+    if audit_ref is None or audit_path is None:
         return {"status": "missing", "output_dir": str(output_dir), "queue": None}
-    audit_path = (output_dir / audit_ref).resolve(strict=False)
-    if not audit_path.is_relative_to(output_dir.resolve(strict=False)):
-        raise HTTPException(status_code=400, detail="latest audit path escapes paper loop output dir")
-    audit = _read_optional_json(audit_path) or {}
     wiki = audit.get("llm_wiki_audit") if isinstance(audit.get("llm_wiki_audit"), dict) else {}
     artifacts = wiki.get("artifacts") if isinstance(wiki.get("artifacts"), dict) else {}
     queue_ref = artifacts.get("source_candidate_review_queue")
@@ -1722,6 +1722,47 @@ def _paper_problem_loop_review_queue_payload(output_dir: Path) -> dict[str, obje
         "queue_json": queue_ref,
         "queue": queue,
     }
+
+
+def _paper_problem_loop_llm_wiki_payload(output_dir: Path) -> dict[str, object]:
+    latest, audit_ref, audit_path, audit = _paper_problem_loop_latest_audit(output_dir)
+    if audit_ref is None or audit_path is None:
+        return {"status": "missing", "output_dir": str(output_dir), "payload": None}
+    wiki = audit.get("llm_wiki_audit") if isinstance(audit.get("llm_wiki_audit"), dict) else {}
+    artifacts = wiki.get("artifacts") if isinstance(wiki.get("artifacts"), dict) else {}
+    graph_ref = artifacts.get("graph")
+    if not isinstance(graph_ref, str):
+        return {
+            "status": "missing",
+            "output_dir": str(output_dir),
+            "latest_round_id": latest.get("round_id"),
+            "audit_json": audit_ref,
+            "payload": None,
+        }
+    graph_path = (audit_path.parent / graph_ref).resolve(strict=False)
+    if not graph_path.is_relative_to(audit_path.parent.resolve(strict=False)):
+        raise HTTPException(status_code=400, detail="llm wiki graph path escapes latest audit dir")
+    graph = _read_optional_json(graph_path)
+    return {
+        "status": "available" if graph else "missing",
+        "output_dir": str(output_dir),
+        "latest_round_id": latest.get("round_id"),
+        "audit_json": audit_ref,
+        "graph_json": graph_ref,
+        "payload": graph,
+    }
+
+
+def _paper_problem_loop_latest_audit(output_dir: Path) -> tuple[dict[str, Any], str | None, Path | None, dict[str, Any]]:
+    index = _read_optional_json(output_dir / "paper_problem_loop_index.json") or {}
+    latest = index.get("latest") if isinstance(index.get("latest"), dict) else {}
+    audit_ref = latest.get("audit_json")
+    if not isinstance(audit_ref, str):
+        return latest, None, None, {}
+    audit_path = (output_dir / audit_ref).resolve(strict=False)
+    if not audit_path.is_relative_to(output_dir.resolve(strict=False)):
+        raise HTTPException(status_code=400, detail="latest audit path escapes paper loop output dir")
+    return latest, audit_ref, audit_path, _read_optional_json(audit_path) or {}
 
 
 def _save_account_llm_wiki(account_id: str | None, payload: dict[str, Any]) -> dict[str, object]:

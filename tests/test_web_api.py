@@ -265,6 +265,64 @@ def test_paper_problem_loop_review_queue_rejects_escaping_audit_path(tmp_path: P
     assert response.status_code == 400
 
 
+def test_paper_problem_loop_llm_wiki_endpoint_reads_latest_graph(tmp_path: Path) -> None:
+    output_dir = tmp_path / "paper-loop"
+    round_dir = output_dir / "round-0001"
+    wiki_dir = round_dir / "llm_wiki"
+    wiki_dir.mkdir(parents=True)
+    (output_dir / "paper_problem_loop_index.json").write_text(
+        json.dumps({"latest": {"round_id": "round-0001", "audit_json": "round-0001/audit.json"}}),
+        encoding="utf-8",
+    )
+    (round_dir / "audit.json").write_text(
+        json.dumps({"llm_wiki_audit": {"artifacts": {"graph": "llm_wiki/llm_wiki_okf.json"}}}),
+        encoding="utf-8",
+    )
+    (wiki_dir / "llm_wiki_okf.json").write_text(
+        json.dumps(
+            {
+                "type": "llm_wiki_knowledge_graph",
+                "title": "Loop Wiki",
+                "description": "Latest loop graph",
+                "timestamp": "2026-07-09T00:00:00Z",
+                "tags": ["wiki"],
+                "nodes": [{"id": "source:test", "type": "source_candidate", "title": "Test"}],
+                "edges": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = TestClient(create_app())
+
+    response = client.get("/api/paper-problem-loop/llm-wiki", params={"output_dir": str(output_dir)})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "available"
+    assert payload["latest_round_id"] == "round-0001"
+    assert payload["payload"]["title"] == "Loop Wiki"
+    assert payload["payload"]["nodes"][0]["id"] == "source:test"
+
+
+def test_paper_problem_loop_llm_wiki_rejects_escaping_graph_path(tmp_path: Path) -> None:
+    output_dir = tmp_path / "paper-loop"
+    round_dir = output_dir / "round-0001"
+    round_dir.mkdir(parents=True)
+    (output_dir / "paper_problem_loop_index.json").write_text(
+        json.dumps({"latest": {"round_id": "round-0001", "audit_json": "round-0001/audit.json"}}),
+        encoding="utf-8",
+    )
+    (round_dir / "audit.json").write_text(
+        json.dumps({"llm_wiki_audit": {"artifacts": {"graph": "../llm_wiki_okf.json"}}}),
+        encoding="utf-8",
+    )
+    client = TestClient(create_app())
+
+    response = client.get("/api/paper-problem-loop/llm-wiki", params={"output_dir": str(output_dir)})
+
+    assert response.status_code == 400
+
+
 def test_problem_intake_plans_benchmark_and_strategy_seeds() -> None:
     client = TestClient(create_app())
 

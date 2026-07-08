@@ -33,6 +33,8 @@ OKF-like JSON 知识图谱。
   `source_candidate` 节点；这些节点保留 `manual_review_required`，不自动污染 account Wiki 或 evaluator 事实层。
 - 每轮还会写出 `llm_wiki/source_candidate_review_queue.json`，把本轮候选节点和可编辑字段集中成手动修正入口。
 - Web `Wiki` 功能页会读取最新 production review queue，让功能栏直接暴露本轮待人工修正的候选节点。
+- Web `Wiki` 功能页还可把最新 production `llm_wiki/llm_wiki_okf.json` 加载进 OKF editor；
+  用户可在中英文双语 JSON 中手动修正后再保存到当前 account Wiki，加载动作不自动晋升候选节点。
 - 循环审计会保存并验证 generated LLM Wiki OKF snapshot：`llm_wiki/llm_wiki_okf.json` 和
   `llm_wiki/llm_wiki_audit.json`。若 OKF 根字段、双语论文节点、边引用或手动编辑持久化边界损坏，
   总审计会 fail closed。

@@ -545,6 +545,14 @@ type LlmWikiReviewQueuePayload = {
   };
 };
 
+type LlmWikiLoopGraphPayload = {
+  status: string;
+  latest_round_id?: string;
+  audit_json?: string;
+  graph_json?: string;
+  payload?: LlmWikiOkfPayload | null;
+};
+
 const DEFAULT_SOLVER_SETTINGS: SolverSettings = {
   default_assistant_mode: "ask",
   reasoning_efforts: ["low", "medium", "high", "xhigh"],
@@ -762,6 +770,9 @@ const api = {
   },
   async getLlmWikiReviewQueue(): Promise<LlmWikiReviewQueuePayload> {
     return getJson<LlmWikiReviewQueuePayload>("/api/paper-problem-loop/review-queue");
+  },
+  async getLatestLoopWikiGraph(): Promise<LlmWikiLoopGraphPayload> {
+    return getJson<LlmWikiLoopGraphPayload>("/api/paper-problem-loop/llm-wiki");
   }
 };
 
@@ -1022,6 +1033,19 @@ export function App() {
     setWikiText(JSON.stringify(payload, null, 2));
     setWikiCopied(false);
     setWikiSaved(false);
+  }
+
+  async function loadLatestLoopWikiGraph() {
+    const payload = await api.getLatestLoopWikiGraph();
+    if (!payload.payload) {
+      setError("Latest loop Wiki graph is missing.");
+      return;
+    }
+    setWikiPayload(payload.payload);
+    setWikiText(JSON.stringify(payload.payload, null, 2));
+    setWikiCopied(false);
+    setWikiSaved(false);
+    setError(null);
   }
 
   async function copyWikiText() {
@@ -1722,6 +1746,7 @@ export function App() {
               setWikiSaved(false);
             }}
             onCopy={copyWikiText}
+            onLoadLoopGraph={loadLatestLoopWikiGraph}
             onRefresh={() => refreshWiki(true)}
             onSave={saveWiki}
           />
@@ -1814,6 +1839,7 @@ function LlmWikiPage({
   text,
   onChange,
   onCopy,
+  onLoadLoopGraph,
   onRefresh,
   onSave
 }: {
@@ -1824,6 +1850,7 @@ function LlmWikiPage({
   text: string;
   onChange: (value: string) => void;
   onCopy: () => void;
+  onLoadLoopGraph: () => void;
   onRefresh: () => void;
   onSave: () => void;
 }) {
@@ -1895,6 +1922,10 @@ function LlmWikiPage({
             <button className="icon-text-button secondary" type="button" onClick={onRefresh}>
               <RefreshCw size={15} />
               Regenerate
+            </button>
+            <button className="icon-text-button secondary" type="button" onClick={onLoadLoopGraph}>
+              <GitGraph size={15} />
+              Load loop graph
             </button>
             <button className="icon-text-button secondary" disabled={!isOkf} type="button" onClick={onSave}>
               <FileText size={15} />

@@ -76,6 +76,8 @@ PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python -m agenticsci
 `manual_review_required`，不自动写入 account Wiki 或 evaluator 事实层。
 同时写出 `llm_wiki/source_candidate_review_queue.json`，只列本轮待人工修正的候选节点和可编辑字段。
 Web `Wiki` 功能页会读取最新 production queue，方便从功能栏直接定位待修正节点。
+同一页面也可加载最新 `llm_wiki/llm_wiki_okf.json` 到 OKF editor，供人工用中英文双语字段修正后
+再显式保存到当前 account Wiki；加载动作本身不会晋升候选节点。
 顶层 index/health 还会汇总 `source_candidate_seen_count`、`source_candidate_available_count`、
 `source_candidate_coverage_ratio`、`source_candidate_pending_count` 和 `source_candidate_pending_ids`；
 coverage ratio 与 pending ids 都按当前 source collection 的 candidate ids 与累计 seen ids 的交集/差集计算。
