@@ -48,6 +48,19 @@ def test_llm_problem_context_pack_assigns_bounded_agent_roles_without_claim() ->
         for action in role["forbidden_actions"]
     )
 
+    prompt_contract = pack["execution_prompt_contract"]
+    required_sections = set(prompt_contract["required_sections"])
+    assert prompt_contract["prompt_assembly_ready"] is True
+    assert "expected_output_schema" in required_sections
+    assert "evidence_and_claim_boundary" in required_sections
+    assert "prompt_quality_controls" in required_sections
+    role_blueprints = {item["role_id"]: item for item in prompt_contract["role_prompt_blueprints"]}
+    assert set(role_blueprints) == set(roles)
+    for blueprint in role_blueprints.values():
+        assert set(blueprint["required_sections"]) >= required_sections
+        assert set(blueprint["section_sources"]) >= required_sections
+        assert blueprint["hidden_chain_of_thought_allowed"] is False
+
     assert "evaluation scoring" in pack["orchestrator_owned_decisions"]
     assert "champion selection" in pack["orchestrator_owned_decisions"]
     assert "claim gate" in pack["orchestrator_owned_decisions"]
@@ -93,6 +106,8 @@ def test_write_llm_problem_context_pack_outputs_json_and_markdown(tmp_path: Path
     assert markdown_path == tmp_path / LLM_PROBLEM_CONTEXT_PACK_MD
     assert pack["status"] == "ready_for_llm_context"
     assert "# LLM Problem Context Pack" in markdown
+    assert "## Execution Prompt Contract" in markdown
+    assert "- prompt_assembly_ready: True" in markdown
     assert "## Prompt Quality Controls" in markdown
     assert "root_engineer" in markdown
 

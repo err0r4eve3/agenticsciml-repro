@@ -38,6 +38,7 @@ def test_paper_problem_loop_audit_writes_passed_bilingual_artifact(tmp_path: Pat
     assert all(item["source_review_status"] == "ready_for_source_audit" for item in audit["results"])
     assert fno_case["recommended_benchmark"] == "reaction_diffusion_operator_faithful_small"
     assert "fno_lite_operator" in fno_case["selected_algorithm_ids"]
+    assert all(item["prompt_assembly_ready"] is True for item in audit["results"])
     assert (tmp_path / "summary.md").exists()
     assert fno_case["artifacts"] == {
         "source_review": "cases/10-fourier-neural-operator-parametric-pdes/source_review.json",
@@ -54,9 +55,9 @@ def test_paper_problem_loop_audit_writes_passed_bilingual_artifact(tmp_path: Pat
     assert json.loads((tmp_path / fno_case["artifacts"]["reference_matrix"]).read_text(encoding="utf-8"))[
         "status"
     ] == "ready_for_offline_planning"
-    assert json.loads((tmp_path / fno_case["artifacts"]["llm_context_pack"]).read_text(encoding="utf-8"))[
-        "status"
-    ] == "ready_for_llm_context"
+    fno_context = json.loads((tmp_path / fno_case["artifacts"]["llm_context_pack"]).read_text(encoding="utf-8"))
+    assert fno_context["status"] == "ready_for_llm_context"
+    assert fno_context["execution_prompt_contract"]["prompt_assembly_ready"] is True
 
 
 def test_cli_paper_problem_loop_audit_writes_artifact(tmp_path: Path, cli_env: dict[str, str]) -> None:
@@ -131,6 +132,7 @@ def test_paper_problem_loop_audit_includes_source_collection_cache(tmp_path: Pat
     assert audit["llm_wiki_audit"]["source_candidate_review_queue_count"] == 1
     source_candidate = audit["source_candidate_results"][0]
     assert source_candidate["wiki_promotion_status"] == "manual_review_required"
+    assert source_candidate["prompt_assembly_ready"] is True
     assert "bilingual_wiki_preserves_identifiers" in source_candidate["prompt_quality_control_ids"]
     assert source_candidate["artifacts"]["llm_context_pack"] == (
         "source_candidates/01-2606-02427v1/llm_context_pack.json"

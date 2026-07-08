@@ -100,6 +100,7 @@ def write_paper_problem_loop_audit(
                 "reference_matrix_status": matrix.get("status"),
                 "llm_context_status": context.get("status"),
                 "prompt_quality_control_ids": _prompt_quality_control_ids(context),
+                "prompt_assembly_ready": _prompt_assembly_ready(context),
                 "artifacts": artifacts,
             }
         )
@@ -463,7 +464,7 @@ def _audit_payload(
             1 for item in results if item.get("source_review_status") == "ready_for_source_audit"
         ),
         "prompt_quality_control_ready_count": sum(
-            1 for item in results if _has_required_prompt_controls(item.get("prompt_quality_control_ids"))
+            1 for item in results if _prompt_quality_ready(item)
         ),
         "llm_context_ready_count": sum(1 for item in results if item.get("llm_context_status") == "ready_for_llm_context"),
         "reference_matrix_ready_count": sum(
@@ -492,7 +493,7 @@ def _audit_payload(
             item.get("paper_id") for item in source_candidate_results if item.get("paper_id")
         ]
         payload["source_candidate_prompt_quality_control_ready_count"] = sum(
-            1 for item in source_candidate_results if _has_required_prompt_controls(item.get("prompt_quality_control_ids"))
+            1 for item in source_candidate_results if _prompt_quality_ready(item)
         )
         payload["source_candidate_context_ready_count"] = sum(
             1 for item in source_candidate_results if item.get("llm_context_status") == "ready_for_llm_context"
@@ -840,6 +841,7 @@ def _source_candidate_results(
                 "reference_matrix_status": matrix.get("status"),
                 "llm_context_status": context.get("status"),
                 "prompt_quality_control_ids": _prompt_quality_control_ids(context),
+                "prompt_assembly_ready": _prompt_assembly_ready(context),
                 "artifacts": artifacts,
             }
         )
@@ -907,15 +909,26 @@ def _has_required_prompt_controls(value: object) -> bool:
     return isinstance(value, list) and set(value) >= _required_prompt_control_ids()
 
 
+def _prompt_assembly_ready(context: dict[str, Any]) -> bool:
+    contract = context.get("execution_prompt_contract") if isinstance(context.get("execution_prompt_contract"), dict) else {}
+    return contract.get("prompt_assembly_ready") is True
+
+
+def _prompt_quality_ready(item: dict[str, Any]) -> bool:
+    return _has_required_prompt_controls(item.get("prompt_quality_control_ids")) and item.get("prompt_assembly_ready") is True
+
+
 def _prompt_quality_issues(items: list[dict[str, Any]], *, prefix: str) -> list[str]:
     required = _required_prompt_control_ids()
     issues: list[str] = []
     for item in items:
         controls = set(item.get("prompt_quality_control_ids") if isinstance(item.get("prompt_quality_control_ids"), list) else [])
         missing = sorted(required - controls)
+        item_id = item.get("paper_id") or item.get("title") or "unknown"
         if missing:
-            item_id = item.get("paper_id") or item.get("title") or "unknown"
             issues.append(f"{prefix} {item_id} missing prompt controls: {','.join(missing)}")
+        if item.get("prompt_assembly_ready") is not True:
+            issues.append(f"{prefix} {item_id} prompt assembly contract is not ready")
     return issues
 
 

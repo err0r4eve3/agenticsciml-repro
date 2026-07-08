@@ -17,6 +17,17 @@ LLM_PROBLEM_CONTEXT_CLAIM_BOUNDARY = (
     "it does not validate a solution, execute a provider call, or support a scientific claim."
 )
 REQUIRED_RESOURCE_CONSTRAINTS = ("cpu", "gpu", "timeout_s", "dependency_limits", "data_limits")
+REQUIRED_PROMPT_SECTIONS = (
+    "problem_decomposition",
+    "resource_constraints",
+    "role_task",
+    "model_policy",
+    "input_artifacts",
+    "forbidden_actions",
+    "expected_output_schema",
+    "evidence_and_claim_boundary",
+    "prompt_quality_controls",
+)
 PROMPT_QUALITY_CONTROLS: tuple[dict[str, object], ...] = (
     {
         "control_id": "paper_context_is_non_authoritative",
@@ -262,8 +273,17 @@ def build_llm_problem_context_pack(
             expert_blueprint_id=expert_blueprint_id,
         )
     )
-    blockers = _context_blockers(reference_matrix, resources)
     role_task_plan = [_role_task_payload(role) for role in ROLE_TASKS]
+    execution_prompt_contract = _execution_prompt_contract(role_task_plan)
+    blockers = _context_blockers(reference_matrix, resources)
+    blockers.extend(
+        {
+            "blocker_id": "prompt_assembly_contract_incomplete",
+            "message": issue,
+            "next_action": "Fix role prompt blueprint generation before real LLM execution.",
+        }
+        for issue in execution_prompt_contract["issues"]
+    )
     return {
         "schema_version": LLM_PROBLEM_CONTEXT_SCHEMA_VERSION,
         "pack_version": "llm_problem_context_pack.v1",
@@ -293,6 +313,7 @@ def build_llm_problem_context_pack(
             "visual artifact interpretation when actual image inputs are available",
             "artifact-grounded rationale summary",
         ],
+        "execution_prompt_contract": execution_prompt_contract,
         "prompt_quality_controls": [dict(item) for item in PROMPT_QUALITY_CONTROLS],
         "reference_capability_matrix": reference_matrix,
         "blockers": blockers,
@@ -364,6 +385,11 @@ def render_llm_problem_context_pack_markdown(pack: dict[str, Any]) -> str:
         )
         lines.append(f"- expected_output_schema: {_format_markdown_value(role.get('expected_output_schema'))}")
         lines.append("")
+    contract = pack.get("execution_prompt_contract") if isinstance(pack.get("execution_prompt_contract"), dict) else {}
+    lines.extend(["## Execution Prompt Contract", ""])
+    lines.append(f"- prompt_assembly_ready: {contract.get('prompt_assembly_ready')}")
+    lines.append(f"- required_sections: {_format_markdown_value(contract.get('required_sections'))}")
+    lines.append("")
     lines.extend(["## Prompt Quality Controls", ""])
     for item in pack.get("prompt_quality_controls", []):
         if not isinstance(item, dict):
@@ -405,6 +431,64 @@ def _role_task_payload(role: dict[str, object]) -> dict[str, Any]:
         "evidence_artifacts": list(role.get("evidence_artifacts", ())),
         "requires_image_capable_provider": bool(role.get("requires_image_capable_provider", False)),
     }
+
+
+def _execution_prompt_contract(role_task_plan: list[dict[str, Any]]) -> dict[str, Any]:
+    blueprints = [_role_prompt_blueprint(role) for role in role_task_plan]
+    issues = _prompt_blueprint_issues(blueprints)
+    return {
+        "schema_version": 1,
+        "prompt_assembly_ready": not issues,
+        "required_sections": list(REQUIRED_PROMPT_SECTIONS),
+        "prompt_quality_control_ids": [
+            str(item["control_id"])
+            for item in PROMPT_QUALITY_CONTROLS
+            if isinstance(item.get("control_id"), str)
+        ],
+        "role_prompt_blueprints": blueprints,
+        "issues": issues,
+        "claim_boundary": "This contract audits prompt assembly only; it is not a provider call or benchmark result.",
+    }
+
+
+def _role_prompt_blueprint(role: dict[str, Any]) -> dict[str, Any]:
+    role_id = str(role["role_id"])
+    return {
+        "role_id": role_id,
+        "required_sections": list(REQUIRED_PROMPT_SECTIONS),
+        "section_sources": {
+            "problem_decomposition": "llm_problem_context_pack.problem_decomposition",
+            "resource_constraints": "llm_problem_context_pack.resource_constraints",
+            "role_task": f"role_task_plan[{role_id}].task + non_role + stop_condition",
+            "model_policy": f"role_task_plan[{role_id}].model_policy",
+            "input_artifacts": f"role_task_plan[{role_id}].inputs + evidence_artifacts",
+            "forbidden_actions": f"role_task_plan[{role_id}].forbidden_actions",
+            "expected_output_schema": f"role_task_plan[{role_id}].expected_output_schema",
+            "evidence_and_claim_boundary": "llm_problem_context_pack.claim_boundary + orchestrator_owned_decisions",
+            "prompt_quality_controls": "llm_problem_context_pack.prompt_quality_controls",
+        },
+        "output_contract": role["expected_output_schema"],
+        "artifact_refs_required": list(role.get("evidence_artifacts", [])),
+        "hidden_chain_of_thought_allowed": False,
+    }
+
+
+def _prompt_blueprint_issues(blueprints: list[dict[str, Any]]) -> list[str]:
+    issues: list[str] = []
+    required = set(REQUIRED_PROMPT_SECTIONS)
+    for blueprint in blueprints:
+        role_id = blueprint.get("role_id") or "unknown"
+        sections = set(blueprint.get("required_sections") if isinstance(blueprint.get("required_sections"), list) else [])
+        missing = sorted(required - sections)
+        if missing:
+            issues.append(f"{role_id} missing prompt sections: {','.join(missing)}")
+        sources = blueprint.get("section_sources") if isinstance(blueprint.get("section_sources"), dict) else {}
+        missing_sources = sorted(section for section in required if not sources.get(section))
+        if missing_sources:
+            issues.append(f"{role_id} missing prompt section sources: {','.join(missing_sources)}")
+        if blueprint.get("hidden_chain_of_thought_allowed") is not False:
+            issues.append(f"{role_id} must forbid hidden chain-of-thought output")
+    return issues
 
 
 def _forbidden_actions(role: dict[str, object]) -> list[str]:
