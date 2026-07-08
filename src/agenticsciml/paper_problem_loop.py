@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import calendar
 import json
 import re
 import time
@@ -144,6 +145,120 @@ def update_paper_problem_loop_index(*, index_path: Path, audit_path: Path, audit
     _atomic_write_text(index_path, json.dumps(index, indent=2, ensure_ascii=False, allow_nan=False))
     _atomic_write_text(index_path.with_name(LOOP_INDEX_MD), _render_loop_index_markdown(index))
     return index
+
+
+def verify_paper_problem_loop(*, output_dir: Path, max_age_s: float | None = None) -> dict[str, Any]:
+    issues: list[str] = []
+    index_path = output_dir / LOOP_INDEX_JSON
+    index_md_path = output_dir / LOOP_INDEX_MD
+    index = _read_json_file(index_path, issues)
+    index_md = index_md_path.read_text(encoding="utf-8") if index_md_path.exists() else ""
+    if not index_md:
+        issues.append(f"missing {LOOP_INDEX_MD}")
+    latest = index.get("latest") if isinstance(index.get("latest"), dict) else {}
+    latest_round_id = latest.get("round_id") if isinstance(latest.get("round_id"), str) else ""
+    audit_ref = latest.get("audit_json") if isinstance(latest.get("audit_json"), str) else ""
+    if not latest_round_id:
+        issues.append("index missing latest round")
+    if not audit_ref:
+        issues.append("index missing latest audit path")
+    audit_path = (output_dir / audit_ref).resolve(strict=False) if audit_ref else output_dir / "__missing_audit__"
+    if audit_ref and not audit_path.is_relative_to(output_dir.resolve(strict=False)):
+        issues.append("latest audit path escapes output dir")
+        audit_path = output_dir / "__escaped_audit__"
+    audit = _read_json_file(audit_path, issues)
+    if index_md and latest_round_id not in index_md:
+        issues.append("index markdown missing latest round")
+    if index_md and audit_ref not in index_md:
+        issues.append("index markdown missing latest audit path")
+    if audit:
+        _verify_latest_audit(latest, audit_path, audit, issues, max_age_s=max_age_s)
+    status = "passed" if not issues else "failed"
+    return {
+        "artifact_type": "agenticsciml_paper_problem_loop_health",
+        "status": status,
+        "issue_count": len(issues),
+        "issues": issues,
+        "index_json": str(index_path.resolve(strict=False)),
+        "index_md": str(index_md_path.resolve(strict=False)),
+        "latest_audit_json": str(audit_path),
+        "round_count": index.get("round_count"),
+        "failed_round_count": index.get("failed_round_count"),
+        "latest_round_id": latest.get("round_id"),
+    }
+
+
+def _verify_latest_audit(
+    latest: dict[str, Any],
+    audit_path: Path,
+    audit: dict[str, Any],
+    issues: list[str],
+    *,
+    max_age_s: float | None,
+) -> None:
+    audit_issues = audit.get("issues")
+    if audit.get("passed") is not True:
+        issues.append("latest audit did not pass")
+    if audit_issues:
+        issues.append("latest audit has issues")
+    expected = {
+        "passed": audit.get("passed"),
+        "issue_count": len(audit_issues) if isinstance(audit_issues, list) else None,
+        "case_count": audit.get("case_count"),
+        "source_candidate_count": audit.get("source_candidate_count"),
+        "prompt_quality_control_ready_count": audit.get("prompt_quality_control_ready_count"),
+        "source_candidate_prompt_quality_control_ready_count": audit.get(
+            "source_candidate_prompt_quality_control_ready_count"
+        ),
+    }
+    for key, value in expected.items():
+        if latest.get(key) != value:
+            issues.append(f"latest index mismatch: {key}")
+    wiki = audit.get("llm_wiki_audit") if isinstance(audit.get("llm_wiki_audit"), dict) else {}
+    if latest.get("llm_wiki_status") != wiki.get("status"):
+        issues.append("latest index mismatch: llm_wiki_status")
+    if wiki.get("status") != "passed":
+        issues.append("llm wiki audit did not pass")
+    if wiki.get("languages") != ["en", "zh-CN"]:
+        issues.append("llm wiki audit missing bilingual languages")
+    if wiki.get("manual_editing") is not True:
+        issues.append("llm wiki manual editing is not enabled")
+    if (wiki.get("manual_edit_roundtrip") or {}).get("status") != "passed":
+        issues.append("llm wiki manual edit roundtrip did not pass")
+    artifacts = wiki.get("artifacts") if isinstance(wiki.get("artifacts"), dict) else {}
+    for name, rel_path in artifacts.items():
+        if not isinstance(rel_path, str) or not (audit_path.parent / rel_path).exists():
+            issues.append(f"missing llm wiki artifact: {name}")
+    if max_age_s is not None:
+        _verify_audit_age(audit.get("created_at"), max_age_s, issues)
+
+
+def _verify_audit_age(created_at: Any, max_age_s: float, issues: list[str]) -> None:
+    if not isinstance(created_at, str):
+        issues.append("latest audit missing created_at")
+        return
+    try:
+        created_epoch = calendar.timegm(time.strptime(created_at, "%Y-%m-%dT%H:%M:%SZ"))
+    except ValueError:
+        issues.append("latest audit created_at is invalid")
+        return
+    if time.time() - created_epoch > max_age_s:
+        issues.append("latest audit is stale")
+
+
+def _read_json_file(path: Path, issues: list[str]) -> dict[str, Any]:
+    if not path.exists():
+        issues.append(f"missing {path.name}")
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        issues.append(f"invalid json: {path.name}")
+        return {}
+    if not isinstance(payload, dict):
+        issues.append(f"json root is not object: {path.name}")
+        return {}
+    return payload
 
 
 def _read_loop_index(path: Path) -> dict[str, Any]:

@@ -174,6 +174,67 @@ def test_cli_paper_problem_loop_audit_repeat_writes_round_dirs(tmp_path: Path, c
     assert f"`{audit_paths[-1].parent.name}/agenticsciml_paper_problem_loop_audit.json`" in index_md
 
 
+def test_cli_verify_paper_problem_loop_health_checks_latest_artifacts(
+    tmp_path: Path, cli_env: dict[str, str]
+) -> None:
+    output_dir = tmp_path / "paper loop"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenticsciml.cli",
+            "paper-problem-loop-audit",
+            "--output-dir",
+            str(output_dir),
+            "--repeat",
+            "--rounds",
+            "1",
+            "--interval-s",
+            "0",
+            "--fail-on-issues",
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+        env=cli_env,
+    )
+
+    ok = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenticsciml.cli",
+            "verify-paper-problem-loop",
+            str(output_dir),
+            "--max-age-s",
+            "86400",
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+        env=cli_env,
+    )
+    health = json.loads(ok.stdout)
+    assert health["status"] == "passed"
+
+    index = json.loads((output_dir / "paper_problem_loop_index.json").read_text(encoding="utf-8"))
+    audit_path = output_dir / index["latest"]["audit_json"]
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    (audit_path.parent / audit["llm_wiki_audit"]["artifacts"]["graph"]).unlink()
+
+    broken = subprocess.run(
+        [sys.executable, "-m", "agenticsciml.cli", "verify-paper-problem-loop", str(output_dir)],
+        text=True,
+        capture_output=True,
+        env=cli_env,
+    )
+    broken_health = json.loads(broken.stdout)
+
+    assert broken.returncode == 1
+    assert broken_health["status"] == "failed"
+    assert "missing llm wiki artifact: graph" in broken_health["issues"]
+
+
 def test_cli_paper_problem_loop_audit_repeat_continues_existing_round_index(
     tmp_path: Path, cli_env: dict[str, str]
 ) -> None:

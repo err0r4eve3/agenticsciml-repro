@@ -348,6 +348,19 @@ def cmd_paper_problem_loop_audit(args: argparse.Namespace) -> int:
     return 1 if args.fail_on_issues and had_issues else 0
 
 
+def cmd_verify_paper_problem_loop(args: argparse.Namespace) -> int:
+    from agenticsciml.paper_problem_loop import verify_paper_problem_loop
+
+    if args.max_age_s is not None and args.max_age_s < 0:
+        raise ValueError("--max-age-s must be >= 0")
+    result = verify_paper_problem_loop(
+        output_dir=Path(args.output_dir).resolve(),
+        max_age_s=args.max_age_s,
+    )
+    print(json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False))
+    return 0 if result["status"] == "passed" else 1
+
+
 def _next_repeat_round_index(base_output_dir: Path) -> int:
     if not base_output_dir.exists():
         return 1
@@ -754,6 +767,11 @@ def build_parser() -> argparse.ArgumentParser:
     paper_problem_loop.add_argument("--source-timeout-s", type=float, default=15.0)
     paper_problem_loop.add_argument("--fail-on-issues", action="store_true")
     paper_problem_loop.set_defaults(func=cmd_paper_problem_loop_audit)
+
+    verify_paper_problem_loop = sub.add_parser("verify-paper-problem-loop")
+    verify_paper_problem_loop.add_argument("output_dir")
+    verify_paper_problem_loop.add_argument("--max-age-s", type=float)
+    verify_paper_problem_loop.set_defaults(func=cmd_verify_paper_problem_loop)
 
     collect_sources = sub.add_parser("collect-paper-sources")
     collect_sources.add_argument("--output-dir", default="runs/paper-problem-loop")

@@ -59,6 +59,14 @@ PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python -m agenticsci
 路径、通过状态、issue 数、source candidate 数、prompt gate 计数和 Wiki audit 状态；JSON 给工具读取，
 Markdown 给人工快速审计最新轮次。
 
+生产巡检可直接检查最新轮次、索引摘要和 Wiki artifact 一致性：
+
+```bash
+PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python -m agenticsciml.cli verify-paper-problem-loop \
+  runs/paper-problem-loop \
+  --max-age-s 900
+```
+
 刷新后的 source candidates 会写入每轮 `source_candidates/*/{source_review,planner,reference_matrix,llm_context_pack}.json`，
 并在总审计中标记 `wiki_promotion_status=manual_review_required`。它们不会自动改写 LLM Wiki。
 每轮还会写入 `llm_wiki/llm_wiki_okf.json` 与 `llm_wiki/llm_wiki_audit.json`，验证 OKF

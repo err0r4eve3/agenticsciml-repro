@@ -38,6 +38,8 @@ OKF-like JSON 知识图谱。
   缺少任一 prompt control id 都会让总审计失败。
 - 循环新增顶层 `paper_problem_loop_index.json` 和 `paper_problem_loop_index.md`，汇总每轮 audit 路径、
   通过状态、issue 数、source candidate 数、prompt gate 计数和 Wiki audit 状态，作为长期运行的状态入口。
+- 新增 `verify-paper-problem-loop`，fail-closed 检查顶层索引、Markdown 摘要、最新 audit、LLM Wiki
+  OKF/audit/manual-edit artifacts 和可选最新轮时效，便于生产巡检直接返回非零状态。
 
 边界：
 
