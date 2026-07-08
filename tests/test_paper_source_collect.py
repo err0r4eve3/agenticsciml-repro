@@ -122,6 +122,18 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。",
         ),
         (
+            "Learning and discovering multiple solutions using physics-informed neural networks with random initialization and deep ensemble",
+            "PINNs discover multiple solutions and solution multiplicity in nonlinear DEs where Newton iteration is sensitive.",
+            "Audit PINN discovery of multiple nonlinear ODE/PDE solutions under initialization, ensemble diversity, and solver-refinement constraints.",
+            "审计 PINN 对非线性 ODE/PDE 多解的发现能力，并检查初始化、ensemble 多样性和求解器细化约束。",
+        ),
+        (
+            "DeepSeek vs. ChatGPT vs. Claude: A Comparative Study for Scientific Computing and Scientific Machine Learning Tasks",
+            "Large Language Models are compared on scientific computing and scientific machine learning decision tasks.",
+            "Benchmark LLM capability for scientific computing and SciML tasks while preserving model-specific failure modes and decision points.",
+            "评测 LLM 在 scientific computing 和 SciML 任务中的能力，同时保留模型特定失败模式和决策点。",
+        ),
+        (
             "Physics-Informed Machine Learning in Biomedical Science and Engineering",
             "Biomedical PIML reviews PINNs, NODEs and neural operators for biofluid mechanics and cell signaling.",
             "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints.",

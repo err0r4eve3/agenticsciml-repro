@@ -148,8 +148,14 @@ def _normalize(value: str) -> str:
 
 def _real_problem(title: str, summary: str) -> str:
     text = f"{title} {summary}".lower()
+    if any(term in text for term in ("deepseek", "chatgpt", "claude", "comparative study")) and (
+        "scientific computing" in text or "scientific machine learning" in text
+    ):
+        return "Benchmark LLM capability for scientific computing and SciML tasks while preserving model-specific failure modes and decision points."
     if "agent" in text or "llm" in text:
         return "Audit long-horizon agent or LLM workflows with verifiable outcomes and explicit failure boundaries."
+    if "multiple solutions" in text or "solution multiplicity" in text or "deep ensemble" in text:
+        return "Audit PINN discovery of multiple nonlinear ODE/PDE solutions under initialization, ensemble diversity, and solver-refinement constraints."
     if "meta-solver" in text or "meta solver" in text or "multi-objective" in text or "pareto" in text:
         return "Audit automated meta-solver discovery for time-dependent PDEs under accuracy, speed, memory, and preference-selection tradeoffs."
     if "newton" in text or "nonlinear solver" in text or "nonlinear system" in text:
@@ -187,8 +193,14 @@ def _real_problem(title: str, summary: str) -> str:
 
 def _real_problem_zh(title: str, summary: str) -> str:
     text = f"{title} {summary}".lower()
+    if any(term in text for term in ("deepseek", "chatgpt", "claude", "comparative study")) and (
+        "scientific computing" in text or "scientific machine learning" in text
+    ):
+        return "评测 LLM 在 scientific computing 和 SciML 任务中的能力，同时保留模型特定失败模式和决策点。"
     if "agent" in text or "llm" in text:
         return "审计长周期 agent 或 LLM 工作流，要求结果可验证并显式记录失败边界。"
+    if "multiple solutions" in text or "solution multiplicity" in text or "deep ensemble" in text:
+        return "审计 PINN 对非线性 ODE/PDE 多解的发现能力，并检查初始化、ensemble 多样性和求解器细化约束。"
     if "meta-solver" in text or "meta solver" in text or "multi-objective" in text or "pareto" in text:
         return "审计 time-dependent PDE 的自动 meta-solver 发现，并权衡精度、速度、内存和偏好选择。"
     if "newton" in text or "nonlinear solver" in text or "nonlinear system" in text:

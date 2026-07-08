@@ -66,6 +66,8 @@ OKF-like JSON 知识图谱。
   现在分别落到化学动力学 surrogate、biomedical modeling 和湍流生成式重建的具体审计问题。
 - Time-dependent nonlinear PDE meta-solver discovery 论文现在优先落到自动 meta-solver 多目标/Pareto
   取舍审计；plug-flow reactor 设计会稳定落到 reactor surrogate 审计。
+- PINN multiple-solution / deep ensemble 论文现在落到多解发现与初始化/ensemble 多样性审计；
+  DeepSeek/ChatGPT/Claude SciML 对比论文会落到 LLM 科学计算能力 benchmark 审计。
 
 边界：
 
