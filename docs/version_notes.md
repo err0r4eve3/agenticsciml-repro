@@ -44,7 +44,8 @@ OKF-like JSON 知识图谱。
 - repeat 循环中的 source candidates 现在按 `--source-candidate-limit` 成块轮转，并在 audit/index 中记录
   `source_candidate_offset` 与 `source_candidate_selection_ids`，避免长期运行只反复解析 source cache 前几条。
 - 顶层 index/health 会汇总 `source_candidate_seen_count`、`source_candidate_seen_ids`、
-  `source_candidate_available_count` 和 `source_candidate_coverage_ratio`，用于回查累计覆盖了多少不同论文候选。
+  `source_candidate_available_count` 和 `source_candidate_coverage_ratio`，其中 coverage ratio 按当前 source
+  collection candidate ids 与累计 seen ids 的交集计算，避免 source cache 刷新后比例虚高。
 
 边界：
 

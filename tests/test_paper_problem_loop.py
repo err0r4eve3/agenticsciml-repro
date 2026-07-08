@@ -115,6 +115,7 @@ def test_paper_problem_loop_audit_includes_source_collection_cache(tmp_path: Pat
     assert audit["source_collection"] == {
         "status": "collected",
         "candidate_count": 1,
+        "candidate_ids": ["source:2606.02427v1"],
         "issue_count": 0,
         "query": "au:Karniadakis",
         "created_at": "2026-07-09T00:00:00Z",
@@ -177,6 +178,7 @@ def test_cli_paper_problem_loop_audit_repeat_writes_round_dirs(tmp_path: Path, c
     assert health["latest_round_id"] == audit_paths[-1].parent.name
     assert health["issue_count"] == 0
     assert health["source_candidate_seen_count"] == 0
+    assert health["source_candidate_current_seen_count"] is None
     assert health["source_candidate_available_count"] is None
     assert health["source_candidate_coverage_ratio"] is None
 
@@ -250,11 +252,86 @@ def test_cli_paper_problem_loop_audit_repeat_rotates_source_candidates(
     assert index["latest"]["source_candidate_selection_ids"] == ["source:a3", "source:a4"]
     assert index["source_candidate_seen_count"] == 4
     assert index["source_candidate_seen_ids"] == ["source:a1", "source:a2", "source:a3", "source:a4"]
+    assert index["source_candidate_current_seen_count"] == 4
+    assert index["source_candidate_current_seen_ids"] == ["source:a1", "source:a2", "source:a3", "source:a4"]
     assert index["source_candidate_available_count"] == 4
     assert index["source_candidate_coverage_ratio"] == 1.0
     assert health["source_candidate_seen_count"] == 4
+    assert health["source_candidate_current_seen_count"] == 4
     assert health["source_candidate_available_count"] == 4
     assert health["source_candidate_coverage_ratio"] == 1.0
+
+
+def test_cli_paper_problem_loop_audit_source_coverage_uses_current_collection(
+    tmp_path: Path, cli_env: dict[str, str]
+) -> None:
+    output_dir = tmp_path / "paper loop"
+    source_cache = tmp_path / "source_collection.json"
+
+    def write_source(ids: list[str]) -> None:
+        source_cache.write_text(
+            json.dumps(
+                {
+                    "status": "collected",
+                    "candidate_count": len(ids),
+                    "issue_count": 0,
+                    "query": "agentic sciml",
+                    "created_at": "2026-07-09T00:00:00Z",
+                    "candidates": [
+                        {
+                            "id": source_id,
+                            "title": f"Agentic SciML Candidate {source_id}",
+                            "url": f"https://arxiv.org/abs/2606.{source_id}",
+                            "authors": ["Test Author"],
+                            "published": "2026-06-01",
+                            "summary": "Agentic scientific machine learning benchmark candidate.",
+                            "real_problem": "Audit real scientific ML planning coverage.",
+                            "real_problem_zh": "审计真实科学机器学习规划覆盖。",
+                        }
+                        for source_id in ids
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def run_one_round() -> None:
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "agenticsciml.cli",
+                "paper-problem-loop-audit",
+                "--output-dir",
+                str(output_dir),
+                "--source-collection-json",
+                str(source_cache),
+                "--source-candidate-limit",
+                "1",
+                "--repeat",
+                "--rounds",
+                "1",
+                "--interval-s",
+                "0",
+                "--fail-on-issues",
+            ],
+            check=True,
+            text=True,
+            capture_output=True,
+            env=cli_env,
+        )
+
+    write_source(["a1", "a2", "a3", "a4"])
+    run_one_round()
+    write_source(["b1", "b2", "b3", "b4"])
+    run_one_round()
+
+    index = json.loads((output_dir / "paper_problem_loop_index.json").read_text(encoding="utf-8"))
+
+    assert index["source_candidate_seen_count"] == 2
+    assert index["source_candidate_available_count"] == 4
+    assert index["source_candidate_current_seen_count"] == 1
+    assert index["source_candidate_coverage_ratio"] == 0.25
 
 
 def test_cli_verify_paper_problem_loop_health_checks_latest_artifacts(
