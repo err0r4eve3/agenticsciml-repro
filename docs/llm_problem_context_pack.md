@@ -74,6 +74,7 @@ PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python -m agenticsci
 `source_candidate_offset`、`source_candidate_selection_ids` 和 `wiki_promotion_status=manual_review_required`。
 每轮 generated LLM Wiki snapshot 会追加这些候选的双语 `source_candidate` 节点，仍保留
 `manual_review_required`，不自动写入 account Wiki 或 evaluator 事实层。
+同时写出 `llm_wiki/source_candidate_review_queue.json`，只列本轮待人工修正的候选节点和可编辑字段。
 顶层 index/health 还会汇总 `source_candidate_seen_count`、`source_candidate_available_count`、
 `source_candidate_coverage_ratio`、`source_candidate_pending_count` 和 `source_candidate_pending_ids`；
 coverage ratio 与 pending ids 都按当前 source collection 的 candidate ids 与累计 seen ids 的交集/差集计算。

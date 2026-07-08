@@ -24,6 +24,7 @@ def test_paper_problem_loop_audit_writes_passed_bilingual_artifact(tmp_path: Pat
     assert audit["llm_wiki_audit"]["status"] == "passed"
     assert audit["llm_wiki_audit"]["paper_problem_case_count"] == 10
     assert audit["llm_wiki_audit"]["source_candidate_node_count"] == 0
+    assert audit["llm_wiki_audit"]["source_candidate_review_queue_count"] == 0
     assert audit["llm_wiki_audit"]["manual_editing"] is True
     assert audit["llm_wiki_audit"]["persistence"] == "account_scoped_json"
     assert audit["llm_wiki_audit"]["manual_edit_roundtrip"]["status"] == "passed"
@@ -31,6 +32,7 @@ def test_paper_problem_loop_audit_writes_passed_bilingual_artifact(tmp_path: Pat
     assert audit["llm_wiki_audit"]["manual_edit_roundtrip"]["persistence"] == "account_scoped_json"
     assert (tmp_path / audit["llm_wiki_audit"]["artifacts"]["graph"]).exists()
     assert (tmp_path / audit["llm_wiki_audit"]["artifacts"]["audit"]).exists()
+    assert (tmp_path / audit["llm_wiki_audit"]["artifacts"]["source_candidate_review_queue"]).exists()
     manual_edit_path = tmp_path / audit["llm_wiki_audit"]["artifacts"]["manual_edit_roundtrip"]
     assert json.loads(manual_edit_path.read_text(encoding="utf-8"))["title"].endswith("manual edit audit")
     assert all(item["source_review_status"] == "ready_for_source_audit" for item in audit["results"])
@@ -126,6 +128,7 @@ def test_paper_problem_loop_audit_includes_source_collection_cache(tmp_path: Pat
     assert audit["source_candidate_context_ready_count"] == 1
     assert audit["source_candidate_manual_wiki_review_count"] == 1
     assert audit["llm_wiki_audit"]["source_candidate_node_count"] == 1
+    assert audit["llm_wiki_audit"]["source_candidate_review_queue_count"] == 1
     source_candidate = audit["source_candidate_results"][0]
     assert source_candidate["wiki_promotion_status"] == "manual_review_required"
     assert "bilingual_wiki_preserves_identifiers" in source_candidate["prompt_quality_control_ids"]
@@ -145,6 +148,24 @@ def test_paper_problem_loop_audit_includes_source_collection_cache(tmp_path: Pat
         edge["source"] == "source:2606.02427v1" and edge["target"] == "workflow:problem_intake"
         for edge in graph["edges"]
     )
+    queue = json.loads(
+        (tmp_path / "round" / audit["llm_wiki_audit"]["artifacts"]["source_candidate_review_queue"]).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert queue["status"] == "manual_review_required"
+    assert queue["graph_path"] == "llm_wiki/llm_wiki_okf.json"
+    assert queue["editable_fields"] == [
+        "title_zh",
+        "description",
+        "description_zh",
+        "real_problem",
+        "real_problem_zh",
+        "tags",
+        "tags_zh",
+        "wiki_promotion_status",
+    ]
+    assert queue["nodes"][0]["id"] == "source:2606.02427v1"
 
 
 def test_cli_paper_problem_loop_audit_repeat_writes_round_dirs(tmp_path: Path, cli_env: dict[str, str]) -> None:

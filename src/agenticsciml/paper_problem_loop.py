@@ -507,6 +507,7 @@ def _audit_payload(
             "issue_count": llm_wiki_audit.get("issue_count"),
             "paper_problem_case_count": llm_wiki_audit.get("paper_problem_case_count"),
             "source_candidate_node_count": llm_wiki_audit.get("source_candidate_node_count"),
+            "source_candidate_review_queue_count": llm_wiki_audit.get("source_candidate_review_queue_count"),
             "languages": llm_wiki_audit.get("languages"),
             "manual_editing": llm_wiki_audit.get("manual_editing"),
             "persistence": llm_wiki_audit.get("persistence"),
@@ -613,6 +614,19 @@ def _write_llm_wiki_audit(output_dir: Path, *, source_candidate_results: list[di
     source_candidate_nodes = [
         node for node in graph.get("nodes", []) if isinstance(node, dict) and node.get("type") == "source_candidate"
     ]
+    review_queue_path = output_dir / "llm_wiki" / "source_candidate_review_queue.json"
+    _atomic_write_text(
+        review_queue_path,
+        json.dumps(
+            _source_candidate_review_queue(
+                source_candidate_nodes=source_candidate_nodes,
+                graph_path=graph_path.relative_to(output_dir).as_posix(),
+            ),
+            indent=2,
+            ensure_ascii=False,
+            allow_nan=False,
+        ),
+    )
     edit_policy = graph.get("edit_policy") if isinstance(graph.get("edit_policy"), dict) else {}
     audit = {
         "artifact_type": "agenticsciml_llm_wiki_okf_audit",
@@ -622,6 +636,7 @@ def _write_llm_wiki_audit(output_dir: Path, *, source_candidate_results: list[di
         "paper_problem_case_count": len(paper_nodes),
         "source_candidate_node_count": len(source_candidate_nodes),
         "source_candidate_input_count": source_candidate_node_count,
+        "source_candidate_review_queue_count": len(source_candidate_nodes),
         "languages": graph.get("languages"),
         "manual_editing": edit_policy.get("manual_editing"),
         "persistence": edit_policy.get("persistence"),
@@ -630,6 +645,7 @@ def _write_llm_wiki_audit(output_dir: Path, *, source_candidate_results: list[di
             "graph": graph_path.relative_to(output_dir).as_posix(),
             "audit": audit_path.relative_to(output_dir).as_posix(),
             "manual_edit_roundtrip": manual_roundtrip["path"],
+            "source_candidate_review_queue": review_queue_path.relative_to(output_dir).as_posix(),
         },
     }
     _atomic_write_text(audit_path, json.dumps(audit, indent=2, ensure_ascii=False, allow_nan=False))
@@ -678,6 +694,45 @@ def _attach_source_candidate_wiki_nodes(graph: dict[str, Any], source_candidate_
         existing_ids.add(paper_id)
         count += 1
     return count
+
+
+def _source_candidate_review_queue(*, source_candidate_nodes: list[dict[str, Any]], graph_path: str) -> dict[str, Any]:
+    return {
+        "artifact_type": "agenticsciml_llm_wiki_source_candidate_review_queue",
+        "status": "manual_review_required" if source_candidate_nodes else "empty",
+        "graph_path": graph_path,
+        "node_count": len(source_candidate_nodes),
+        "editable_fields": [
+            "title_zh",
+            "description",
+            "description_zh",
+            "real_problem",
+            "real_problem_zh",
+            "tags",
+            "tags_zh",
+            "wiki_promotion_status",
+        ],
+        "claim_boundary": "Queue entries are planning context only until a human promotes them in the account Wiki.",
+        "nodes": [
+            {
+                key: node.get(key)
+                for key in (
+                    "id",
+                    "title",
+                    "title_zh",
+                    "description",
+                    "description_zh",
+                    "real_problem",
+                    "real_problem_zh",
+                    "tags",
+                    "tags_zh",
+                    "wiki_promotion_status",
+                    "source",
+                )
+            }
+            for node in source_candidate_nodes
+        ],
+    }
 
 
 def _manual_wiki_edit_roundtrip(graph: dict[str, Any], output_dir: Path) -> dict[str, Any]:
