@@ -86,6 +86,12 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "验证数据稀缺和 OOD 泛化约束下用于 PDE 求解的 physics-informed neural operator surrogate。",
         ),
         (
+            "Uncertainty Quantification in PINNs for Turbulent Flows: Bayesian Inference and Repulsive Ensembles",
+            "Bayesian PINNs, Monte Carlo dropout, and repulsive deep ensembles calibrate turbulent-flow inverse modeling uncertainty.",
+            "Audit uncertainty calibration for physics-informed turbulent-flow inverse modeling under Bayesian, dropout, and ensemble tradeoffs.",
+            "审计 physics-informed 湍流反问题建模中的不确定性校准，并权衡 Bayesian、dropout 和 ensemble 方法。",
+        ),
+        (
             "NeuroSEM: A hybrid framework for simulating multiphysics problems by coupling PINNs and spectral elements",
             "NeuroSEM integrates PINNs with the Spectral Element Method solver for turbulence-aware multiphysics simulation.",
             "Validate hybrid PINN and spectral-element workflows for coupled multiphysics simulation under data assimilation, solver integration, and turbulence robustness constraints.",

@@ -29,6 +29,7 @@ SOURCE_MAPPING_THEMES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("optimal_control", ("optimal control", "adjoint", "optimality")),
     ("safe_control", ("safe-control", "safe control", "stabilization", "adversarial", "disturbance", "game-theoretic", "stability")),
     ("spectral", ("spectral", "high-frequency", "frequency")),
+    ("uncertainty", ("uncertainty", "calibration", "bayesian", "dropout", "ensemble")),
     ("multiphysics", ("multiphysics", "multiscale")),
     ("earth_system", ("earth system", "esm", "bias-correction", "bias correction", "cadence")),
     ("solver", ("solver", "newton", "krylov", "preconditioner")),

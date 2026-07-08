@@ -156,6 +156,10 @@ def _real_problem(title: str, summary: str) -> str:
         return "Assess physics-informed operator networks for real-time optimal control of multi-agent dynamical systems under stability constraints."
     if "agent" in text or "llm" in text:
         return "Audit long-horizon agent or LLM workflows with verifiable outcomes and explicit failure boundaries."
+    if any(term in text for term in ("uncertainty quantification", "bayesian", "dropout", "repulsive ensemble")) and (
+        "pinn" in text or "physics-informed" in text or "turbulence" in text or "turbulent" in text
+    ):
+        return "Audit uncertainty calibration for physics-informed turbulent-flow inverse modeling under Bayesian, dropout, and ensemble tradeoffs."
     if "multiple solutions" in text or "solution multiplicity" in text or "deep ensemble" in text:
         return "Audit PINN discovery of multiple nonlinear ODE/PDE solutions under initialization, ensemble diversity, and solver-refinement constraints."
     if "meta-solver" in text or "meta solver" in text or "multi-objective" in text or "pareto" in text:
@@ -219,6 +223,10 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "评估 real-time optimal control 中的 physics-informed operator network，并检查多智能体动力系统稳定性约束。"
     if "agent" in text or "llm" in text:
         return "审计长周期 agent 或 LLM 工作流，要求结果可验证并显式记录失败边界。"
+    if any(term in text for term in ("uncertainty quantification", "bayesian", "dropout", "repulsive ensemble")) and (
+        "pinn" in text or "physics-informed" in text or "turbulence" in text or "turbulent" in text
+    ):
+        return "审计 physics-informed 湍流反问题建模中的不确定性校准，并权衡 Bayesian、dropout 和 ensemble 方法。"
     if "multiple solutions" in text or "solution multiplicity" in text or "deep ensemble" in text:
         return "审计 PINN 对非线性 ODE/PDE 多解的发现能力，并检查初始化、ensemble 多样性和求解器细化约束。"
     if "meta-solver" in text or "meta solver" in text or "multi-objective" in text or "pareto" in text:

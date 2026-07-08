@@ -84,6 +84,8 @@ OKF-like JSON 知识图谱。
   source candidates 若映射主题不一致会进入 `needs_manual_review` 并使循环 fail closed。PILNO/Laplace Neural
   Operator 论文现在会落到 small-data / OOD 的 physics-informed neural operator surrogate 审计，而不是误归 optimizer。
 - Mapping theme 匹配改为词边界匹配并允许简单复数，避免 `engineering` 误命中 `engine` 这类子串假阳性。
+- Bayesian PINNs / repulsive ensembles 的 turbulent-flow uncertainty quantification 论文现在落到不确定性校准审计，
+  不再因 `deep ensemble` 误归为多解发现。
 
 边界：
 
