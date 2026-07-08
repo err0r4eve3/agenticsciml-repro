@@ -5,7 +5,16 @@ import subprocess
 import sys
 from pathlib import Path
 
-from agenticsciml.paper_problem_loop import write_paper_problem_loop_audit
+from agenticsciml.paper_problem_loop import _mapping_themes, write_paper_problem_loop_audit
+
+
+def test_source_mapping_themes_ignore_substring_false_positives() -> None:
+    themes = _mapping_themes("tangent behavior in biomedical science and engineering with neural operators")
+
+    assert "agent" not in themes
+    assert "engine" not in themes
+    assert "biomedical" in themes
+    assert "operator_learning" in themes
 
 
 def test_paper_problem_loop_audit_writes_passed_bilingual_artifact(tmp_path: Path) -> None:

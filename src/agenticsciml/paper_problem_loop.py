@@ -1053,7 +1053,14 @@ def _source_mapping_audit(case: dict[str, object]) -> dict[str, Any]:
 
 def _mapping_themes(text: str) -> list[str]:
     normalized = text.lower()
-    return [theme for theme, terms in SOURCE_MAPPING_THEMES if any(term in normalized for term in terms)]
+    return [
+        theme for theme, terms in SOURCE_MAPPING_THEMES if any(_matches_mapping_term(normalized, term) for term in terms)
+    ]
+
+
+def _matches_mapping_term(normalized_text: str, term: str) -> bool:
+    pattern = rf"(?<![a-z0-9]){re.escape(term.lower())}s?(?![a-z0-9])"
+    return re.search(pattern, normalized_text) is not None
 
 
 def _source_candidate_case(candidate: dict[str, Any]) -> dict[str, object]:
