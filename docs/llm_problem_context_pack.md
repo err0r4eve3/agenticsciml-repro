@@ -36,6 +36,16 @@ PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python -m agenticsci
 写出 `agenticsciml_paper_problem_loop_audit.json` 与 `summary.md`。它不联网、不调用真实 LLM、
 不写 evaluator 证据。
 
+持续循环时加 `--repeat`，用 Ctrl-C 手动暂停；每轮写入一个 `round-*` 子目录：
+
+```bash
+PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python -m agenticsciml.cli paper-problem-loop-audit \
+  --output-dir runs/paper-problem-loop \
+  --repeat \
+  --interval-s 300 \
+  --fail-on-issues
+```
+
 ## Pack 内容
 
 pack 固定记录：

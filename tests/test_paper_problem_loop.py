@@ -48,3 +48,36 @@ def test_cli_paper_problem_loop_audit_writes_artifact(tmp_path: Path, cli_env: d
 
     assert audit_path == output_dir / "agenticsciml_paper_problem_loop_audit.json"
     assert audit["passed"] is True
+
+
+def test_cli_paper_problem_loop_audit_repeat_writes_round_dirs(tmp_path: Path, cli_env: dict[str, str]) -> None:
+    output_dir = tmp_path / "paper loop"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenticsciml.cli",
+            "paper-problem-loop-audit",
+            "--output-dir",
+            str(output_dir),
+            "--repeat",
+            "--rounds",
+            "2",
+            "--interval-s",
+            "0",
+            "--fail-on-issues",
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+        env=cli_env,
+    )
+
+    audit_paths = [Path(line) for line in result.stdout.splitlines() if line.strip()]
+
+    assert len(audit_paths) == 2
+    assert audit_paths[0].parent.parent == output_dir
+    assert audit_paths[1].parent.parent == output_dir
+    assert audit_paths[0].parent != audit_paths[1].parent
+    assert all(json.loads(path.read_text(encoding="utf-8"))["passed"] is True for path in audit_paths)

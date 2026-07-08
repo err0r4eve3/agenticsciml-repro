@@ -290,12 +290,35 @@ def cmd_build_llm_problem_context(args: argparse.Namespace) -> int:
 def cmd_paper_problem_loop_audit(args: argparse.Namespace) -> int:
     from agenticsciml.paper_problem_loop import write_paper_problem_loop_audit
 
-    result = write_paper_problem_loop_audit(
-        output_dir=Path(args.output_dir).resolve(),
-        case_limit=args.case_limit,
-    )
-    print(result["paths"]["audit_json"])
-    return 1 if args.fail_on_issues and result["audit"]["issues"] else 0
+    if args.rounds is not None and args.rounds < 1:
+        raise ValueError("--rounds must be >= 1")
+    if args.interval_s < 0:
+        raise ValueError("--interval-s must be >= 0")
+
+    base_output_dir = Path(args.output_dir).resolve()
+    had_issues = False
+    round_index = 0
+    try:
+        while True:
+            round_index += 1
+            output_dir = (
+                base_output_dir
+                if not args.repeat
+                else base_output_dir / f"round-{round_index:04d}-{time.strftime('%Y%m%d-%H%M%S')}"
+            )
+            result = write_paper_problem_loop_audit(
+                output_dir=output_dir,
+                case_limit=args.case_limit,
+            )
+            print(result["paths"]["audit_json"], flush=True)
+            had_issues = had_issues or bool(result["audit"]["issues"])
+            if not args.repeat or (args.rounds is not None and round_index >= args.rounds):
+                break
+            time.sleep(args.interval_s)
+    except KeyboardInterrupt:
+        print("paper-problem-loop-audit stopped by user", file=sys.stderr)
+        return 130
+    return 1 if args.fail_on_issues and had_issues else 0
 
 
 def cmd_plan_real_problem_closure(args: argparse.Namespace) -> int:
@@ -671,6 +694,9 @@ def build_parser() -> argparse.ArgumentParser:
     paper_problem_loop = sub.add_parser("paper-problem-loop-audit")
     paper_problem_loop.add_argument("--output-dir", default="runs/paper-problem-loop")
     paper_problem_loop.add_argument("--case-limit", type=int)
+    paper_problem_loop.add_argument("--repeat", action="store_true")
+    paper_problem_loop.add_argument("--rounds", type=int, help="with --repeat, stop after this many rounds")
+    paper_problem_loop.add_argument("--interval-s", type=float, default=60.0)
     paper_problem_loop.add_argument("--fail-on-issues", action="store_true")
     paper_problem_loop.set_defaults(func=cmd_paper_problem_loop_audit)
 
