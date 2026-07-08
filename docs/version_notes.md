@@ -24,12 +24,14 @@ OKF-like JSON 知识图谱。
 - 每个循环案例会额外写出 `source_review.json`、`planner.json`、`reference_matrix.json` 和
   `llm_context_pack.json`，总审计记录 `source_review_ready_count`，用于回查论文源元数据、
   benchmark 路由、reference matrix 和 prompt 控制项。
+- 新增 `collect-paper-sources`，通过 arXiv API 刷新本地 `paper_source_collection.json`；
+  `paper-problem-loop-audit --refresh-source-collection` 会在循环轮次前更新该 cache，并把
+  `source_collection` 摘要写入总审计。测试仍使用本地 Atom fixture，不联网。
 
 边界：
 
 - Wiki graph 是规划和检索上下文，不是 run artifact、evaluator score 或 scientific claim evidence。
-- 论文节点来自人工核对后的元数据，测试不联网；后续若要自动刷新论文列表，需要另加缓存、
-  审计时间戳和无网络测试替身。
+- 论文节点来自人工核对后的元数据；source collection 是候选源 cache，不会自动改写 Wiki 或 evaluator 事实层。
 - 手动保存走 account-scoped `wiki/llm_wiki_okf.json`；它是 LLM Wiki 规划上下文，不是 run
   artifact、评测证据或权限隔离边界。
 

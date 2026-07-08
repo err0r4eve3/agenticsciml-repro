@@ -33,14 +33,22 @@ PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python -m agenticsci
 ```
 
 该命令复用 `/api/problem-intake/plan` 的本地 planner 和 `build_llm_problem_context_pack`，
-写出 `agenticsciml_paper_problem_loop_audit.json` 与 `summary.md`。它不联网、不调用真实 LLM、
+写出 `agenticsciml_paper_problem_loop_audit.json` 与 `summary.md`。默认不联网、不调用真实 LLM、
 不写 evaluator 证据。
+
+需要刷新真实论文候选源时，先写本地 source collection cache：
+
+```bash
+PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python -m agenticsciml.cli collect-paper-sources \
+  --output-dir runs/paper-problem-loop
+```
 
 持续循环时加 `--repeat`，用 Ctrl-C 手动暂停；每轮写入一个 `round-*` 子目录：
 
 ```bash
 PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python -m agenticsciml.cli paper-problem-loop-audit \
   --output-dir runs/paper-problem-loop \
+  --refresh-source-collection \
   --repeat \
   --interval-s 300 \
   --fail-on-issues

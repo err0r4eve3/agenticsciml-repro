@@ -32,6 +32,7 @@ from agenticsciml.llm_smoke import DEFAULT_SMOKE_VARIANTS, run_llm_smoke, verify
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 from agenticsciml.paper_workflow_readiness import write_paper_workflow_readiness_bundle
 from agenticsciml.paper_gap_report import write_paper_gap_report
+from agenticsciml.paper_source_collect import DEFAULT_ARXIV_QUERY, write_paper_source_collection
 from agenticsciml.real_problem_closure import write_real_problem_closure_plan
 from agenticsciml.reference_capability_matrix import write_reference_capability_matrix
 from agenticsciml.reporting import write_sdk_trace_export, write_trace_summary
@@ -296,11 +297,23 @@ def cmd_paper_problem_loop_audit(args: argparse.Namespace) -> int:
         raise ValueError("--interval-s must be >= 0")
 
     base_output_dir = Path(args.output_dir).resolve()
+    source_collection_path = (
+        Path(args.source_collection_json).resolve()
+        if args.source_collection_json
+        else base_output_dir / "paper_source_collection.json"
+    )
     had_issues = False
     round_index = _next_repeat_round_index(base_output_dir) - 1 if args.repeat else 0
     try:
         while True:
             round_index += 1
+            if args.refresh_source_collection:
+                write_paper_source_collection(
+                    output_dir=source_collection_path.parent,
+                    query=args.source_query,
+                    max_results=args.source_limit,
+                    timeout_s=args.source_timeout_s,
+                )
             output_dir = (
                 base_output_dir
                 if not args.repeat
@@ -309,6 +322,7 @@ def cmd_paper_problem_loop_audit(args: argparse.Namespace) -> int:
             result = write_paper_problem_loop_audit(
                 output_dir=output_dir,
                 case_limit=args.case_limit,
+                source_collection_path=source_collection_path if source_collection_path.exists() else None,
             )
             print(result["paths"]["audit_json"], flush=True)
             had_issues = had_issues or bool(result["audit"]["issues"])
@@ -330,6 +344,17 @@ def _next_repeat_round_index(base_output_dir: Path) -> int:
         if path.is_dir() and len(parts) >= 2 and parts[0] == "round" and parts[1].isdigit():
             max_index = max(max_index, int(parts[1]))
     return max_index + 1
+
+
+def cmd_collect_paper_sources(args: argparse.Namespace) -> int:
+    result = write_paper_source_collection(
+        output_dir=Path(args.output_dir).resolve(),
+        query=args.query,
+        max_results=args.max_results,
+        timeout_s=args.timeout_s,
+    )
+    print(result["paths"]["collection_json"])
+    return 1 if args.fail_on_issues and result["collection"]["issues"] else 0
 
 
 def cmd_plan_real_problem_closure(args: argparse.Namespace) -> int:
@@ -708,8 +733,21 @@ def build_parser() -> argparse.ArgumentParser:
     paper_problem_loop.add_argument("--repeat", action="store_true")
     paper_problem_loop.add_argument("--rounds", type=int, help="with --repeat, stop after this many rounds")
     paper_problem_loop.add_argument("--interval-s", type=float, default=60.0)
+    paper_problem_loop.add_argument("--source-collection-json")
+    paper_problem_loop.add_argument("--refresh-source-collection", action="store_true")
+    paper_problem_loop.add_argument("--source-query", default=DEFAULT_ARXIV_QUERY)
+    paper_problem_loop.add_argument("--source-limit", type=int, default=20)
+    paper_problem_loop.add_argument("--source-timeout-s", type=float, default=15.0)
     paper_problem_loop.add_argument("--fail-on-issues", action="store_true")
     paper_problem_loop.set_defaults(func=cmd_paper_problem_loop_audit)
+
+    collect_sources = sub.add_parser("collect-paper-sources")
+    collect_sources.add_argument("--output-dir", default="runs/paper-problem-loop")
+    collect_sources.add_argument("--query", default=DEFAULT_ARXIV_QUERY)
+    collect_sources.add_argument("--max-results", type=int, default=20)
+    collect_sources.add_argument("--timeout-s", type=float, default=15.0)
+    collect_sources.add_argument("--fail-on-issues", action="store_true")
+    collect_sources.set_defaults(func=cmd_collect_paper_sources)
 
     real_problem = sub.add_parser("plan-real-problem-closure")
     real_problem.add_argument("benchmark_dir")

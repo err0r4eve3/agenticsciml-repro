@@ -70,6 +70,33 @@ def test_cli_paper_problem_loop_audit_writes_artifact(tmp_path: Path, cli_env: d
     assert audit["passed"] is True
 
 
+def test_paper_problem_loop_audit_includes_source_collection_cache(tmp_path: Path) -> None:
+    source_cache = tmp_path / "paper_source_collection.json"
+    source_cache.write_text(
+        json.dumps(
+            {
+                "status": "collected",
+                "candidate_count": 1,
+                "issue_count": 0,
+                "query": "au:Karniadakis",
+                "created_at": "2026-07-09T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = write_paper_problem_loop_audit(output_dir=tmp_path / "round", source_collection_path=source_cache)
+    audit = json.loads(Path(result["paths"]["audit_json"]).read_text(encoding="utf-8"))
+
+    assert audit["source_collection"] == {
+        "status": "collected",
+        "candidate_count": 1,
+        "issue_count": 0,
+        "query": "au:Karniadakis",
+        "created_at": "2026-07-09T00:00:00Z",
+    }
+
+
 def test_cli_paper_problem_loop_audit_repeat_writes_round_dirs(tmp_path: Path, cli_env: dict[str, str]) -> None:
     output_dir = tmp_path / "paper loop"
 

@@ -20,6 +20,7 @@ def write_paper_problem_loop_audit(
     *,
     output_dir: Path,
     case_limit: int | None = None,
+    source_collection_path: Path | None = None,
 ) -> dict[str, Any]:
     from agenticsciml.web.app import CURATED_PAPER_PROBLEM_CASES, ProblemIntakeRequest, _problem_intake_plan_payload
 
@@ -100,7 +101,8 @@ def write_paper_problem_loop_audit(
                 "artifacts": artifacts,
             }
         )
-    audit = _audit_payload(results)
+    source_collection = _read_source_collection(source_collection_path)
+    audit = _audit_payload(results, source_collection=source_collection)
     _atomic_write_text(output_dir / AUDIT_JSON, json.dumps(audit, indent=2, ensure_ascii=False, allow_nan=False))
     _atomic_write_text(output_dir / AUDIT_MD, _render_markdown(audit))
     return {
@@ -112,14 +114,14 @@ def write_paper_problem_loop_audit(
     }
 
 
-def _audit_payload(results: list[dict[str, Any]]) -> dict[str, Any]:
+def _audit_payload(results: list[dict[str, Any]], *, source_collection: dict[str, Any] | None = None) -> dict[str, Any]:
     status_counts: dict[str, int] = {}
     for item in results:
         status = str(item.get("planner_status"))
         status_counts[status] = status_counts.get(status, 0) + 1
     scores = [item["recommended_benchmark_score"] for item in results if isinstance(item.get("recommended_benchmark_score"), int)]
     issues = _audit_issues(results)
-    return {
+    payload = {
         "artifact_type": "agenticsciml_paper_problem_loop_audit",
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "case_count": len(results),
@@ -139,6 +141,15 @@ def _audit_payload(results: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "results": results,
     }
+    if source_collection is not None:
+        payload["source_collection"] = {
+            "status": source_collection.get("status"),
+            "candidate_count": source_collection.get("candidate_count"),
+            "issue_count": source_collection.get("issue_count"),
+            "query": source_collection.get("query"),
+            "created_at": source_collection.get("created_at"),
+        }
+    return payload
 
 
 def _audit_issues(results: list[dict[str, Any]]) -> list[str]:
@@ -178,6 +189,8 @@ def _render_markdown(audit: dict[str, Any]) -> str:
         f"- claim_boundary: {audit.get('claim_boundary')}",
         "",
     ]
+    if isinstance(audit.get("source_collection"), dict):
+        lines.extend([f"- source_collection: {audit['source_collection']}", ""])
     if audit.get("issues"):
         lines.extend(["## Issues", ""])
         lines.extend(f"- {issue}" for issue in audit["issues"])
@@ -232,6 +245,16 @@ def _write_case_artifacts(
 
 def _slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-") or "case"
+
+
+def _read_source_collection(path: Path | None) -> dict[str, Any] | None:
+    if path is None or not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {"status": "invalid_source_collection_json", "candidate_count": 0, "issue_count": 1}
+    return payload if isinstance(payload, dict) else {"status": "invalid_source_collection_json", "candidate_count": 0, "issue_count": 1}
 
 
 def _source_review(case: dict[str, object]) -> dict[str, Any]:
