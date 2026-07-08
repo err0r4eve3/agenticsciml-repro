@@ -71,6 +71,8 @@ PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python -m agenticsci
 刷新后的 source candidates 会按 repeat 轮次和 `--source-candidate-limit` 轮转，写入每轮
 `source_candidates/*/{source_review,planner,reference_matrix,llm_context_pack}.json`，并在总审计中记录
 `source_candidate_offset`、`source_candidate_selection_ids` 和 `wiki_promotion_status=manual_review_required`。
+顶层 index/health 还会汇总 `source_candidate_seen_count`、`source_candidate_available_count` 和
+`source_candidate_coverage_ratio`。
 它们不会自动改写 LLM Wiki。
 每轮还会写入 `llm_wiki/llm_wiki_okf.json` 与 `llm_wiki/llm_wiki_audit.json`，验证 OKF
 根字段、节点字段、双语论文问题字段、边引用和手动编辑持久化边界。

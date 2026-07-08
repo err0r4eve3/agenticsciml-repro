@@ -177,6 +177,8 @@ def test_cli_paper_problem_loop_audit_repeat_writes_round_dirs(tmp_path: Path, c
     assert health["latest_round_id"] == audit_paths[-1].parent.name
     assert health["issue_count"] == 0
     assert health["source_candidate_seen_count"] == 0
+    assert health["source_candidate_available_count"] is None
+    assert health["source_candidate_coverage_ratio"] is None
 
 
 def test_cli_paper_problem_loop_audit_repeat_rotates_source_candidates(
@@ -248,7 +250,11 @@ def test_cli_paper_problem_loop_audit_repeat_rotates_source_candidates(
     assert index["latest"]["source_candidate_selection_ids"] == ["source:a3", "source:a4"]
     assert index["source_candidate_seen_count"] == 4
     assert index["source_candidate_seen_ids"] == ["source:a1", "source:a2", "source:a3", "source:a4"]
+    assert index["source_candidate_available_count"] == 4
+    assert index["source_candidate_coverage_ratio"] == 1.0
     assert health["source_candidate_seen_count"] == 4
+    assert health["source_candidate_available_count"] == 4
+    assert health["source_candidate_coverage_ratio"] == 1.0
 
 
 def test_cli_verify_paper_problem_loop_health_checks_latest_artifacts(

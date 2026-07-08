@@ -139,6 +139,7 @@ def update_paper_problem_loop_index(*, index_path: Path, audit_path: Path, audit
     ]
     rounds.append(entry)
     source_candidate_seen_ids = _source_candidate_seen_ids(rounds)
+    source_candidate_available_count = _source_candidate_available_count(entry)
     index = {
         "artifact_type": "agenticsciml_paper_problem_loop_index",
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -147,6 +148,11 @@ def update_paper_problem_loop_index(*, index_path: Path, audit_path: Path, audit
         "failed_round_count": sum(1 for item in rounds if item.get("passed") is not True),
         "source_candidate_seen_count": len(source_candidate_seen_ids),
         "source_candidate_seen_ids": source_candidate_seen_ids,
+        "source_candidate_available_count": source_candidate_available_count,
+        "source_candidate_coverage_ratio": _source_candidate_coverage_ratio(
+            seen_count=len(source_candidate_seen_ids),
+            available_count=source_candidate_available_count,
+        ),
         "rounds": rounds,
     }
     _atomic_write_text(index_path, json.dumps(index, indent=2, ensure_ascii=False, allow_nan=False))
@@ -194,6 +200,8 @@ def verify_paper_problem_loop(*, output_dir: Path, max_age_s: float | None = Non
         "failed_round_count": index.get("failed_round_count"),
         "source_candidate_seen_count": index.get("source_candidate_seen_count"),
         "source_candidate_seen_ids": index.get("source_candidate_seen_ids"),
+        "source_candidate_available_count": index.get("source_candidate_available_count"),
+        "source_candidate_coverage_ratio": index.get("source_candidate_coverage_ratio"),
         "latest_round_id": latest.get("round_id"),
     }
 
@@ -315,6 +323,7 @@ def _loop_index_entry(root: Path, audit_path: Path, audit: dict[str, Any]) -> di
         "source_candidate_count": audit.get("source_candidate_count"),
         "source_candidate_offset": audit.get("source_candidate_offset"),
         "source_candidate_selection_ids": audit.get("source_candidate_selection_ids"),
+        "source_collection": audit.get("source_collection") if isinstance(audit.get("source_collection"), dict) else None,
         "prompt_quality_control_ready_count": audit.get("prompt_quality_control_ready_count"),
         "source_candidate_prompt_quality_control_ready_count": audit.get(
             "source_candidate_prompt_quality_control_ready_count"
@@ -338,6 +347,18 @@ def _source_candidate_seen_ids(rounds: list[Any]) -> list[str]:
     return ids
 
 
+def _source_candidate_available_count(entry: dict[str, Any]) -> int | None:
+    source_collection = entry.get("source_collection") if isinstance(entry.get("source_collection"), dict) else {}
+    value = source_collection.get("candidate_count")
+    return value if isinstance(value, int) and value >= 0 else None
+
+
+def _source_candidate_coverage_ratio(*, seen_count: int, available_count: int | None) -> float | None:
+    if not available_count:
+        return None
+    return round(min(seen_count, available_count) / available_count, 4)
+
+
 def _render_loop_index_markdown(index: dict[str, Any]) -> str:
     latest = index.get("latest") if isinstance(index.get("latest"), dict) else {}
     seen_ids = [str(item) for item in index.get("source_candidate_seen_ids") or []]
@@ -348,6 +369,7 @@ def _render_loop_index_markdown(index: dict[str, Any]) -> str:
         f"- Round count: {index.get('round_count')}",
         f"- Failed round count: {index.get('failed_round_count')}",
         f"- Source candidates seen: {index.get('source_candidate_seen_count')}",
+        f"- Source candidate coverage: {index.get('source_candidate_seen_count')}/{index.get('source_candidate_available_count')} ({index.get('source_candidate_coverage_ratio')})",
         f"- Recent source candidate ids: {', '.join(seen_ids[-20:])}",
         f"- Latest round: {latest.get('round_id')}",
         f"- Latest audit: `{latest.get('audit_json')}`",

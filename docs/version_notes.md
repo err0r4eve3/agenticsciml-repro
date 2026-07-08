@@ -43,7 +43,8 @@ OKF-like JSON 知识图谱。
 - 每轮循环会同步写出顶层 `paper_problem_loop_health.json`，保留最近一次 health 检查结果，避免只能靠人工命令回查。
 - repeat 循环中的 source candidates 现在按 `--source-candidate-limit` 成块轮转，并在 audit/index 中记录
   `source_candidate_offset` 与 `source_candidate_selection_ids`，避免长期运行只反复解析 source cache 前几条。
-- 顶层 index/health 会汇总 `source_candidate_seen_count` 和 `source_candidate_seen_ids`，用于回查累计覆盖了多少不同论文候选。
+- 顶层 index/health 会汇总 `source_candidate_seen_count`、`source_candidate_seen_ids`、
+  `source_candidate_available_count` 和 `source_candidate_coverage_ratio`，用于回查累计覆盖了多少不同论文候选。
 
 边界：
 
