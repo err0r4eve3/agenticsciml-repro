@@ -17,6 +17,7 @@ AUDIT_JSON = "agenticsciml_paper_problem_loop_audit.json"
 AUDIT_MD = "summary.md"
 LOOP_INDEX_JSON = "paper_problem_loop_index.json"
 LOOP_INDEX_MD = "paper_problem_loop_index.md"
+LOOP_HEALTH_JSON = "paper_problem_loop_health.json"
 
 
 def write_paper_problem_loop_audit(
@@ -176,6 +177,7 @@ def verify_paper_problem_loop(*, output_dir: Path, max_age_s: float | None = Non
     status = "passed" if not issues else "failed"
     return {
         "artifact_type": "agenticsciml_paper_problem_loop_health",
+        "checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "status": status,
         "issue_count": len(issues),
         "issues": issues,

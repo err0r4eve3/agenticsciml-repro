@@ -290,8 +290,10 @@ def cmd_build_llm_problem_context(args: argparse.Namespace) -> int:
 
 def cmd_paper_problem_loop_audit(args: argparse.Namespace) -> int:
     from agenticsciml.paper_problem_loop import (
+        LOOP_HEALTH_JSON,
         LOOP_INDEX_JSON,
         update_paper_problem_loop_index,
+        verify_paper_problem_loop,
         write_paper_problem_loop_audit,
     )
 
@@ -336,9 +338,15 @@ def cmd_paper_problem_loop_audit(args: argparse.Namespace) -> int:
                 audit_path=Path(result["paths"]["audit_json"]),
                 audit=result["audit"],
             )
+            health = verify_paper_problem_loop(output_dir=base_output_dir)
+            _atomic_write_text(
+                base_output_dir / LOOP_HEALTH_JSON,
+                json.dumps(health, indent=2, ensure_ascii=False, allow_nan=False),
+            )
             result["paths"]["loop_index_json"] = str((base_output_dir / LOOP_INDEX_JSON).resolve())
+            result["paths"]["loop_health_json"] = str((base_output_dir / LOOP_HEALTH_JSON).resolve())
             print(result["paths"]["audit_json"], flush=True)
-            had_issues = had_issues or bool(result["audit"]["issues"])
+            had_issues = had_issues or bool(result["audit"]["issues"]) or health["status"] != "passed"
             if not args.repeat or (args.rounds is not None and round_index >= args.rounds):
                 break
             time.sleep(args.interval_s)

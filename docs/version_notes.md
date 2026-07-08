@@ -40,6 +40,7 @@ OKF-like JSON 知识图谱。
   通过状态、issue 数、source candidate 数、prompt gate 计数和 Wiki audit 状态，作为长期运行的状态入口。
 - 新增 `verify-paper-problem-loop`，fail-closed 检查顶层索引、Markdown 摘要、最新 audit、LLM Wiki
   OKF/audit/manual-edit artifacts 和可选最新轮时效，便于生产巡检直接返回非零状态。
+- 每轮循环会同步写出顶层 `paper_problem_loop_health.json`，保留最近一次 health 检查结果，避免只能靠人工命令回查。
 
 边界：
 

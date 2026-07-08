@@ -55,9 +55,9 @@ PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python -m agenticsci
   --fail-on-issues
 ```
 
-循环会维护顶层 `paper_problem_loop_index.json` 和 `paper_problem_loop_index.md`，记录每轮 audit
-路径、通过状态、issue 数、source candidate 数、prompt gate 计数和 Wiki audit 状态；JSON 给工具读取，
-Markdown 给人工快速审计最新轮次。
+循环会维护顶层 `paper_problem_loop_index.json`、`paper_problem_loop_index.md` 和
+`paper_problem_loop_health.json`，记录每轮 audit 路径、通过状态、issue 数、source candidate 数、
+prompt gate 计数、Wiki audit 状态和最新 health 结果；JSON 给工具读取，Markdown 给人工快速审计最新轮次。
 
 生产巡检可直接检查最新轮次、索引摘要和 Wiki artifact 一致性：
 
