@@ -95,3 +95,35 @@ def test_cli_paper_problem_loop_audit_repeat_writes_round_dirs(tmp_path: Path, c
     assert audit_paths[1].parent.parent == output_dir
     assert audit_paths[0].parent != audit_paths[1].parent
     assert all(json.loads(path.read_text(encoding="utf-8"))["passed"] is True for path in audit_paths)
+
+
+def test_cli_paper_problem_loop_audit_repeat_continues_existing_round_index(
+    tmp_path: Path, cli_env: dict[str, str]
+) -> None:
+    output_dir = tmp_path / "paper loop"
+    (output_dir / "round-0002-old").mkdir(parents=True)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenticsciml.cli",
+            "paper-problem-loop-audit",
+            "--output-dir",
+            str(output_dir),
+            "--repeat",
+            "--rounds",
+            "1",
+            "--interval-s",
+            "0",
+            "--fail-on-issues",
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+        env=cli_env,
+    )
+
+    audit_path = Path(result.stdout.strip())
+
+    assert audit_path.parent.name.startswith("round-0003-")

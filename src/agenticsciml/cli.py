@@ -297,7 +297,7 @@ def cmd_paper_problem_loop_audit(args: argparse.Namespace) -> int:
 
     base_output_dir = Path(args.output_dir).resolve()
     had_issues = False
-    round_index = 0
+    round_index = _next_repeat_round_index(base_output_dir) - 1 if args.repeat else 0
     try:
         while True:
             round_index += 1
@@ -319,6 +319,17 @@ def cmd_paper_problem_loop_audit(args: argparse.Namespace) -> int:
         print("paper-problem-loop-audit stopped by user", file=sys.stderr)
         return 130
     return 1 if args.fail_on_issues and had_issues else 0
+
+
+def _next_repeat_round_index(base_output_dir: Path) -> int:
+    if not base_output_dir.exists():
+        return 1
+    max_index = 0
+    for path in base_output_dir.iterdir():
+        parts = path.name.split("-", 2)
+        if path.is_dir() and len(parts) >= 2 and parts[0] == "round" and parts[1].isdigit():
+            max_index = max(max_index, int(parts[1]))
+    return max_index + 1
 
 
 def cmd_plan_real_problem_closure(args: argparse.Namespace) -> int:
