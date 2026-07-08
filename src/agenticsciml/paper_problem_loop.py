@@ -15,6 +15,7 @@ from agenticsciml.storage import _atomic_write_text
 AUDIT_JSON = "agenticsciml_paper_problem_loop_audit.json"
 AUDIT_MD = "summary.md"
 LOOP_INDEX_JSON = "paper_problem_loop_index.json"
+LOOP_INDEX_MD = "paper_problem_loop_index.md"
 
 
 def write_paper_problem_loop_audit(
@@ -141,6 +142,7 @@ def update_paper_problem_loop_index(*, index_path: Path, audit_path: Path, audit
         "rounds": rounds,
     }
     _atomic_write_text(index_path, json.dumps(index, indent=2, ensure_ascii=False, allow_nan=False))
+    _atomic_write_text(index_path.with_name(LOOP_INDEX_MD), _render_loop_index_markdown(index))
     return index
 
 
@@ -192,6 +194,40 @@ def _loop_index_entry(root: Path, audit_path: Path, audit: dict[str, Any]) -> di
         if isinstance(audit.get("llm_wiki_audit"), dict)
         else None,
     }
+
+
+def _render_loop_index_markdown(index: dict[str, Any]) -> str:
+    latest = index.get("latest") if isinstance(index.get("latest"), dict) else {}
+    lines = [
+        "# Paper Problem Loop Index",
+        "",
+        f"- Updated at: {index.get('updated_at')}",
+        f"- Round count: {index.get('round_count')}",
+        f"- Failed round count: {index.get('failed_round_count')}",
+        f"- Latest round: {latest.get('round_id')}",
+        f"- Latest audit: `{latest.get('audit_json')}`",
+        f"- Latest status: passed={latest.get('passed')} issues={latest.get('issue_count')}",
+        f"- Latest cases/source candidates: {latest.get('case_count')}/{latest.get('source_candidate_count')}",
+        f"- Latest prompt gates: curated={latest.get('prompt_quality_control_ready_count')} source={latest.get('source_candidate_prompt_quality_control_ready_count')}",
+        f"- Latest LLM Wiki status: {latest.get('llm_wiki_status')}",
+        "",
+        "## Recent Rounds",
+        "",
+        "| round | passed | issues | source candidates | wiki | audit |",
+        "| --- | --- | ---: | ---: | --- | --- |",
+    ]
+    rounds = index.get("rounds") if isinstance(index.get("rounds"), list) else []
+    for item in rounds[-20:]:
+        if not isinstance(item, dict):
+            continue
+        lines.append(
+            "| "
+            f"{item.get('round_id')} | {item.get('passed')} | {item.get('issue_count')} | "
+            f"{item.get('source_candidate_count')} | {item.get('llm_wiki_status')} | "
+            f"`{item.get('audit_json')}` |"
+        )
+    lines.append("")
+    return "\n".join(lines)
 
 
 def _audit_payload(

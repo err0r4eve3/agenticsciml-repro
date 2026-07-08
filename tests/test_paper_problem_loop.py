@@ -158,6 +158,7 @@ def test_cli_paper_problem_loop_audit_repeat_writes_round_dirs(tmp_path: Path, c
 
     audit_paths = [Path(line) for line in result.stdout.splitlines() if line.strip()]
     index = json.loads((output_dir / "paper_problem_loop_index.json").read_text(encoding="utf-8"))
+    index_md = (output_dir / "paper_problem_loop_index.md").read_text(encoding="utf-8")
 
     assert len(audit_paths) == 2
     assert audit_paths[0].parent.parent == output_dir
@@ -168,6 +169,9 @@ def test_cli_paper_problem_loop_audit_repeat_writes_round_dirs(tmp_path: Path, c
     assert index["failed_round_count"] == 0
     assert index["latest"]["round_id"] == audit_paths[-1].parent.name
     assert index["latest"]["prompt_quality_control_ready_count"] == 10
+    assert "# Paper Problem Loop Index" in index_md
+    assert f"- Latest round: {audit_paths[-1].parent.name}" in index_md
+    assert f"`{audit_paths[-1].parent.name}/agenticsciml_paper_problem_loop_audit.json`" in index_md
 
 
 def test_cli_paper_problem_loop_audit_repeat_continues_existing_round_index(
