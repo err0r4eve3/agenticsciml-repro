@@ -52,6 +52,7 @@ def write_paper_problem_loop_audit(
                 expert_blueprint_id=expert_blueprint,
             )
         )
+        source_review = _source_review(case)
         matrix = build_reference_capability_matrix(
             problem_intake=intake,
             expert_blueprint_id=expert_blueprint,
@@ -66,6 +67,7 @@ def write_paper_problem_loop_audit(
             output_dir=output_dir,
             index=index,
             paper_id=str(case["id"]),
+            source_review=source_review,
             plan=plan,
             matrix=matrix,
             context=context,
@@ -87,6 +89,7 @@ def write_paper_problem_loop_audit(
                 "recommended_benchmark_score": top_candidate.get("score"),
                 "selected_algorithm_ids": plan.get("selected_algorithm_ids"),
                 "run_allowed": plan.get("run_allowed"),
+                "source_review_status": source_review.get("status"),
                 "reference_matrix_status": matrix.get("status"),
                 "llm_context_status": context.get("status"),
                 "prompt_quality_control_ids": [
@@ -122,6 +125,9 @@ def _audit_payload(results: list[dict[str, Any]]) -> dict[str, Any]:
         "case_count": len(results),
         "planner_status_counts": status_counts,
         "mean_recommended_benchmark_score": mean(scores) if scores else None,
+        "source_review_ready_count": sum(
+            1 for item in results if item.get("source_review_status") == "ready_for_source_audit"
+        ),
         "llm_context_ready_count": sum(1 for item in results if item.get("llm_context_status") == "ready_for_llm_context"),
         "reference_matrix_ready_count": sum(
             1 for item in results if item.get("reference_matrix_status") == "ready_for_offline_planning"
@@ -147,6 +153,8 @@ def _audit_issues(results: list[dict[str, Any]]) -> list[str]:
             issues.append(f"{paper_id} reference matrix is not ready")
         if not item.get("title_zh") or not item.get("real_problem_zh"):
             issues.append(f"{paper_id} missing bilingual wiki fields")
+        if item.get("source_review_status") != "ready_for_source_audit":
+            issues.append(f"{paper_id} source metadata is incomplete")
     fno = next((item for item in results if item.get("paper_id") == "paper:fourier_neural_operator_parametric_pdes"), None)
     if fno:
         selected = fno.get("selected_algorithm_ids") if isinstance(fno.get("selected_algorithm_ids"), list) else []
@@ -164,6 +172,7 @@ def _render_markdown(audit: dict[str, Any]) -> str:
         f"- case_count: {audit.get('case_count')}",
         f"- passed: {audit.get('passed')}",
         f"- planner_status_counts: {audit.get('planner_status_counts')}",
+        f"- source_review_ready_count: {audit.get('source_review_ready_count')}",
         f"- llm_context_ready_count: {audit.get('llm_context_ready_count')}",
         f"- reference_matrix_ready_count: {audit.get('reference_matrix_ready_count')}",
         f"- claim_boundary: {audit.get('claim_boundary')}",
@@ -184,6 +193,7 @@ def _render_markdown(audit: dict[str, Any]) -> str:
                 f"- title_zh: {item.get('title_zh')}",
                 f"- url: {item.get('url')}",
                 f"- real_problem_zh: {item.get('real_problem_zh')}",
+                f"- source_review_status: {item.get('source_review_status')}",
                 f"- planner_status: {item.get('planner_status')}",
                 f"- recommended_benchmark: {item.get('recommended_benchmark')} (score={item.get('recommended_benchmark_score')})",
                 f"- selected_algorithm_ids: {', '.join(item.get('selected_algorithm_ids') or [])}",
@@ -200,12 +210,14 @@ def _write_case_artifacts(
     output_dir: Path,
     index: int,
     paper_id: str,
+    source_review: dict[str, Any],
     plan: dict[str, Any],
     matrix: dict[str, Any],
     context: dict[str, Any],
 ) -> dict[str, str]:
     case_dir = output_dir / "cases" / f"{index:02d}-{_slug(paper_id.split(':')[-1])}"
     payloads = {
+        "source_review": source_review,
         "planner": plan,
         "reference_matrix": matrix,
         "llm_context_pack": context,
@@ -220,6 +232,28 @@ def _write_case_artifacts(
 
 def _slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-") or "case"
+
+
+def _source_review(case: dict[str, object]) -> dict[str, Any]:
+    missing = [
+        key
+        for key in ("id", "title", "url", "authors", "submitted", "real_problem", "real_problem_zh")
+        if not case.get(key)
+    ]
+    source_type = "arxiv" if str(case.get("url", "")).startswith("https://arxiv.org/abs/") else "publisher"
+    return {
+        "status": "incomplete_source_metadata" if missing else "ready_for_source_audit",
+        "source_type": source_type,
+        "missing_fields": missing,
+        "paper_id": case.get("id"),
+        "title": case.get("title"),
+        "url": case.get("url"),
+        "authors": case.get("authors"),
+        "submitted": case.get("submitted"),
+        "published": case.get("published"),
+        "real_problem": case.get("real_problem"),
+        "real_problem_zh": case.get("real_problem_zh"),
+    }
 
 
 def _problem_intake(case: dict[str, object], tags: list[str]) -> dict[str, object]:

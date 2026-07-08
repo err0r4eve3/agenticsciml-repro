@@ -18,15 +18,21 @@ def test_paper_problem_loop_audit_writes_passed_bilingual_artifact(tmp_path: Pat
     assert audit_path == tmp_path / "agenticsciml_paper_problem_loop_audit.json"
     assert audit["passed"] is True
     assert audit["case_count"] == 10
+    assert audit["source_review_ready_count"] == 10
     assert audit["llm_context_ready_count"] == 10
+    assert all(item["source_review_status"] == "ready_for_source_audit" for item in audit["results"])
     assert fno_case["recommended_benchmark"] == "reaction_diffusion_operator_faithful_small"
     assert "fno_lite_operator" in fno_case["selected_algorithm_ids"]
     assert (tmp_path / "summary.md").exists()
     assert fno_case["artifacts"] == {
+        "source_review": "cases/10-fourier-neural-operator-parametric-pdes/source_review.json",
         "planner": "cases/10-fourier-neural-operator-parametric-pdes/planner.json",
         "reference_matrix": "cases/10-fourier-neural-operator-parametric-pdes/reference_matrix.json",
         "llm_context_pack": "cases/10-fourier-neural-operator-parametric-pdes/llm_context_pack.json",
     }
+    assert json.loads((tmp_path / fno_case["artifacts"]["source_review"]).read_text(encoding="utf-8"))["status"] == (
+        "ready_for_source_audit"
+    )
     assert json.loads((tmp_path / fno_case["artifacts"]["planner"]).read_text(encoding="utf-8"))["status"] == (
         "catalog_benchmark_planned"
     )

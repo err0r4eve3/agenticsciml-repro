@@ -21,6 +21,9 @@ OKF-like JSON 知识图谱。
   planner 和 LLM context pack，生成本地循环审计 artifact。`needs_manual_benchmark` 会保留为正常
   planner 结果，不会被硬改成 catalog 映射。
 - `paper-problem-loop-audit --repeat` 会持续写入 `round-*` 子目录，直到用户 Ctrl-C 手动暂停。
+- 每个循环案例会额外写出 `source_review.json`、`planner.json`、`reference_matrix.json` 和
+  `llm_context_pack.json`，总审计记录 `source_review_ready_count`，用于回查论文源元数据、
+  benchmark 路由、reference matrix 和 prompt 控制项。
 
 边界：
 
