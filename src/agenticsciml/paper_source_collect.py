@@ -172,6 +172,12 @@ def _real_problem(title: str, summary: str) -> str:
         return "Compare PINN control formulations against adjoint or optimality-system baselines for PDE-constrained control."
     if "spectral bias" in text or "high-frequency" in text or "frequency-resolved" in text:
         return "Diagnose high-frequency failure modes in physics-informed or operator learning and test mitigation controls."
+    if "laplace neural operator" in text or "pilno" in text or "virtual inputs" in text or "out-of-distribution" in text:
+        return "Validate physics-informed neural operator surrogates for data-efficient PDE solving under small-data and out-of-distribution generalization constraints."
+    if ("neurosem" in text or "spectral element" in text or "sem solver" in text) and (
+        "pinn" in text or "physics-informed" in text or "multiphysics" in text
+    ):
+        return "Validate hybrid PINN and spectral-element workflows for coupled multiphysics simulation under data assimilation, solver integration, and turbulence robustness constraints."
     if any(term in text for term in ("sensor location", "sensor placement", "vortex-induced", "marine riser", "deepvivonet")):
         return "Optimize sparse sensor placement for vortex-induced vibration reconstruction and forecasting under transfer-learning constraints."
     if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical", "plug flow reactor", "reactor design")):
@@ -229,6 +235,12 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "对比 PINN 控制 formulation 与伴随法或最优性系统基线在 PDE 约束控制中的表现。"
     if "spectral bias" in text or "high-frequency" in text or "frequency-resolved" in text:
         return "诊断 physics-informed 或 operator learning 中的高频失效模式，并测试缓解控制。"
+    if "laplace neural operator" in text or "pilno" in text or "virtual inputs" in text or "out-of-distribution" in text:
+        return "验证数据稀缺和 OOD 泛化约束下用于 PDE 求解的 physics-informed neural operator surrogate。"
+    if ("neurosem" in text or "spectral element" in text or "sem solver" in text) and (
+        "pinn" in text or "physics-informed" in text or "multiphysics" in text
+    ):
+        return "验证混合 PINN 与 spectral-element 工作流在耦合 multiphysics 模拟中的数据同化、求解器集成和湍流鲁棒性。"
     if any(term in text for term in ("sensor location", "sensor placement", "vortex-induced", "marine riser", "deepvivonet")):
         return "优化 vortex-induced vibration 重建与 forecasting 的稀疏传感器布置，并检查 transfer-learning 约束。"
     if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical", "plug flow reactor", "reactor design")):

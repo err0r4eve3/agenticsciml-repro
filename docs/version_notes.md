@@ -80,6 +80,9 @@ OKF-like JSON 知识图谱。
 - LLM context pack 新增 `execution_prompt_contract`，为每个角色列出真实 LLM prompt 必须包含的
   problem/resource/role/model/input/forbidden/schema/evidence/prompt-control sections；paper loop 的 prompt gate
   会要求该 contract ready，避免只靠 prompt control 名称通过审计。
+- Source review 新增轻量 `mapping_audit`，会比较论文标题/摘要与 `real_problem` 的主题一致性；
+  source candidates 若映射主题不一致会进入 `needs_manual_review` 并使循环 fail closed。PILNO/Laplace Neural
+  Operator 论文现在会落到 small-data / OOD 的 physics-informed neural operator surrogate 审计，而不是误归 optimizer。
 
 边界：
 

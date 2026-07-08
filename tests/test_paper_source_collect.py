@@ -80,6 +80,18 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "诊断 physics-informed 或 operator learning 中的高频失效模式，并测试缓解控制。",
         ),
         (
+            "Physics-Informed Laplace Neural Operator for Solving Partial Differential Equations",
+            "PILNO uses virtual inputs for small-data and out-of-distribution PDE operator generalization.",
+            "Validate physics-informed neural operator surrogates for data-efficient PDE solving under small-data and out-of-distribution generalization constraints.",
+            "验证数据稀缺和 OOD 泛化约束下用于 PDE 求解的 physics-informed neural operator surrogate。",
+        ),
+        (
+            "NeuroSEM: A hybrid framework for simulating multiphysics problems by coupling PINNs and spectral elements",
+            "NeuroSEM integrates PINNs with the Spectral Element Method solver for turbulence-aware multiphysics simulation.",
+            "Validate hybrid PINN and spectral-element workflows for coupled multiphysics simulation under data assimilation, solver integration, and turbulence robustness constraints.",
+            "验证混合 PINN 与 spectral-element 工作流在耦合 multiphysics 模拟中的数据同化、求解器集成和湍流鲁棒性。",
+        ),
+        (
             "Retrofitting Earth System Models with Cadence-Limited Neural Operator Updates",
             "Online bias correction tendencies retrofit ESM predictions under runtime cadence limits.",
             "Audit online ML bias-correction for Earth-system models under stability, portability, and runtime cadence constraints.",

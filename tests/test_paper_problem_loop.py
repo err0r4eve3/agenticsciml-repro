@@ -131,6 +131,7 @@ def test_paper_problem_loop_audit_includes_source_collection_cache(tmp_path: Pat
     assert audit["llm_wiki_audit"]["source_candidate_node_count"] == 1
     assert audit["llm_wiki_audit"]["source_candidate_review_queue_count"] == 1
     source_candidate = audit["source_candidate_results"][0]
+    assert source_candidate["source_mapping_status"] == "aligned"
     assert source_candidate["wiki_promotion_status"] == "manual_review_required"
     assert source_candidate["prompt_assembly_ready"] is True
     assert "bilingual_wiki_preserves_identifiers" in source_candidate["prompt_quality_control_ids"]
@@ -138,6 +139,10 @@ def test_paper_problem_loop_audit_includes_source_collection_cache(tmp_path: Pat
         "source_candidates/01-2606-02427v1/llm_context_pack.json"
     )
     assert (tmp_path / "round" / source_candidate["artifacts"]["planner"]).exists()
+    source_review = json.loads((tmp_path / "round" / source_candidate["artifacts"]["source_review"]).read_text(encoding="utf-8"))
+    assert source_review["source_type"] == "arxiv"
+    assert source_review["mapping_audit"]["status"] == "aligned"
+    assert "operator_learning" in source_review["mapping_audit"]["matched_themes"]
     graph = json.loads((tmp_path / "round" / audit["llm_wiki_audit"]["artifacts"]["graph"]).read_text(encoding="utf-8"))
     nodes = {node["id"]: node for node in graph["nodes"]}
     wiki_node = nodes["source:2606.02427v1"]
@@ -171,6 +176,41 @@ def test_paper_problem_loop_audit_includes_source_collection_cache(tmp_path: Pat
         "wiki_promotion_status",
     ]
     assert queue["nodes"][0]["id"] == "source:2606.02427v1"
+
+
+def test_paper_problem_loop_audit_fails_on_unaligned_source_mapping(tmp_path: Path) -> None:
+    source_cache = tmp_path / "paper_source_collection.json"
+    source_cache.write_text(
+        json.dumps(
+            {
+                "status": "collected",
+                "candidate_count": 1,
+                "issue_count": 0,
+                "query": "au:Karniadakis",
+                "created_at": "2026-07-09T00:00:00Z",
+                "candidates": [
+                    {
+                        "id": "2602.12706v1",
+                        "title": "Physics-Informed Laplace Neural Operator for Solving Partial Differential Equations",
+                        "summary": "PILNO uses virtual inputs for small-data and OOD PDE operator generalization.",
+                        "url": "http://arxiv.org/abs/2602.12706v1",
+                        "authors": ["Heechang Kim", "George Em Karniadakis"],
+                        "published": "2026-02-13",
+                        "real_problem": "Audit long-horizon LLM workflows with verifiable outcomes.",
+                        "real_problem_zh": "审计长周期 LLM 工作流。",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = write_paper_problem_loop_audit(output_dir=tmp_path / "round", source_collection_path=source_cache)
+    audit = json.loads(Path(result["paths"]["audit_json"]).read_text(encoding="utf-8"))
+
+    assert audit["passed"] is False
+    assert audit["source_candidate_results"][0]["source_mapping_status"] == "needs_manual_review"
+    assert any("source mapping audit is not aligned" in issue for issue in audit["issues"])
 
 
 def test_cli_paper_problem_loop_audit_repeat_writes_round_dirs(tmp_path: Path, cli_env: dict[str, str]) -> None:

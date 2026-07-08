@@ -18,6 +18,30 @@ AUDIT_MD = "summary.md"
 LOOP_INDEX_JSON = "paper_problem_loop_index.json"
 LOOP_INDEX_MD = "paper_problem_loop_index.md"
 LOOP_HEALTH_JSON = "paper_problem_loop_health.json"
+SOURCE_MAPPING_THEMES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("llm", ("llm", "large language model", "chatgpt", "claude", "deepseek")),
+    ("agent", ("agent", "multi-agent", "agentic")),
+    ("sciml_workflow", ("sciml", "scientific ml", "scientific machine learning")),
+    ("operator_learning", ("operator", "deeponet", "fno", "neural operator", "laplace neural operator", "pilno", "surrogate", "parametric")),
+    ("physics_informed", ("physics-informed", "pinn", "physics residual", "physics-residual", "pde residual", "pde-constrained", "known physics")),
+    ("pde_workflow", ("pde", "partial differential", "wave equation", "physics-residual", "representation", "pde-constrained")),
+    ("ood_generalization", ("out-of-distribution", "ood", "small-data", "small data", "virtual input")),
+    ("optimal_control", ("optimal control", "adjoint", "optimality")),
+    ("safe_control", ("safe-control", "safe control", "stabilization", "adversarial", "disturbance", "game-theoretic", "stability")),
+    ("spectral", ("spectral", "high-frequency", "frequency")),
+    ("multiphysics", ("multiphysics", "multiscale")),
+    ("earth_system", ("earth system", "esm", "bias-correction", "bias correction", "cadence")),
+    ("solver", ("solver", "newton", "krylov", "preconditioner")),
+    ("chemical", ("chemical", "kinetics", "combustion", "reactor", "reactive")),
+    ("biomedical", ("biomedical", "biofluid", "cell signaling", "pharmacology")),
+    ("fluid", ("fluid", "turbulence", "wake", "vortex")),
+    ("inverse", ("inverse", "parameter", "source recovery")),
+    ("sensor", ("sensor", "sparse reconstruction", "riser")),
+    ("kan", ("kolmogorov", "kan", "kkan")),
+    ("fracture", ("fracture", "crack", "brittle")),
+    ("engine", ("diesel", "engine", "maintenance")),
+    ("spiking", ("spiking", "lif", "qif")),
+)
 
 
 def write_paper_problem_loop_audit(
@@ -97,6 +121,7 @@ def write_paper_problem_loop_audit(
                 "selected_algorithm_ids": plan.get("selected_algorithm_ids"),
                 "run_allowed": plan.get("run_allowed"),
                 "source_review_status": source_review.get("status"),
+                "source_mapping_status": _nested_text(source_review, "mapping_audit", "status"),
                 "reference_matrix_status": matrix.get("status"),
                 "llm_context_status": context.get("status"),
                 "prompt_quality_control_ids": _prompt_quality_control_ids(context),
@@ -451,6 +476,7 @@ def _audit_payload(
     issues = _audit_issues(results)
     issues += _prompt_quality_issues(results, prefix="case")
     if source_candidate_results is not None:
+        issues += _source_mapping_issues(source_candidate_results, prefix="source candidate")
         issues += _prompt_quality_issues(source_candidate_results, prefix="source candidate")
     if llm_wiki_audit is not None:
         issues += [f"llm wiki: {issue}" for issue in llm_wiki_audit.get("issues", [])]
@@ -532,6 +558,8 @@ def _audit_issues(results: list[dict[str, Any]]) -> list[str]:
             issues.append(f"{paper_id} missing bilingual wiki fields")
         if item.get("source_review_status") != "ready_for_source_audit":
             issues.append(f"{paper_id} source metadata is incomplete")
+        if item.get("source_mapping_status") != "aligned":
+            issues.append(f"{paper_id} source mapping audit is not aligned")
     fno = next((item for item in results if item.get("paper_id") == "paper:fourier_neural_operator_parametric_pdes"), None)
     if fno:
         selected = fno.get("selected_algorithm_ids") if isinstance(fno.get("selected_algorithm_ids"), list) else []
@@ -539,6 +567,15 @@ def _audit_issues(results: list[dict[str, Any]]) -> list[str]:
             issues.append("FNO paper should map to reaction_diffusion_operator_faithful_small")
         if "fno_lite_operator" not in selected:
             issues.append("FNO paper should select fno_lite_operator")
+    return issues
+
+
+def _source_mapping_issues(items: list[dict[str, Any]], *, prefix: str) -> list[str]:
+    issues: list[str] = []
+    for item in items:
+        item_id = item.get("paper_id") or item.get("title") or "unknown"
+        if item.get("source_mapping_status") != "aligned":
+            issues.append(f"{prefix} {item_id} source mapping audit is not aligned")
     return issues
 
 
@@ -815,11 +852,12 @@ def _source_candidate_results(
             resource_constraints=_resource_constraints(),
             reference_capability_matrix=matrix,
         )
+        source_review = _source_review(case)
         artifacts = _write_case_artifacts(
             output_dir=output_dir,
             index=index,
             paper_id=str(case["id"]),
-            source_review=_source_review(case),
+            source_review=source_review,
             plan=plan,
             matrix=matrix,
             context=context,
@@ -837,7 +875,8 @@ def _source_candidate_results(
                 "expert_blueprint_id": expert_blueprint,
                 "planner_status": plan.get("status"),
                 "recommended_benchmark": _nested_text(plan, "recommended_benchmark", "name"),
-                "source_review_status": _source_review(case).get("status"),
+                "source_review_status": source_review.get("status"),
+                "source_mapping_status": _nested_text(source_review, "mapping_audit", "status"),
                 "reference_matrix_status": matrix.get("status"),
                 "llm_context_status": context.get("status"),
                 "prompt_quality_control_ids": _prompt_quality_control_ids(context),
@@ -978,20 +1017,43 @@ def _source_review(case: dict[str, object]) -> dict[str, Any]:
         for key in ("id", "title", "url", "authors", "submitted", "real_problem", "real_problem_zh")
         if not case.get(key)
     ]
-    source_type = "arxiv" if str(case.get("url", "")).startswith("https://arxiv.org/abs/") else "publisher"
+    source_type = "arxiv" if re.match(r"https?://arxiv\.org/abs/", str(case.get("url", ""))) else "publisher"
+    mapping_audit = _source_mapping_audit(case)
     return {
         "status": "incomplete_source_metadata" if missing else "ready_for_source_audit",
         "source_type": source_type,
         "missing_fields": missing,
         "paper_id": case.get("id"),
         "title": case.get("title"),
+        "summary": case.get("summary"),
         "url": case.get("url"),
         "authors": case.get("authors"),
         "submitted": case.get("submitted"),
         "published": case.get("published"),
         "real_problem": case.get("real_problem"),
         "real_problem_zh": case.get("real_problem_zh"),
+        "mapping_audit": mapping_audit,
     }
+
+
+def _source_mapping_audit(case: dict[str, object]) -> dict[str, Any]:
+    source_text = " ".join(str(case.get(key) or "") for key in ("title", "summary"))
+    problem_text = " ".join(str(case.get(key) or "") for key in ("real_problem", "real_problem_zh"))
+    source_themes = _mapping_themes(source_text)
+    problem_themes = _mapping_themes(problem_text)
+    matched = sorted(set(source_themes) & set(problem_themes))
+    return {
+        "status": "aligned" if matched else "needs_manual_review",
+        "source_themes": source_themes,
+        "real_problem_themes": problem_themes,
+        "matched_themes": matched,
+        "claim_boundary": "Theme overlap is a lightweight mapping audit, not proof of scientific correctness.",
+    }
+
+
+def _mapping_themes(text: str) -> list[str]:
+    normalized = text.lower()
+    return [theme for theme, terms in SOURCE_MAPPING_THEMES if any(term in normalized for term in terms)]
 
 
 def _source_candidate_case(candidate: dict[str, Any]) -> dict[str, object]:
