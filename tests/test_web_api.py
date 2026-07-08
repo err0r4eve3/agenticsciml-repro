@@ -181,6 +181,35 @@ def test_llm_wiki_okf_endpoint_exposes_editable_graph_with_recent_paper_hooks() 
         assert edge["description"]
 
 
+def test_llm_wiki_okf_manual_edits_persist_per_account(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTICSCIML_ACCOUNTS_ROOT", str(tmp_path / "accounts"))
+    client = TestClient(create_app())
+
+    generated = client.get("/api/llm-wiki/okf", params={"account_id": "wiki-user"}).json()
+    edited = {**generated, "title": "Manual Wiki Title"}
+
+    save_response = client.post(
+        "/api/llm-wiki/okf",
+        json={"account_id": "wiki-user", "payload": edited},
+    )
+    saved_response = client.get("/api/llm-wiki/okf", params={"account_id": "wiki-user"})
+    regenerated_response = client.get(
+        "/api/llm-wiki/okf",
+        params={"account_id": "wiki-user", "generated": "true"},
+    )
+    invalid_response = client.post(
+        "/api/llm-wiki/okf",
+        json={"account_id": "wiki-user", "payload": {"type": "not-okf"}},
+    )
+
+    assert save_response.status_code == 200
+    assert save_response.json()["saved"] is True
+    assert save_response.json()["payload"]["edit_policy"]["persistence"] == "account_scoped_json"
+    assert saved_response.json()["title"] == "Manual Wiki Title"
+    assert regenerated_response.json()["title"] == generated["title"]
+    assert invalid_response.status_code == 400
+
+
 def test_problem_intake_plans_benchmark_and_strategy_seeds() -> None:
     client = TestClient(create_app())
 

@@ -391,6 +391,11 @@ class AccountCreateRequest(BaseModel):
     display_name: str | None = Field(default=None, max_length=80)
 
 
+class LlmWikiSaveRequest(BaseModel):
+    account_id: str | None = None
+    payload: dict[str, Any]
+
+
 @dataclass(slots=True)
 class RunRecord:
     run_id: str
@@ -652,8 +657,19 @@ def create_app() -> FastAPI:
         return {"workspaces": _code_server_workspaces(account_id=account_id, run_id=run_id, output_dir=output_dir)}
 
     @app.get("/api/llm-wiki/okf")
-    def llm_wiki_okf() -> dict[str, object]:
+    def llm_wiki_okf(
+        account_id: str | None = Query(default=None),
+        generated: bool = Query(default=False),
+    ) -> dict[str, object]:
+        if account_id and not generated:
+            saved = _read_account_llm_wiki(account_id)
+            if saved is not None:
+                return saved
         return _llm_wiki_okf_payload()
+
+    @app.post("/api/llm-wiki/okf")
+    def save_llm_wiki_okf(request: LlmWikiSaveRequest) -> dict[str, object]:
+        return _save_account_llm_wiki(request.account_id, request.payload)
 
     @app.get("/api/solver/settings")
     def solver_settings() -> dict[str, object]:
@@ -1654,6 +1670,58 @@ def _custom_benchmarks_dir(account_id: str | None) -> Path:
         path = REPO_ROOT / ".agenticsciml" / "custom_benchmarks"
     path.mkdir(parents=True, exist_ok=True)
     return path.resolve()
+
+
+def _account_llm_wiki_path(account_id: str | None) -> Path:
+    path = _account_root(account_id) / "wiki"
+    path.mkdir(parents=True, exist_ok=True)
+    return (path / "llm_wiki_okf.json").resolve(strict=False)
+
+
+def _read_account_llm_wiki(account_id: str | None) -> dict[str, object] | None:
+    payload = _read_optional_json(_account_llm_wiki_path(account_id))
+    return payload if payload is None else dict(payload)
+
+
+def _save_account_llm_wiki(account_id: str | None, payload: dict[str, Any]) -> dict[str, object]:
+    validated = _validated_llm_wiki_payload(payload)
+    path = _account_llm_wiki_path(account_id)
+    tmp_path = path.with_name(f".{path.name}.{threading.get_ident()}.{time.time_ns()}.tmp")
+    tmp_path.write_text(json.dumps(validated, ensure_ascii=False, allow_nan=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp_path, path)
+    return {
+        "saved": True,
+        "account_id": _resolve_account_id(account_id),
+        "path": str(path),
+        "payload": validated,
+    }
+
+
+def _validated_llm_wiki_payload(payload: dict[str, Any]) -> dict[str, object]:
+    try:
+        encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="LLM Wiki payload must be strict JSON") from exc
+    if len(encoded.encode("utf-8")) > 1_000_000:
+        raise HTTPException(status_code=413, detail="LLM Wiki payload is too large")
+    required = {
+        "type": str,
+        "title": str,
+        "description": str,
+        "timestamp": str,
+        "tags": list,
+        "nodes": list,
+        "edges": list,
+    }
+    for key, expected_type in required.items():
+        if not isinstance(payload.get(key), expected_type):
+            raise HTTPException(status_code=400, detail=f"LLM Wiki payload missing {key}")
+    if payload.get("type") != "llm_wiki_knowledge_graph":
+        raise HTTPException(status_code=400, detail="LLM Wiki payload type must be llm_wiki_knowledge_graph")
+    validated = dict(payload)
+    edit_policy = validated.get("edit_policy") if isinstance(validated.get("edit_policy"), dict) else {}
+    validated["edit_policy"] = {**edit_policy, "manual_editing": True, "persistence": "account_scoped_json"}
+    return validated
 
 
 def _ensure_account(account_id: str | None, display_name: str | None = None) -> dict[str, object]:

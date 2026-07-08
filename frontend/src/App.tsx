@@ -725,8 +725,17 @@ const api = {
     const payload = await getJson<{ workspaces: CodeWorkspaceOption[] }>(`/api/code-server/workspaces?${params.toString()}`);
     return payload.workspaces;
   },
-  async getLlmWikiOkf(): Promise<LlmWikiOkfPayload> {
-    return getJson<LlmWikiOkfPayload>("/api/llm-wiki/okf");
+  async getLlmWikiOkf(accountId: string, generated = false): Promise<LlmWikiOkfPayload> {
+    const params = new URLSearchParams();
+    params.set("account_id", accountId);
+    if (generated) params.set("generated", "true");
+    return getJson<LlmWikiOkfPayload>(`/api/llm-wiki/okf?${params.toString()}`);
+  },
+  async saveLlmWikiOkf(accountId: string, payload: LlmWikiOkfPayload): Promise<{ payload: LlmWikiOkfPayload; saved: boolean }> {
+    return postJson<{ payload: LlmWikiOkfPayload; saved: boolean }>("/api/llm-wiki/okf", {
+      account_id: accountId,
+      payload
+    });
   }
 };
 
@@ -786,6 +795,7 @@ export function App() {
   const [wikiPayload, setWikiPayload] = useState<LlmWikiOkfPayload | null>(null);
   const [wikiText, setWikiText] = useState("");
   const [wikiCopied, setWikiCopied] = useState(false);
+  const [wikiSaved, setWikiSaved] = useState(false);
   const [agentCollapsed, setAgentCollapsed] = useState(false);
   const [agentPanelWidth, setAgentPanelWidth] = useState(AGENT_PANEL_DEFAULT_WIDTH);
   const [pendingRealAction, setPendingRealAction] = useState<SolverAction | null>(null);
@@ -837,6 +847,7 @@ export function App() {
     setWorkspaceScope("account");
     refreshRuns().catch((exc) => setError(String(exc)));
     refreshCodeWorkspaces().catch((exc) => setError(String(exc)));
+    refreshWiki().catch((exc) => setError(String(exc)));
   }, [activeAccountId]);
 
   useEffect(() => {
@@ -974,16 +985,35 @@ export function App() {
     setSelectedWorkspaceId((current) => (current && workspaces.some((workspace) => workspace.id === current) ? current : null));
   }
 
-  async function refreshWiki() {
-    const payload = await api.getLlmWikiOkf();
+  async function refreshWiki(generated = false) {
+    const payload = await api.getLlmWikiOkf(activeAccountId, generated);
     setWikiPayload(payload);
     setWikiText(JSON.stringify(payload, null, 2));
     setWikiCopied(false);
+    setWikiSaved(false);
   }
 
   async function copyWikiText() {
     await navigator.clipboard?.writeText(wikiText);
     setWikiCopied(true);
+  }
+
+  async function saveWiki() {
+    const parsed = parseJsonObject(wikiText);
+    if (!parsed) {
+      setError("Wiki JSON invalid，无法保存。");
+      return;
+    }
+    try {
+      setError(null);
+      const result = await api.saveLlmWikiOkf(activeAccountId, parsed as unknown as LlmWikiOkfPayload);
+      setWikiPayload(result.payload);
+      setWikiText(JSON.stringify(result.payload, null, 2));
+      setWikiSaved(true);
+      setWikiCopied(false);
+    } catch (exc) {
+      setError(String(exc));
+    }
   }
 
   async function selectWorkspaceFromCodeServerAction(action: SolverAction) {
@@ -1652,13 +1682,16 @@ export function App() {
           <LlmWikiPage
             copied={wikiCopied}
             payload={wikiPayload}
+            saved={wikiSaved}
             text={wikiText}
             onChange={(value) => {
               setWikiText(value);
               setWikiCopied(false);
+              setWikiSaved(false);
             }}
             onCopy={copyWikiText}
-            onRefresh={refreshWiki}
+            onRefresh={() => refreshWiki(true)}
+            onSave={saveWiki}
           />
         </section>
       ) : null}
@@ -1744,17 +1777,21 @@ function PageHeader({ subtitle, title }: { subtitle: string; title: string }) {
 function LlmWikiPage({
   copied,
   payload,
+  saved,
   text,
   onChange,
   onCopy,
-  onRefresh
+  onRefresh,
+  onSave
 }: {
   copied: boolean;
   payload: LlmWikiOkfPayload | null;
+  saved: boolean;
   text: string;
   onChange: (value: string) => void;
   onCopy: () => void;
   onRefresh: () => void;
+  onSave: () => void;
 }) {
   const parsed = parseJsonObject(text);
   const nodes = Array.isArray(parsed?.nodes) ? parsed.nodes : [];
@@ -1809,6 +1846,10 @@ function LlmWikiPage({
             <button className="icon-text-button secondary" type="button" onClick={onRefresh}>
               <RefreshCw size={15} />
               Regenerate
+            </button>
+            <button className="icon-text-button secondary" disabled={!isOkf} type="button" onClick={onSave}>
+              <FileText size={15} />
+              {saved ? "Saved" : "Save"}
             </button>
             <button className="icon-text-button" disabled={!text.trim()} type="button" onClick={onCopy}>
               <FileText size={15} />
