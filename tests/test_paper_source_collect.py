@@ -42,6 +42,23 @@ def test_parse_arxiv_atom_builds_bilingual_real_problem_candidate() -> None:
     assert entries[0]["real_problem_zh"]
 
 
+def test_parse_arxiv_atom_prefers_solver_problem_for_krylov_operator_paper() -> None:
+    feed = ATOM_FIXTURE.replace(
+        "Spectral Audit of In-Context Operator Networks",
+        "NSPOD: Accelerating Krylov solvers via DeepONet-learned POD subspaces",
+    ).replace(
+        "Existing evaluations of neural operators rely primarily on prediction error.",
+        "A neural operator preconditioner accelerates Krylov linear solvers for PDE systems.",
+    )
+
+    entry = parse_arxiv_atom(feed)[0]
+
+    assert entry["real_problem"] == (
+        "Evaluate whether learned solver aids accelerate PDE linear systems while preserving convergence and generalization."
+    )
+    assert entry["real_problem_zh"] == "评估学习型求解器辅助是否能加速 PDE 线性系统，同时保持收敛性和泛化能力。"
+
+
 def test_collect_paper_sources_cli_writes_failure_cache_without_network(tmp_path: Path, cli_env: dict[str, str]) -> None:
     result = subprocess.run(
         [

@@ -150,6 +150,8 @@ def _real_problem(title: str, summary: str) -> str:
     text = f"{title} {summary}".lower()
     if "agent" in text or "llm" in text:
         return "Audit long-horizon agent or LLM workflows with verifiable outcomes and explicit failure boundaries."
+    if any(term in text for term in ("krylov", "preconditioner", "linear solver", "linear system")):
+        return "Evaluate whether learned solver aids accelerate PDE linear systems while preserving convergence and generalization."
     if "operator" in text:
         return "Evaluate neural operator reliability beyond average prediction error using stability and fidelity diagnostics."
     if "turbulence" in text or "fluid" in text:
@@ -163,6 +165,8 @@ def _real_problem_zh(title: str, summary: str) -> str:
     text = f"{title} {summary}".lower()
     if "agent" in text or "llm" in text:
         return "审计长周期 agent 或 LLM 工作流，要求结果可验证并显式记录失败边界。"
+    if any(term in text for term in ("krylov", "preconditioner", "linear solver", "linear system")):
+        return "评估学习型求解器辅助是否能加速 PDE 线性系统，同时保持收敛性和泛化能力。"
     if "operator" in text:
         return "用稳定性和保真度诊断评估神经算子可靠性，而不只看平均预测误差。"
     if "turbulence" in text or "fluid" in text:

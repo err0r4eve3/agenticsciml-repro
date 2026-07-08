@@ -53,6 +53,8 @@ OKF-like JSON 知识图谱。
   `source_candidate_available_count`、`source_candidate_coverage_ratio`、`source_candidate_pending_count` 和
   `source_candidate_pending_ids`，其中 coverage ratio 与 pending ids 按当前 source collection candidate ids 与
   累计 seen ids 的交集/差集计算，避免 source cache 刷新后比例虚高并直接暴露待覆盖候选。
+- Source collection 的现实问题映射现在优先识别 `Krylov`、preconditioner 和 linear solver/system
+  论文，避免这类数值求解器加速论文因为同时包含 neural operator 关键词而被归到过宽的可靠性诊断问题。
 
 边界：
 
