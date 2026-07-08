@@ -148,7 +148,7 @@ def test_llm_wiki_okf_endpoint_exposes_editable_graph_with_recent_paper_hooks() 
     assert payload["languages"] == ["en", "zh-CN"]
     assert payload["generator"]["uses_network"] is False
     assert payload["edit_policy"]["manual_editing"] is True
-    assert payload["edit_policy"]["persistence"] == "client_side_editor_only"
+    assert payload["edit_policy"]["persistence"] == "account_scoped_json"
     assert payload["author_scan"]["qile_jiang_post_agenticsciml_exact_author_article_found"] is False
     assert payload["author_scan"]["curated_paper_problem_case_count"] == 10
 

@@ -2816,7 +2816,7 @@ def _llm_wiki_okf_payload() -> dict[str, object]:
         },
         "edit_policy": {
             "manual_editing": True,
-            "persistence": "client_side_editor_only",
+            "persistence": "account_scoped_json",
             "claim_boundary": "Edited wiki text is planning context, not benchmark evidence.",
         },
         "author_scan": {
