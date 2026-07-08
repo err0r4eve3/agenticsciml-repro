@@ -176,6 +176,7 @@ def test_cli_paper_problem_loop_audit_repeat_writes_round_dirs(tmp_path: Path, c
     assert health["status"] == "passed"
     assert health["latest_round_id"] == audit_paths[-1].parent.name
     assert health["issue_count"] == 0
+    assert health["source_candidate_seen_count"] == 0
 
 
 def test_cli_paper_problem_loop_audit_repeat_rotates_source_candidates(
@@ -238,12 +239,16 @@ def test_cli_paper_problem_loop_audit_repeat_rotates_source_candidates(
     first = json.loads(audit_paths[0].read_text(encoding="utf-8"))
     second = json.loads(audit_paths[1].read_text(encoding="utf-8"))
     index = json.loads((output_dir / "paper_problem_loop_index.json").read_text(encoding="utf-8"))
+    health = json.loads((output_dir / "paper_problem_loop_health.json").read_text(encoding="utf-8"))
 
     assert first["source_candidate_offset"] == 0
     assert second["source_candidate_offset"] == 2
     assert first["source_candidate_selection_ids"] == ["source:a1", "source:a2"]
     assert second["source_candidate_selection_ids"] == ["source:a3", "source:a4"]
     assert index["latest"]["source_candidate_selection_ids"] == ["source:a3", "source:a4"]
+    assert index["source_candidate_seen_count"] == 4
+    assert index["source_candidate_seen_ids"] == ["source:a1", "source:a2", "source:a3", "source:a4"]
+    assert health["source_candidate_seen_count"] == 4
 
 
 def test_cli_verify_paper_problem_loop_health_checks_latest_artifacts(

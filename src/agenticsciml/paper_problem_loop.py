@@ -138,12 +138,15 @@ def update_paper_problem_loop_index(*, index_path: Path, audit_path: Path, audit
         if isinstance(item, dict) and item.get("audit_json") != entry["audit_json"]
     ]
     rounds.append(entry)
+    source_candidate_seen_ids = _source_candidate_seen_ids(rounds)
     index = {
         "artifact_type": "agenticsciml_paper_problem_loop_index",
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "round_count": len(rounds),
         "latest": rounds[-1],
         "failed_round_count": sum(1 for item in rounds if item.get("passed") is not True),
+        "source_candidate_seen_count": len(source_candidate_seen_ids),
+        "source_candidate_seen_ids": source_candidate_seen_ids,
         "rounds": rounds,
     }
     _atomic_write_text(index_path, json.dumps(index, indent=2, ensure_ascii=False, allow_nan=False))
@@ -189,6 +192,8 @@ def verify_paper_problem_loop(*, output_dir: Path, max_age_s: float | None = Non
         "latest_audit_json": str(audit_path),
         "round_count": index.get("round_count"),
         "failed_round_count": index.get("failed_round_count"),
+        "source_candidate_seen_count": index.get("source_candidate_seen_count"),
+        "source_candidate_seen_ids": index.get("source_candidate_seen_ids"),
         "latest_round_id": latest.get("round_id"),
     }
 
@@ -320,14 +325,30 @@ def _loop_index_entry(root: Path, audit_path: Path, audit: dict[str, Any]) -> di
     }
 
 
+def _source_candidate_seen_ids(rounds: list[Any]) -> list[str]:
+    seen: set[str] = set()
+    ids: list[str] = []
+    for item in rounds:
+        if not isinstance(item, dict):
+            continue
+        for source_id in item.get("source_candidate_selection_ids") or []:
+            if isinstance(source_id, str) and source_id not in seen:
+                seen.add(source_id)
+                ids.append(source_id)
+    return ids
+
+
 def _render_loop_index_markdown(index: dict[str, Any]) -> str:
     latest = index.get("latest") if isinstance(index.get("latest"), dict) else {}
+    seen_ids = [str(item) for item in index.get("source_candidate_seen_ids") or []]
     lines = [
         "# Paper Problem Loop Index",
         "",
         f"- Updated at: {index.get('updated_at')}",
         f"- Round count: {index.get('round_count')}",
         f"- Failed round count: {index.get('failed_round_count')}",
+        f"- Source candidates seen: {index.get('source_candidate_seen_count')}",
+        f"- Recent source candidate ids: {', '.join(seen_ids[-20:])}",
         f"- Latest round: {latest.get('round_id')}",
         f"- Latest audit: `{latest.get('audit_json')}`",
         f"- Latest status: passed={latest.get('passed')} issues={latest.get('issue_count')}",
