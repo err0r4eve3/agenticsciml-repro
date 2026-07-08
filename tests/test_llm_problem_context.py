@@ -52,6 +52,11 @@ def test_llm_problem_context_pack_assigns_bounded_agent_roles_without_claim() ->
     assert "champion selection" in pack["orchestrator_owned_decisions"]
     assert "claim gate" in pack["orchestrator_owned_decisions"]
     assert pack["problem_decomposition"]["metric"] == "relative_l2"
+    prompt_controls = {item["control_id"]: item for item in pack["prompt_quality_controls"]}
+    assert "paper_context_is_non_authoritative" in prompt_controls
+    assert "diagnostics_match_problem_family" in prompt_controls
+    assert "prediction error alone" in prompt_controls["diagnostics_match_problem_family"]["paper_informed_reason"]
+    assert "benchmark names" in prompt_controls["bilingual_wiki_preserves_identifiers"]["requirement"]
 
 
 def test_llm_problem_context_pack_blocks_incomplete_intake_and_resource_limits() -> None:
@@ -88,6 +93,7 @@ def test_write_llm_problem_context_pack_outputs_json_and_markdown(tmp_path: Path
     assert markdown_path == tmp_path / LLM_PROBLEM_CONTEXT_PACK_MD
     assert pack["status"] == "ready_for_llm_context"
     assert "# LLM Problem Context Pack" in markdown
+    assert "## Prompt Quality Controls" in markdown
     assert "root_engineer" in markdown
 
 

@@ -481,9 +481,13 @@ type LlmWikiOkfPayload = {
   okf_version: string;
   type: string;
   title: string;
+  title_zh?: string;
   description: string;
+  description_zh?: string;
   tags: string[];
+  tags_zh?: string[];
   timestamp: string;
+  languages?: string[];
   generator?: {
     name?: string;
     mode?: string;
@@ -500,10 +504,15 @@ type LlmWikiOkfPayload = {
     id: string;
     type: string;
     title: string;
+    title_zh?: string;
     description: string;
+    description_zh?: string;
     tags: string[];
+    tags_zh?: string[];
     timestamp: string;
     source?: Record<string, unknown>;
+    real_problem?: string;
+    real_problem_zh?: string;
   }>;
   edges: Array<{
     source: string;
@@ -1750,7 +1759,9 @@ function LlmWikiPage({
   const parsed = parseJsonObject(text);
   const nodes = Array.isArray(parsed?.nodes) ? parsed.nodes : [];
   const edges = Array.isArray(parsed?.edges) ? parsed.edges : [];
-  const externalPapers = nodes.filter((node) => isRecord(node) && node.type === "external_paper");
+  const paperProblemCases = nodes.filter(
+    (node) => isRecord(node) && (node.type === "paper_problem_case" || node.type === "external_paper")
+  );
   const isOkf = Boolean(
     parsed &&
       parsed.type === "llm_wiki_knowledge_graph" &&
@@ -1764,8 +1775,8 @@ function LlmWikiPage({
     <section className="wiki-content">
       <section className="wiki-head">
         <div>
-          <p className="eyebrow">Agent-generated graph</p>
-          <h2>{payload?.title ?? "AgenticSciML LLM Wiki Knowledge Graph"}</h2>
+          <p className="eyebrow">Agent-generated bilingual graph</p>
+          <h2>{payload?.title_zh ?? payload?.title ?? "AgenticSciML LLM Wiki Knowledge Graph"}</h2>
           <span>{payload?.generator?.source_boundary ?? "Repository catalog plus reviewed paper metadata."}</span>
         </div>
         <StatusBadge tone={isOkf ? "good" : "bad"}>{isOkf ? "OKF valid" : "JSON invalid"}</StatusBadge>
@@ -1775,14 +1786,16 @@ function LlmWikiPage({
           <div className="metric-grid compact">
             <Metric label="nodes" value={String(nodes.length)} />
             <Metric label="edges" value={String(edges.length)} />
-            <Metric label="papers" value={String(externalPapers.length)} />
+            <Metric label="paper cases" value={String(paperProblemCases.length)} />
             <Metric label="version" value={payload?.okf_version ?? "0.1"} />
           </div>
           <div className="wiki-node-list">
-            {externalPapers.map((node) => (
+            {paperProblemCases.map((node) => (
               <div className="wiki-node-row" key={String(node.id)}>
-                <strong>{String(node.title)}</strong>
-                <span>{String(node.description)}</span>
+                <strong>{String(node.title_zh ?? node.title)}</strong>
+                <span>{String(node.description_zh ?? node.description)}</span>
+                {typeof node.real_problem_zh === "string" && <small>{node.real_problem_zh}</small>}
+                <em>{String(node.title)}</em>
               </div>
             ))}
           </div>

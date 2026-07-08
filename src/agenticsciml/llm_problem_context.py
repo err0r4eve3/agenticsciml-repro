@@ -17,6 +17,58 @@ LLM_PROBLEM_CONTEXT_CLAIM_BOUNDARY = (
     "it does not validate a solution, execute a provider call, or support a scientific claim."
 )
 REQUIRED_RESOURCE_CONSTRAINTS = ("cpu", "gpu", "timeout_s", "dependency_limits", "data_limits")
+PROMPT_QUALITY_CONTROLS: tuple[dict[str, object], ...] = (
+    {
+        "control_id": "paper_context_is_non_authoritative",
+        "requirement": (
+            "Treat LLM Wiki paper_problem_case entries as bilingual planning context only; evaluator contracts, "
+            "benchmark guidelines, and run artifacts remain authoritative."
+        ),
+        "paper_informed_reason": (
+            "AgenticSciML-style retrieval can guide proposals, but relevance and evaluator-backed outcomes decide evidence."
+        ),
+    },
+    {
+        "control_id": "diagnostics_match_problem_family",
+        "requirement": (
+            "For PDE/operator problems, ask for residual, boundary, smoothness, stability, spectral, or sensitivity "
+            "diagnostics when those diagnostics match the problem family."
+        ),
+        "paper_informed_reason": (
+            "Recent spectral-audit and warm-start papers show that prediction error alone can hide operator or solver failures."
+        ),
+    },
+    {
+        "control_id": "explicit_failure_and_risk_fields",
+        "requirement": (
+            "Every code-consumed LLM response must expose expected effects, failure modes, risks, and artifact references "
+            "instead of hidden chain-of-thought."
+        ),
+        "paper_informed_reason": (
+            "Long-horizon agent evaluation and real-problem closure require verifiable outcomes and auditable blockers."
+        ),
+    },
+    {
+        "control_id": "model_routing_and_budget_visibility",
+        "requirement": (
+            "Prompts should preserve role, model-setting, budget, and provider-boundary metadata so model choice is "
+            "auditable rather than implicit."
+        ),
+        "paper_informed_reason": (
+            "Scientific-computing LLM comparisons support explicit model routing instead of assuming one model is best."
+        ),
+    },
+    {
+        "control_id": "bilingual_wiki_preserves_identifiers",
+        "requirement": (
+            "Bilingual Wiki context may include Chinese explanations, but code symbols, benchmark names, algorithm ids, "
+            "artifact paths, and schema keys stay in English."
+        ),
+        "paper_informed_reason": (
+            "Manual LLM Wiki editing should improve human comprehension without corrupting machine-readable contracts."
+        ),
+    },
+)
 
 
 ROLE_TASKS: tuple[dict[str, object], ...] = (
@@ -241,6 +293,7 @@ def build_llm_problem_context_pack(
             "visual artifact interpretation when actual image inputs are available",
             "artifact-grounded rationale summary",
         ],
+        "prompt_quality_controls": [dict(item) for item in PROMPT_QUALITY_CONTROLS],
         "reference_capability_matrix": reference_matrix,
         "blockers": blockers,
         "prompt_injection_boundary": (
@@ -310,6 +363,15 @@ def render_llm_problem_context_pack_markdown(pack: dict[str, Any]) -> str:
             f"tier={role.get('recommended_model_tier')}"
         )
         lines.append(f"- expected_output_schema: {_format_markdown_value(role.get('expected_output_schema'))}")
+        lines.append("")
+    lines.extend(["## Prompt Quality Controls", ""])
+    for item in pack.get("prompt_quality_controls", []):
+        if not isinstance(item, dict):
+            continue
+        lines.append(f"### {item.get('control_id')}")
+        lines.append("")
+        lines.append(f"- requirement: {item.get('requirement')}")
+        lines.append(f"- paper_informed_reason: {item.get('paper_informed_reason')}")
         lines.append("")
     if pack.get("blockers"):
         lines.extend(["## Blockers", ""])

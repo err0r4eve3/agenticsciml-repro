@@ -37,6 +37,8 @@ pack 固定记录：
   sandbox execution、artifact writes、trace summary、claim gate 和 budget enforcement。
 - `llm_owned_judgments`：方法假设映射、受控代码生成、批判/修复诊断、真实图像输入可用时的视觉解释、
   artifact-grounded rationale summary。
+- `prompt_quality_controls`：论文上下文非权威、PDE/operator 诊断匹配、失败/风险字段显式化、
+  模型路由和预算可审计、双语 Wiki 保留英文 schema/benchmark/algorithm/path 标识。
 - `blockers`：缺失 problem intake 字段、专家蓝图或 CPU/GPU/timeout/dependency/data limits 时保持 blocked。
 
 ## 边界

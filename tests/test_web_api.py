@@ -139,20 +139,34 @@ def test_llm_wiki_okf_endpoint_exposes_editable_graph_with_recent_paper_hooks() 
     assert payload["okf_version"] == "0.1"
     assert payload["type"] == "llm_wiki_knowledge_graph"
     assert payload["title"]
+    assert payload["title_zh"]
     assert payload["description"]
+    assert payload["description_zh"]
     assert payload["tags"]
+    assert payload["tags_zh"]
     assert payload["timestamp"]
+    assert payload["languages"] == ["en", "zh-CN"]
     assert payload["generator"]["uses_network"] is False
     assert payload["edit_policy"]["manual_editing"] is True
     assert payload["edit_policy"]["persistence"] == "client_side_editor_only"
     assert payload["author_scan"]["qile_jiang_post_agenticsciml_exact_author_article_found"] is False
+    assert payload["author_scan"]["curated_paper_problem_case_count"] == 10
 
     nodes = {node["id"]: node for node in payload["nodes"]}
     assert "project:agenticsciml" in nodes
     assert "workflow:trace_summary_quality_gate" in nodes
+    assert "paper:agenticsciml_collaborative_agents" in nodes
     assert "paper:spectral_audit_in_context_operator_networks" in nodes
     assert "paper:turbulence_closure_pinn_solver_agnostic" in nodes
+    assert "paper:fourier_neural_operator_parametric_pdes" in nodes
     assert "benchmark:cylinder_wake_reconstruction_faithful_small" in nodes
+    paper_problem_nodes = [node for node in nodes.values() if node["type"] == "paper_problem_case"]
+    assert len(paper_problem_nodes) == 10
+    for node in paper_problem_nodes:
+        assert node["title_zh"]
+        assert node["description_zh"]
+        assert node["real_problem"]
+        assert node["real_problem_zh"]
     for node in nodes.values():
         assert node["type"]
         assert node["title"]
@@ -208,6 +222,32 @@ def test_problem_intake_plans_benchmark_and_strategy_seeds() -> None:
         item["algorithm"]["id"] == "paper_cylinder_bandlimited_filter" and item["selected"]
         for item in payload["algorithm_rankings"]
     )
+
+
+def test_problem_intake_prefers_fno_operator_path_for_fourier_neural_operator_problem() -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/problem-intake/plan",
+        json={
+            "problem_statement": (
+                "Fourier Neural Operator for parametric PDE families. Build a fast surrogate solver for "
+                "Burgers, Darcy, and Navier-Stokes style gridded fields using spectral operator kernels."
+            ),
+            "requirements": "Prefer an operator-learning benchmark and keep the run local and deterministic.",
+            "evaluation_criteria": "Relative L2 plus operator fidelity diagnostics.",
+            "data_description": "Public paper-derived problem statement and local gridded proxy fields.",
+            "mode": "mock",
+            "target_solution_count": 6,
+            "parallel_mutations": 2,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "catalog_benchmark_planned"
+    assert payload["recommended_benchmark"]["name"] == "reaction_diffusion_operator_faithful_small"
+    assert "fno_lite_operator" in payload["selected_algorithm_ids"]
 
 
 def test_problem_intake_custom_benchmark_generates_runnable_evaluator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

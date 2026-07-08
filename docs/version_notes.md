@@ -5,13 +5,23 @@
 ## 2026-07-09 LLM Wiki OKF Graph
 
 本次新增 ChatUI 左侧功能栏 `Wiki` 页面和 `/api/llm-wiki/okf`，把项目结构、S1 task、
-benchmark、algorithm seed、claim gate 与近期 AgenticSciML 作者论文整理成可手动编辑的
+benchmark、algorithm seed、claim gate 与真实论文/现实问题整理成可手动编辑的双语
 OKF-like JSON 知识图谱。
+
+追加迭代：
+
+- Wiki graph 现在包含 `languages=["en", "zh-CN"]`、根对象中文标题/描述/标签，以及 10 个
+  `paper_problem_case` 节点。每个论文节点都保存英文标题/摘要、中文标题/摘要、英文现实问题、
+  中文现实问题和来源 URL，便于 LLM 读取时同时获得方法语义和应用边界。
+- 前端 Wiki 索引页显示双语论文-问题案例，右侧 JSON textarea 仍可手动修正、复制和重新生成。
+  手动编辑只存在于当前浏览器状态，不写入 run artifact 或 evaluator 事实层。
+- `build-llm-problem-context` 输出新增 `prompt_quality_controls`，把论文启发转成可审计的提示词控制项：
+  论文上下文非权威、PDE/operator 诊断匹配、失败/风险字段显式化、模型路由/预算可见、双语 Wiki 保留英文机器标识。
 
 边界：
 
 - Wiki graph 是规划和检索上下文，不是 run artifact、evaluator score 或 scientific claim evidence。
-- 近期论文节点来自人工核对后的元数据，测试不联网；后续若要自动刷新论文列表，需要另加缓存、
+- 论文节点来自人工核对后的元数据，测试不联网；后续若要自动刷新论文列表，需要另加缓存、
   审计时间戳和无网络测试替身。
 - 前端当前只提供 client-side 手动编辑和复制；跨会话保存需要以后走 account-scoped 文件写入。
 
