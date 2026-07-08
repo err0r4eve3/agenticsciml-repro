@@ -157,12 +157,17 @@ def test_cli_paper_problem_loop_audit_repeat_writes_round_dirs(tmp_path: Path, c
     )
 
     audit_paths = [Path(line) for line in result.stdout.splitlines() if line.strip()]
+    index = json.loads((output_dir / "paper_problem_loop_index.json").read_text(encoding="utf-8"))
 
     assert len(audit_paths) == 2
     assert audit_paths[0].parent.parent == output_dir
     assert audit_paths[1].parent.parent == output_dir
     assert audit_paths[0].parent != audit_paths[1].parent
     assert all(json.loads(path.read_text(encoding="utf-8"))["passed"] is True for path in audit_paths)
+    assert index["round_count"] == 2
+    assert index["failed_round_count"] == 0
+    assert index["latest"]["round_id"] == audit_paths[-1].parent.name
+    assert index["latest"]["prompt_quality_control_ready_count"] == 10
 
 
 def test_cli_paper_problem_loop_audit_repeat_continues_existing_round_index(

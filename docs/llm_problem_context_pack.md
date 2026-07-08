@@ -55,6 +55,9 @@ PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python -m agenticsci
   --fail-on-issues
 ```
 
+循环会维护顶层 `paper_problem_loop_index.json`，记录每轮 audit 路径、通过状态、issue 数、
+source candidate 数、prompt gate 计数和 Wiki audit 状态。
+
 刷新后的 source candidates 会写入每轮 `source_candidates/*/{source_review,planner,reference_matrix,llm_context_pack}.json`，
 并在总审计中标记 `wiki_promotion_status=manual_review_required`。它们不会自动改写 LLM Wiki。
 每轮还会写入 `llm_wiki/llm_wiki_okf.json` 与 `llm_wiki/llm_wiki_audit.json`，验证 OKF

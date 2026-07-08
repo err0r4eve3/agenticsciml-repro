@@ -36,6 +36,8 @@ OKF-like JSON 知识图谱。
   可被规范化为 `account_scoped_json`，但不修改真实 account Wiki。
 - `prompt_quality_controls` 从描述字段升级为循环 fail gate；curated cases 和 source candidates
   缺少任一 prompt control id 都会让总审计失败。
+- 循环新增顶层 `paper_problem_loop_index.json`，汇总每轮 audit 路径、通过状态、issue 数、
+  source candidate 数、prompt gate 计数和 Wiki audit 状态，作为长期运行的状态入口。
 
 边界：
 

@@ -14,6 +14,7 @@ from agenticsciml.storage import _atomic_write_text
 
 AUDIT_JSON = "agenticsciml_paper_problem_loop_audit.json"
 AUDIT_MD = "summary.md"
+LOOP_INDEX_JSON = "paper_problem_loop_index.json"
 
 
 def write_paper_problem_loop_audit(
@@ -119,6 +120,55 @@ def write_paper_problem_loop_audit(
             "audit_json": str((output_dir / AUDIT_JSON).resolve()),
             "audit_md": str((output_dir / AUDIT_MD).resolve()),
         },
+    }
+
+
+def update_paper_problem_loop_index(*, index_path: Path, audit_path: Path, audit: dict[str, Any]) -> dict[str, Any]:
+    existing = _read_loop_index(index_path)
+    rounds = [
+        item
+        for item in existing.get("rounds", [])
+        if isinstance(item, dict) and item.get("audit_json") != str(audit_path)
+    ]
+    rounds.append(_loop_index_entry(index_path.parent, audit_path, audit))
+    index = {
+        "artifact_type": "agenticsciml_paper_problem_loop_index",
+        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "round_count": len(rounds),
+        "latest": rounds[-1],
+        "failed_round_count": sum(1 for item in rounds if item.get("passed") is not True),
+        "rounds": rounds,
+    }
+    _atomic_write_text(index_path, json.dumps(index, indent=2, ensure_ascii=False, allow_nan=False))
+    return index
+
+
+def _read_loop_index(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"rounds": []}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {"rounds": []}
+    return payload if isinstance(payload, dict) and isinstance(payload.get("rounds"), list) else {"rounds": []}
+
+
+def _loop_index_entry(root: Path, audit_path: Path, audit: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "round_id": audit_path.parent.name,
+        "audit_json": audit_path.relative_to(root).as_posix() if audit_path.is_relative_to(root) else str(audit_path),
+        "created_at": audit.get("created_at"),
+        "passed": audit.get("passed"),
+        "issue_count": len(audit.get("issues", [])) if isinstance(audit.get("issues"), list) else None,
+        "case_count": audit.get("case_count"),
+        "source_candidate_count": audit.get("source_candidate_count"),
+        "prompt_quality_control_ready_count": audit.get("prompt_quality_control_ready_count"),
+        "source_candidate_prompt_quality_control_ready_count": audit.get(
+            "source_candidate_prompt_quality_control_ready_count"
+        ),
+        "llm_wiki_status": (audit.get("llm_wiki_audit") or {}).get("status")
+        if isinstance(audit.get("llm_wiki_audit"), dict)
+        else None,
     }
 
 

@@ -289,7 +289,11 @@ def cmd_build_llm_problem_context(args: argparse.Namespace) -> int:
 
 
 def cmd_paper_problem_loop_audit(args: argparse.Namespace) -> int:
-    from agenticsciml.paper_problem_loop import write_paper_problem_loop_audit
+    from agenticsciml.paper_problem_loop import (
+        LOOP_INDEX_JSON,
+        update_paper_problem_loop_index,
+        write_paper_problem_loop_audit,
+    )
 
     if args.rounds is not None and args.rounds < 1:
         raise ValueError("--rounds must be >= 1")
@@ -327,6 +331,12 @@ def cmd_paper_problem_loop_audit(args: argparse.Namespace) -> int:
                 source_collection_path=source_collection_path if source_collection_path.exists() else None,
                 source_candidate_limit=args.source_candidate_limit,
             )
+            update_paper_problem_loop_index(
+                index_path=base_output_dir / LOOP_INDEX_JSON,
+                audit_path=Path(result["paths"]["audit_json"]),
+                audit=result["audit"],
+            )
+            result["paths"]["loop_index_json"] = str((base_output_dir / LOOP_INDEX_JSON).resolve())
             print(result["paths"]["audit_json"], flush=True)
             had_issues = had_issues or bool(result["audit"]["issues"])
             if not args.repeat or (args.rounds is not None and round_index >= args.rounds):
