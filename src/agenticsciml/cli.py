@@ -32,7 +32,7 @@ from agenticsciml.llm_smoke import DEFAULT_SMOKE_VARIANTS, run_llm_smoke, verify
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 from agenticsciml.paper_workflow_readiness import write_paper_workflow_readiness_bundle
 from agenticsciml.paper_gap_report import write_paper_gap_report
-from agenticsciml.paper_source_collect import DEFAULT_ARXIV_QUERY, write_paper_source_collection
+from agenticsciml.paper_source_collect import DEFAULT_ARXIV_QUERY, DEFAULT_SOURCE_LIMIT, write_paper_source_collection
 from agenticsciml.real_problem_closure import write_real_problem_closure_plan
 from agenticsciml.reference_capability_matrix import write_reference_capability_matrix
 from agenticsciml.reporting import write_sdk_trace_export, write_trace_summary
@@ -771,7 +771,7 @@ def build_parser() -> argparse.ArgumentParser:
     paper_problem_loop.add_argument("--source-collection-json")
     paper_problem_loop.add_argument("--refresh-source-collection", action="store_true")
     paper_problem_loop.add_argument("--source-query", default=DEFAULT_ARXIV_QUERY)
-    paper_problem_loop.add_argument("--source-limit", type=int, default=20)
+    paper_problem_loop.add_argument("--source-limit", type=int, default=DEFAULT_SOURCE_LIMIT)
     paper_problem_loop.add_argument("--source-candidate-limit", type=int, default=3)
     paper_problem_loop.add_argument("--source-timeout-s", type=float, default=15.0)
     paper_problem_loop.add_argument("--fail-on-issues", action="store_true")
@@ -785,7 +785,7 @@ def build_parser() -> argparse.ArgumentParser:
     collect_sources = sub.add_parser("collect-paper-sources")
     collect_sources.add_argument("--output-dir", default="runs/paper-problem-loop")
     collect_sources.add_argument("--query", default=DEFAULT_ARXIV_QUERY)
-    collect_sources.add_argument("--max-results", type=int, default=20)
+    collect_sources.add_argument("--max-results", type=int, default=DEFAULT_SOURCE_LIMIT)
     collect_sources.add_argument("--timeout-s", type=float, default=15.0)
     collect_sources.add_argument("--fail-on-issues", action="store_true")
     collect_sources.set_defaults(func=cmd_collect_paper_sources)

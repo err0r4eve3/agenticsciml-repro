@@ -13,6 +13,7 @@ from agenticsciml.storage import _atomic_write_text
 
 ARXIV_API_URL = "https://export.arxiv.org/api/query"
 DEFAULT_ARXIV_QUERY = 'au:"George Em Karniadakis" AND (all:"neural operator" OR all:"physics-informed" OR all:"agent")'
+DEFAULT_SOURCE_LIMIT = 50
 COLLECTION_JSON = "paper_source_collection.json"
 
 
@@ -20,7 +21,7 @@ def write_paper_source_collection(
     *,
     output_dir: Path,
     query: str = DEFAULT_ARXIV_QUERY,
-    max_results: int = 20,
+    max_results: int = DEFAULT_SOURCE_LIMIT,
     timeout_s: float = 15.0,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)

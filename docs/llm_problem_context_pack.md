@@ -68,7 +68,8 @@ PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python -m agenticsci
   --max-age-s 900
 ```
 
-刷新后的 source candidates 会按 repeat 轮次和 `--source-candidate-limit` 轮转，写入每轮
+刷新后的 source collection 默认保留 50 条候选；source candidates 会按 repeat 轮次和
+`--source-candidate-limit` 轮转，写入每轮
 `source_candidates/*/{source_review,planner,reference_matrix,llm_context_pack}.json`，并在总审计中记录
 `source_candidate_offset`、`source_candidate_selection_ids` 和 `wiki_promotion_status=manual_review_required`。
 顶层 index/health 还会汇总 `source_candidate_seen_count`、`source_candidate_available_count`、
