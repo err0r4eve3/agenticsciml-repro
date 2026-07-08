@@ -287,6 +287,17 @@ def cmd_build_llm_problem_context(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_paper_problem_loop_audit(args: argparse.Namespace) -> int:
+    from agenticsciml.paper_problem_loop import write_paper_problem_loop_audit
+
+    result = write_paper_problem_loop_audit(
+        output_dir=Path(args.output_dir).resolve(),
+        case_limit=args.case_limit,
+    )
+    print(result["paths"]["audit_json"])
+    return 1 if args.fail_on_issues and result["audit"]["issues"] else 0
+
+
 def cmd_plan_real_problem_closure(args: argparse.Namespace) -> int:
     selector_panel = _json_array_arg(args.selector_panel_json, "--selector-panel-json")
     result = write_real_problem_closure_plan(
@@ -656,6 +667,12 @@ def build_parser() -> argparse.ArgumentParser:
     llm_context.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
     llm_context.add_argument("--fail-on-blockers", action="store_true")
     llm_context.set_defaults(func=cmd_build_llm_problem_context)
+
+    paper_problem_loop = sub.add_parser("paper-problem-loop-audit")
+    paper_problem_loop.add_argument("--output-dir", default="runs/paper-problem-loop")
+    paper_problem_loop.add_argument("--case-limit", type=int)
+    paper_problem_loop.add_argument("--fail-on-issues", action="store_true")
+    paper_problem_loop.set_defaults(func=cmd_paper_problem_loop_audit)
 
     real_problem = sub.add_parser("plan-real-problem-closure")
     real_problem.add_argument("benchmark_dir")

@@ -1,0 +1,256 @@
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+from statistics import mean
+from typing import Any
+
+from agenticsciml.llm_problem_context import build_llm_problem_context_pack
+from agenticsciml.reference_capability_matrix import build_reference_capability_matrix
+from agenticsciml.storage import _atomic_write_text
+
+
+AUDIT_JSON = "agenticsciml_paper_problem_loop_audit.json"
+AUDIT_MD = "summary.md"
+
+
+def write_paper_problem_loop_audit(
+    *,
+    output_dir: Path,
+    case_limit: int | None = None,
+) -> dict[str, Any]:
+    from agenticsciml.web.app import CURATED_PAPER_PROBLEM_CASES, ProblemIntakeRequest, _problem_intake_plan_payload
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    cases = list(CURATED_PAPER_PROBLEM_CASES[:case_limit])
+    results = []
+    for index, case in enumerate(cases, start=1):
+        tags = [str(tag) for tag in case["tags"]]
+        expert_blueprint = _expert_blueprint(tags)
+        intake = _problem_intake(case, tags)
+        plan = _problem_intake_plan_payload(
+            ProblemIntakeRequest(
+                problem_statement=(
+                    f"{case['title']}\n\n{case['summary']}\n\n"
+                    f"Real-world problem: {case['real_problem']}"
+                ),
+                requirements=(
+                    "Use local deterministic planning only; preserve evaluator, sandbox, artifact, "
+                    "and claim-gate boundaries."
+                ),
+                evaluation_criteria=str(intake["metric"]),
+                data_description=str(intake["data_source"]),
+                mode="mock",
+                target_solution_count=6,
+                parallel_mutations=2,
+                selector_vote_count=3,
+                max_children_per_node=3,
+                visual_audit_mode="off",
+                resource_constraints=_resource_constraints(),
+                expert_blueprint_id=expert_blueprint,
+            )
+        )
+        matrix = build_reference_capability_matrix(
+            problem_intake=intake,
+            expert_blueprint_id=expert_blueprint,
+        )
+        context = build_llm_problem_context_pack(
+            problem_intake=intake,
+            expert_blueprint_id=expert_blueprint,
+            resource_constraints=_resource_constraints(),
+            reference_capability_matrix=matrix,
+        )
+        benchmark_candidates = plan.get("benchmark_candidates") if isinstance(plan.get("benchmark_candidates"), list) else []
+        top_candidate = benchmark_candidates[0] if benchmark_candidates and isinstance(benchmark_candidates[0], dict) else {}
+        results.append(
+            {
+                "index": index,
+                "paper_id": case["id"],
+                "title": case["title"],
+                "title_zh": case["title_zh"],
+                "url": case["url"],
+                "real_problem": case["real_problem"],
+                "real_problem_zh": case["real_problem_zh"],
+                "expert_blueprint_id": expert_blueprint,
+                "planner_status": plan.get("status"),
+                "recommended_benchmark": _nested_text(plan, "recommended_benchmark", "name"),
+                "recommended_benchmark_score": top_candidate.get("score"),
+                "selected_algorithm_ids": plan.get("selected_algorithm_ids"),
+                "run_allowed": plan.get("run_allowed"),
+                "reference_matrix_status": matrix.get("status"),
+                "llm_context_status": context.get("status"),
+                "prompt_quality_control_ids": [
+                    item.get("control_id")
+                    for item in context.get("prompt_quality_controls", [])
+                    if isinstance(item, dict)
+                ],
+            }
+        )
+    audit = _audit_payload(results)
+    _atomic_write_text(output_dir / AUDIT_JSON, json.dumps(audit, indent=2, ensure_ascii=False, allow_nan=False))
+    _atomic_write_text(output_dir / AUDIT_MD, _render_markdown(audit))
+    return {
+        "audit": audit,
+        "paths": {
+            "audit_json": str((output_dir / AUDIT_JSON).resolve()),
+            "audit_md": str((output_dir / AUDIT_MD).resolve()),
+        },
+    }
+
+
+def _audit_payload(results: list[dict[str, Any]]) -> dict[str, Any]:
+    status_counts: dict[str, int] = {}
+    for item in results:
+        status = str(item.get("planner_status"))
+        status_counts[status] = status_counts.get(status, 0) + 1
+    scores = [item["recommended_benchmark_score"] for item in results if isinstance(item.get("recommended_benchmark_score"), int)]
+    issues = _audit_issues(results)
+    return {
+        "artifact_type": "agenticsciml_paper_problem_loop_audit",
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "case_count": len(results),
+        "planner_status_counts": status_counts,
+        "mean_recommended_benchmark_score": mean(scores) if scores else None,
+        "llm_context_ready_count": sum(1 for item in results if item.get("llm_context_status") == "ready_for_llm_context"),
+        "reference_matrix_ready_count": sum(
+            1 for item in results if item.get("reference_matrix_status") == "ready_for_offline_planning"
+        ),
+        "issues": issues,
+        "passed": not issues,
+        "claim_boundary": (
+            "Deterministic planning evidence only; no real LLM calls and no scientific claim support."
+        ),
+        "results": results,
+    }
+
+
+def _audit_issues(results: list[dict[str, Any]]) -> list[str]:
+    issues: list[str] = []
+    if len(results) < 10:
+        issues.append("expected at least 10 paper-problem cases")
+    for item in results:
+        paper_id = str(item.get("paper_id"))
+        if item.get("llm_context_status") != "ready_for_llm_context":
+            issues.append(f"{paper_id} llm context is not ready")
+        if item.get("reference_matrix_status") != "ready_for_offline_planning":
+            issues.append(f"{paper_id} reference matrix is not ready")
+        if not item.get("title_zh") or not item.get("real_problem_zh"):
+            issues.append(f"{paper_id} missing bilingual wiki fields")
+    fno = next((item for item in results if item.get("paper_id") == "paper:fourier_neural_operator_parametric_pdes"), None)
+    if fno:
+        selected = fno.get("selected_algorithm_ids") if isinstance(fno.get("selected_algorithm_ids"), list) else []
+        if fno.get("recommended_benchmark") != "reaction_diffusion_operator_faithful_small":
+            issues.append("FNO paper should map to reaction_diffusion_operator_faithful_small")
+        if "fno_lite_operator" not in selected:
+            issues.append("FNO paper should select fno_lite_operator")
+    return issues
+
+
+def _render_markdown(audit: dict[str, Any]) -> str:
+    lines = [
+        "# AgenticSciML Paper Problem Loop Audit",
+        "",
+        f"- case_count: {audit.get('case_count')}",
+        f"- passed: {audit.get('passed')}",
+        f"- planner_status_counts: {audit.get('planner_status_counts')}",
+        f"- llm_context_ready_count: {audit.get('llm_context_ready_count')}",
+        f"- reference_matrix_ready_count: {audit.get('reference_matrix_ready_count')}",
+        f"- claim_boundary: {audit.get('claim_boundary')}",
+        "",
+    ]
+    if audit.get("issues"):
+        lines.extend(["## Issues", ""])
+        lines.extend(f"- {issue}" for issue in audit["issues"])
+        lines.append("")
+    lines.extend(["## Cases", ""])
+    for item in audit.get("results", []):
+        if not isinstance(item, dict):
+            continue
+        lines.extend(
+            [
+                f"### {item.get('index')}. {item.get('title')}",
+                "",
+                f"- title_zh: {item.get('title_zh')}",
+                f"- url: {item.get('url')}",
+                f"- real_problem_zh: {item.get('real_problem_zh')}",
+                f"- planner_status: {item.get('planner_status')}",
+                f"- recommended_benchmark: {item.get('recommended_benchmark')} (score={item.get('recommended_benchmark_score')})",
+                f"- selected_algorithm_ids: {', '.join(item.get('selected_algorithm_ids') or [])}",
+                f"- llm_context_status: {item.get('llm_context_status')}",
+                "",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _problem_intake(case: dict[str, object], tags: list[str]) -> dict[str, object]:
+    observable: list[str] = ["trusted_score", "trace_artifact", "failure_report"]
+    metric = "artifact-backed readiness and task-specific error"
+    constraints = ["no private-label leakage", "claim gate remains blocked without run evidence"]
+    failure_modes = ["low-confidence benchmark mapping", "unsupported scientific claim", "missing domain review"]
+    if any(tag in tags for tag in ("fluid-dynamics", "closure-modeling")):
+        observable = ["wake_velocity", "drag", "closure_residual", "solver_stability"]
+        metric = "leave-one-shape-out relative error plus solver-stability audit"
+        constraints += ["RANS residual consistency", "solver-agnostic closure stability"]
+    elif any(tag in tags for tag in ("operator-learning", "neural-operator", "deeponet", "fno")):
+        observable = ["input_function", "output_field", "spectral_response", "residual_proxy"]
+        metric = "relative L2 plus operator-fidelity diagnostic"
+        constraints += ["operator input/output contract", "spectral or sensitivity audit when available"]
+    elif "inverse-problem" in tags:
+        observable = ["observed_field", "unknown_parameter", "residual", "optimization_trace"]
+        metric = "parameter recovery error and PDE residual consistency"
+        constraints += ["inverse parameter identifiability", "PDE residual consistency"]
+    elif any(tag in tags for tag in ("agent-benchmark", "llm-evaluation", "multi-agent")):
+        observable = ["prompt", "response", "tool_trace", "verified_outcome"]
+        metric = "verifiable task success with artifact-backed failure attribution"
+        constraints += ["no hidden chain-of-thought", "controlled action boundary"]
+    return {
+        "problem_summary": f"Paper case: {case['title']}. Real problem: {case['real_problem']}",
+        "hypothesis": f"AgenticSciML can plan a bounded workflow proxy for: {case['real_problem']}",
+        "observable": observable,
+        "metric": metric,
+        "failure_modes": failure_modes,
+        "physical_constraints": constraints,
+        "domain_review_checklist": [
+            "source paper URL reviewed",
+            "benchmark fidelity boundary reviewed",
+            "manual Wiki edits do not become run evidence",
+        ],
+        "data_source": "public paper-derived problem statement plus local deterministic proxy fixtures",
+    }
+
+
+def _expert_blueprint(tags: list[str]) -> str:
+    by_tag = {
+        "fluid-dynamics": "fluid_pde",
+        "closure-modeling": "fluid_pde",
+        "pde": "piml",
+        "pinn": "piml",
+        "inverse-problem": "inverse_reconstruction",
+        "operator-learning": "operator_learning",
+        "neural-operator": "operator_learning",
+        "deeponet": "operator_learning",
+        "fno": "operator_learning",
+        "agent-benchmark": "numerical_methods",
+        "llm-evaluation": "numerical_methods",
+        "multi-agent": "numerical_methods",
+    }
+    return next((by_tag[tag] for tag in tags if tag in by_tag), "numerical_methods")
+
+
+def _resource_constraints() -> dict[str, object]:
+    return {
+        "cpu": "local",
+        "gpu": False,
+        "timeout_s": 120,
+        "dependency_limits": ["numpy", "scipy"],
+        "data_limits": "public metadata plus local proxy only",
+    }
+
+
+def _nested_text(payload: dict[str, Any], key: str, child_key: str) -> str | None:
+    child = payload.get(key)
+    if isinstance(child, dict) and isinstance(child.get(child_key), str):
+        return child[child_key]
+    return None

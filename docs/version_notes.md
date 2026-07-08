@@ -17,6 +17,9 @@ OKF-like JSON 知识图谱。
   手动编辑只存在于当前浏览器状态，不写入 run artifact 或 evaluator 事实层。
 - `build-llm-problem-context` 输出新增 `prompt_quality_controls`，把论文启发转成可审计的提示词控制项：
   论文上下文非权威、PDE/operator 诊断匹配、失败/风险字段显式化、模型路由/预算可见、双语 Wiki 保留英文机器标识。
+- 新增 CLI `paper-problem-loop-audit`，复用 Wiki 里的 10 个双语论文-现实问题案例、Problem Intake
+  planner 和 LLM context pack，生成本地循环审计 artifact。`needs_manual_benchmark` 会保留为正常
+  planner 结果，不会被硬改成 catalog 映射。
 
 边界：
 

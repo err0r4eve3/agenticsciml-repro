@@ -24,6 +24,18 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli build
 `plan-paper-workflow`、`plan-real-problem-closure` 和 `plan-iteration-campaign` 也会把同一份
 `llm_problem_context_pack` 嵌入各自 artifact。
 
+循环审计十个 Wiki 论文-现实问题案例：
+
+```bash
+PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python -m agenticsciml.cli paper-problem-loop-audit \
+  --output-dir runs/paper-problem-loop \
+  --fail-on-issues
+```
+
+该命令复用 `/api/problem-intake/plan` 的本地 planner 和 `build_llm_problem_context_pack`，
+写出 `agenticsciml_paper_problem_loop_audit.json` 与 `summary.md`。它不联网、不调用真实 LLM、
+不写 evaluator 证据。
+
 ## Pack 内容
 
 pack 固定记录：
