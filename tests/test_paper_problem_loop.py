@@ -200,3 +200,104 @@ def test_cli_paper_problem_loop_audit_repeat_continues_existing_round_index(
     audit_path = Path(result.stdout.strip())
 
     assert audit_path.parent.name.startswith("round-0003-")
+
+
+def test_cli_paper_problem_loop_audit_index_backfills_existing_rounds(
+    tmp_path: Path, cli_env: dict[str, str]
+) -> None:
+    output_dir = tmp_path / "paper loop"
+    old_round = output_dir / "round-0002-old"
+    old_round.mkdir(parents=True)
+    (old_round / "agenticsciml_paper_problem_loop_audit.json").write_text(
+        json.dumps(
+            {
+                "created_at": "2026-07-09T00:00:00Z",
+                "passed": True,
+                "issues": [],
+                "case_count": 10,
+                "source_candidate_count": 0,
+                "prompt_quality_control_ready_count": 10,
+                "source_candidate_prompt_quality_control_ready_count": 0,
+                "llm_wiki_audit": {"status": "passed"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenticsciml.cli",
+            "paper-problem-loop-audit",
+            "--output-dir",
+            str(output_dir),
+            "--repeat",
+            "--rounds",
+            "1",
+            "--interval-s",
+            "0",
+            "--fail-on-issues",
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+        env=cli_env,
+    )
+
+    index = json.loads((output_dir / "paper_problem_loop_index.json").read_text(encoding="utf-8"))
+
+    assert index["round_count"] == 2
+    assert index["rounds"][0]["round_id"] == "round-0002-old"
+    assert index["latest"]["round_id"].startswith("round-0003-")
+
+
+def test_cli_paper_problem_loop_audit_index_backfills_corrupt_index(
+    tmp_path: Path, cli_env: dict[str, str]
+) -> None:
+    output_dir = tmp_path / "paper loop"
+    old_round = output_dir / "round-0002-old"
+    old_round.mkdir(parents=True)
+    (old_round / "agenticsciml_paper_problem_loop_audit.json").write_text(
+        json.dumps(
+            {
+                "created_at": "2026-07-09T00:00:00Z",
+                "passed": True,
+                "issues": [],
+                "case_count": 10,
+                "source_candidate_count": 0,
+                "prompt_quality_control_ready_count": 10,
+                "source_candidate_prompt_quality_control_ready_count": 0,
+                "llm_wiki_audit": {"status": "passed"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (output_dir / "paper_problem_loop_index.json").write_text("{", encoding="utf-8")
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenticsciml.cli",
+            "paper-problem-loop-audit",
+            "--output-dir",
+            str(output_dir),
+            "--repeat",
+            "--rounds",
+            "1",
+            "--interval-s",
+            "0",
+            "--fail-on-issues",
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+        env=cli_env,
+    )
+
+    index = json.loads((output_dir / "paper_problem_loop_index.json").read_text(encoding="utf-8"))
+
+    assert index["round_count"] == 2
+    assert index["rounds"][0]["round_id"] == "round-0002-old"
+    assert index["latest"]["round_id"].startswith("round-0003-")

@@ -125,12 +125,13 @@ def write_paper_problem_loop_audit(
 
 def update_paper_problem_loop_index(*, index_path: Path, audit_path: Path, audit: dict[str, Any]) -> dict[str, Any]:
     existing = _read_loop_index(index_path)
+    entry = _loop_index_entry(index_path.parent, audit_path, audit)
     rounds = [
         item
         for item in existing.get("rounds", [])
-        if isinstance(item, dict) and item.get("audit_json") != str(audit_path)
+        if isinstance(item, dict) and item.get("audit_json") != entry["audit_json"]
     ]
-    rounds.append(_loop_index_entry(index_path.parent, audit_path, audit))
+    rounds.append(entry)
     index = {
         "artifact_type": "agenticsciml_paper_problem_loop_index",
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -145,12 +146,33 @@ def update_paper_problem_loop_index(*, index_path: Path, audit_path: Path, audit
 
 def _read_loop_index(path: Path) -> dict[str, Any]:
     if not path.exists():
-        return {"rounds": []}
+        return {"rounds": _backfill_loop_rounds(path.parent)}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        return {"rounds": []}
-    return payload if isinstance(payload, dict) and isinstance(payload.get("rounds"), list) else {"rounds": []}
+        return {"rounds": _backfill_loop_rounds(path.parent)}
+    if not isinstance(payload, dict) or not isinstance(payload.get("rounds"), list):
+        return {"rounds": _backfill_loop_rounds(path.parent)}
+    by_path = {
+        item.get("audit_json"): item
+        for item in payload["rounds"]
+        if isinstance(item, dict) and item.get("audit_json")
+    }
+    for item in _backfill_loop_rounds(path.parent):
+        by_path.setdefault(item.get("audit_json"), item)
+    return {"rounds": sorted(by_path.values(), key=lambda item: str(item.get("audit_json")))}
+
+
+def _backfill_loop_rounds(root: Path) -> list[dict[str, Any]]:
+    rounds: list[dict[str, Any]] = []
+    for audit_path in sorted(root.glob(f"round-*/{AUDIT_JSON}")):
+        try:
+            audit = json.loads(audit_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(audit, dict):
+            rounds.append(_loop_index_entry(root, audit_path, audit))
+    return rounds
 
 
 def _loop_index_entry(root: Path, audit_path: Path, audit: dict[str, Any]) -> dict[str, Any]:
