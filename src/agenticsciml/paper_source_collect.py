@@ -150,6 +150,8 @@ def _real_problem(title: str, summary: str) -> str:
     text = f"{title} {summary}".lower()
     if "agent" in text or "llm" in text:
         return "Audit long-horizon agent or LLM workflows with verifiable outcomes and explicit failure boundaries."
+    if "newton" in text or "nonlinear solver" in text or "nonlinear system" in text:
+        return "Evaluate neural preconditioning for nonlinear solvers under convergence, robustness, and instability constraints."
     if any(term in text for term in ("krylov", "preconditioner", "linear solver", "linear system")):
         return "Evaluate whether learned solver aids accelerate PDE linear systems while preserving convergence and generalization."
     if "earth system" in text or "esm" in text or "bias correction" in text or "cadence-limited" in text:
@@ -160,6 +162,8 @@ def _real_problem(title: str, summary: str) -> str:
         return "Compare PINN control formulations against adjoint or optimality-system baselines for PDE-constrained control."
     if "spectral bias" in text or "high-frequency" in text or "frequency-resolved" in text:
         return "Diagnose high-frequency failure modes in physics-informed or operator learning and test mitigation controls."
+    if any(term in text for term in ("spiking", "lif", "qif", "integrate-and-fire", "snn")):
+        return "Evaluate differentiable spiking-neuron models for stable SciML regression, operator learning, and PDE solving."
     if any(term in text for term in ("optimizer", "optimization", "natural gradient", "bfgs", "broyden", "curvature-aware")):
         return "Audit optimizer and conditioning choices for high-accuracy PINN convergence on challenging PDE or ODE systems."
     if "operator" in text:
@@ -175,6 +179,8 @@ def _real_problem_zh(title: str, summary: str) -> str:
     text = f"{title} {summary}".lower()
     if "agent" in text or "llm" in text:
         return "审计长周期 agent 或 LLM 工作流，要求结果可验证并显式记录失败边界。"
+    if "newton" in text or "nonlinear solver" in text or "nonlinear system" in text:
+        return "评估非线性求解器中的神经预条件方法，并检查收敛性、鲁棒性和不稳定边界。"
     if any(term in text for term in ("krylov", "preconditioner", "linear solver", "linear system")):
         return "评估学习型求解器辅助是否能加速 PDE 线性系统，同时保持收敛性和泛化能力。"
     if "earth system" in text or "esm" in text or "bias correction" in text or "cadence-limited" in text:
@@ -185,6 +191,8 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "对比 PINN 控制 formulation 与伴随法或最优性系统基线在 PDE 约束控制中的表现。"
     if "spectral bias" in text or "high-frequency" in text or "frequency-resolved" in text:
         return "诊断 physics-informed 或 operator learning 中的高频失效模式，并测试缓解控制。"
+    if any(term in text for term in ("spiking", "lif", "qif", "integrate-and-fire", "snn")):
+        return "评估可微分 spiking-neuron 模型在 SciML 回归、operator learning 和 PDE 求解中的稳定性。"
     if any(term in text for term in ("optimizer", "optimization", "natural gradient", "bfgs", "broyden", "curvature-aware")):
         return "审计 optimizer 与 conditioning 选择对高精度 PINN 在困难 PDE 或 ODE 系统上收敛的影响。"
     if "operator" in text:

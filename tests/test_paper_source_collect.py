@@ -91,6 +91,18 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "Assess robust safe-control learning for nonlinear dynamical systems under adversarial disturbances and stability constraints.",
             "评估非线性动力系统在对抗扰动和稳定性约束下的鲁棒安全控制学习。",
         ),
+        (
+            "A Neural-Operator Preconditioned Newton Method for Accelerated Nonlinear Solvers",
+            "A fixed-point neural operator preconditions Newton iterations for nonlinear systems.",
+            "Evaluate neural preconditioning for nonlinear solvers under convergence, robustness, and instability constraints.",
+            "评估非线性求解器中的神经预条件方法，并检查收敛性、鲁棒性和不稳定边界。",
+        ),
+        (
+            "From LIF to QIF: Toward Differentiable Spiking Neurons for Scientific Machine Learning",
+            "QIF spiking neural networks support stable gradients for operator learning and PDE solving.",
+            "Evaluate differentiable spiking-neuron models for stable SciML regression, operator learning, and PDE solving.",
+            "评估可微分 spiking-neuron 模型在 SciML 回归、operator learning 和 PDE 求解中的稳定性。",
+        ),
     ]
 
     for title, summary, expected, expected_zh in cases:
