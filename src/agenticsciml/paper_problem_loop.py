@@ -7,7 +7,7 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
-from agenticsciml.llm_problem_context import build_llm_problem_context_pack
+from agenticsciml.llm_problem_context import PROMPT_QUALITY_CONTROLS, build_llm_problem_context_pack
 from agenticsciml.reference_capability_matrix import build_reference_capability_matrix
 from agenticsciml.storage import _atomic_write_text
 
@@ -94,11 +94,7 @@ def write_paper_problem_loop_audit(
                 "source_review_status": source_review.get("status"),
                 "reference_matrix_status": matrix.get("status"),
                 "llm_context_status": context.get("status"),
-                "prompt_quality_control_ids": [
-                    item.get("control_id")
-                    for item in context.get("prompt_quality_controls", [])
-                    if isinstance(item, dict)
-                ],
+                "prompt_quality_control_ids": _prompt_quality_control_ids(context),
                 "artifacts": artifacts,
             }
         )
@@ -139,6 +135,9 @@ def _audit_payload(
         status_counts[status] = status_counts.get(status, 0) + 1
     scores = [item["recommended_benchmark_score"] for item in results if isinstance(item.get("recommended_benchmark_score"), int)]
     issues = _audit_issues(results)
+    issues += _prompt_quality_issues(results, prefix="case")
+    if source_candidate_results is not None:
+        issues += _prompt_quality_issues(source_candidate_results, prefix="source candidate")
     if llm_wiki_audit is not None:
         issues += [f"llm wiki: {issue}" for issue in llm_wiki_audit.get("issues", [])]
     payload = {
@@ -149,6 +148,9 @@ def _audit_payload(
         "mean_recommended_benchmark_score": mean(scores) if scores else None,
         "source_review_ready_count": sum(
             1 for item in results if item.get("source_review_status") == "ready_for_source_audit"
+        ),
+        "prompt_quality_control_ready_count": sum(
+            1 for item in results if _has_required_prompt_controls(item.get("prompt_quality_control_ids"))
         ),
         "llm_context_ready_count": sum(1 for item in results if item.get("llm_context_status") == "ready_for_llm_context"),
         "reference_matrix_ready_count": sum(
@@ -171,6 +173,9 @@ def _audit_payload(
         }
     if source_candidate_results is not None:
         payload["source_candidate_count"] = len(source_candidate_results)
+        payload["source_candidate_prompt_quality_control_ready_count"] = sum(
+            1 for item in source_candidate_results if _has_required_prompt_controls(item.get("prompt_quality_control_ids"))
+        )
         payload["source_candidate_context_ready_count"] = sum(
             1 for item in source_candidate_results if item.get("llm_context_status") == "ready_for_llm_context"
         )
@@ -224,6 +229,7 @@ def _render_markdown(audit: dict[str, Any]) -> str:
         f"- passed: {audit.get('passed')}",
         f"- planner_status_counts: {audit.get('planner_status_counts')}",
         f"- source_review_ready_count: {audit.get('source_review_ready_count')}",
+        f"- prompt_quality_control_ready_count: {audit.get('prompt_quality_control_ready_count')}",
         f"- llm_context_ready_count: {audit.get('llm_context_ready_count')}",
         f"- reference_matrix_ready_count: {audit.get('reference_matrix_ready_count')}",
         f"- claim_boundary: {audit.get('claim_boundary')}",
@@ -235,6 +241,7 @@ def _render_markdown(audit: dict[str, Any]) -> str:
         lines.extend(
             [
                 f"- source_candidate_count: {audit.get('source_candidate_count')}",
+                f"- source_candidate_prompt_quality_control_ready_count: {audit.get('source_candidate_prompt_quality_control_ready_count')}",
                 f"- source_candidate_context_ready_count: {audit.get('source_candidate_context_ready_count')}",
                 f"- source_candidate_manual_wiki_review_count: {audit.get('source_candidate_manual_wiki_review_count')}",
                 "",
@@ -432,6 +439,7 @@ def _source_candidate_results(
                 "source_review_status": _source_review(case).get("status"),
                 "reference_matrix_status": matrix.get("status"),
                 "llm_context_status": context.get("status"),
+                "prompt_quality_control_ids": _prompt_quality_control_ids(context),
                 "artifacts": artifacts,
             }
         )
@@ -460,6 +468,38 @@ def _plan_problem(intake: dict[str, object], expert_blueprint: str) -> dict[str,
             expert_blueprint_id=expert_blueprint,
         )
     )
+
+
+def _prompt_quality_control_ids(context: dict[str, Any]) -> list[str]:
+    return [
+        str(item.get("control_id"))
+        for item in context.get("prompt_quality_controls", [])
+        if isinstance(item, dict) and item.get("control_id")
+    ]
+
+
+def _required_prompt_control_ids() -> set[str]:
+    return {
+        str(item["control_id"])
+        for item in PROMPT_QUALITY_CONTROLS
+        if isinstance(item.get("control_id"), str)
+    }
+
+
+def _has_required_prompt_controls(value: object) -> bool:
+    return isinstance(value, list) and set(value) >= _required_prompt_control_ids()
+
+
+def _prompt_quality_issues(items: list[dict[str, Any]], *, prefix: str) -> list[str]:
+    required = _required_prompt_control_ids()
+    issues: list[str] = []
+    for item in items:
+        controls = set(item.get("prompt_quality_control_ids") if isinstance(item.get("prompt_quality_control_ids"), list) else [])
+        missing = sorted(required - controls)
+        if missing:
+            item_id = item.get("paper_id") or item.get("title") or "unknown"
+            issues.append(f"{prefix} {item_id} missing prompt controls: {','.join(missing)}")
+    return issues
 
 
 def _write_case_artifacts(

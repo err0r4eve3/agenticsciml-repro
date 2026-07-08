@@ -34,6 +34,8 @@ OKF-like JSON 知识图谱。
   总审计会 fail closed。
 - Wiki 审计新增隔离 `manual_edit_roundtrip.json`，复用 Web 保存校验验证手动编辑 payload
   可被规范化为 `account_scoped_json`，但不修改真实 account Wiki。
+- `prompt_quality_controls` 从描述字段升级为循环 fail gate；curated cases 和 source candidates
+  缺少任一 prompt control id 都会让总审计失败。
 
 边界：
 

@@ -61,6 +61,8 @@ PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python -m agenticsci
 根字段、节点字段、双语论文问题字段、边引用和手动编辑持久化边界。
 审计还会写 `llm_wiki/manual_edit_roundtrip.json`，用隔离副本验证手动编辑 payload 能通过同一
 Wiki 保存校验；该 roundtrip 不修改真实 account Wiki。
+`prompt_quality_controls` 也是循环 fail gate：curated cases 和 source candidates 都必须保留完整
+control ids，否则 `paper-problem-loop-audit --fail-on-issues` 会失败。
 
 ## Pack 内容
 

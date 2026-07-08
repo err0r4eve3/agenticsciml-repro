@@ -19,6 +19,7 @@ def test_paper_problem_loop_audit_writes_passed_bilingual_artifact(tmp_path: Pat
     assert audit["passed"] is True
     assert audit["case_count"] == 10
     assert audit["source_review_ready_count"] == 10
+    assert audit["prompt_quality_control_ready_count"] == 10
     assert audit["llm_context_ready_count"] == 10
     assert audit["llm_wiki_audit"]["status"] == "passed"
     assert audit["llm_wiki_audit"]["paper_problem_case_count"] == 10
@@ -119,10 +120,12 @@ def test_paper_problem_loop_audit_includes_source_collection_cache(tmp_path: Pat
         "created_at": "2026-07-09T00:00:00Z",
     }
     assert audit["source_candidate_count"] == 1
+    assert audit["source_candidate_prompt_quality_control_ready_count"] == 1
     assert audit["source_candidate_context_ready_count"] == 1
     assert audit["source_candidate_manual_wiki_review_count"] == 1
     source_candidate = audit["source_candidate_results"][0]
     assert source_candidate["wiki_promotion_status"] == "manual_review_required"
+    assert "bilingual_wiki_preserves_identifiers" in source_candidate["prompt_quality_control_ids"]
     assert source_candidate["artifacts"]["llm_context_pack"] == (
         "source_candidates/01-2606-02427v1/llm_context_pack.json"
     )
