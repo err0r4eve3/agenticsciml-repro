@@ -170,8 +170,11 @@ def test_llm_wiki_okf_endpoint_exposes_editable_graph_with_recent_paper_hooks() 
     for node in nodes.values():
         assert node["type"]
         assert node["title"]
+        assert node["title_zh"]
         assert node["description"]
+        assert node["description_zh"]
         assert isinstance(node["tags"], list)
+        assert isinstance(node["tags_zh"], list)
         assert node["timestamp"]
 
     for edge in payload["edges"]:
@@ -179,6 +182,7 @@ def test_llm_wiki_okf_endpoint_exposes_editable_graph_with_recent_paper_hooks() 
         assert edge["target"] in nodes
         assert edge["relation"]
         assert edge["description"]
+        assert edge["description_zh"]
 
 
 def test_llm_wiki_okf_manual_edits_persist_per_account(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -201,6 +205,15 @@ def test_llm_wiki_okf_manual_edits_persist_per_account(tmp_path: Path, monkeypat
         "/api/llm-wiki/okf",
         json={"account_id": "wiki-user", "payload": {"type": "not-okf"}},
     )
+    invalid_root_bilingual_response = client.post(
+        "/api/llm-wiki/okf",
+        json={"account_id": "wiki-user", "payload": {**generated, "title_zh": ""}},
+    )
+    broken_nodes = [{**generated["nodes"][0], "description_zh": ""}, *generated["nodes"][1:]]
+    invalid_node_bilingual_response = client.post(
+        "/api/llm-wiki/okf",
+        json={"account_id": "wiki-user", "payload": {**generated, "nodes": broken_nodes}},
+    )
 
     assert save_response.status_code == 200
     assert save_response.json()["saved"] is True
@@ -208,6 +221,26 @@ def test_llm_wiki_okf_manual_edits_persist_per_account(tmp_path: Path, monkeypat
     assert saved_response.json()["title"] == "Manual Wiki Title"
     assert regenerated_response.json()["title"] == generated["title"]
     assert invalid_response.status_code == 400
+    assert invalid_root_bilingual_response.status_code == 400
+    assert invalid_node_bilingual_response.status_code == 400
+
+
+def test_llm_wiki_okf_ignores_legacy_invalid_saved_account_graph(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AGENTICSCIML_ACCOUNTS_ROOT", str(tmp_path / "accounts"))
+    saved_path = tmp_path / "accounts" / "wiki-user" / "wiki" / "llm_wiki_okf.json"
+    saved_path.parent.mkdir(parents=True)
+    saved_path.write_text(
+        json.dumps({"type": "llm_wiki_knowledge_graph", "title": "Legacy incomplete graph"}),
+        encoding="utf-8",
+    )
+    client = TestClient(create_app())
+
+    response = client.get("/api/llm-wiki/okf", params={"account_id": "wiki-user"})
+
+    assert response.status_code == 200
+    assert response.json()["title"] == "AgenticSciML LLM Wiki Knowledge Graph"
 
 
 def test_paper_problem_loop_review_queue_endpoint_reads_latest_queue(tmp_path: Path) -> None:

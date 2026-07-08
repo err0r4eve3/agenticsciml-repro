@@ -689,6 +689,7 @@ def _attach_source_candidate_wiki_nodes(graph: dict[str, Any], source_candidate_
                 "target": "workflow:problem_intake",
                 "relation": "planned_by",
                 "description": "Source candidates are routed through Problem Intake and require manual Wiki review before promotion.",
+                "description_zh": "候选来源会进入 Problem Intake，并且在晋升前需要人工 Wiki 审核。",
             }
         )
         existing_ids.add(paper_id)
@@ -776,44 +777,13 @@ def _manual_wiki_edit_roundtrip(graph: dict[str, Any], output_dir: Path) -> dict
 
 
 def _llm_wiki_issues(graph: dict[str, Any]) -> list[str]:
-    issues: list[str] = []
-    if graph.get("type") != "llm_wiki_knowledge_graph":
-        issues.append("graph type must be llm_wiki_knowledge_graph")
-    if graph.get("okf_version") != "0.1":
-        issues.append("okf_version must be 0.1")
-    if graph.get("languages") != ["en", "zh-CN"]:
-        issues.append("languages must be ['en', 'zh-CN']")
-    edit_policy = graph.get("edit_policy") if isinstance(graph.get("edit_policy"), dict) else {}
-    if edit_policy.get("manual_editing") is not True:
-        issues.append("manual_editing must be true")
-    if edit_policy.get("persistence") != "account_scoped_json":
-        issues.append("persistence must be account_scoped_json")
+    from agenticsciml.web.app import _llm_wiki_validation_issues
+
+    issues = _llm_wiki_validation_issues(graph)
     nodes = graph.get("nodes") if isinstance(graph.get("nodes"), list) else []
-    node_ids = {node.get("id") for node in nodes if isinstance(node, dict)}
-    if len(node_ids) != len(nodes):
-        issues.append("node ids must be unique")
     paper_nodes = [node for node in nodes if isinstance(node, dict) and node.get("type") == "paper_problem_case"]
     if len(paper_nodes) < 10:
         issues.append("expected at least 10 paper_problem_case nodes")
-    for node in nodes:
-        if not isinstance(node, dict):
-            issues.append("node must be an object")
-            continue
-        for key in ("id", "type", "title", "description", "tags", "timestamp"):
-            if not node.get(key):
-                issues.append(f"{node.get('id') or 'unknown'} missing {key}")
-        if node.get("type") in {"paper_problem_case", "source_candidate"}:
-            for key in ("title_zh", "description_zh", "real_problem", "real_problem_zh"):
-                if not node.get(key):
-                    issues.append(f"{node.get('id') or 'unknown'} missing {key}")
-        if node.get("type") == "source_candidate" and node.get("wiki_promotion_status") != "manual_review_required":
-            issues.append(f"{node.get('id') or 'unknown'} source candidate must require manual review")
-    for edge in graph.get("edges", []):
-        if not isinstance(edge, dict):
-            issues.append("edge must be an object")
-            continue
-        if edge.get("source") not in node_ids or edge.get("target") not in node_ids:
-            issues.append(f"edge {edge.get('source')}->{edge.get('target')} references missing node")
     return issues
 
 

@@ -1692,7 +1692,10 @@ def _account_llm_wiki_path(account_id: str | None) -> Path:
 
 def _read_account_llm_wiki(account_id: str | None) -> dict[str, object] | None:
     payload = _read_optional_json(_account_llm_wiki_path(account_id))
-    return payload if payload is None else dict(payload)
+    if payload is None:
+        return None
+    saved = dict(payload)
+    return saved if not _llm_wiki_validation_issues(saved) else None
 
 
 def _paper_problem_loop_review_queue_payload(output_dir: Path) -> dict[str, object]:
@@ -1786,24 +1789,95 @@ def _validated_llm_wiki_payload(payload: dict[str, Any]) -> dict[str, object]:
         raise HTTPException(status_code=400, detail="LLM Wiki payload must be strict JSON") from exc
     if len(encoded.encode("utf-8")) > 1_000_000:
         raise HTTPException(status_code=413, detail="LLM Wiki payload is too large")
+    issues = _llm_wiki_validation_issues(payload)
+    if issues:
+        raise HTTPException(status_code=400, detail=f"LLM Wiki payload invalid: {issues[0]}")
+    validated = dict(payload)
+    edit_policy = validated.get("edit_policy") if isinstance(validated.get("edit_policy"), dict) else {}
+    validated["edit_policy"] = {**edit_policy, "manual_editing": True, "persistence": "account_scoped_json"}
+    return validated
+
+
+def _llm_wiki_validation_issues(payload: dict[str, Any]) -> list[str]:
+    issues: list[str] = []
     required = {
+        "okf_version": str,
         "type": str,
         "title": str,
+        "title_zh": str,
         "description": str,
+        "description_zh": str,
         "timestamp": str,
         "tags": list,
+        "tags_zh": list,
         "nodes": list,
         "edges": list,
     }
     for key, expected_type in required.items():
         if not isinstance(payload.get(key), expected_type):
-            raise HTTPException(status_code=400, detail=f"LLM Wiki payload missing {key}")
+            issues.append(f"graph missing {key}")
+        elif isinstance(payload.get(key), str) and not str(payload.get(key)).strip():
+            issues.append(f"graph missing {key}")
     if payload.get("type") != "llm_wiki_knowledge_graph":
-        raise HTTPException(status_code=400, detail="LLM Wiki payload type must be llm_wiki_knowledge_graph")
-    validated = dict(payload)
-    edit_policy = validated.get("edit_policy") if isinstance(validated.get("edit_policy"), dict) else {}
-    validated["edit_policy"] = {**edit_policy, "manual_editing": True, "persistence": "account_scoped_json"}
-    return validated
+        issues.append("graph type must be llm_wiki_knowledge_graph")
+    if payload.get("okf_version") != "0.1":
+        issues.append("okf_version must be 0.1")
+    if payload.get("languages") != ["en", "zh-CN"]:
+        issues.append("languages must be ['en', 'zh-CN']")
+    edit_policy = payload.get("edit_policy") if isinstance(payload.get("edit_policy"), dict) else {}
+    if edit_policy.get("manual_editing") is not True:
+        issues.append("manual_editing must be true")
+    if edit_policy.get("persistence") not in (None, "account_scoped_json"):
+        issues.append("persistence must be account_scoped_json")
+
+    nodes = payload.get("nodes") if isinstance(payload.get("nodes"), list) else []
+    node_ids: set[str] = set()
+    for node in nodes:
+        if not isinstance(node, dict):
+            issues.append("node must be an object")
+            continue
+        node_id = node.get("id")
+        if not isinstance(node_id, str) or not node_id.strip():
+            issues.append("node missing id")
+            continue
+        if node_id in node_ids:
+            issues.append(f"{node_id} duplicate node id")
+        node_ids.add(node_id)
+        for key, expected_type in {
+            "type": str,
+            "title": str,
+            "title_zh": str,
+            "description": str,
+            "description_zh": str,
+            "tags": list,
+            "tags_zh": list,
+            "timestamp": str,
+        }.items():
+            value = node.get(key)
+            if not isinstance(value, expected_type):
+                issues.append(f"{node_id} missing {key}")
+            elif isinstance(value, str) and not value.strip():
+                issues.append(f"{node_id} missing {key}")
+        if node.get("type") in {"paper_problem_case", "source_candidate"}:
+            for key in ("real_problem", "real_problem_zh"):
+                if not isinstance(node.get(key), str) or not str(node.get(key)).strip():
+                    issues.append(f"{node_id} missing {key}")
+        if node.get("type") == "source_candidate" and node.get("wiki_promotion_status") != "manual_review_required":
+            issues.append(f"{node_id} source candidate must require manual review")
+
+    edges = payload.get("edges") if isinstance(payload.get("edges"), list) else []
+    for edge in edges:
+        if not isinstance(edge, dict):
+            issues.append("edge must be an object")
+            continue
+        source = edge.get("source")
+        target = edge.get("target")
+        if source not in node_ids or target not in node_ids:
+            issues.append(f"edge {source}->{target} references missing node")
+        for key in ("relation", "description", "description_zh"):
+            if not isinstance(edge.get(key), str) or not str(edge.get(key)).strip():
+                issues.append(f"edge {source}->{target} missing {key}")
+    return issues
 
 
 def _ensure_account(account_id: str | None, display_name: str | None = None) -> dict[str, object]:
@@ -2925,20 +2999,31 @@ def _okf_node(
         "id": node_id,
         "type": node_type,
         "title": title,
+        "title_zh": str(extra.pop("title_zh", title)),
         "description": _compact_summary(description, 520),
+        "description_zh": _compact_summary(str(extra.pop("description_zh", description)), 520),
         "tags": tags,
+        "tags_zh": list(extra.pop("tags_zh", tags)),
         "timestamp": timestamp,
     }
     payload.update({key: value for key, value in extra.items() if value not in (None, "", [], {})})
     return payload
 
 
-def _okf_edge(source: str, target: str, relation: str, description: str) -> dict[str, object]:
+def _okf_edge(
+    source: str,
+    target: str,
+    relation: str,
+    description: str,
+    *,
+    description_zh: str | None = None,
+) -> dict[str, object]:
     return {
         "source": source,
         "target": target,
         "relation": relation,
         "description": _compact_summary(description, 360),
+        "description_zh": _compact_summary(description_zh or description, 360),
     }
 
 

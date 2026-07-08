@@ -73,6 +73,8 @@ OKF-like JSON 知识图谱。
   engine health monitoring 和 fracture surrogate 的具体审计问题。
 - Source mapping 规则收紧了短子串和优先级：不再用裸 `viv` 命中 VIV，reactor/chemical 与
   pharmacology 优先于 KAN/hypersonic 泛化，multi-agent control 不再误归为 LLM agent workflow。
+- Web 保存与生产循环审计现在复用同一个 LLM Wiki OKF schema gate：根对象、所有节点和边都必须保留
+  中英文槽位，边必须引用现有节点；旧格式 account Wiki 若不满足当前 schema，会回退到自动生成图谱而不是继续返回坏上下文。
 
 边界：
 
