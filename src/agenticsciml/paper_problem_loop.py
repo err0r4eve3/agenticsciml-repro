@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from statistics import mean
@@ -61,6 +62,14 @@ def write_paper_problem_loop_audit(
             resource_constraints=_resource_constraints(),
             reference_capability_matrix=matrix,
         )
+        artifacts = _write_case_artifacts(
+            output_dir=output_dir,
+            index=index,
+            paper_id=str(case["id"]),
+            plan=plan,
+            matrix=matrix,
+            context=context,
+        )
         benchmark_candidates = plan.get("benchmark_candidates") if isinstance(plan.get("benchmark_candidates"), list) else []
         top_candidate = benchmark_candidates[0] if benchmark_candidates and isinstance(benchmark_candidates[0], dict) else {}
         results.append(
@@ -85,6 +94,7 @@ def write_paper_problem_loop_audit(
                     for item in context.get("prompt_quality_controls", [])
                     if isinstance(item, dict)
                 ],
+                "artifacts": artifacts,
             }
         )
     audit = _audit_payload(results)
@@ -178,10 +188,38 @@ def _render_markdown(audit: dict[str, Any]) -> str:
                 f"- recommended_benchmark: {item.get('recommended_benchmark')} (score={item.get('recommended_benchmark_score')})",
                 f"- selected_algorithm_ids: {', '.join(item.get('selected_algorithm_ids') or [])}",
                 f"- llm_context_status: {item.get('llm_context_status')}",
+                f"- artifacts: {', '.join((item.get('artifacts') or {}).values())}",
                 "",
             ]
         )
     return "\n".join(lines)
+
+
+def _write_case_artifacts(
+    *,
+    output_dir: Path,
+    index: int,
+    paper_id: str,
+    plan: dict[str, Any],
+    matrix: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, str]:
+    case_dir = output_dir / "cases" / f"{index:02d}-{_slug(paper_id.split(':')[-1])}"
+    payloads = {
+        "planner": plan,
+        "reference_matrix": matrix,
+        "llm_context_pack": context,
+    }
+    paths: dict[str, str] = {}
+    for name, payload in payloads.items():
+        path = case_dir / f"{name}.json"
+        _atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False))
+        paths[name] = path.relative_to(output_dir).as_posix()
+    return paths
+
+
+def _slug(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-") or "case"
 
 
 def _problem_intake(case: dict[str, object], tags: list[str]) -> dict[str, object]:

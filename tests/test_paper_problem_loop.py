@@ -22,6 +22,20 @@ def test_paper_problem_loop_audit_writes_passed_bilingual_artifact(tmp_path: Pat
     assert fno_case["recommended_benchmark"] == "reaction_diffusion_operator_faithful_small"
     assert "fno_lite_operator" in fno_case["selected_algorithm_ids"]
     assert (tmp_path / "summary.md").exists()
+    assert fno_case["artifacts"] == {
+        "planner": "cases/10-fourier-neural-operator-parametric-pdes/planner.json",
+        "reference_matrix": "cases/10-fourier-neural-operator-parametric-pdes/reference_matrix.json",
+        "llm_context_pack": "cases/10-fourier-neural-operator-parametric-pdes/llm_context_pack.json",
+    }
+    assert json.loads((tmp_path / fno_case["artifacts"]["planner"]).read_text(encoding="utf-8"))["status"] == (
+        "catalog_benchmark_planned"
+    )
+    assert json.loads((tmp_path / fno_case["artifacts"]["reference_matrix"]).read_text(encoding="utf-8"))[
+        "status"
+    ] == "ready_for_offline_planning"
+    assert json.loads((tmp_path / fno_case["artifacts"]["llm_context_pack"]).read_text(encoding="utf-8"))[
+        "status"
+    ] == "ready_for_llm_context"
 
 
 def test_cli_paper_problem_loop_audit_writes_artifact(tmp_path: Path, cli_env: dict[str, str]) -> None:
