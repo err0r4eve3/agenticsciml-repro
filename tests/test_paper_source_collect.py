@@ -134,6 +134,36 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "评测 LLM 在 scientific computing 和 SciML 任务中的能力，同时保留模型特定失败模式和决策点。",
         ),
         (
+            "DeepVIVONet: Using deep neural operators to optimize sensor locations with application to vortex-induced vibrations",
+            "Sparse spatio-temporal measurements reconstruct and forecast vortex-induced vibrations of a marine riser.",
+            "Optimize sparse sensor placement for vortex-induced vibration reconstruction and forecasting under transfer-learning constraints.",
+            "优化 vortex-induced vibration 重建与 forecasting 的稀疏传感器布置，并检查 transfer-learning 约束。",
+        ),
+        (
+            "Fusion-DeepONet: A Data-Efficient Neural Operator for Geometry-Dependent Hypersonic and Supersonic Flows",
+            "A geometry-dependent surrogate predicts hypersonic and supersonic flow fields on arbitrary grids with scarce data.",
+            "Validate data-efficient neural operator surrogates for geometry-dependent hypersonic or supersonic flow prediction on scarce data.",
+            "验证稀缺数据下 geometry-dependent hypersonic 或 supersonic flow 预测的高效神经算子 surrogate。",
+        ),
+        (
+            "KKANs: Kurkova-Kolmogorov-Arnold Networks and Their Learning Dynamics",
+            "Kolmogorov-Arnold networks are analyzed with information bottleneck theory and geometric complexity.",
+            "Audit KAN-style SciML architectures through approximation behavior, learning dynamics, and signal-to-noise generalization controls.",
+            "通过逼近行为、learning dynamics 和 signal-to-noise 泛化控制审计 KAN-style SciML 架构。",
+        ),
+        (
+            "A Digital Twin for Diesel Engines: Operator-infused Physics-Informed Neural Networks with Transfer Learning for Engine Health Monitoring",
+            "Operator-infused PINNs identify diesel engine parameters for health monitoring and maintenance forecasting.",
+            "Evaluate operator-infused PINN digital twins for diesel-engine health monitoring under transfer learning and uncertainty constraints.",
+            "评估 diesel-engine health monitoring 的 operator-infused PINN digital twin，并检查 transfer learning 和不确定性约束。",
+        ),
+        (
+            "Predicting Crack Nucleation and Propagation in Brittle Materials Using Deep Operator Networks with Diverse Trunk Architectures",
+            "DeepONet solves brittle fracture phase-field problems and compares a Kolmogorov-Arnold trunk architecture.",
+            "Validate DeepONet surrogates for brittle-fracture crack nucleation and propagation under phase-field physics constraints.",
+            "验证 brittle-fracture crack nucleation 与 propagation 的 DeepONet surrogate，并检查 phase-field 物理约束。",
+        ),
+        (
             "Physics-Informed Machine Learning in Biomedical Science and Engineering",
             "Biomedical PIML reviews PINNs, NODEs and neural operators for biofluid mechanics and cell signaling.",
             "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints.",
