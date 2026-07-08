@@ -152,6 +152,8 @@ def _real_problem(title: str, summary: str) -> str:
         "scientific computing" in text or "scientific machine learning" in text
     ):
         return "Benchmark LLM capability for scientific computing and SciML tasks while preserving model-specific failure modes and decision points."
+    if "multi-agent systems" in text and "control" in text:
+        return "Assess physics-informed operator networks for real-time optimal control of multi-agent dynamical systems under stability constraints."
     if "agent" in text or "llm" in text:
         return "Audit long-horizon agent or LLM workflows with verifiable outcomes and explicit failure boundaries."
     if "multiple solutions" in text or "solution multiplicity" in text or "deep ensemble" in text:
@@ -170,8 +172,12 @@ def _real_problem(title: str, summary: str) -> str:
         return "Compare PINN control formulations against adjoint or optimality-system baselines for PDE-constrained control."
     if "spectral bias" in text or "high-frequency" in text or "frequency-resolved" in text:
         return "Diagnose high-frequency failure modes in physics-informed or operator learning and test mitigation controls."
-    if any(term in text for term in ("sensor location", "sensor placement", "vortex-induced", "marine riser", "viv")):
+    if any(term in text for term in ("sensor location", "sensor placement", "vortex-induced", "marine riser", "deepvivonet")):
         return "Optimize sparse sensor placement for vortex-induced vibration reconstruction and forecasting under transfer-learning constraints."
+    if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical", "plug flow reactor", "reactor design")):
+        return "Validate multi-output neural operator surrogates for stiff chemical kinetics under conservation, stiffness, and CFD-coupling constraints."
+    if any(term in text for term in ("biomedical", "biofluid", "biosolid", "medical imaging", "cell signaling", "physiological", "pharmacology")):
+        return "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints."
     if any(term in text for term in ("hypersonic", "supersonic", "reentry", "arbitrary grids", "geometry-dependent")):
         return "Validate data-efficient neural operator surrogates for geometry-dependent hypersonic or supersonic flow prediction on scarce data."
     if any(term in text for term in ("crack nucleation", "crack propagation", "brittle", "fracture", "phase-field")):
@@ -182,10 +188,6 @@ def _real_problem(title: str, summary: str) -> str:
         return "Evaluate differentiable spiking-neuron models for stable SciML regression, operator learning, and PDE solving."
     if any(term in text for term in ("diesel engine", "engine health", "maintenance forecasting", "parameter identification", "mean value diesel")):
         return "Evaluate operator-infused PINN digital twins for diesel-engine health monitoring under transfer learning and uncertainty constraints."
-    if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical", "plug flow reactor", "reactor design")):
-        return "Validate multi-output neural operator surrogates for stiff chemical kinetics under conservation, stiffness, and CFD-coupling constraints."
-    if any(term in text for term in ("biomedical", "biofluid", "biosolid", "medical imaging", "cell signaling", "physiological")):
-        return "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints."
     if ("turbulent" in text or "turbulence" in text) and any(
         term in text for term in ("generative", "super-resolution", "forecasting", "sparse", "reconstruction")
     ):
@@ -207,6 +209,8 @@ def _real_problem_zh(title: str, summary: str) -> str:
         "scientific computing" in text or "scientific machine learning" in text
     ):
         return "评测 LLM 在 scientific computing 和 SciML 任务中的能力，同时保留模型特定失败模式和决策点。"
+    if "multi-agent systems" in text and "control" in text:
+        return "评估 real-time optimal control 中的 physics-informed operator network，并检查多智能体动力系统稳定性约束。"
     if "agent" in text or "llm" in text:
         return "审计长周期 agent 或 LLM 工作流，要求结果可验证并显式记录失败边界。"
     if "multiple solutions" in text or "solution multiplicity" in text or "deep ensemble" in text:
@@ -225,8 +229,12 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "对比 PINN 控制 formulation 与伴随法或最优性系统基线在 PDE 约束控制中的表现。"
     if "spectral bias" in text or "high-frequency" in text or "frequency-resolved" in text:
         return "诊断 physics-informed 或 operator learning 中的高频失效模式，并测试缓解控制。"
-    if any(term in text for term in ("sensor location", "sensor placement", "vortex-induced", "marine riser", "viv")):
+    if any(term in text for term in ("sensor location", "sensor placement", "vortex-induced", "marine riser", "deepvivonet")):
         return "优化 vortex-induced vibration 重建与 forecasting 的稀疏传感器布置，并检查 transfer-learning 约束。"
+    if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical", "plug flow reactor", "reactor design")):
+        return "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。"
+    if any(term in text for term in ("biomedical", "biofluid", "biosolid", "medical imaging", "cell signaling", "physiological", "pharmacology")):
+        return "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。"
     if any(term in text for term in ("hypersonic", "supersonic", "reentry", "arbitrary grids", "geometry-dependent")):
         return "验证稀缺数据下 geometry-dependent hypersonic 或 supersonic flow 预测的高效神经算子 surrogate。"
     if any(term in text for term in ("crack nucleation", "crack propagation", "brittle", "fracture", "phase-field")):
@@ -237,10 +245,6 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "评估可微分 spiking-neuron 模型在 SciML 回归、operator learning 和 PDE 求解中的稳定性。"
     if any(term in text for term in ("diesel engine", "engine health", "maintenance forecasting", "parameter identification", "mean value diesel")):
         return "评估 diesel-engine health monitoring 的 operator-infused PINN digital twin，并检查 transfer learning 和不确定性约束。"
-    if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical", "plug flow reactor", "reactor design")):
-        return "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。"
-    if any(term in text for term in ("biomedical", "biofluid", "biosolid", "medical imaging", "cell signaling", "physiological")):
-        return "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。"
     if ("turbulent" in text or "turbulence" in text) and any(
         term in text for term in ("generative", "super-resolution", "forecasting", "sparse", "reconstruction")
     ):

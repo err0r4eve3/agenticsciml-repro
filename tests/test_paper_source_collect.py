@@ -170,10 +170,22 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。",
         ),
         (
+            "Representation Meets Optimization: Training PINNs and PIKANs for Gray-Box Discovery in Systems Pharmacology",
+            "PIKANs use Kolmogorov-Arnold networks and optimizers for systems pharmacology modeling.",
+            "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints.",
+            "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。",
+        ),
+        (
             "Learning Turbulent Flows with Generative Models: Super-resolution, Forecasting, and Sparse Flow Reconstruction",
-            "Generative neural operators improve turbulent-flow super-resolution, forecasting and sparse reconstruction.",
+            "Generative neural operators improve turbulent-flow super-resolution and sparse reconstruction; see https://vivekoommen.github.io/gen4turb/.",
             "Evaluate generative operator models for turbulent-flow super-resolution, forecasting, and sparse reconstruction without losing fine-scale structure.",
             "评估湍流 super-resolution、forecasting 和 sparse reconstruction 的生成式算子模型，避免丢失细尺度结构。",
+        ),
+        (
+            "PI-SONet: A Physics-Informed Symplectic Operator Network for Real-Time Optimal Control of Multi-Agent Systems",
+            "A symplectic operator network learns real-time optimal control of multi-agent systems.",
+            "Assess physics-informed operator networks for real-time optimal control of multi-agent dynamical systems under stability constraints.",
+            "评估 real-time optimal control 中的 physics-informed operator network，并检查多智能体动力系统稳定性约束。",
         ),
     ]
 
