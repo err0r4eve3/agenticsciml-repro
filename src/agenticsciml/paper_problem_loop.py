@@ -21,6 +21,7 @@ def write_paper_problem_loop_audit(
     output_dir: Path,
     case_limit: int | None = None,
     source_collection_path: Path | None = None,
+    source_candidate_limit: int = 3,
 ) -> dict[str, Any]:
     from agenticsciml.web.app import CURATED_PAPER_PROBLEM_CASES, ProblemIntakeRequest, _problem_intake_plan_payload
 
@@ -102,7 +103,16 @@ def write_paper_problem_loop_audit(
             }
         )
     source_collection = _read_source_collection(source_collection_path)
-    audit = _audit_payload(results, source_collection=source_collection)
+    source_candidate_results = _source_candidate_results(
+        output_dir=output_dir,
+        source_collection=source_collection,
+        limit=source_candidate_limit,
+    )
+    audit = _audit_payload(
+        results,
+        source_collection=source_collection,
+        source_candidate_results=source_candidate_results,
+    )
     _atomic_write_text(output_dir / AUDIT_JSON, json.dumps(audit, indent=2, ensure_ascii=False, allow_nan=False))
     _atomic_write_text(output_dir / AUDIT_MD, _render_markdown(audit))
     return {
@@ -114,7 +124,12 @@ def write_paper_problem_loop_audit(
     }
 
 
-def _audit_payload(results: list[dict[str, Any]], *, source_collection: dict[str, Any] | None = None) -> dict[str, Any]:
+def _audit_payload(
+    results: list[dict[str, Any]],
+    *,
+    source_collection: dict[str, Any] | None = None,
+    source_candidate_results: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     status_counts: dict[str, int] = {}
     for item in results:
         status = str(item.get("planner_status"))
@@ -149,6 +164,15 @@ def _audit_payload(results: list[dict[str, Any]], *, source_collection: dict[str
             "query": source_collection.get("query"),
             "created_at": source_collection.get("created_at"),
         }
+    if source_candidate_results is not None:
+        payload["source_candidate_count"] = len(source_candidate_results)
+        payload["source_candidate_context_ready_count"] = sum(
+            1 for item in source_candidate_results if item.get("llm_context_status") == "ready_for_llm_context"
+        )
+        payload["source_candidate_manual_wiki_review_count"] = sum(
+            1 for item in source_candidate_results if item.get("wiki_promotion_status") == "manual_review_required"
+        )
+        payload["source_candidate_results"] = source_candidate_results
     return payload
 
 
@@ -191,6 +215,15 @@ def _render_markdown(audit: dict[str, Any]) -> str:
     ]
     if isinstance(audit.get("source_collection"), dict):
         lines.extend([f"- source_collection: {audit['source_collection']}", ""])
+    if "source_candidate_count" in audit:
+        lines.extend(
+            [
+                f"- source_candidate_count: {audit.get('source_candidate_count')}",
+                f"- source_candidate_context_ready_count: {audit.get('source_candidate_context_ready_count')}",
+                f"- source_candidate_manual_wiki_review_count: {audit.get('source_candidate_manual_wiki_review_count')}",
+                "",
+            ]
+        )
     if audit.get("issues"):
         lines.extend(["## Issues", ""])
         lines.extend(f"- {issue}" for issue in audit["issues"])
@@ -218,6 +251,86 @@ def _render_markdown(audit: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _source_candidate_results(
+    *,
+    output_dir: Path,
+    source_collection: dict[str, Any] | None,
+    limit: int,
+) -> list[dict[str, Any]]:
+    if limit <= 0 or not isinstance(source_collection, dict):
+        return []
+    candidates = source_collection.get("candidates") if isinstance(source_collection.get("candidates"), list) else []
+    results: list[dict[str, Any]] = []
+    for index, candidate in enumerate(candidates[:limit], start=1):
+        if not isinstance(candidate, dict):
+            continue
+        case = _source_candidate_case(candidate)
+        tags = [str(tag) for tag in case["tags"]]
+        expert_blueprint = _expert_blueprint(tags)
+        intake = _problem_intake(case, tags)
+        plan = _plan_problem(intake, expert_blueprint)
+        matrix = build_reference_capability_matrix(problem_intake=intake, expert_blueprint_id=expert_blueprint)
+        context = build_llm_problem_context_pack(
+            problem_intake=intake,
+            expert_blueprint_id=expert_blueprint,
+            resource_constraints=_resource_constraints(),
+            reference_capability_matrix=matrix,
+        )
+        artifacts = _write_case_artifacts(
+            output_dir=output_dir,
+            index=index,
+            paper_id=str(case["id"]),
+            source_review=_source_review(case),
+            plan=plan,
+            matrix=matrix,
+            context=context,
+            group="source_candidates",
+        )
+        results.append(
+            {
+                "index": index,
+                "paper_id": case["id"],
+                "title": case["title"],
+                "url": case["url"],
+                "real_problem": case["real_problem"],
+                "real_problem_zh": case["real_problem_zh"],
+                "wiki_promotion_status": "manual_review_required",
+                "expert_blueprint_id": expert_blueprint,
+                "planner_status": plan.get("status"),
+                "recommended_benchmark": _nested_text(plan, "recommended_benchmark", "name"),
+                "source_review_status": _source_review(case).get("status"),
+                "reference_matrix_status": matrix.get("status"),
+                "llm_context_status": context.get("status"),
+                "artifacts": artifacts,
+            }
+        )
+    return results
+
+
+def _plan_problem(intake: dict[str, object], expert_blueprint: str) -> dict[str, Any]:
+    from agenticsciml.web.app import ProblemIntakeRequest, _problem_intake_plan_payload
+
+    return _problem_intake_plan_payload(
+        ProblemIntakeRequest(
+            problem_statement=str(intake["problem_summary"]),
+            requirements=(
+                "Use local deterministic planning only; preserve evaluator, sandbox, artifact, "
+                "and claim-gate boundaries."
+            ),
+            evaluation_criteria=str(intake["metric"]),
+            data_description=str(intake["data_source"]),
+            mode="mock",
+            target_solution_count=6,
+            parallel_mutations=2,
+            selector_vote_count=3,
+            max_children_per_node=3,
+            visual_audit_mode="off",
+            resource_constraints=_resource_constraints(),
+            expert_blueprint_id=expert_blueprint,
+        )
+    )
+
+
 def _write_case_artifacts(
     *,
     output_dir: Path,
@@ -227,8 +340,9 @@ def _write_case_artifacts(
     plan: dict[str, Any],
     matrix: dict[str, Any],
     context: dict[str, Any],
+    group: str = "cases",
 ) -> dict[str, str]:
-    case_dir = output_dir / "cases" / f"{index:02d}-{_slug(paper_id.split(':')[-1])}"
+    case_dir = output_dir / group / f"{index:02d}-{_slug(paper_id.split(':')[-1])}"
     payloads = {
         "source_review": source_review,
         "planner": plan,
@@ -277,6 +391,40 @@ def _source_review(case: dict[str, object]) -> dict[str, Any]:
         "real_problem": case.get("real_problem"),
         "real_problem_zh": case.get("real_problem_zh"),
     }
+
+
+def _source_candidate_case(candidate: dict[str, Any]) -> dict[str, object]:
+    tags = _source_candidate_tags(candidate)
+    published = candidate.get("published")
+    return {
+        "id": f"source:{candidate.get('id') or _slug(str(candidate.get('title', 'candidate')))}",
+        "title": candidate.get("title") or "Untitled source candidate",
+        "summary": candidate.get("summary") or "",
+        "url": candidate.get("url") or "",
+        "authors": candidate.get("authors") or [],
+        "submitted": published,
+        "published": published,
+        "real_problem": candidate.get("real_problem") or "Track this source candidate as planning context.",
+        "real_problem_zh": candidate.get("real_problem_zh") or "把该候选论文作为规划上下文跟踪。",
+        "tags": tags,
+    }
+
+
+def _source_candidate_tags(candidate: dict[str, Any]) -> list[str]:
+    text = " ".join(
+        str(candidate.get(key) or "")
+        for key in ("title", "summary", "real_problem")
+    ).lower()
+    tags = ["paper", "source-candidate"]
+    if "agent" in text or "llm" in text:
+        tags += ["agent-benchmark", "llm-evaluation"]
+    if "operator" in text:
+        tags += ["operator-learning", "neural-operator"]
+    if "turbulence" in text or "fluid" in text or "closure" in text:
+        tags += ["fluid-dynamics", "closure-modeling"]
+    if "inverse" in text or "physics-informed" in text or "pinn" in text:
+        tags += ["inverse-problem", "pinn"]
+    return tags
 
 
 def _problem_intake(case: dict[str, object], tags: list[str]) -> dict[str, object]:

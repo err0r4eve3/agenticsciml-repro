@@ -80,6 +80,18 @@ def test_paper_problem_loop_audit_includes_source_collection_cache(tmp_path: Pat
                 "issue_count": 0,
                 "query": "au:Karniadakis",
                 "created_at": "2026-07-09T00:00:00Z",
+                "candidates": [
+                    {
+                        "id": "2606.02427v1",
+                        "title": "Spectral Audit of In-Context Operator Networks",
+                        "url": "https://arxiv.org/abs/2606.02427",
+                        "authors": ["Zhiwei Gao", "George Em Karniadakis"],
+                        "published": "2026-06-01",
+                        "summary": "Audits neural operator tangent spectra beyond prediction error.",
+                        "real_problem": "Evaluate neural operator reliability beyond average prediction error.",
+                        "real_problem_zh": "用稳定性和保真度诊断评估神经算子可靠性。",
+                    }
+                ],
             }
         ),
         encoding="utf-8",
@@ -95,6 +107,15 @@ def test_paper_problem_loop_audit_includes_source_collection_cache(tmp_path: Pat
         "query": "au:Karniadakis",
         "created_at": "2026-07-09T00:00:00Z",
     }
+    assert audit["source_candidate_count"] == 1
+    assert audit["source_candidate_context_ready_count"] == 1
+    assert audit["source_candidate_manual_wiki_review_count"] == 1
+    source_candidate = audit["source_candidate_results"][0]
+    assert source_candidate["wiki_promotion_status"] == "manual_review_required"
+    assert source_candidate["artifacts"]["llm_context_pack"] == (
+        "source_candidates/01-2606-02427v1/llm_context_pack.json"
+    )
+    assert (tmp_path / "round" / source_candidate["artifacts"]["planner"]).exists()
 
 
 def test_cli_paper_problem_loop_audit_repeat_writes_round_dirs(tmp_path: Path, cli_env: dict[str, str]) -> None:

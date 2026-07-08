@@ -49,10 +49,14 @@ PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python -m agenticsci
 PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python -m agenticsciml.cli paper-problem-loop-audit \
   --output-dir runs/paper-problem-loop \
   --refresh-source-collection \
+  --source-candidate-limit 3 \
   --repeat \
   --interval-s 300 \
   --fail-on-issues
 ```
+
+刷新后的 source candidates 会写入每轮 `source_candidates/*/{source_review,planner,reference_matrix,llm_context_pack}.json`，
+并在总审计中标记 `wiki_promotion_status=manual_review_required`。它们不会自动改写 LLM Wiki。
 
 ## Pack 内容
 

@@ -27,6 +27,8 @@ OKF-like JSON 知识图谱。
 - 新增 `collect-paper-sources`，通过 arXiv API 刷新本地 `paper_source_collection.json`；
   `paper-problem-loop-audit --refresh-source-collection` 会在循环轮次前更新该 cache，并把
   `source_collection` 摘要写入总审计。测试仍使用本地 Atom fixture，不联网。
+- 循环审计会对 source collection 前几条候选执行 Problem Intake、reference matrix 和 LLM context
+  pack 生成，写入 `source_candidates/*`，但只标记 `manual_review_required`，不自动污染 Wiki 事实层。
 
 边界：
 

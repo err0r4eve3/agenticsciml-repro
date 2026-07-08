@@ -295,6 +295,8 @@ def cmd_paper_problem_loop_audit(args: argparse.Namespace) -> int:
         raise ValueError("--rounds must be >= 1")
     if args.interval_s < 0:
         raise ValueError("--interval-s must be >= 0")
+    if args.source_candidate_limit < 0:
+        raise ValueError("--source-candidate-limit must be >= 0")
 
     base_output_dir = Path(args.output_dir).resolve()
     source_collection_path = (
@@ -323,6 +325,7 @@ def cmd_paper_problem_loop_audit(args: argparse.Namespace) -> int:
                 output_dir=output_dir,
                 case_limit=args.case_limit,
                 source_collection_path=source_collection_path if source_collection_path.exists() else None,
+                source_candidate_limit=args.source_candidate_limit,
             )
             print(result["paths"]["audit_json"], flush=True)
             had_issues = had_issues or bool(result["audit"]["issues"])
@@ -737,6 +740,7 @@ def build_parser() -> argparse.ArgumentParser:
     paper_problem_loop.add_argument("--refresh-source-collection", action="store_true")
     paper_problem_loop.add_argument("--source-query", default=DEFAULT_ARXIV_QUERY)
     paper_problem_loop.add_argument("--source-limit", type=int, default=20)
+    paper_problem_loop.add_argument("--source-candidate-limit", type=int, default=3)
     paper_problem_loop.add_argument("--source-timeout-s", type=float, default=15.0)
     paper_problem_loop.add_argument("--fail-on-issues", action="store_true")
     paper_problem_loop.set_defaults(func=cmd_paper_problem_loop_audit)
