@@ -164,6 +164,14 @@ def _real_problem(title: str, summary: str) -> str:
         return "Diagnose high-frequency failure modes in physics-informed or operator learning and test mitigation controls."
     if any(term in text for term in ("spiking", "lif", "qif", "integrate-and-fire", "snn")):
         return "Evaluate differentiable spiking-neuron models for stable SciML regression, operator learning, and PDE solving."
+    if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical")):
+        return "Validate multi-output neural operator surrogates for stiff chemical kinetics under conservation, stiffness, and CFD-coupling constraints."
+    if any(term in text for term in ("biomedical", "biofluid", "biosolid", "medical imaging", "cell signaling", "physiological")):
+        return "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints."
+    if ("turbulent" in text or "turbulence" in text) and any(
+        term in text for term in ("generative", "super-resolution", "forecasting", "sparse", "reconstruction")
+    ):
+        return "Evaluate generative operator models for turbulent-flow super-resolution, forecasting, and sparse reconstruction without losing fine-scale structure."
     if any(term in text for term in ("optimizer", "optimization", "natural gradient", "bfgs", "broyden", "curvature-aware")):
         return "Audit optimizer and conditioning choices for high-accuracy PINN convergence on challenging PDE or ODE systems."
     if "operator" in text:
@@ -193,6 +201,14 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "诊断 physics-informed 或 operator learning 中的高频失效模式，并测试缓解控制。"
     if any(term in text for term in ("spiking", "lif", "qif", "integrate-and-fire", "snn")):
         return "评估可微分 spiking-neuron 模型在 SciML 回归、operator learning 和 PDE 求解中的稳定性。"
+    if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical")):
+        return "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。"
+    if any(term in text for term in ("biomedical", "biofluid", "biosolid", "medical imaging", "cell signaling", "physiological")):
+        return "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。"
+    if ("turbulent" in text or "turbulence" in text) and any(
+        term in text for term in ("generative", "super-resolution", "forecasting", "sparse", "reconstruction")
+    ):
+        return "评估湍流 super-resolution、forecasting 和 sparse reconstruction 的生成式算子模型，避免丢失细尺度结构。"
     if any(term in text for term in ("optimizer", "optimization", "natural gradient", "bfgs", "broyden", "curvature-aware")):
         return "审计 optimizer 与 conditioning 选择对高精度 PINN 在困难 PDE 或 ODE 系统上收敛的影响。"
     if "operator" in text:

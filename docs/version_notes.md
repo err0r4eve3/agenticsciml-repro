@@ -62,6 +62,8 @@ OKF-like JSON 知识图谱。
   safe predefined-time stabilization 论文会落到对抗扰动下的鲁棒安全控制学习审计。
 - Neural-operator preconditioned Newton / nonlinear solver 论文会落到非线性求解器神经预条件审计；
   LIF/QIF spiking-neuron 论文会落到可微分 spiking SciML 模型稳定性审计。
+- AMORE stiff chemical kinetics、biomedical PIML review 和 turbulent-flow generative modeling 论文
+  现在分别落到化学动力学 surrogate、biomedical modeling 和湍流生成式重建的具体审计问题。
 
 边界：
 

@@ -103,6 +103,24 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "Evaluate differentiable spiking-neuron models for stable SciML regression, operator learning, and PDE solving.",
             "评估可微分 spiking-neuron 模型在 SciML 回归、operator learning 和 PDE 求解中的稳定性。",
         ),
+        (
+            "AMORE: Adaptive Multi-Output Operator Network for Stiff Chemical Kinetics",
+            "Adaptive losses predict thermochemical states for combustion and reactive transport systems.",
+            "Validate multi-output neural operator surrogates for stiff chemical kinetics under conservation, stiffness, and CFD-coupling constraints.",
+            "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。",
+        ),
+        (
+            "Physics-Informed Machine Learning in Biomedical Science and Engineering",
+            "Biomedical PIML reviews PINNs, NODEs and neural operators for biofluid mechanics and cell signaling.",
+            "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints.",
+            "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。",
+        ),
+        (
+            "Learning Turbulent Flows with Generative Models: Super-resolution, Forecasting, and Sparse Flow Reconstruction",
+            "Generative neural operators improve turbulent-flow super-resolution, forecasting and sparse reconstruction.",
+            "Evaluate generative operator models for turbulent-flow super-resolution, forecasting, and sparse reconstruction without losing fine-scale structure.",
+            "评估湍流 super-resolution、forecasting 和 sparse reconstruction 的生成式算子模型，避免丢失细尺度结构。",
+        ),
     ]
 
     for title, summary, expected, expected_zh in cases:
