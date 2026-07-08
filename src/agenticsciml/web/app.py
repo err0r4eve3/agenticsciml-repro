@@ -671,6 +671,12 @@ def create_app() -> FastAPI:
     def save_llm_wiki_okf(request: LlmWikiSaveRequest) -> dict[str, object]:
         return _save_account_llm_wiki(request.account_id, request.payload)
 
+    @app.get("/api/paper-problem-loop/review-queue")
+    def paper_problem_loop_review_queue(
+        output_dir: str = Query(default="runs/paper-problem-loop"),
+    ) -> dict[str, object]:
+        return _paper_problem_loop_review_queue_payload(_resolve_output_dir(output_dir))
+
     @app.get("/api/solver/settings")
     def solver_settings() -> dict[str, object]:
         return _solver_settings_payload()
@@ -1681,6 +1687,41 @@ def _account_llm_wiki_path(account_id: str | None) -> Path:
 def _read_account_llm_wiki(account_id: str | None) -> dict[str, object] | None:
     payload = _read_optional_json(_account_llm_wiki_path(account_id))
     return payload if payload is None else dict(payload)
+
+
+def _paper_problem_loop_review_queue_payload(output_dir: Path) -> dict[str, object]:
+    index = _read_optional_json(output_dir / "paper_problem_loop_index.json") or {}
+    latest = index.get("latest") if isinstance(index.get("latest"), dict) else {}
+    audit_ref = latest.get("audit_json")
+    if not isinstance(audit_ref, str):
+        return {"status": "missing", "output_dir": str(output_dir), "queue": None}
+    audit_path = (output_dir / audit_ref).resolve(strict=False)
+    if not audit_path.is_relative_to(output_dir.resolve(strict=False)):
+        raise HTTPException(status_code=400, detail="latest audit path escapes paper loop output dir")
+    audit = _read_optional_json(audit_path) or {}
+    wiki = audit.get("llm_wiki_audit") if isinstance(audit.get("llm_wiki_audit"), dict) else {}
+    artifacts = wiki.get("artifacts") if isinstance(wiki.get("artifacts"), dict) else {}
+    queue_ref = artifacts.get("source_candidate_review_queue")
+    if not isinstance(queue_ref, str):
+        return {
+            "status": "missing",
+            "output_dir": str(output_dir),
+            "latest_round_id": latest.get("round_id"),
+            "audit_json": audit_ref,
+            "queue": None,
+        }
+    queue_path = (audit_path.parent / queue_ref).resolve(strict=False)
+    if not queue_path.is_relative_to(audit_path.parent.resolve(strict=False)):
+        raise HTTPException(status_code=400, detail="review queue path escapes latest audit dir")
+    queue = _read_optional_json(queue_path)
+    return {
+        "status": "available" if queue else "missing",
+        "output_dir": str(output_dir),
+        "latest_round_id": latest.get("round_id"),
+        "audit_json": audit_ref,
+        "queue_json": queue_ref,
+        "queue": queue,
+    }
 
 
 def _save_account_llm_wiki(account_id: str | None, payload: dict[str, Any]) -> dict[str, object]:

@@ -522,6 +522,29 @@ type LlmWikiOkfPayload = {
   }>;
 };
 
+type LlmWikiReviewQueuePayload = {
+  status: string;
+  latest_round_id?: string;
+  audit_json?: string;
+  queue_json?: string;
+  queue?: null | {
+    status: string;
+    graph_path?: string;
+    node_count: number;
+    editable_fields?: string[];
+    nodes?: Array<{
+      id: string;
+      title?: string;
+      title_zh?: string;
+      description?: string;
+      description_zh?: string;
+      real_problem?: string;
+      real_problem_zh?: string;
+      wiki_promotion_status?: string;
+    }>;
+  };
+};
+
 const DEFAULT_SOLVER_SETTINGS: SolverSettings = {
   default_assistant_mode: "ask",
   reasoning_efforts: ["low", "medium", "high", "xhigh"],
@@ -736,6 +759,9 @@ const api = {
       account_id: accountId,
       payload
     });
+  },
+  async getLlmWikiReviewQueue(): Promise<LlmWikiReviewQueuePayload> {
+    return getJson<LlmWikiReviewQueuePayload>("/api/paper-problem-loop/review-queue");
   }
 };
 
@@ -794,6 +820,7 @@ export function App() {
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
   const [wikiPayload, setWikiPayload] = useState<LlmWikiOkfPayload | null>(null);
   const [wikiText, setWikiText] = useState("");
+  const [wikiReviewQueue, setWikiReviewQueue] = useState<LlmWikiReviewQueuePayload | null>(null);
   const [wikiCopied, setWikiCopied] = useState(false);
   const [wikiSaved, setWikiSaved] = useState(false);
   const [agentCollapsed, setAgentCollapsed] = useState(false);
@@ -986,8 +1013,12 @@ export function App() {
   }
 
   async function refreshWiki(generated = false) {
-    const payload = await api.getLlmWikiOkf(activeAccountId, generated);
+    const [payload, reviewQueue] = await Promise.all([
+      api.getLlmWikiOkf(activeAccountId, generated),
+      api.getLlmWikiReviewQueue()
+    ]);
     setWikiPayload(payload);
+    setWikiReviewQueue(reviewQueue);
     setWikiText(JSON.stringify(payload, null, 2));
     setWikiCopied(false);
     setWikiSaved(false);
@@ -1682,6 +1713,7 @@ export function App() {
           <LlmWikiPage
             copied={wikiCopied}
             payload={wikiPayload}
+            reviewQueue={wikiReviewQueue}
             saved={wikiSaved}
             text={wikiText}
             onChange={(value) => {
@@ -1777,6 +1809,7 @@ function PageHeader({ subtitle, title }: { subtitle: string; title: string }) {
 function LlmWikiPage({
   copied,
   payload,
+  reviewQueue,
   saved,
   text,
   onChange,
@@ -1786,6 +1819,7 @@ function LlmWikiPage({
 }: {
   copied: boolean;
   payload: LlmWikiOkfPayload | null;
+  reviewQueue: LlmWikiReviewQueuePayload | null;
   saved: boolean;
   text: string;
   onChange: (value: string) => void;
@@ -1799,6 +1833,7 @@ function LlmWikiPage({
   const paperProblemCases = nodes.filter(
     (node) => isRecord(node) && (node.type === "paper_problem_case" || node.type === "external_paper")
   );
+  const queueNodes = reviewQueue?.queue?.nodes ?? [];
   const isOkf = Boolean(
     parsed &&
       parsed.type === "llm_wiki_knowledge_graph" &&
@@ -1827,6 +1862,20 @@ function LlmWikiPage({
             <Metric label="version" value={payload?.okf_version ?? "0.1"} />
           </div>
           <div className="wiki-node-list">
+            {queueNodes.length ? (
+              <div className="wiki-review-queue">
+                <strong>Manual review queue</strong>
+                <span>{reviewQueue?.latest_round_id ?? "latest"} · {reviewQueue?.queue?.graph_path ?? "llm_wiki/llm_wiki_okf.json"}</span>
+                {queueNodes.map((node) => (
+                  <div className="wiki-node-row" key={node.id}>
+                    <strong>{node.title_zh ?? node.title ?? node.id}</strong>
+                    <span>{node.description_zh ?? node.description ?? node.id}</span>
+                    {node.real_problem_zh ? <small>{node.real_problem_zh}</small> : null}
+                    <em>{node.wiki_promotion_status ?? "manual_review_required"}</em>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             {paperProblemCases.map((node) => (
               <div className="wiki-node-row" key={String(node.id)}>
                 <strong>{String(node.title_zh ?? node.title)}</strong>

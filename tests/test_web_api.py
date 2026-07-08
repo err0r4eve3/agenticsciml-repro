@@ -210,6 +210,61 @@ def test_llm_wiki_okf_manual_edits_persist_per_account(tmp_path: Path, monkeypat
     assert invalid_response.status_code == 400
 
 
+def test_paper_problem_loop_review_queue_endpoint_reads_latest_queue(tmp_path: Path) -> None:
+    output_dir = tmp_path / "paper-loop"
+    round_dir = output_dir / "round-0001"
+    queue_dir = round_dir / "llm_wiki"
+    queue_dir.mkdir(parents=True)
+    (output_dir / "paper_problem_loop_index.json").write_text(
+        json.dumps({"latest": {"round_id": "round-0001", "audit_json": "round-0001/audit.json"}}),
+        encoding="utf-8",
+    )
+    (round_dir / "audit.json").write_text(
+        json.dumps(
+            {
+                "llm_wiki_audit": {
+                    "artifacts": {"source_candidate_review_queue": "llm_wiki/source_candidate_review_queue.json"}
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (queue_dir / "source_candidate_review_queue.json").write_text(
+        json.dumps(
+            {
+                "status": "manual_review_required",
+                "node_count": 1,
+                "nodes": [{"id": "source:test", "wiki_promotion_status": "manual_review_required"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = TestClient(create_app())
+
+    response = client.get("/api/paper-problem-loop/review-queue", params={"output_dir": str(output_dir)})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "available"
+    assert payload["latest_round_id"] == "round-0001"
+    assert payload["queue"]["node_count"] == 1
+    assert payload["queue"]["nodes"][0]["id"] == "source:test"
+
+
+def test_paper_problem_loop_review_queue_rejects_escaping_audit_path(tmp_path: Path) -> None:
+    output_dir = tmp_path / "paper-loop"
+    output_dir.mkdir()
+    (output_dir / "paper_problem_loop_index.json").write_text(
+        json.dumps({"latest": {"round_id": "round-0001", "audit_json": "../audit.json"}}),
+        encoding="utf-8",
+    )
+    client = TestClient(create_app())
+
+    response = client.get("/api/paper-problem-loop/review-queue", params={"output_dir": str(output_dir)})
+
+    assert response.status_code == 400
+
+
 def test_problem_intake_plans_benchmark_and_strategy_seeds() -> None:
     client = TestClient(create_app())
 

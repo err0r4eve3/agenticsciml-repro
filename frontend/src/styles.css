@@ -477,6 +477,24 @@ ul {
   gap: 8px;
 }
 
+.wiki-review-queue {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #b9885a;
+  border-radius: 8px;
+  background: #fff2d9;
+  padding: 10px;
+}
+
+.wiki-review-queue > strong {
+  font-size: 13px;
+}
+
+.wiki-review-queue > span {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
 .wiki-node-row {
   display: grid;
   gap: 4px;
