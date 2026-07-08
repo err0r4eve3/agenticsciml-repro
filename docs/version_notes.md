@@ -29,7 +29,8 @@ OKF-like JSON 知识图谱。
   `source_collection` 摘要写入总审计。默认 source collection 上限为 50 条，避免生产循环过早耗尽当前候选池。
   测试仍使用本地 Atom fixture，不联网。
 - 循环审计会对 source collection 前几条候选执行 Problem Intake、reference matrix 和 LLM context
-  pack 生成，写入 `source_candidates/*`，但只标记 `manual_review_required`，不自动污染 Wiki 事实层。
+  pack 生成，写入 `source_candidates/*`，并在每轮 generated LLM Wiki snapshot 追加双语
+  `source_candidate` 节点；这些节点保留 `manual_review_required`，不自动污染 account Wiki 或 evaluator 事实层。
 - 循环审计会保存并验证 generated LLM Wiki OKF snapshot：`llm_wiki/llm_wiki_okf.json` 和
   `llm_wiki/llm_wiki_audit.json`。若 OKF 根字段、双语论文节点、边引用或手动编辑持久化边界损坏，
   总审计会 fail closed。

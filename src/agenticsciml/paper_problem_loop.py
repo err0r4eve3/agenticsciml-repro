@@ -110,7 +110,7 @@ def write_paper_problem_loop_audit(
         limit=source_candidate_limit,
         offset=source_candidate_offset,
     )
-    llm_wiki_audit = _write_llm_wiki_audit(output_dir)
+    llm_wiki_audit = _write_llm_wiki_audit(output_dir, source_candidate_results=source_candidate_results)
     audit = _audit_payload(
         results,
         source_collection=source_collection,
@@ -506,6 +506,7 @@ def _audit_payload(
             "status": llm_wiki_audit.get("status"),
             "issue_count": llm_wiki_audit.get("issue_count"),
             "paper_problem_case_count": llm_wiki_audit.get("paper_problem_case_count"),
+            "source_candidate_node_count": llm_wiki_audit.get("source_candidate_node_count"),
             "languages": llm_wiki_audit.get("languages"),
             "manual_editing": llm_wiki_audit.get("manual_editing"),
             "persistence": llm_wiki_audit.get("persistence"),
@@ -596,10 +597,11 @@ def _render_markdown(audit: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _write_llm_wiki_audit(output_dir: Path) -> dict[str, Any]:
+def _write_llm_wiki_audit(output_dir: Path, *, source_candidate_results: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     from agenticsciml.web.app import _llm_wiki_okf_payload
 
     graph = _llm_wiki_okf_payload()
+    source_candidate_node_count = _attach_source_candidate_wiki_nodes(graph, source_candidate_results or [])
     graph_path = output_dir / "llm_wiki" / "llm_wiki_okf.json"
     audit_path = output_dir / "llm_wiki" / "llm_wiki_audit.json"
     _atomic_write_text(graph_path, json.dumps(graph, indent=2, ensure_ascii=False, allow_nan=False))
@@ -608,6 +610,9 @@ def _write_llm_wiki_audit(output_dir: Path) -> dict[str, Any]:
     if manual_roundtrip["status"] != "passed":
         issues.append("manual edit roundtrip failed")
     paper_nodes = [node for node in graph.get("nodes", []) if isinstance(node, dict) and node.get("type") == "paper_problem_case"]
+    source_candidate_nodes = [
+        node for node in graph.get("nodes", []) if isinstance(node, dict) and node.get("type") == "source_candidate"
+    ]
     edit_policy = graph.get("edit_policy") if isinstance(graph.get("edit_policy"), dict) else {}
     audit = {
         "artifact_type": "agenticsciml_llm_wiki_okf_audit",
@@ -615,6 +620,8 @@ def _write_llm_wiki_audit(output_dir: Path) -> dict[str, Any]:
         "issue_count": len(issues),
         "issues": issues,
         "paper_problem_case_count": len(paper_nodes),
+        "source_candidate_node_count": len(source_candidate_nodes),
+        "source_candidate_input_count": source_candidate_node_count,
         "languages": graph.get("languages"),
         "manual_editing": edit_policy.get("manual_editing"),
         "persistence": edit_policy.get("persistence"),
@@ -627,6 +634,50 @@ def _write_llm_wiki_audit(output_dir: Path) -> dict[str, Any]:
     }
     _atomic_write_text(audit_path, json.dumps(audit, indent=2, ensure_ascii=False, allow_nan=False))
     return audit
+
+
+def _attach_source_candidate_wiki_nodes(graph: dict[str, Any], source_candidate_results: list[dict[str, Any]]) -> int:
+    nodes = graph.get("nodes") if isinstance(graph.get("nodes"), list) else []
+    edges = graph.get("edges") if isinstance(graph.get("edges"), list) else []
+    timestamp = str(graph.get("timestamp") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    existing_ids = {node.get("id") for node in nodes if isinstance(node, dict)}
+    count = 0
+    for item in source_candidate_results:
+        paper_id = item.get("paper_id")
+        if not isinstance(paper_id, str) or not paper_id or paper_id in existing_ids:
+            continue
+        title = str(item.get("title") or paper_id)
+        nodes.append(
+            {
+                "id": paper_id,
+                "type": "source_candidate",
+                "title": title,
+                "title_zh": f"候选论文：{title}",
+                "description": str(item.get("real_problem") or "Source candidate awaiting manual Wiki review."),
+                "description_zh": str(item.get("real_problem_zh") or "等待人工审核的候选论文。"),
+                "real_problem": str(item.get("real_problem") or "Source candidate awaiting manual Wiki review."),
+                "real_problem_zh": str(item.get("real_problem_zh") or "等待人工审核的候选论文。"),
+                "tags": ["paper", "source-candidate", "manual-review-required"],
+                "tags_zh": ["论文", "候选来源", "需要人工审核"],
+                "timestamp": timestamp,
+                "wiki_promotion_status": item.get("wiki_promotion_status") or "manual_review_required",
+                "source": {
+                    "url": item.get("url"),
+                    "artifacts": item.get("artifacts"),
+                },
+            }
+        )
+        edges.append(
+            {
+                "source": paper_id,
+                "target": "workflow:problem_intake",
+                "relation": "planned_by",
+                "description": "Source candidates are routed through Problem Intake and require manual Wiki review before promotion.",
+            }
+        )
+        existing_ids.add(paper_id)
+        count += 1
+    return count
 
 
 def _manual_wiki_edit_roundtrip(graph: dict[str, Any], output_dir: Path) -> dict[str, Any]:
@@ -696,10 +747,12 @@ def _llm_wiki_issues(graph: dict[str, Any]) -> list[str]:
         for key in ("id", "type", "title", "description", "tags", "timestamp"):
             if not node.get(key):
                 issues.append(f"{node.get('id') or 'unknown'} missing {key}")
-        if node.get("type") == "paper_problem_case":
+        if node.get("type") in {"paper_problem_case", "source_candidate"}:
             for key in ("title_zh", "description_zh", "real_problem", "real_problem_zh"):
                 if not node.get(key):
                     issues.append(f"{node.get('id') or 'unknown'} missing {key}")
+        if node.get("type") == "source_candidate" and node.get("wiki_promotion_status") != "manual_review_required":
+            issues.append(f"{node.get('id') or 'unknown'} source candidate must require manual review")
     for edge in graph.get("edges", []):
         if not isinstance(edge, dict):
             issues.append("edge must be an object")

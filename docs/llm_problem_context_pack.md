@@ -72,10 +72,11 @@ PYTHONPATH=src uv run --python 3.11 --extra web --extra dev python -m agenticsci
 `--source-candidate-limit` 轮转，写入每轮
 `source_candidates/*/{source_review,planner,reference_matrix,llm_context_pack}.json`，并在总审计中记录
 `source_candidate_offset`、`source_candidate_selection_ids` 和 `wiki_promotion_status=manual_review_required`。
+每轮 generated LLM Wiki snapshot 会追加这些候选的双语 `source_candidate` 节点，仍保留
+`manual_review_required`，不自动写入 account Wiki 或 evaluator 事实层。
 顶层 index/health 还会汇总 `source_candidate_seen_count`、`source_candidate_available_count`、
 `source_candidate_coverage_ratio`、`source_candidate_pending_count` 和 `source_candidate_pending_ids`；
 coverage ratio 与 pending ids 都按当前 source collection 的 candidate ids 与累计 seen ids 的交集/差集计算。
-它们不会自动改写 LLM Wiki。
 每轮还会写入 `llm_wiki/llm_wiki_okf.json` 与 `llm_wiki/llm_wiki_audit.json`，验证 OKF
 根字段、节点字段、双语论文问题字段、边引用和手动编辑持久化边界。
 审计还会写 `llm_wiki/manual_edit_roundtrip.json`，用隔离副本验证手动编辑 payload 能通过同一
