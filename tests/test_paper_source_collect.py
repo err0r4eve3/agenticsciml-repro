@@ -79,6 +79,18 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "Diagnose high-frequency failure modes in physics-informed or operator learning and test mitigation controls.",
             "诊断 physics-informed 或 operator learning 中的高频失效模式，并测试缓解控制。",
         ),
+        (
+            "Retrofitting Earth System Models with Cadence-Limited Neural Operator Updates",
+            "Online bias correction tendencies retrofit ESM predictions under runtime cadence limits.",
+            "Audit online ML bias-correction for Earth-system models under stability, portability, and runtime cadence constraints.",
+            "审计 Earth-system model 的在线 ML 偏差校正，同时检查稳定性、可迁移性和运行 cadence 约束。",
+        ),
+        (
+            "Adversarial Physics-Informed Machine Learning for Robust Optimal Safe Predefined-Time Stabilization",
+            "A differential game and HJI equation learn safe stabilization under adversarial disturbances.",
+            "Assess robust safe-control learning for nonlinear dynamical systems under adversarial disturbances and stability constraints.",
+            "评估非线性动力系统在对抗扰动和稳定性约束下的鲁棒安全控制学习。",
+        ),
     ]
 
     for title, summary, expected, expected_zh in cases:

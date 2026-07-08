@@ -58,6 +58,8 @@ OKF-like JSON 知识图谱。
 - 现实问题映射继续补齐本轮生产抽样发现的具体主题：curvature-aware / optimizer PINN 论文会落到
   optimizer 与 conditioning 审计，PDE constrained optimal control 论文会落到 PINN control
   formulation 对比，spectral bias 论文会落到高频失效与缓解控制诊断。
+- Earth-system operator 更新会落到在线 ML bias-correction 的稳定性/可迁移性/cadence 约束审计；
+  safe predefined-time stabilization 论文会落到对抗扰动下的鲁棒安全控制学习审计。
 
 边界：
 
