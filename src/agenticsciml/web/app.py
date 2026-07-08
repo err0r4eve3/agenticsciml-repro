@@ -98,6 +98,59 @@ ASSISTANT_MODE_MODEL_SETTINGS: dict[AssistantMode, dict[str, object]] = {
     "agent": {"reasoning_effort": "high", "temperature": 0.1},
 }
 
+RECENT_AUTHOR_PAPER_INSIGHTS: tuple[dict[str, object], ...] = (
+    {
+        "id": "paper:turbulence_closure_pinn_solver_agnostic",
+        "title": "Generalizable turbulence closures across bluff-body shapes by PINN-based solver-agnostic training",
+        "authors": ["Zhen Zhang", "Theo Kaufer", "Louise Ronglan", "Michael S. Triantafyllou", "George Em Karniadakis"],
+        "submitted": "2026-07-05",
+        "url": "https://arxiv.org/abs/2607.04491",
+        "summary": "PINN-trained RANS closures reduce solver-in-loop calibration and motivate solver-agnostic closure benchmark gates.",
+        "project_hooks": ["benchmark:cylinder_wake_reconstruction_faithful_small", "workflow:problem_intake"],
+        "tags": ["paper", "fluid-dynamics", "closure-modeling", "pinn"],
+    },
+    {
+        "id": "paper:spectrally_safe_neural_operator_warm_starts",
+        "title": "Spectrally Safe Neural Operator Warm-Starts for Large-Scale Newton Solvers",
+        "authors": ["Jaemin Oh", "Youngkyu Lee", "Jerome Darbon", "George Em Karniadakis"],
+        "submitted": "2026-06-20",
+        "url": "https://arxiv.org/abs/2606.21828",
+        "summary": "Low prediction error can still miss Newton-basin and Jacobian-spectrum safety, so operator claims need stability diagnostics.",
+        "project_hooks": ["workflow:trace_summary_quality_gate", "algorithm:deeponet_operator"],
+        "tags": ["paper", "neural-operator", "stability", "newton"],
+    },
+    {
+        "id": "paper:adjoint_vs_pinn_inverse_problems",
+        "title": "Adjoint Method versus Physics-Informed Neural Networks in PDE-Constrained Inverse Problems",
+        "authors": ["Zhen Zhang", "Alessandro Alla", "George Em Karniadakis"],
+        "submitted": "2026-06-10",
+        "url": "https://arxiv.org/abs/2606.12337",
+        "summary": "Unknown representation often decides whether adjoint methods or PINNs are the right local strategy.",
+        "project_hooks": ["workflow:problem_intake", "algorithm:pinn_residual_minimizer"],
+        "tags": ["paper", "inverse-problem", "pinn", "adjoint"],
+    },
+    {
+        "id": "paper:agents_last_exam",
+        "title": "Agents' Last Exam",
+        "authors": ["Yiyou Sun", "Xinyang Han", "Weichen Zhang", "George Em Karniadakis", "et al."],
+        "submitted": "2026-06-03",
+        "url": "https://arxiv.org/abs/2606.05405",
+        "summary": "Long-horizon agent benchmarks reinforce the need for verifiable outcomes and fail-closed action boundaries.",
+        "project_hooks": ["workflow:claim_gate", "workflow:trace_summary_quality_gate"],
+        "tags": ["paper", "agent-benchmark", "evaluation"],
+    },
+    {
+        "id": "paper:spectral_audit_in_context_operator_networks",
+        "title": "Spectral Audit of In-Context Operator Networks",
+        "authors": ["Zhiwei Gao", "Liu Yang", "George Em Karniadakis"],
+        "submitted": "2026-06-01",
+        "url": "https://arxiv.org/abs/2606.02427",
+        "summary": "Prediction error alone can hide wrong tangent dynamics; operator-learning runs should expose spectral/audit hooks.",
+        "project_hooks": ["workflow:trace_summary_quality_gate", "benchmark:antiderivative_operator_faithful_small"],
+        "tags": ["paper", "operator-learning", "spectral-audit"],
+    },
+)
+
 
 class AgentModelRequest(BaseModel):
     model: str = Field(min_length=1, max_length=120)
@@ -496,6 +549,10 @@ def create_app() -> FastAPI:
         output_dir: str = Query(default="runs"),
     ) -> dict[str, object]:
         return {"workspaces": _code_server_workspaces(account_id=account_id, run_id=run_id, output_dir=output_dir)}
+
+    @app.get("/api/llm-wiki/okf")
+    def llm_wiki_okf() -> dict[str, object]:
+        return _llm_wiki_okf_payload()
 
     @app.get("/api/solver/settings")
     def solver_settings() -> dict[str, object]:
@@ -2417,6 +2474,199 @@ def _solver_settings_payload() -> dict[str, object]:
             str(role["role"]): dict(role["default_model_settings"])
             for role in AGENT_ROLES
         },
+    }
+
+
+def _llm_wiki_okf_payload() -> dict[str, object]:
+    timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    nodes = [
+        _okf_node(
+            "project:agenticsciml",
+            "project",
+            "AgenticSciML Reproduction",
+            "Local-first reproduction of the AgenticSciML workflow with fail-closed scientific claim boundaries.",
+            ["agenticsciml", "workflow", "claim-boundary"],
+            timestamp,
+            source={"path": "AGENTS.md"},
+        ),
+        _okf_node(
+            "workflow:claim_gate",
+            "workflow",
+            "Scientific claim gate",
+            "Claims stay blocked unless evaluator outputs, trace summaries, run metadata, and required review artifacts agree.",
+            ["claim-gate", "evidence", "fail-closed"],
+            timestamp,
+            source={"path": "src/agenticsciml/readiness.py"},
+        ),
+        _okf_node(
+            "workflow:trace_summary_quality_gate",
+            "workflow",
+            "Trace summary quality gate",
+            "Trace summaries validate required spans, artifact consistency, node references, and lifecycle coverage.",
+            ["trace", "quality-gate", "artifact"],
+            timestamp,
+            source={"path": "src/agenticsciml/reporting/trace_summary.py"},
+        ),
+        _okf_node(
+            "workflow:problem_intake",
+            "workflow",
+            "Problem Intake",
+            "Structured problem intake maps user scientific requirements to local benchmark candidates and strategy seeds.",
+            ["problem-intake", "benchmark-routing", "strategy-seed"],
+            timestamp,
+            source={"path": "src/agenticsciml/web/app.py"},
+        ),
+        _okf_node(
+            "format:okf",
+            "format",
+            "OKF-like LLM Wiki graph",
+            "Every graph and node object keeps type, title, description, tags, and timestamp metadata for machine editing.",
+            ["okf", "llm-wiki", "knowledge-graph"],
+            timestamp,
+        ),
+    ]
+    edges = [
+        _okf_edge("project:agenticsciml", "workflow:claim_gate", "bounded_by", "Project claims are bounded by the claim gate."),
+        _okf_edge("project:agenticsciml", "workflow:trace_summary_quality_gate", "audited_by", "Completed runs are audited through trace summary."),
+        _okf_edge("project:agenticsciml", "workflow:problem_intake", "operated_by", "ChatUI routes new scientific problems through problem intake."),
+        _okf_edge("format:okf", "project:agenticsciml", "describes", "The graph describes this repository for LLM consumption."),
+    ]
+
+    for task in list_paper_tasks():
+        task_id = f"paper_task:{task['paper_section']}"
+        nodes.append(
+            _okf_node(
+                task_id,
+                "paper_task",
+                str(task["title"]),
+                str(task["summary"]),
+                ["paper-task", str(task["paper_section"])],
+                timestamp,
+                source={"path": "src/agenticsciml/paper_tasks.py"},
+            )
+        )
+        edges.append(_okf_edge("project:agenticsciml", task_id, "maps_paper_section", str(task["claim_boundary"])))
+
+    for benchmark in list_benchmarks():
+        benchmark_id = f"benchmark:{benchmark.name}"
+        nodes.append(
+            _okf_node(
+                benchmark_id,
+                "benchmark",
+                benchmark.name,
+                benchmark.description,
+                ["benchmark", benchmark.family, benchmark.fidelity_level],
+                timestamp,
+                source={"path": str(benchmark.path.relative_to(REPO_ROOT))},
+                metric=benchmark.metric,
+                fidelity_level=benchmark.fidelity_level,
+                paper_gap_notes=benchmark.paper_gap_notes,
+            )
+        )
+        edges.append(
+            _okf_edge(
+                f"paper_task:{benchmark.paper_section}",
+                benchmark_id,
+                "has_local_benchmark",
+                "Local benchmark evidence is not paper-score evidence unless fidelity metadata says paper-like.",
+            )
+        )
+
+    for algorithm in list_algorithms():
+        algorithm_id = f"algorithm:{algorithm.algorithm_id}"
+        nodes.append(
+            _okf_node(
+                algorithm_id,
+                "algorithm_seed",
+                algorithm.name,
+                algorithm.description,
+                ["algorithm", algorithm.family, algorithm.status],
+                timestamp,
+                source={"path": algorithm.implementation_path or "src/agenticsciml/algorithm_catalog.py"},
+                claim_boundary=algorithm.claim_boundary,
+            )
+        )
+        for benchmark_name in algorithm.benchmark_examples[:2]:
+            edges.append(
+                _okf_edge(
+                    algorithm_id,
+                    f"benchmark:{benchmark_name}",
+                    "suggests_seed_for",
+                    "Algorithm entries are prompt seeds, not evaluated implementations.",
+                )
+            )
+
+    for paper in RECENT_AUTHOR_PAPER_INSIGHTS:
+        paper_id = str(paper["id"])
+        nodes.append(
+            _okf_node(
+                paper_id,
+                "external_paper",
+                str(paper["title"]),
+                str(paper["summary"]),
+                [str(tag) for tag in paper["tags"]],
+                timestamp,
+                source={"url": paper["url"], "submitted": paper["submitted"], "authors": paper["authors"]},
+            )
+        )
+        for hook in paper["project_hooks"]:
+            edges.append(_okf_edge(paper_id, str(hook), "suggests_project_attention", str(paper["summary"])))
+
+    return {
+        "okf_version": "0.1",
+        "type": "llm_wiki_knowledge_graph",
+        "title": "AgenticSciML LLM Wiki Knowledge Graph",
+        "description": "Editable OKF-like JSON graph for repository, workflow, benchmark, algorithm, and recent author-paper context.",
+        "tags": ["agenticsciml", "llm-wiki", "okf", "knowledge-graph"],
+        "timestamp": timestamp,
+        "generator": {
+            "name": "AgenticSciML Wiki Agent",
+            "mode": "deterministic_repo_catalog",
+            "uses_network": False,
+            "source_boundary": "Repository catalog plus manually reviewed recent author-paper metadata.",
+        },
+        "edit_policy": {
+            "manual_editing": True,
+            "persistence": "client_side_editor_only",
+            "claim_boundary": "Edited wiki text is planning context, not benchmark evidence.",
+        },
+        "author_scan": {
+            "qile_jiang_exact_arxiv_total": 3,
+            "qile_jiang_post_agenticsciml_exact_author_article_found": False,
+            "george_karniadakis_recent_paper_count_included": len(RECENT_AUTHOR_PAPER_INSIGHTS),
+        },
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+
+def _okf_node(
+    node_id: str,
+    node_type: str,
+    title: str,
+    description: str,
+    tags: list[str],
+    timestamp: str,
+    **extra: object,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": node_id,
+        "type": node_type,
+        "title": title,
+        "description": _compact_summary(description, 520),
+        "tags": tags,
+        "timestamp": timestamp,
+    }
+    payload.update({key: value for key, value in extra.items() if value not in (None, "", [], {})})
+    return payload
+
+
+def _okf_edge(source: str, target: str, relation: str, description: str) -> dict[str, object]:
+    return {
+        "source": source,
+        "target": target,
+        "relation": relation,
+        "description": _compact_summary(description, 360),
     }
 
 

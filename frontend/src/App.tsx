@@ -15,6 +15,7 @@ import {
   Database,
   FileText,
   FolderTree,
+  GitGraph,
   MessageSquare,
   PackageSearch,
   PanelRightClose,
@@ -119,7 +120,7 @@ type ClaimLevel = "workflow_proxy" | "paper_workflow";
 type WorkspaceScope = "repo" | "account" | "run" | "solution";
 type AssistantMode = "ask" | "plan" | "agent";
 type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
-type PageKey = "chat" | "ide" | "library";
+type PageKey = "chat" | "ide" | "library" | "wiki";
 
 const AGENT_PANEL_MIN_WIDTH = 280;
 const AGENT_PANEL_MAX_WIDTH = 560;
@@ -476,6 +477,42 @@ type CodeWorkspaceOption = CodeServerPayload & {
   status: string;
 };
 
+type LlmWikiOkfPayload = {
+  okf_version: string;
+  type: string;
+  title: string;
+  description: string;
+  tags: string[];
+  timestamp: string;
+  generator?: {
+    name?: string;
+    mode?: string;
+    uses_network?: boolean;
+    source_boundary?: string;
+  };
+  edit_policy?: {
+    manual_editing?: boolean;
+    persistence?: string;
+    claim_boundary?: string;
+  };
+  author_scan?: Record<string, unknown>;
+  nodes: Array<{
+    id: string;
+    type: string;
+    title: string;
+    description: string;
+    tags: string[];
+    timestamp: string;
+    source?: Record<string, unknown>;
+  }>;
+  edges: Array<{
+    source: string;
+    target: string;
+    relation: string;
+    description: string;
+  }>;
+};
+
 const DEFAULT_SOLVER_SETTINGS: SolverSettings = {
   default_assistant_mode: "ask",
   reasoning_efforts: ["low", "medium", "high", "xhigh"],
@@ -678,6 +715,9 @@ const api = {
     if (runId) params.set("run_id", runId);
     const payload = await getJson<{ workspaces: CodeWorkspaceOption[] }>(`/api/code-server/workspaces?${params.toString()}`);
     return payload.workspaces;
+  },
+  async getLlmWikiOkf(): Promise<LlmWikiOkfPayload> {
+    return getJson<LlmWikiOkfPayload>("/api/llm-wiki/okf");
   }
 };
 
@@ -734,6 +774,9 @@ export function App() {
   const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScope>("account");
   const [codeWorkspaces, setCodeWorkspaces] = useState<CodeWorkspaceOption[]>([]);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
+  const [wikiPayload, setWikiPayload] = useState<LlmWikiOkfPayload | null>(null);
+  const [wikiText, setWikiText] = useState("");
+  const [wikiCopied, setWikiCopied] = useState(false);
   const [agentCollapsed, setAgentCollapsed] = useState(false);
   const [agentPanelWidth, setAgentPanelWidth] = useState(AGENT_PANEL_DEFAULT_WIDTH);
   const [pendingRealAction, setPendingRealAction] = useState<SolverAction | null>(null);
@@ -771,6 +814,7 @@ export function App() {
       })
       .catch((exc) => setError(String(exc)));
     api.getSolverSettings().then(setSolverSettings).catch((exc) => setError(String(exc)));
+    refreshWiki().catch((exc) => setError(String(exc)));
     refreshRuns().catch((exc) => setError(String(exc)));
   }, []);
 
@@ -919,6 +963,18 @@ export function App() {
     const workspaces = await api.getCodeWorkspaces(activeRunId, activeAccountId);
     setCodeWorkspaces(workspaces);
     setSelectedWorkspaceId((current) => (current && workspaces.some((workspace) => workspace.id === current) ? current : null));
+  }
+
+  async function refreshWiki() {
+    const payload = await api.getLlmWikiOkf();
+    setWikiPayload(payload);
+    setWikiText(JSON.stringify(payload, null, 2));
+    setWikiCopied(false);
+  }
+
+  async function copyWikiText() {
+    await navigator.clipboard?.writeText(wikiText);
+    setWikiCopied(true);
   }
 
   async function selectWorkspaceFromCodeServerAction(action: SolverAction) {
@@ -1580,6 +1636,23 @@ export function App() {
           />
         </section>
       ) : null}
+      {activePage === "wiki" ? (
+        <section className="wiki-page" aria-label="LLM Wiki OKF 页面" data-testid="page-wiki">
+          <PageHeader title="LLM Wiki" subtitle="OKF Graph" />
+          {error ? <div className="error-line">{error}</div> : null}
+          <LlmWikiPage
+            copied={wikiCopied}
+            payload={wikiPayload}
+            text={wikiText}
+            onChange={(value) => {
+              setWikiText(value);
+              setWikiCopied(false);
+            }}
+            onCopy={copyWikiText}
+            onRefresh={refreshWiki}
+          />
+        </section>
+      ) : null}
     </main>
   );
 }
@@ -1602,7 +1675,8 @@ function FunctionNav({
   const pages: Array<{ key: PageKey; label: string; icon: ReactNode }> = [
     { key: "chat", label: "ChatUI", icon: <MessageSquare size={19} /> },
     { key: "ide", label: "VS Code", icon: <Code2 size={19} /> },
-    { key: "library", label: "算法库", icon: <PackageSearch size={19} /> }
+    { key: "library", label: "算法库", icon: <PackageSearch size={19} /> },
+    { key: "wiki", label: "Wiki", icon: <GitGraph size={19} /> }
   ];
 
   return (
@@ -1655,6 +1729,88 @@ function PageHeader({ subtitle, title }: { subtitle: string; title: string }) {
         <span>{subtitle}</span>
       </div>
     </header>
+  );
+}
+
+function LlmWikiPage({
+  copied,
+  payload,
+  text,
+  onChange,
+  onCopy,
+  onRefresh
+}: {
+  copied: boolean;
+  payload: LlmWikiOkfPayload | null;
+  text: string;
+  onChange: (value: string) => void;
+  onCopy: () => void;
+  onRefresh: () => void;
+}) {
+  const parsed = parseJsonObject(text);
+  const nodes = Array.isArray(parsed?.nodes) ? parsed.nodes : [];
+  const edges = Array.isArray(parsed?.edges) ? parsed.edges : [];
+  const externalPapers = nodes.filter((node) => isRecord(node) && node.type === "external_paper");
+  const isOkf = Boolean(
+    parsed &&
+      parsed.type === "llm_wiki_knowledge_graph" &&
+      typeof parsed.title === "string" &&
+      typeof parsed.description === "string" &&
+      Array.isArray(parsed.tags) &&
+      typeof parsed.timestamp === "string"
+  );
+
+  return (
+    <section className="wiki-content">
+      <section className="wiki-head">
+        <div>
+          <p className="eyebrow">Agent-generated graph</p>
+          <h2>{payload?.title ?? "AgenticSciML LLM Wiki Knowledge Graph"}</h2>
+          <span>{payload?.generator?.source_boundary ?? "Repository catalog plus reviewed paper metadata."}</span>
+        </div>
+        <StatusBadge tone={isOkf ? "good" : "bad"}>{isOkf ? "OKF valid" : "JSON invalid"}</StatusBadge>
+      </section>
+      <div className="wiki-grid">
+        <DataRegion title="Graph Index">
+          <div className="metric-grid compact">
+            <Metric label="nodes" value={String(nodes.length)} />
+            <Metric label="edges" value={String(edges.length)} />
+            <Metric label="papers" value={String(externalPapers.length)} />
+            <Metric label="version" value={payload?.okf_version ?? "0.1"} />
+          </div>
+          <div className="wiki-node-list">
+            {externalPapers.map((node) => (
+              <div className="wiki-node-row" key={String(node.id)}>
+                <strong>{String(node.title)}</strong>
+                <span>{String(node.description)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="claim-boundary">
+            <AlertTriangle size={15} />
+            <span>{payload?.edit_policy?.claim_boundary ?? "Edited wiki text is planning context, not benchmark evidence."}</span>
+          </div>
+        </DataRegion>
+        <DataRegion title="OKF Editor">
+          <div className="wiki-editor-actions">
+            <button className="icon-text-button secondary" type="button" onClick={onRefresh}>
+              <RefreshCw size={15} />
+              Regenerate
+            </button>
+            <button className="icon-text-button" disabled={!text.trim()} type="button" onClick={onCopy}>
+              <FileText size={15} />
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+          <textarea
+            className="wiki-editor"
+            value={text}
+            onChange={(event) => onChange(event.target.value)}
+            spellCheck={false}
+          />
+        </DataRegion>
+      </div>
+    </section>
   );
 }
 
@@ -3509,6 +3665,19 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 function StatusBadge({ children, tone }: { children: ReactNode; tone: "neutral" | "good" | "bad" | "info" }) {
   return <span className={`status-badge ${tone}`}>{children}</span>;
+}
+
+function parseJsonObject(text: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function Leaderboard({ rows }: { rows: Array<Record<string, string>> }) {

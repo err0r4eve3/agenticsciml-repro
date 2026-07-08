@@ -2,6 +2,19 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-07-09 LLM Wiki OKF Graph
+
+本次新增 ChatUI 左侧功能栏 `Wiki` 页面和 `/api/llm-wiki/okf`，把项目结构、S1 task、
+benchmark、algorithm seed、claim gate 与近期 AgenticSciML 作者论文整理成可手动编辑的
+OKF-like JSON 知识图谱。
+
+边界：
+
+- Wiki graph 是规划和检索上下文，不是 run artifact、evaluator score 或 scientific claim evidence。
+- 近期论文节点来自人工核对后的元数据，测试不联网；后续若要自动刷新论文列表，需要另加缓存、
+  审计时间戳和无网络测试替身。
+- 前端当前只提供 client-side 手动编辑和复制；跨会话保存需要以后走 account-scoped 文件写入。
+
 ## 2026-05-27 Paper Workflow Evidence Modules
 
 本轮继续推进科学证据链，但仍不默认启动 real LLM、不跑昂贵 paper-scale 训练，也不把

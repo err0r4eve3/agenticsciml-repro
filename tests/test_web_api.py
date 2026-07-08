@@ -129,6 +129,44 @@ def test_agent_roles_expose_layered_model_contract() -> None:
     assert "reasoning_effort" in payload["reasoning_effort_note"]
 
 
+def test_llm_wiki_okf_endpoint_exposes_editable_graph_with_recent_paper_hooks() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/api/llm-wiki/okf")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["okf_version"] == "0.1"
+    assert payload["type"] == "llm_wiki_knowledge_graph"
+    assert payload["title"]
+    assert payload["description"]
+    assert payload["tags"]
+    assert payload["timestamp"]
+    assert payload["generator"]["uses_network"] is False
+    assert payload["edit_policy"]["manual_editing"] is True
+    assert payload["edit_policy"]["persistence"] == "client_side_editor_only"
+    assert payload["author_scan"]["qile_jiang_post_agenticsciml_exact_author_article_found"] is False
+
+    nodes = {node["id"]: node for node in payload["nodes"]}
+    assert "project:agenticsciml" in nodes
+    assert "workflow:trace_summary_quality_gate" in nodes
+    assert "paper:spectral_audit_in_context_operator_networks" in nodes
+    assert "paper:turbulence_closure_pinn_solver_agnostic" in nodes
+    assert "benchmark:cylinder_wake_reconstruction_faithful_small" in nodes
+    for node in nodes.values():
+        assert node["type"]
+        assert node["title"]
+        assert node["description"]
+        assert isinstance(node["tags"], list)
+        assert node["timestamp"]
+
+    for edge in payload["edges"]:
+        assert edge["source"] in nodes
+        assert edge["target"] in nodes
+        assert edge["relation"]
+        assert edge["description"]
+
+
 def test_problem_intake_plans_benchmark_and_strategy_seeds() -> None:
     client = TestClient(create_app())
 
