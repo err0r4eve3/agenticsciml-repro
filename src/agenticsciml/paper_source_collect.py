@@ -156,14 +156,18 @@ def _real_problem(title: str, summary: str) -> str:
         return "Assess physics-informed operator networks for real-time optimal control of multi-agent dynamical systems under stability constraints."
     if "agent" in text or "llm" in text:
         return "Audit long-horizon agent or LLM workflows with verifiable outcomes and explicit failure boundaries."
+    if "multiple solutions" in text or "solution multiplicity" in text:
+        return "Audit PINN discovery of multiple nonlinear ODE/PDE solutions under initialization, ensemble diversity, and solver-refinement constraints."
     if any(term in text for term in ("uncertainty quantification", "bayesian", "dropout", "repulsive ensemble")) and (
         "pinn" in text or "physics-informed" in text or "turbulence" in text or "turbulent" in text
     ):
         return "Audit uncertainty calibration for physics-informed turbulent-flow inverse modeling under Bayesian, dropout, and ensemble tradeoffs."
-    if "multiple solutions" in text or "solution multiplicity" in text or "deep ensemble" in text:
-        return "Audit PINN discovery of multiple nonlinear ODE/PDE solutions under initialization, ensemble diversity, and solver-refinement constraints."
     if "meta-solver" in text or "meta solver" in text or "multi-objective" in text or "pareto" in text:
         return "Audit automated meta-solver discovery for time-dependent PDEs under accuracy, speed, memory, and preference-selection tradeoffs."
+    if "systems pharmacology" in text:
+        return "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints."
+    if any(term in text for term in ("optimizer", "optimization", "natural gradient", "bfgs", "broyden", "curvature-aware")):
+        return "Audit optimizer and conditioning choices for high-accuracy PINN convergence on challenging PDE or ODE systems."
     if "newton" in text or "nonlinear solver" in text or "nonlinear system" in text:
         return "Evaluate neural preconditioning for nonlinear solvers under convergence, robustness, and instability constraints."
     if any(term in text for term in ("krylov", "preconditioner", "linear solver", "linear system")):
@@ -202,8 +206,6 @@ def _real_problem(title: str, summary: str) -> str:
         term in text for term in ("generative", "super-resolution", "forecasting", "sparse", "reconstruction")
     ):
         return "Evaluate generative operator models for turbulent-flow super-resolution, forecasting, and sparse reconstruction without losing fine-scale structure."
-    if any(term in text for term in ("optimizer", "optimization", "natural gradient", "bfgs", "broyden", "curvature-aware")):
-        return "Audit optimizer and conditioning choices for high-accuracy PINN convergence on challenging PDE or ODE systems."
     if "operator" in text:
         return "Evaluate neural operator reliability beyond average prediction error using stability and fidelity diagnostics."
     if "turbulence" in text or "fluid" in text:
@@ -223,14 +225,18 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "评估 real-time optimal control 中的 physics-informed operator network，并检查多智能体动力系统稳定性约束。"
     if "agent" in text or "llm" in text:
         return "审计长周期 agent 或 LLM 工作流，要求结果可验证并显式记录失败边界。"
+    if "multiple solutions" in text or "solution multiplicity" in text:
+        return "审计 PINN 对非线性 ODE/PDE 多解的发现能力，并检查初始化、ensemble 多样性和求解器细化约束。"
     if any(term in text for term in ("uncertainty quantification", "bayesian", "dropout", "repulsive ensemble")) and (
         "pinn" in text or "physics-informed" in text or "turbulence" in text or "turbulent" in text
     ):
         return "审计 physics-informed 湍流反问题建模中的不确定性校准，并权衡 Bayesian、dropout 和 ensemble 方法。"
-    if "multiple solutions" in text or "solution multiplicity" in text or "deep ensemble" in text:
-        return "审计 PINN 对非线性 ODE/PDE 多解的发现能力，并检查初始化、ensemble 多样性和求解器细化约束。"
     if "meta-solver" in text or "meta solver" in text or "multi-objective" in text or "pareto" in text:
         return "审计 time-dependent PDE 的自动 meta-solver 发现，并权衡精度、速度、内存和偏好选择。"
+    if "systems pharmacology" in text:
+        return "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。"
+    if any(term in text for term in ("optimizer", "optimization", "natural gradient", "bfgs", "broyden", "curvature-aware")):
+        return "审计 optimizer 与 conditioning 选择对高精度 PINN 在困难 PDE 或 ODE 系统上收敛的影响。"
     if "newton" in text or "nonlinear solver" in text or "nonlinear system" in text:
         return "评估非线性求解器中的神经预条件方法，并检查收敛性、鲁棒性和不稳定边界。"
     if any(term in text for term in ("krylov", "preconditioner", "linear solver", "linear system")):
@@ -269,8 +275,6 @@ def _real_problem_zh(title: str, summary: str) -> str:
         term in text for term in ("generative", "super-resolution", "forecasting", "sparse", "reconstruction")
     ):
         return "评估湍流 super-resolution、forecasting 和 sparse reconstruction 的生成式算子模型，避免丢失细尺度结构。"
-    if any(term in text for term in ("optimizer", "optimization", "natural gradient", "bfgs", "broyden", "curvature-aware")):
-        return "审计 optimizer 与 conditioning 选择对高精度 PINN 在困难 PDE 或 ODE 系统上收敛的影响。"
     if "operator" in text:
         return "用稳定性和保真度诊断评估神经算子可靠性，而不只看平均预测误差。"
     if "turbulence" in text or "fluid" in text:

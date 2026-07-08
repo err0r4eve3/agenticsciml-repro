@@ -63,7 +63,7 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
     cases = [
         (
             "Curvature-Aware Optimization for High-Accuracy Physics-Informed Neural Networks",
-            "Natural Gradient, BFGS and Broyden optimizers accelerate PINN convergence for PDEs.",
+            "Natural Gradient, BFGS, Broyden, and quasi-Newton optimizers accelerate PINN convergence for PDEs.",
             "Audit optimizer and conditioning choices for high-accuracy PINN convergence on challenging PDE or ODE systems.",
             "审计 optimizer 与 conditioning 选择对高精度 PINN 在困难 PDE 或 ODE 系统上收敛的影响。",
         ),

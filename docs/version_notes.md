@@ -86,6 +86,10 @@ OKF-like JSON 知识图谱。
 - Mapping theme 匹配改为词边界匹配并允许简单复数，避免 `engineering` 误命中 `engine` 这类子串假阳性。
 - Bayesian PINNs / repulsive ensembles 的 turbulent-flow uncertainty quantification 论文现在落到不确定性校准审计，
   不再因 `deep ensemble` 误归为多解发现。
+- Curvature-aware PINN optimization 论文现在会优先落到 optimizer / conditioning 审计，不再被 `quasi-Newton`
+  里的 `Newton` 误归为 nonlinear solver preconditioning。
+- 多解发现路由不再把 `deep ensemble` 单独当作充分信号，必须出现 `multiple solutions` 或
+  `solution multiplicity`。
 
 边界：
 
