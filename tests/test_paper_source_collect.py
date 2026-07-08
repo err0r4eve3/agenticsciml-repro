@@ -110,6 +110,18 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。",
         ),
         (
+            "Automatic discovery of optimal meta-solvers for time-dependent nonlinear PDEs",
+            "Multi-objective optimization discovers Pareto optimal meta-solvers for Newton and IMEX time integration.",
+            "Audit automated meta-solver discovery for time-dependent PDEs under accuracy, speed, memory, and preference-selection tradeoffs.",
+            "审计 time-dependent PDE 的自动 meta-solver 发现，并权衡精度、速度、内存和偏好选择。",
+        ),
+        (
+            "FMEnets: Flow, Material, and Energy networks for non-ideal plug flow reactor design",
+            "A physics-informed framework predicts flow, material and energy states for reactor design.",
+            "Validate multi-output neural operator surrogates for stiff chemical kinetics under conservation, stiffness, and CFD-coupling constraints.",
+            "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。",
+        ),
+        (
             "Physics-Informed Machine Learning in Biomedical Science and Engineering",
             "Biomedical PIML reviews PINNs, NODEs and neural operators for biofluid mechanics and cell signaling.",
             "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints.",

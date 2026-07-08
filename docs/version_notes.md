@@ -64,6 +64,8 @@ OKF-like JSON 知识图谱。
   LIF/QIF spiking-neuron 论文会落到可微分 spiking SciML 模型稳定性审计。
 - AMORE stiff chemical kinetics、biomedical PIML review 和 turbulent-flow generative modeling 论文
   现在分别落到化学动力学 surrogate、biomedical modeling 和湍流生成式重建的具体审计问题。
+- Time-dependent nonlinear PDE meta-solver discovery 论文现在优先落到自动 meta-solver 多目标/Pareto
+  取舍审计；plug-flow reactor 设计会稳定落到 reactor surrogate 审计。
 
 边界：
 

@@ -150,6 +150,8 @@ def _real_problem(title: str, summary: str) -> str:
     text = f"{title} {summary}".lower()
     if "agent" in text or "llm" in text:
         return "Audit long-horizon agent or LLM workflows with verifiable outcomes and explicit failure boundaries."
+    if "meta-solver" in text or "meta solver" in text or "multi-objective" in text or "pareto" in text:
+        return "Audit automated meta-solver discovery for time-dependent PDEs under accuracy, speed, memory, and preference-selection tradeoffs."
     if "newton" in text or "nonlinear solver" in text or "nonlinear system" in text:
         return "Evaluate neural preconditioning for nonlinear solvers under convergence, robustness, and instability constraints."
     if any(term in text for term in ("krylov", "preconditioner", "linear solver", "linear system")):
@@ -164,7 +166,7 @@ def _real_problem(title: str, summary: str) -> str:
         return "Diagnose high-frequency failure modes in physics-informed or operator learning and test mitigation controls."
     if any(term in text for term in ("spiking", "lif", "qif", "integrate-and-fire", "snn")):
         return "Evaluate differentiable spiking-neuron models for stable SciML regression, operator learning, and PDE solving."
-    if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical")):
+    if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical", "plug flow reactor", "reactor design")):
         return "Validate multi-output neural operator surrogates for stiff chemical kinetics under conservation, stiffness, and CFD-coupling constraints."
     if any(term in text for term in ("biomedical", "biofluid", "biosolid", "medical imaging", "cell signaling", "physiological")):
         return "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints."
@@ -187,6 +189,8 @@ def _real_problem_zh(title: str, summary: str) -> str:
     text = f"{title} {summary}".lower()
     if "agent" in text or "llm" in text:
         return "审计长周期 agent 或 LLM 工作流，要求结果可验证并显式记录失败边界。"
+    if "meta-solver" in text or "meta solver" in text or "multi-objective" in text or "pareto" in text:
+        return "审计 time-dependent PDE 的自动 meta-solver 发现，并权衡精度、速度、内存和偏好选择。"
     if "newton" in text or "nonlinear solver" in text or "nonlinear system" in text:
         return "评估非线性求解器中的神经预条件方法，并检查收敛性、鲁棒性和不稳定边界。"
     if any(term in text for term in ("krylov", "preconditioner", "linear solver", "linear system")):
@@ -201,7 +205,7 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "诊断 physics-informed 或 operator learning 中的高频失效模式，并测试缓解控制。"
     if any(term in text for term in ("spiking", "lif", "qif", "integrate-and-fire", "snn")):
         return "评估可微分 spiking-neuron 模型在 SciML 回归、operator learning 和 PDE 求解中的稳定性。"
-    if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical")):
+    if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical", "plug flow reactor", "reactor design")):
         return "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。"
     if any(term in text for term in ("biomedical", "biofluid", "biosolid", "medical imaging", "cell signaling", "physiological")):
         return "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。"
