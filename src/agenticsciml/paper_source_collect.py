@@ -152,6 +152,12 @@ def _real_problem(title: str, summary: str) -> str:
         return "Audit long-horizon agent or LLM workflows with verifiable outcomes and explicit failure boundaries."
     if any(term in text for term in ("krylov", "preconditioner", "linear solver", "linear system")):
         return "Evaluate whether learned solver aids accelerate PDE linear systems while preserving convergence and generalization."
+    if "optimal control" in text or "adjoint" in text or "direct vs indirect" in text:
+        return "Compare PINN control formulations against adjoint or optimality-system baselines for PDE-constrained control."
+    if "spectral bias" in text or "high-frequency" in text or "frequency-resolved" in text:
+        return "Diagnose high-frequency failure modes in physics-informed or operator learning and test mitigation controls."
+    if any(term in text for term in ("optimizer", "optimization", "natural gradient", "bfgs", "broyden", "curvature-aware")):
+        return "Audit optimizer and conditioning choices for high-accuracy PINN convergence on challenging PDE or ODE systems."
     if "operator" in text:
         return "Evaluate neural operator reliability beyond average prediction error using stability and fidelity diagnostics."
     if "turbulence" in text or "fluid" in text:
@@ -167,6 +173,12 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "审计长周期 agent 或 LLM 工作流，要求结果可验证并显式记录失败边界。"
     if any(term in text for term in ("krylov", "preconditioner", "linear solver", "linear system")):
         return "评估学习型求解器辅助是否能加速 PDE 线性系统，同时保持收敛性和泛化能力。"
+    if "optimal control" in text or "adjoint" in text or "direct vs indirect" in text:
+        return "对比 PINN 控制 formulation 与伴随法或最优性系统基线在 PDE 约束控制中的表现。"
+    if "spectral bias" in text or "high-frequency" in text or "frequency-resolved" in text:
+        return "诊断 physics-informed 或 operator learning 中的高频失效模式，并测试缓解控制。"
+    if any(term in text for term in ("optimizer", "optimization", "natural gradient", "bfgs", "broyden", "curvature-aware")):
+        return "审计 optimizer 与 conditioning 选择对高精度 PINN 在困难 PDE 或 ODE 系统上收敛的影响。"
     if "operator" in text:
         return "用稳定性和保真度诊断评估神经算子可靠性，而不只看平均预测误差。"
     if "turbulence" in text or "fluid" in text:

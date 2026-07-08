@@ -55,6 +55,9 @@ OKF-like JSON 知识图谱。
   累计 seen ids 的交集/差集计算，避免 source cache 刷新后比例虚高并直接暴露待覆盖候选。
 - Source collection 的现实问题映射现在优先识别 `Krylov`、preconditioner 和 linear solver/system
   论文，避免这类数值求解器加速论文因为同时包含 neural operator 关键词而被归到过宽的可靠性诊断问题。
+- 现实问题映射继续补齐本轮生产抽样发现的具体主题：curvature-aware / optimizer PINN 论文会落到
+  optimizer 与 conditioning 审计，PDE constrained optimal control 论文会落到 PINN control
+  formulation 对比，spectral bias 论文会落到高频失效与缓解控制诊断。
 
 边界：
 

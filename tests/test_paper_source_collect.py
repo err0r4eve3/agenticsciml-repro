@@ -59,6 +59,38 @@ def test_parse_arxiv_atom_prefers_solver_problem_for_krylov_operator_paper() -> 
     assert entry["real_problem_zh"] == "评估学习型求解器辅助是否能加速 PDE 线性系统，同时保持收敛性和泛化能力。"
 
 
+def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() -> None:
+    cases = [
+        (
+            "Curvature-Aware Optimization for High-Accuracy Physics-Informed Neural Networks",
+            "Natural Gradient, BFGS and Broyden optimizers accelerate PINN convergence for PDEs.",
+            "Audit optimizer and conditioning choices for high-accuracy PINN convergence on challenging PDE or ODE systems.",
+            "审计 optimizer 与 conditioning 选择对高精度 PINN 在困难 PDE 或 ODE 系统上收敛的影响。",
+        ),
+        (
+            "PINNs in PDE Constrained Optimal Control Problems: Direct vs Indirect Methods",
+            "The study compares direct PINNs with indirect adjoint optimality-system formulations.",
+            "Compare PINN control formulations against adjoint or optimality-system baselines for PDE-constrained control.",
+            "对比 PINN 控制 formulation 与伴随法或最优性系统基线在 PDE 约束控制中的表现。",
+        ),
+        (
+            "Spectral bias in physics-informed and operator learning: Analysis and mitigation guidelines",
+            "Frequency-resolved diagnostics expose high-frequency failure modes in neural operators.",
+            "Diagnose high-frequency failure modes in physics-informed or operator learning and test mitigation controls.",
+            "诊断 physics-informed 或 operator learning 中的高频失效模式，并测试缓解控制。",
+        ),
+    ]
+
+    for title, summary, expected, expected_zh in cases:
+        feed = ATOM_FIXTURE.replace("Spectral Audit of In-Context Operator Networks", title).replace(
+            "Existing evaluations of neural operators rely primarily on prediction error.",
+            summary,
+        )
+        entry = parse_arxiv_atom(feed)[0]
+        assert entry["real_problem"] == expected
+        assert entry["real_problem_zh"] == expected_zh
+
+
 def test_collect_paper_sources_cli_writes_failure_cache_without_network(tmp_path: Path, cli_env: dict[str, str]) -> None:
     result = subprocess.run(
         [
