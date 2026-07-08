@@ -108,10 +108,12 @@ def write_paper_problem_loop_audit(
         source_collection=source_collection,
         limit=source_candidate_limit,
     )
+    llm_wiki_audit = _write_llm_wiki_audit(output_dir)
     audit = _audit_payload(
         results,
         source_collection=source_collection,
         source_candidate_results=source_candidate_results,
+        llm_wiki_audit=llm_wiki_audit,
     )
     _atomic_write_text(output_dir / AUDIT_JSON, json.dumps(audit, indent=2, ensure_ascii=False, allow_nan=False))
     _atomic_write_text(output_dir / AUDIT_MD, _render_markdown(audit))
@@ -129,6 +131,7 @@ def _audit_payload(
     *,
     source_collection: dict[str, Any] | None = None,
     source_candidate_results: list[dict[str, Any]] | None = None,
+    llm_wiki_audit: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     status_counts: dict[str, int] = {}
     for item in results:
@@ -136,6 +139,8 @@ def _audit_payload(
         status_counts[status] = status_counts.get(status, 0) + 1
     scores = [item["recommended_benchmark_score"] for item in results if isinstance(item.get("recommended_benchmark_score"), int)]
     issues = _audit_issues(results)
+    if llm_wiki_audit is not None:
+        issues += [f"llm wiki: {issue}" for issue in llm_wiki_audit.get("issues", [])]
     payload = {
         "artifact_type": "agenticsciml_paper_problem_loop_audit",
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -173,6 +178,16 @@ def _audit_payload(
             1 for item in source_candidate_results if item.get("wiki_promotion_status") == "manual_review_required"
         )
         payload["source_candidate_results"] = source_candidate_results
+    if llm_wiki_audit is not None:
+        payload["llm_wiki_audit"] = {
+            "status": llm_wiki_audit.get("status"),
+            "issue_count": llm_wiki_audit.get("issue_count"),
+            "paper_problem_case_count": llm_wiki_audit.get("paper_problem_case_count"),
+            "languages": llm_wiki_audit.get("languages"),
+            "manual_editing": llm_wiki_audit.get("manual_editing"),
+            "persistence": llm_wiki_audit.get("persistence"),
+            "artifacts": llm_wiki_audit.get("artifacts"),
+        }
     return payload
 
 
@@ -224,6 +239,8 @@ def _render_markdown(audit: dict[str, Any]) -> str:
                 "",
             ]
         )
+    if isinstance(audit.get("llm_wiki_audit"), dict):
+        lines.extend([f"- llm_wiki_audit: {audit['llm_wiki_audit']}", ""])
     if audit.get("issues"):
         lines.extend(["## Issues", ""])
         lines.extend(f"- {issue}" for issue in audit["issues"])
@@ -249,6 +266,74 @@ def _render_markdown(audit: dict[str, Any]) -> str:
             ]
         )
     return "\n".join(lines)
+
+
+def _write_llm_wiki_audit(output_dir: Path) -> dict[str, Any]:
+    from agenticsciml.web.app import _llm_wiki_okf_payload
+
+    graph = _llm_wiki_okf_payload()
+    graph_path = output_dir / "llm_wiki" / "llm_wiki_okf.json"
+    audit_path = output_dir / "llm_wiki" / "llm_wiki_audit.json"
+    _atomic_write_text(graph_path, json.dumps(graph, indent=2, ensure_ascii=False, allow_nan=False))
+    issues = _llm_wiki_issues(graph)
+    paper_nodes = [node for node in graph.get("nodes", []) if isinstance(node, dict) and node.get("type") == "paper_problem_case"]
+    edit_policy = graph.get("edit_policy") if isinstance(graph.get("edit_policy"), dict) else {}
+    audit = {
+        "artifact_type": "agenticsciml_llm_wiki_okf_audit",
+        "status": "passed" if not issues else "failed",
+        "issue_count": len(issues),
+        "issues": issues,
+        "paper_problem_case_count": len(paper_nodes),
+        "languages": graph.get("languages"),
+        "manual_editing": edit_policy.get("manual_editing"),
+        "persistence": edit_policy.get("persistence"),
+        "artifacts": {
+            "graph": graph_path.relative_to(output_dir).as_posix(),
+            "audit": audit_path.relative_to(output_dir).as_posix(),
+        },
+    }
+    _atomic_write_text(audit_path, json.dumps(audit, indent=2, ensure_ascii=False, allow_nan=False))
+    return audit
+
+
+def _llm_wiki_issues(graph: dict[str, Any]) -> list[str]:
+    issues: list[str] = []
+    if graph.get("type") != "llm_wiki_knowledge_graph":
+        issues.append("graph type must be llm_wiki_knowledge_graph")
+    if graph.get("okf_version") != "0.1":
+        issues.append("okf_version must be 0.1")
+    if graph.get("languages") != ["en", "zh-CN"]:
+        issues.append("languages must be ['en', 'zh-CN']")
+    edit_policy = graph.get("edit_policy") if isinstance(graph.get("edit_policy"), dict) else {}
+    if edit_policy.get("manual_editing") is not True:
+        issues.append("manual_editing must be true")
+    if edit_policy.get("persistence") != "account_scoped_json":
+        issues.append("persistence must be account_scoped_json")
+    nodes = graph.get("nodes") if isinstance(graph.get("nodes"), list) else []
+    node_ids = {node.get("id") for node in nodes if isinstance(node, dict)}
+    if len(node_ids) != len(nodes):
+        issues.append("node ids must be unique")
+    paper_nodes = [node for node in nodes if isinstance(node, dict) and node.get("type") == "paper_problem_case"]
+    if len(paper_nodes) < 10:
+        issues.append("expected at least 10 paper_problem_case nodes")
+    for node in nodes:
+        if not isinstance(node, dict):
+            issues.append("node must be an object")
+            continue
+        for key in ("id", "type", "title", "description", "tags", "timestamp"):
+            if not node.get(key):
+                issues.append(f"{node.get('id') or 'unknown'} missing {key}")
+        if node.get("type") == "paper_problem_case":
+            for key in ("title_zh", "description_zh", "real_problem", "real_problem_zh"):
+                if not node.get(key):
+                    issues.append(f"{node.get('id') or 'unknown'} missing {key}")
+    for edge in graph.get("edges", []):
+        if not isinstance(edge, dict):
+            issues.append("edge must be an object")
+            continue
+        if edge.get("source") not in node_ids or edge.get("target") not in node_ids:
+            issues.append(f"edge {edge.get('source')}->{edge.get('target')} references missing node")
+    return issues
 
 
 def _source_candidate_results(
