@@ -11,6 +11,7 @@ from agenticsciml.state import (
     validate_solution_node_payload,
     validate_solution_tree_graph_payload,
 )
+from agenticsciml.storage import atomic_write_text
 from agenticsciml.trace_contracts import FanoutTraceMetadata, fanout_trace_references
 from agenticsciml.evidence import CLAIM_GATE_BLOCKED
 
@@ -1074,8 +1075,5 @@ def _compare_metadata_value(
 
 def write_trace_summary(run_dir: Path) -> Path:
     path = run_dir / "trace_summary.json"
-    path.write_text(
-        json.dumps(summarize_trace(run_dir), indent=2, sort_keys=True, allow_nan=False),
-        encoding="utf-8",
-    )
+    atomic_write_text(path, json.dumps(summarize_trace(run_dir), indent=2, sort_keys=True, allow_nan=False))
     return path

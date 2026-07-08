@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from agenticsciml.state import SOLUTION_TREE_SCHEMA_VERSION, SolutionNode
+from agenticsciml.storage import atomic_write_text
 
 
 def write_tree_json(run_dir: Path, nodes: list[SolutionNode]) -> Path:
@@ -12,7 +13,7 @@ def write_tree_json(run_dir: Path, nodes: list[SolutionNode]) -> Path:
         "schema_version": SOLUTION_TREE_SCHEMA_VERSION,
         "nodes": [node.to_dict() for node in nodes],
     }
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True, allow_nan=False), encoding="utf-8")
+    atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True, allow_nan=False))
     return path
 
 
@@ -26,5 +27,5 @@ def write_tree_mermaid(run_dir: Path, nodes: list[SolutionNode]) -> Path:
     for node in nodes:
         for child in node.children:
             lines.append(f"  {node.node_id} --> {child}")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    atomic_write_text(path, "\n".join(lines) + "\n")
     return path

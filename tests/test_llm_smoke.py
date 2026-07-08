@@ -1,5 +1,6 @@
 import csv
 import json
+import shutil
 import subprocess
 import sys
 import threading
@@ -13,11 +14,63 @@ from agenticsciml.llm.budget import LLMBudget
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm_smoke import (
     _RecordingLLMClient,
+    _hash_payload,
     _paired_contrast_gate,
     _smoke_gate,
     run_llm_smoke,
     verify_llm_smoke_output,
 )
+
+_REAL_SMOKE_BUNDLE_TEMPLATE: Path | None = None
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _build_real_smoke_bundle_template(tmp_path_factory: pytest.TempPathFactory) -> None:
+    global _REAL_SMOKE_BUNDLE_TEMPLATE
+    output_dir = tmp_path_factory.mktemp("real-smoke-template")
+    run_llm_smoke(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=output_dir,
+        variants=["branch_context", "no_branch_context"],
+        dry_run=False,
+        llm_client=MockLLMClient(),
+    )
+    _REAL_SMOKE_BUNDLE_TEMPLATE = output_dir
+
+
+def _copy_real_smoke_bundle(output_dir: Path) -> None:
+    assert _REAL_SMOKE_BUNDLE_TEMPLATE is not None
+    shutil.copytree(_REAL_SMOKE_BUNDLE_TEMPLATE, output_dir, dirs_exist_ok=True)
+    _retarget_smoke_bundle(output_dir)
+
+
+def _retarget_smoke_bundle(output_dir: Path) -> None:
+    plan_path = output_dir / "real_llm_smoke_plan.json"
+    manifest_path = output_dir / "real_llm_smoke_manifest.json"
+    rows_path = output_dir / "real_llm_smoke_runs.csv"
+
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    plan["output_dir"] = str(output_dir)
+    plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True), encoding="utf-8")
+
+    plan_hash = _hash_payload(plan)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["output_dir"] = str(output_dir)
+    manifest["plan_hash"] = plan_hash
+    manifest["config_hash"] = plan_hash
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+    rows = list(csv.DictReader(rows_path.open(encoding="utf-8", newline="")))
+    run_by_variant = {
+        str(entry["variant"]): output_dir / "runs" / str(entry["experiment_id"])
+        for entry in plan["runs"]
+    }
+    for row in rows:
+        row["run_dir"] = str(run_by_variant[str(row["variant"])])
+    with rows_path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def _rewrite_parallel_child_max_workers(run_dir: Path, value: object) -> None:
@@ -326,13 +379,7 @@ def test_verify_llm_smoke_output_rejects_dry_run_only(tmp_path: Path) -> None:
 
 
 def test_verify_llm_smoke_output_rejects_header_only_runs_csv(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     rows_path = tmp_path / "real_llm_smoke_runs.csv"
     header = rows_path.read_text(encoding="utf-8").splitlines()[0]
     rows_path.write_text(header + "\n", encoding="utf-8")
@@ -345,13 +392,7 @@ def test_verify_llm_smoke_output_rejects_header_only_runs_csv(tmp_path: Path) ->
 
 
 def test_verify_llm_smoke_output_rejects_stale_external_run_dir(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     rows_path = tmp_path / "real_llm_smoke_runs.csv"
     rows = list(csv.DictReader(rows_path.open(encoding="utf-8")))
     rows[0]["run_dir"] = str(tmp_path / "external-run")
@@ -368,13 +409,7 @@ def test_verify_llm_smoke_output_rejects_stale_external_run_dir(tmp_path: Path) 
 
 
 def test_verify_llm_smoke_output_rejects_manifest_mode_mismatch(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     manifest_path = tmp_path / "real_llm_smoke_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["execution_mode"] = "dry_run"
@@ -388,13 +423,7 @@ def test_verify_llm_smoke_output_rejects_manifest_mode_mismatch(tmp_path: Path) 
 
 
 def test_verify_llm_smoke_output_rejects_output_dir_mismatch(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     plan_path = tmp_path / "real_llm_smoke_plan.json"
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
     plan["output_dir"] = str(tmp_path / "other-bundle")
@@ -408,13 +437,7 @@ def test_verify_llm_smoke_output_rejects_output_dir_mismatch(tmp_path: Path) -> 
 
 
 def test_verify_llm_smoke_output_rejects_manifest_output_dir_mismatch(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     manifest_path = tmp_path / "real_llm_smoke_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["output_dir"] = str(tmp_path / "other-bundle")
@@ -428,13 +451,7 @@ def test_verify_llm_smoke_output_rejects_manifest_output_dir_mismatch(tmp_path: 
 
 
 def test_verify_llm_smoke_output_rejects_non_string_manifest_provider_model(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     manifest_path = tmp_path / "real_llm_smoke_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["provider"] = True
@@ -450,13 +467,7 @@ def test_verify_llm_smoke_output_rejects_non_string_manifest_provider_model(tmp_
 
 
 def test_verify_llm_smoke_output_reports_malformed_seed_without_crashing(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     rows_path = tmp_path / "real_llm_smoke_runs.csv"
     rows = list(csv.DictReader(rows_path.open(encoding="utf-8")))
     rows[0]["seed"] = "not-an-int"
@@ -473,13 +484,7 @@ def test_verify_llm_smoke_output_reports_malformed_seed_without_crashing(tmp_pat
 
 
 def test_verify_llm_smoke_output_rejects_non_integer_plan_seed(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     plan_path = tmp_path / "real_llm_smoke_plan.json"
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
     plan["seed"] = 1.7
@@ -493,13 +498,7 @@ def test_verify_llm_smoke_output_rejects_non_integer_plan_seed(tmp_path: Path) -
 
 
 def test_verify_llm_smoke_output_rejects_malformed_expected_call_range(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     manifest_path = tmp_path / "real_llm_smoke_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["expected_llm_call_range"] = {"min": "abc", "max": 0}
@@ -514,13 +513,7 @@ def test_verify_llm_smoke_output_rejects_malformed_expected_call_range(tmp_path:
 
 
 def test_verify_llm_smoke_output_rejects_missing_expected_call_range_bounds(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     manifest_path = tmp_path / "real_llm_smoke_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["expected_llm_call_range"] = {}
@@ -535,13 +528,7 @@ def test_verify_llm_smoke_output_rejects_missing_expected_call_range_bounds(tmp_
 
 
 def test_verify_llm_smoke_output_reports_manifest_schema_when_rows_are_damaged(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     rows_path = tmp_path / "real_llm_smoke_runs.csv"
     header = rows_path.read_text(encoding="utf-8").splitlines()[0]
     rows_path.write_text(header + "\n", encoding="utf-8")
@@ -564,13 +551,7 @@ def test_verify_llm_smoke_output_rejects_non_integer_parallel_mutations(
     tmp_path: Path,
     bad_value: object,
 ) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     plan_path = tmp_path / "real_llm_smoke_plan.json"
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
     for entry in plan["runs"]:
@@ -590,13 +571,7 @@ def test_verify_llm_smoke_output_rejects_malformed_trace_max_workers(
     tmp_path: Path,
     bad_value: object,
 ) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     _rewrite_parallel_child_max_workers(tmp_path / "runs" / "smoke-branch_context-seed-0", bad_value)
 
     verification = verify_llm_smoke_output(tmp_path)
@@ -619,13 +594,7 @@ def test_verify_llm_smoke_output_rejects_malformed_llm_calls_total(
     bad_value: object,
     expected_issue: str,
 ) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     _rewrite_run_metadata_llm_calls_total(tmp_path / "runs" / "smoke-branch_context-seed-0", bad_value)
 
     verification = verify_llm_smoke_output(tmp_path)
@@ -636,13 +605,7 @@ def test_verify_llm_smoke_output_rejects_malformed_llm_calls_total(
 
 
 def test_verify_llm_smoke_output_rejects_deleted_ledger_call(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     _delete_first_ledger_entry(tmp_path / "runs" / "smoke-branch_context-seed-0")
 
     verification = verify_llm_smoke_output(tmp_path)
@@ -653,13 +616,7 @@ def test_verify_llm_smoke_output_rejects_deleted_ledger_call(tmp_path: Path) -> 
 
 
 def test_verify_llm_smoke_output_rejects_ledger_provider_mismatch(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     _rewrite_first_ledger_field(tmp_path / "runs" / "smoke-branch_context-seed-0", "provider", "OtherProvider")
 
     verification = verify_llm_smoke_output(tmp_path)
@@ -670,13 +627,7 @@ def test_verify_llm_smoke_output_rejects_ledger_provider_mismatch(tmp_path: Path
 
 
 def test_verify_llm_smoke_output_rejects_manifest_model_mismatch(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     manifest_path = tmp_path / "real_llm_smoke_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["model"] = "other-model"
@@ -711,13 +662,7 @@ def test_verify_llm_smoke_output_rejects_invalid_ledger_entry_schema(
     value: object,
     expected_issue: str,
 ) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     _rewrite_first_ledger_field(tmp_path / "runs" / "smoke-branch_context-seed-0", field, value)
 
     verification = verify_llm_smoke_output(tmp_path)
@@ -728,13 +673,7 @@ def test_verify_llm_smoke_output_rejects_invalid_ledger_entry_schema(
 
 
 def test_verify_llm_smoke_output_rejects_missing_ledger_hash(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     _delete_first_ledger_field(tmp_path / "runs" / "smoke-branch_context-seed-0", "response_hash")
 
     verification = verify_llm_smoke_output(tmp_path)
@@ -745,13 +684,7 @@ def test_verify_llm_smoke_output_rejects_missing_ledger_hash(tmp_path: Path) -> 
 
 
 def test_verify_llm_smoke_output_rejects_duplicate_ledger_call_id(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     _duplicate_second_ledger_call_id(tmp_path / "runs" / "smoke-branch_context-seed-0")
 
     verification = verify_llm_smoke_output(tmp_path)
@@ -763,13 +696,7 @@ def test_verify_llm_smoke_output_rejects_duplicate_ledger_call_id(tmp_path: Path
 
 
 def test_verify_llm_smoke_output_rejects_trace_call_id_mismatch(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     _rewrite_first_generation_span_metadata(
         tmp_path / "runs" / "smoke-branch_context-seed-0",
         "llm_call_id",
@@ -784,13 +711,7 @@ def test_verify_llm_smoke_output_rejects_trace_call_id_mismatch(tmp_path: Path) 
 
 
 def test_verify_llm_smoke_output_rejects_trace_provider_mismatch(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     _rewrite_first_generation_span_metadata(
         tmp_path / "runs" / "smoke-branch_context-seed-0",
         "provider",
@@ -806,13 +727,7 @@ def test_verify_llm_smoke_output_rejects_trace_provider_mismatch(tmp_path: Path)
 
 
 def test_verify_llm_smoke_output_accepts_reordered_generation_spans(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     _reverse_generation_span_order(tmp_path / "runs" / "smoke-branch_context-seed-0")
 
     verification = verify_llm_smoke_output(tmp_path)
@@ -821,13 +736,7 @@ def test_verify_llm_smoke_output_accepts_reordered_generation_spans(tmp_path: Pa
 
 
 def test_verify_llm_smoke_output_rejects_missing_trace_call_id(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     _rewrite_first_generation_span_metadata(
         tmp_path / "runs" / "smoke-branch_context-seed-0",
         "llm_call_id",
@@ -842,13 +751,7 @@ def test_verify_llm_smoke_output_rejects_missing_trace_call_id(tmp_path: Path) -
 
 
 def test_verify_llm_smoke_output_rejects_duplicate_trace_call_id(tmp_path: Path) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
     _rewrite_second_generation_span_metadata_from_first(
         tmp_path / "runs" / "smoke-branch_context-seed-0",
         "llm_call_id",
@@ -862,13 +765,7 @@ def test_verify_llm_smoke_output_rejects_duplicate_trace_call_id(tmp_path: Path)
 
 
 def test_cli_verify_smoke_llm_command(tmp_path: Path, cli_env: dict[str, str]) -> None:
-    run_llm_smoke(
-        benchmark_dir=Path("examples/function_approx").resolve(),
-        output_dir=tmp_path,
-        variants=["branch_context", "no_branch_context"],
-        dry_run=False,
-        llm_client=MockLLMClient(),
-    )
+    _copy_real_smoke_bundle(tmp_path)
 
     result = subprocess.run(
         [

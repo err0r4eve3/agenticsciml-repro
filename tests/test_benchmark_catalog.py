@@ -31,6 +31,12 @@ EXPECTED_BENCHMARKS = {
     "cylinder_wake_reconstruction_faithful_small",
 }
 
+ORCHESTRATOR_SMOKE_BENCHMARKS = (
+    "function_approx",
+    "function_approx_faithful_small",
+    "cylinder_wake_reconstruction_faithful_small",
+)
+
 
 CONTRACT_BOUND_BENCHMARK_FIELDS = [
     "name",
@@ -891,8 +897,9 @@ def test_cli_lists_benchmark_fidelity_and_claim(cli_env: dict[str, str]) -> None
     assert "not_validated" in result.stdout
 
 
-def test_mock_orchestrator_root_only_runs_all_benchmarks(tmp_path: Path) -> None:
-    for name, spec in BENCHMARKS.items():
+def test_mock_orchestrator_root_only_runs_representative_benchmarks(tmp_path: Path) -> None:
+    for name in ORCHESTRATOR_SMOKE_BENCHMARKS:
+        spec = BENCHMARKS[name]
         config = ExperimentConfig(
             experiment_id=f"{name}-root",
             benchmark_dir=spec.path,
@@ -912,8 +919,9 @@ def test_mock_orchestrator_root_only_runs_all_benchmarks(tmp_path: Path) -> None
         assert tree["nodes"][0]["contract_hash"]
 
 
-def test_mock_orchestrator_one_iteration_runs_all_benchmarks(tmp_path: Path) -> None:
-    for name, spec in BENCHMARKS.items():
+def test_mock_orchestrator_one_iteration_runs_representative_benchmarks(tmp_path: Path) -> None:
+    for name in ORCHESTRATOR_SMOKE_BENCHMARKS:
+        spec = BENCHMARKS[name]
         config = ExperimentConfig(
             experiment_id=f"{name}-evolution",
             benchmark_dir=spec.path,

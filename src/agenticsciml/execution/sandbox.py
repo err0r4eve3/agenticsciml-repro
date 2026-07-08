@@ -378,7 +378,7 @@ def _static_guardrail_result(workspace: Path) -> RunResult | None:
     if not violations:
         return None
     message = "Guardrail violation: generated solution failed static sandbox checks: " + "; ".join(violations)
-    (workspace / "train.log").write_text(message + "\n", encoding="utf-8")
+    _write_train_log(workspace, [message])
     return RunResult(
         command=["static_guardrail", "solution.py"],
         exit_code=125,
@@ -432,6 +432,13 @@ def _training_data_integrity_violation(phase: str, result: RunResult) -> str | N
     return None
 
 
+def _write_train_log(workspace: Path, stdout_parts: list[str], stderr_parts: list[str] | None = None) -> str:
+    parts = [part for part in [*stdout_parts, *(stderr_parts or [])] if part]
+    log = "\n".join(parts)
+    (workspace / "train.log").write_text(log, encoding="utf-8")
+    return log
+
+
 def train_and_evaluate(
     workspace: Path,
     contract: EvaluationContract,
@@ -461,7 +468,7 @@ def train_and_evaluate(
             message = _validation_exposure(workspace)
             if message:
                 all_stderr.append(message)
-                (workspace / "train.log").write_text("\n".join(all_stdout), encoding="utf-8")
+                _write_train_log(workspace, all_stdout, all_stderr)
                 return RunResult(
                     command=command,
                     exit_code=125,
@@ -472,7 +479,7 @@ def train_and_evaluate(
         if phase == "evaluate" and not validation_path.exists():
             message = "Guardrail violation: evaluator-private validation data is missing."
             all_stderr.append(message)
-            (workspace / "train.log").write_text("\n".join(all_stdout), encoding="utf-8")
+            _write_train_log(workspace, all_stdout, all_stderr)
             return RunResult(
                 command=command,
                 exit_code=125,
@@ -486,7 +493,7 @@ def train_and_evaluate(
             except Exception as exc:
                 message = f"Guardrail violation: could not prepare prediction input: {exc}"
                 all_stderr.append(message)
-                (workspace / "train.log").write_text("\n".join(all_stdout), encoding="utf-8")
+                _write_train_log(workspace, all_stdout, all_stderr)
                 return RunResult(
                     command=command,
                     exit_code=125,
@@ -506,7 +513,7 @@ def train_and_evaluate(
         if result.stderr:
             all_stderr.append(result.stderr)
         if result.exit_code != 0:
-            (workspace / "train.log").write_text("\n".join(all_stdout), encoding="utf-8")
+            _write_train_log(workspace, all_stdout, all_stderr)
             return RunResult(
                 command=normalized,
                 exit_code=result.exit_code,
@@ -518,7 +525,7 @@ def train_and_evaluate(
         data_integrity_violation = _training_data_integrity_violation(phase, result)
         if data_integrity_violation:
             all_stderr.append(data_integrity_violation)
-            (workspace / "train.log").write_text("\n".join(all_stdout), encoding="utf-8")
+            _write_train_log(workspace, all_stdout, all_stderr)
             return RunResult(
                 command=normalized,
                 exit_code=125,
@@ -530,7 +537,7 @@ def train_and_evaluate(
             missing_prediction = _missing_prediction_output(workspace, normalized)
             if missing_prediction:
                 all_stderr.append(missing_prediction)
-                (workspace / "train.log").write_text("\n".join(all_stdout), encoding="utf-8")
+                _write_train_log(workspace, all_stdout, all_stderr)
                 return RunResult(
                     command=normalized,
                     exit_code=125,
@@ -541,7 +548,7 @@ def train_and_evaluate(
         violation = _guardrail_violation(workspace, guarded_before, evaluator_dir=evaluator_dir)
         if violation:
             all_stderr.append(violation)
-            (workspace / "train.log").write_text("\n".join(all_stdout), encoding="utf-8")
+            _write_train_log(workspace, all_stdout, all_stderr)
             return RunResult(
                 command=normalized,
                 exit_code=125,
@@ -551,7 +558,7 @@ def train_and_evaluate(
             )
 
     log = "\n".join(all_stdout)
-    (workspace / "train.log").write_text(log, encoding="utf-8")
+    _write_train_log(workspace, all_stdout, all_stderr)
     return RunResult(
         command=last_command,
         exit_code=0,

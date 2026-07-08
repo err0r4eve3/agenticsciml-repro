@@ -42,7 +42,7 @@ class ExperimentStorage:
         with self._lock:
             path = self.run_dir / relative_path
             path.parent.mkdir(parents=True, exist_ok=True)
-            _atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True, allow_nan=False))
+            atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True, allow_nan=False))
             return path
 
     def load_json(self, relative_path: str | Path) -> Any:
@@ -87,28 +87,28 @@ class ExperimentStorage:
         with self._lock:
             path = self.run_dir / relative_path
             path.parent.mkdir(parents=True, exist_ok=True)
-            _atomic_write_text(path, text)
+            atomic_write_text(path, text)
             return path
 
     def save_bytes(self, relative_path: str | Path, data: bytes) -> Path:
         with self._lock:
             path = self.run_dir / relative_path
             path.parent.mkdir(parents=True, exist_ok=True)
-            _atomic_write_bytes(path, data)
+            atomic_write_bytes(path, data)
             return path
 
     def save_solution_text(self, solution_id: str, filename: str, text: str) -> Path:
         with self._lock:
             workspace = self.create_solution_workspace(solution_id)
             path = workspace / filename
-            _atomic_write_text(path, text)
+            atomic_write_text(path, text)
             return path
 
     def save_solution_bytes(self, solution_id: str, filename: str, data: bytes) -> Path:
         with self._lock:
             workspace = self.create_solution_workspace(solution_id)
             path = workspace / filename
-            _atomic_write_bytes(path, data)
+            atomic_write_bytes(path, data)
             return path
 
     def save_transcript(
@@ -123,11 +123,11 @@ class ExperimentStorage:
             else:
                 path = self.create_solution_workspace(solution_id) / "transcripts" / f"{agent_name}.json"
             payload = [message.to_dict() for message in messages]
-            _atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True, allow_nan=False))
+            atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True, allow_nan=False))
             return path
 
 
-def _atomic_write_text(path: Path, text: str) -> None:
+def atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path: Path | None = None
     try:
@@ -150,7 +150,7 @@ def _atomic_write_text(path: Path, text: str) -> None:
             tmp_path.unlink()
 
 
-def _atomic_write_bytes(path: Path, data: bytes) -> None:
+def atomic_write_bytes(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path: Path | None = None
     try:
@@ -182,3 +182,7 @@ def _fsync_directory(path: Path) -> None:
         os.fsync(fd)
     finally:
         os.close(fd)
+
+
+_atomic_write_text = atomic_write_text
+_atomic_write_bytes = atomic_write_bytes
