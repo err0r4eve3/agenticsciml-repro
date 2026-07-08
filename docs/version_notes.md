@@ -75,6 +75,8 @@ OKF-like JSON 知识图谱。
   pharmacology 优先于 KAN/hypersonic 泛化，multi-agent control 不再误归为 LLM agent workflow。
 - Web 保存与生产循环审计现在复用同一个 LLM Wiki OKF schema gate：根对象、所有节点和边都必须保留
   中英文槽位，边必须引用现有节点；旧格式 account Wiki 若不满足当前 schema，会回退到自动生成图谱而不是继续返回坏上下文。
+- 自动 Wiki 的 project/workflow/paper task/benchmark/algorithm 节点现在写入中文标题、中文说明和中文标签，
+  不再把英文槽位原样复制到 `*_zh` 字段；边也会保留中文关系说明。
 
 边界：
 

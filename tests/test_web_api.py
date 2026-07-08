@@ -176,6 +176,9 @@ def test_llm_wiki_okf_endpoint_exposes_editable_graph_with_recent_paper_hooks() 
         assert isinstance(node["tags"], list)
         assert isinstance(node["tags_zh"], list)
         assert node["timestamp"]
+        assert node["title_zh"] != node["title"]
+        assert node["description_zh"] != node["description"]
+        assert node["tags_zh"] != node["tags"]
 
     for edge in payload["edges"]:
         assert edge["source"] in nodes
@@ -183,6 +186,7 @@ def test_llm_wiki_okf_endpoint_exposes_editable_graph_with_recent_paper_hooks() 
         assert edge["relation"]
         assert edge["description"]
         assert edge["description_zh"]
+        assert edge["description_zh"] != edge["description"]
 
 
 def test_llm_wiki_okf_manual_edits_persist_per_account(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

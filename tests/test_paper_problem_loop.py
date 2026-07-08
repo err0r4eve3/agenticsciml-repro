@@ -144,10 +144,13 @@ def test_paper_problem_loop_audit_includes_source_collection_cache(tmp_path: Pat
     assert wiki_node["description_zh"]
     assert wiki_node["real_problem_zh"] == "用稳定性和保真度诊断评估神经算子可靠性。"
     assert wiki_node["wiki_promotion_status"] == "manual_review_required"
-    assert any(
-        edge["source"] == "source:2606.02427v1" and edge["target"] == "workflow:problem_intake"
+    source_candidate_edge = next(
+        edge
         for edge in graph["edges"]
+        if edge["source"] == "source:2606.02427v1" and edge["target"] == "workflow:problem_intake"
     )
+    assert source_candidate_edge["description_zh"]
+    assert source_candidate_edge["description_zh"] != source_candidate_edge["description"]
     queue = json.loads(
         (tmp_path / "round" / audit["llm_wiki_audit"]["artifacts"]["source_candidate_review_queue"]).read_text(
             encoding="utf-8"

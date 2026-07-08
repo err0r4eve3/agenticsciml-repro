@@ -98,6 +98,65 @@ ASSISTANT_MODE_MODEL_SETTINGS: dict[AssistantMode, dict[str, object]] = {
     "agent": {"reasoning_effort": "high", "temperature": 0.1},
 }
 
+WIKI_TAG_ZH: dict[str, str] = {
+    "agenticsciml": "AgenticSciML",
+    "workflow": "工作流",
+    "claim-boundary": "证据边界",
+    "claim-gate": "声明门控",
+    "evidence": "证据",
+    "fail-closed": "失败即关闭",
+    "trace": "追踪",
+    "quality-gate": "质量门控",
+    "artifact": "产物",
+    "problem-intake": "问题接入",
+    "benchmark-routing": "benchmark 路由",
+    "strategy-seed": "策略种子",
+    "okf": "OKF",
+    "llm-wiki": "LLM Wiki",
+    "knowledge-graph": "知识图谱",
+    "paper-task": "论文任务",
+    "benchmark": "本地 benchmark",
+    "algorithm": "算法种子",
+    "proxy": "代理证据",
+    "faithful-small": "小规模保真证据",
+    "planning": "规划",
+    "reference": "参考",
+    "implemented": "已实现",
+    "primitive": "基础组件",
+}
+
+WIKI_NODE_ZH: dict[str, tuple[str, str]] = {
+    "project:agenticsciml": (
+        "AgenticSciML 复现项目",
+        "本地优先复现 AgenticSciML 工作流，并用失败即关闭的门控保护科学声明边界。",
+    ),
+    "workflow:claim_gate": (
+        "科学声明门控",
+        "只有 evaluator 输出、trace summary、run metadata 和必要审计产物一致时，项目声明才允许成立。",
+    ),
+    "workflow:trace_summary_quality_gate": (
+        "Trace summary 质量门控",
+        "Trace summary 校验必要 span、artifact 一致性、node 引用和生命周期覆盖。",
+    ),
+    "workflow:problem_intake": (
+        "问题接入",
+        "结构化接收科学问题需求，并映射到本地 benchmark 候选与策略种子。",
+    ),
+    "format:okf": (
+        "OKF-like LLM Wiki 图谱",
+        "图谱和节点对象都保留 type、title、description、tags 与 timestamp 元数据，便于机器编辑和人工修正。",
+    ),
+}
+
+PAPER_TASK_ZH: dict[str, tuple[str, str]] = {
+    "S1.1": ("非连续函数拟合", "一维非连续函数逼近任务，适合局部基函数或门控专家策略。"),
+    "S1.2": ("L 形区域 Poisson PINN", "不规则区域 Poisson 任务，重点检查 residual、边界条件和区域分解策略。"),
+    "S1.3": ("Burgers 方程 PINN", "时间相关 Burgers 方程任务，重点检查分阶段 residual 与边界/初值处理。"),
+    "S1.4": ("反导数算子学习", "函数到函数的反导数 operator learning 任务，可使用 DeepONet-style primitive。"),
+    "S1.5": ("Reaction-Diffusion 算子学习", "多输入 reaction-diffusion operator 任务，关注 spectral 与 derivative-enhanced helper。"),
+    "S1.6": ("圆柱尾流重建", "稀疏传感器到二维尾流场重建任务，关注 bandlimited decoder 和 filter primitive。"),
+}
+
 CURATED_PAPER_PROBLEM_CASES: tuple[dict[str, object], ...] = (
     {
         "id": "paper:agenticsciml_collaborative_agents",
@@ -2818,6 +2877,9 @@ def _llm_wiki_okf_payload() -> dict[str, object]:
             "Local-first reproduction of the AgenticSciML workflow with fail-closed scientific claim boundaries.",
             ["agenticsciml", "workflow", "claim-boundary"],
             timestamp,
+            title_zh=WIKI_NODE_ZH["project:agenticsciml"][0],
+            description_zh=WIKI_NODE_ZH["project:agenticsciml"][1],
+            tags_zh=_wiki_tags_zh(["agenticsciml", "workflow", "claim-boundary"]),
             source={"path": "AGENTS.md"},
         ),
         _okf_node(
@@ -2827,6 +2889,9 @@ def _llm_wiki_okf_payload() -> dict[str, object]:
             "Claims stay blocked unless evaluator outputs, trace summaries, run metadata, and required review artifacts agree.",
             ["claim-gate", "evidence", "fail-closed"],
             timestamp,
+            title_zh=WIKI_NODE_ZH["workflow:claim_gate"][0],
+            description_zh=WIKI_NODE_ZH["workflow:claim_gate"][1],
+            tags_zh=_wiki_tags_zh(["claim-gate", "evidence", "fail-closed"]),
             source={"path": "src/agenticsciml/readiness.py"},
         ),
         _okf_node(
@@ -2836,6 +2901,9 @@ def _llm_wiki_okf_payload() -> dict[str, object]:
             "Trace summaries validate required spans, artifact consistency, node references, and lifecycle coverage.",
             ["trace", "quality-gate", "artifact"],
             timestamp,
+            title_zh=WIKI_NODE_ZH["workflow:trace_summary_quality_gate"][0],
+            description_zh=WIKI_NODE_ZH["workflow:trace_summary_quality_gate"][1],
+            tags_zh=_wiki_tags_zh(["trace", "quality-gate", "artifact"]),
             source={"path": "src/agenticsciml/reporting/trace_summary.py"},
         ),
         _okf_node(
@@ -2845,6 +2913,9 @@ def _llm_wiki_okf_payload() -> dict[str, object]:
             "Structured problem intake maps user scientific requirements to local benchmark candidates and strategy seeds.",
             ["problem-intake", "benchmark-routing", "strategy-seed"],
             timestamp,
+            title_zh=WIKI_NODE_ZH["workflow:problem_intake"][0],
+            description_zh=WIKI_NODE_ZH["workflow:problem_intake"][1],
+            tags_zh=_wiki_tags_zh(["problem-intake", "benchmark-routing", "strategy-seed"]),
             source={"path": "src/agenticsciml/web/app.py"},
         ),
         _okf_node(
@@ -2854,6 +2925,9 @@ def _llm_wiki_okf_payload() -> dict[str, object]:
             "Every graph and node object keeps type, title, description, tags, and timestamp metadata for machine editing.",
             ["okf", "llm-wiki", "knowledge-graph"],
             timestamp,
+            title_zh=WIKI_NODE_ZH["format:okf"][0],
+            description_zh=WIKI_NODE_ZH["format:okf"][1],
+            tags_zh=_wiki_tags_zh(["okf", "llm-wiki", "knowledge-graph"]),
         ),
     ]
     edges = [
@@ -2865,6 +2939,7 @@ def _llm_wiki_okf_payload() -> dict[str, object]:
 
     for task in list_paper_tasks():
         task_id = f"paper_task:{task['paper_section']}"
+        task_title_zh, task_description_zh = PAPER_TASK_ZH[str(task["paper_section"])]
         nodes.append(
             _okf_node(
                 task_id,
@@ -2873,6 +2948,9 @@ def _llm_wiki_okf_payload() -> dict[str, object]:
                 str(task["summary"]),
                 ["paper-task", str(task["paper_section"])],
                 timestamp,
+                title_zh=task_title_zh,
+                description_zh=task_description_zh,
+                tags_zh=["论文任务", str(task["paper_section"])],
                 source={"path": "src/agenticsciml/paper_tasks.py"},
             )
         )
@@ -2880,14 +2958,21 @@ def _llm_wiki_okf_payload() -> dict[str, object]:
 
     for benchmark in list_benchmarks():
         benchmark_id = f"benchmark:{benchmark.name}"
+        benchmark_tags = ["benchmark", benchmark.family, benchmark.fidelity_level]
         nodes.append(
             _okf_node(
                 benchmark_id,
                 "benchmark",
                 benchmark.name,
                 benchmark.description,
-                ["benchmark", benchmark.family, benchmark.fidelity_level],
+                benchmark_tags,
                 timestamp,
+                title_zh=f"本地 benchmark：{benchmark.name}",
+                description_zh=(
+                    f"{benchmark.fidelity_level} 本地证据任务，覆盖 {benchmark.paper_task_name}；"
+                    f"指标为 {benchmark.metric}；边界：{benchmark.paper_gap_notes}"
+                ),
+                tags_zh=_wiki_tags_zh(benchmark_tags),
                 source={"path": str(benchmark.path.relative_to(REPO_ROOT))},
                 metric=benchmark.metric,
                 fidelity_level=benchmark.fidelity_level,
@@ -2905,14 +2990,19 @@ def _llm_wiki_okf_payload() -> dict[str, object]:
 
     for algorithm in list_algorithms():
         algorithm_id = f"algorithm:{algorithm.algorithm_id}"
+        algorithm_detail = algorithm.to_dict()
+        algorithm_tags = ["algorithm", algorithm.family, algorithm.status]
         nodes.append(
             _okf_node(
                 algorithm_id,
                 "algorithm_seed",
                 algorithm.name,
                 algorithm.description,
-                ["algorithm", algorithm.family, algorithm.status],
+                algorithm_tags,
                 timestamp,
+                title_zh=f"算法种子：{algorithm.name}",
+                description_zh=str(algorithm_detail["description_zh"]),
+                tags_zh=_wiki_tags_zh(algorithm_tags),
                 source={"path": algorithm.implementation_path or "src/agenticsciml/algorithm_catalog.py"},
                 claim_boundary=algorithm.claim_boundary,
             )
@@ -3010,6 +3100,10 @@ def _okf_node(
     return payload
 
 
+def _wiki_tags_zh(tags: list[str]) -> list[str]:
+    return [WIKI_TAG_ZH.get(tag, tag) for tag in tags]
+
+
 def _okf_edge(
     source: str,
     target: str,
@@ -3023,7 +3117,7 @@ def _okf_edge(
         "target": target,
         "relation": relation,
         "description": _compact_summary(description, 360),
-        "description_zh": _compact_summary(description_zh or description, 360),
+        "description_zh": _compact_summary(description_zh or f"关系说明：{description}", 360),
     }
 
 
