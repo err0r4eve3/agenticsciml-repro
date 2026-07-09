@@ -206,6 +206,8 @@ def _real_problem(title: str, summary: str) -> str:
         return "Assess robust safe-control learning for nonlinear dynamical systems under adversarial disturbances and stability constraints."
     if any(term in text for term in ("lagrangian velocity", "velocimetry-thermometry", "temperature fields")):
         return "Validate physics-informed KAN field-inference workflows for turbulent velocity and temperature reconstruction under sparse Lagrangian measurements and DNS-fidelity constraints."
+    if any(term in text for term in ("solitary wave", "nonlinear wave equation", "initial-value iterative", "nls equation", "kdv equation")):
+        return "Validate two-stage initial-value iterative PINNs for solitary-wave simulation in nonlinear wave equations under initial-data-only, theoretical-guarantee, and traditional-solver comparison constraints."
     if "optimal control" in text or "adjoint" in text or "direct vs indirect" in text:
         return "Compare PINN control formulations against adjoint or optimality-system baselines for PDE-constrained control."
     if "high-frequency scaling" in text or ("hfs" in text and "spectral bias" in text):
@@ -313,6 +315,8 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "评估非线性动力系统在对抗扰动和稳定性约束下的鲁棒安全控制学习。"
     if any(term in text for term in ("lagrangian velocity", "velocimetry-thermometry", "temperature fields")):
         return "验证 turbulent velocity 与 temperature reconstruction 的 physics-informed KAN field-inference 工作流，并检查稀疏 Lagrangian measurements 和 DNS-fidelity 约束。"
+    if any(term in text for term in ("solitary wave", "nonlinear wave equation", "initial-value iterative", "nls equation", "kdv equation")):
+        return "验证 nonlinear wave equation 中 solitary-wave simulation 的 two-stage initial-value iterative PINN，并检查仅初值数据、理论保证和传统求解器对比约束。"
     if "optimal control" in text or "adjoint" in text or "direct vs indirect" in text:
         return "对比 PINN 控制 formulation 与伴随法或最优性系统基线在 PDE 约束控制中的表现。"
     if "high-frequency scaling" in text or ("hfs" in text and "spectral bias" in text):

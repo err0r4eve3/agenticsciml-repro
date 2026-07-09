@@ -140,6 +140,12 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "验证数据稀缺和 OOD 泛化约束下用于 PDE 求解的 physics-informed neural operator surrogate。",
         ),
         (
+            "Two-stage initial-value iterative physics-informed neural networks for simulating solitary waves of nonlinear wave equations",
+            "An IINN algorithm fits a given initial value and then trains with physical information for NLS, KdV, KP, and other nonlinear wave equations without additional boundary data.",
+            "Validate two-stage initial-value iterative PINNs for solitary-wave simulation in nonlinear wave equations under initial-data-only, theoretical-guarantee, and traditional-solver comparison constraints.",
+            "验证 nonlinear wave equation 中 solitary-wave simulation 的 two-stage initial-value iterative PINN，并检查仅初值数据、理论保证和传统求解器对比约束。",
+        ),
+        (
             "Uncertainty Quantification in PINNs for Turbulent Flows: Bayesian Inference and Repulsive Ensembles",
             "Bayesian PINNs, Monte Carlo dropout, and repulsive deep ensembles calibrate turbulent-flow inverse modeling uncertainty.",
             "Audit uncertainty calibration for physics-informed turbulent-flow inverse modeling under Bayesian, dropout, and ensemble tradeoffs.",
