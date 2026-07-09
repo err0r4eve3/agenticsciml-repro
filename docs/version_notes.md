@@ -82,7 +82,9 @@ OKF-like JSON 知识图谱。
 - AMORE stiff chemical kinetics 论文现在即使摘要提到 combustion / hypersonics 背景，也会稳定落到
   chemical kinetics surrogate，而不是 hypersonic/supersonic flow surrogate。
 - PINNs-to-PIKANs review 与 Scalable Bayesian PIKAN/KAN 论文现在会优先落到 Kolmogorov-Arnold
-  review coverage 或 Bayesian KAN uncertainty 审计，不再被通用 `uncertainty quantification` 规则误归为湍流 UQ。
+  review coverage 或 DTEKI/Chebyshev-KAN/active-subspace/HMC-efficiency 约束下的 scalable Bayesian PIKAN
+  uncertainty 审计，不再被通用 `uncertainty quantification` 规则误归为湍流 UQ，也不会退回过宽的
+  generic Bayesian KAN 描述。
 - Agentic risk-aware set-based design 与 GRAFT-ATHENA 论文现在分别落到 CVaR/human-in-the-loop/CFD
   engineering-design 审计和 self-improving method-substrate 审计，不再退回通用 agent/LLM workflow。
 - AIVT turbulent velocity/temperature field inference 与 diffusion-corrected neural-operator turbulence

@@ -184,6 +184,10 @@ def _real_problem(title: str, summary: str) -> str:
         return "Audit physics-informed CVSim-6 physiology reconstruction under aleatoric, epistemic, and model-form uncertainty decomposition, MC X-TFC random-projection Monte-Carlo sampling, sparse noisy data, parameter/state estimation, and model-misspecification constraints."
     if any(term in text for term in ("biomedical", "biofluid", "biosolid", "medical imaging", "cell signaling", "physiological", "pharmacology")):
         return "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints."
+    if "scalable bayesian physics-informed kolmogorov-arnold" in text or (
+        "dteki" in text and "chebyshev kan" in text
+    ):
+        return "Audit scalable Bayesian PIKAN uncertainty workflows under DTEKI gradient-free inference, Chebyshev KAN surrogate parameter efficiency, active-subspace dimension reduction, HMC efficiency comparison, overfitting mitigation, numerical stability, large-dataset scaling, and high-noise reliability constraints."
     if any(term in text for term in ("bayesian", "dteki", "hmc", "ensemble kalman", "tikhonov")) and any(
         term in text for term in ("kolmogorov-arnold", "pikan", "chebyshev kan")
     ):
@@ -331,6 +335,10 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "审计 physics-informed CVSim-6 physiology reconstruction，并检查 aleatoric、epistemic 与 model-form uncertainty decomposition、MC X-TFC random-projection Monte-Carlo sampling、稀疏噪声数据、parameter/state estimation 和 model-misspecification 约束。"
     if any(term in text for term in ("biomedical", "biofluid", "biosolid", "medical imaging", "cell signaling", "physiological", "pharmacology")):
         return "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。"
+    if "scalable bayesian physics-informed kolmogorov-arnold" in text or (
+        "dteki" in text and "chebyshev kan" in text
+    ):
+        return "审计 scalable Bayesian PIKAN uncertainty workflow，并检查 DTEKI gradient-free inference、Chebyshev KAN surrogate parameter efficiency、active-subspace dimension reduction、HMC efficiency comparison、overfitting mitigation、numerical stability、大数据 scaling 和 high-noise reliability 约束。"
     if any(term in text for term in ("bayesian", "dteki", "hmc", "ensemble kalman", "tikhonov")) and any(
         term in text for term in ("kolmogorov-arnold", "pikan", "chebyshev kan")
     ):

@@ -175,8 +175,8 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
         (
             "Scalable Bayesian Physics-Informed Kolmogorov-Arnold Networks",
             "Uncertainty quantification combines dropout Tikhonov ensemble Kalman inversion with Chebyshev KANs.",
-            "Audit Bayesian KAN or PIKAN uncertainty workflows under gradient-free inference, overfitting, stability, and parameter-efficiency constraints.",
-            "审计 Bayesian KAN 或 PIKAN 不确定性工作流，并检查 gradient-free inference、过拟合、稳定性和参数效率约束。",
+            "Audit scalable Bayesian PIKAN uncertainty workflows under DTEKI gradient-free inference, Chebyshev KAN surrogate parameter efficiency, active-subspace dimension reduction, HMC efficiency comparison, overfitting mitigation, numerical stability, large-dataset scaling, and high-noise reliability constraints.",
+            "审计 scalable Bayesian PIKAN uncertainty workflow，并检查 DTEKI gradient-free inference、Chebyshev KAN surrogate parameter efficiency、active-subspace dimension reduction、HMC efficiency comparison、overfitting mitigation、numerical stability、大数据 scaling 和 high-noise reliability 约束。",
         ),
         (
             "NeuroSEM: A hybrid framework for simulating multiphysics problems by coupling PINNs and spectral elements",
