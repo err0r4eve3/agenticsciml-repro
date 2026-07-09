@@ -74,6 +74,12 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "对比 PINN 控制 formulation 与伴随法或最优性系统基线在 PDE 约束控制中的表现。",
         ),
         (
+            "Adjoint Method versus Physics-Informed Neural Networks in PDE-Constrained Inverse Problems",
+            "A fair comparison matches optimizer, unknown parameterization, and regularization for adjoint optimization and PINNs in PDE-constrained inverse problems.",
+            "Compare adjoint optimization and PINNs for PDE-constrained inverse problems under matched formulations, parameterizations, regularization, cost, and warm-start tradeoffs.",
+            "对比 PDE-constrained inverse problem 中的 adjoint optimization 与 PINN，并检查 formulation、parameterization、regularization、成本和 warm-start 取舍。",
+        ),
+        (
             "Spectral bias in physics-informed and operator learning: Analysis and mitigation guidelines",
             "Frequency-resolved diagnostics expose high-frequency failure modes in neural operators.",
             "Diagnose high-frequency failure modes in physics-informed or operator learning and test mitigation controls.",

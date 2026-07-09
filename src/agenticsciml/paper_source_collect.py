@@ -184,6 +184,8 @@ def _real_problem(title: str, summary: str) -> str:
         return "Validate multi-output neural operator surrogates for stiff chemical kinetics under conservation, stiffness, and CFD-coupling constraints."
     if any(term in text for term in ("hypersonic", "supersonic", "reentry", "arbitrary grids", "geometry-dependent")):
         return "Validate data-efficient neural operator surrogates for geometry-dependent hypersonic or supersonic flow prediction on scarce data."
+    if "adjoint" in text and "pinn" in text and "inverse problem" in text:
+        return "Compare adjoint optimization and PINNs for PDE-constrained inverse problems under matched formulations, parameterizations, regularization, cost, and warm-start tradeoffs."
     if any(term in text for term in ("optimizer", "natural gradient", "bfgs", "broyden", "curvature-aware")):
         return "Audit optimizer and conditioning choices for high-accuracy PINN convergence on challenging PDE or ODE systems."
     if "warm-start" in text and "newton" in text and ("spectral" in text or "jacobian" in text):
@@ -285,6 +287,8 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。"
     if any(term in text for term in ("hypersonic", "supersonic", "reentry", "arbitrary grids", "geometry-dependent")):
         return "验证稀缺数据下 geometry-dependent hypersonic 或 supersonic flow 预测的高效神经算子 surrogate。"
+    if "adjoint" in text and "pinn" in text and "inverse problem" in text:
+        return "对比 PDE-constrained inverse problem 中的 adjoint optimization 与 PINN，并检查 formulation、parameterization、regularization、成本和 warm-start 取舍。"
     if any(term in text for term in ("optimizer", "natural gradient", "bfgs", "broyden", "curvature-aware")):
         return "审计 optimizer 与 conditioning 选择对高精度 PINN 在困难 PDE 或 ODE 系统上收敛的影响。"
     if "warm-start" in text and "newton" in text and ("spectral" in text or "jacobian" in text):
