@@ -204,6 +204,10 @@ def _real_problem(title: str, summary: str) -> str:
         return "Compare adjoint optimization and PINNs for PDE-constrained inverse problems under matched formulations, parameterizations, regularization, cost, and warm-start tradeoffs."
     if any(term in text for term in ("optimizer", "natural gradient", "bfgs", "broyden", "curvature-aware")):
         return "Audit optimizer and conditioning choices for high-accuracy PINN convergence on challenging PDE or ODE systems."
+    if "nspod" in text or "neural subspace proper orthogonal decomposition" in text:
+        return "Validate NSPOD DeepONet-learned POD preconditioners for Krylov linear solvers under multigrid-like subspace quality, unstructured CAD geometry, solid-mechanics PDE, AMG comparison, and convergence-speed constraints."
+    if "geometry-aware neural preconditioner" in title.lower() or "hybrid iterative solvers with geometry-aware" in title.lower():
+        return "Validate geometry-aware neural preconditioners for hybrid iterative parametric-PDE solvers under unstructured-mesh geometry transfer, relaxation/Krylov coupling, robustness, and efficiency constraints."
     if "warm-start" in text and "newton" in text and ("spectral" in text or "jacobian" in text):
         return "Audit spectrally safe neural-operator warm starts for large-scale Newton PDE solvers under Jacobian definiteness, Krylov compatibility, label-free energy fine-tuning, and speedup constraints."
     if "newton" in text or "nonlinear solver" in text or "nonlinear system" in text:
@@ -323,6 +327,10 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "对比 PDE-constrained inverse problem 中的 adjoint optimization 与 PINN，并检查 formulation、parameterization、regularization、成本和 warm-start 取舍。"
     if any(term in text for term in ("optimizer", "natural gradient", "bfgs", "broyden", "curvature-aware")):
         return "审计 optimizer 与 conditioning 选择对高精度 PINN 在困难 PDE 或 ODE 系统上收敛的影响。"
+    if "nspod" in text or "neural subspace proper orthogonal decomposition" in text:
+        return "验证 Krylov linear solver 的 NSPOD DeepONet-learned POD preconditioner，并检查 multigrid-like subspace quality、unstructured CAD geometry、solid-mechanics PDE、AMG 对比和收敛加速约束。"
+    if "geometry-aware neural preconditioner" in title.lower() or "hybrid iterative solvers with geometry-aware" in title.lower():
+        return "验证 hybrid iterative parametric-PDE solver 的 geometry-aware neural preconditioner，并检查 unstructured-mesh geometry transfer、relaxation/Krylov coupling、鲁棒性和效率约束。"
     if "warm-start" in text and "newton" in text and ("spectral" in text or "jacobian" in text):
         return "审计 large-scale Newton PDE solver 的 spectrally safe neural-operator warm start，并检查 Jacobian definiteness、Krylov compatibility、label-free energy fine-tuning 和加速约束。"
     if "newton" in text or "nonlinear solver" in text or "nonlinear system" in text:

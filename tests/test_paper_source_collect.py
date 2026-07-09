@@ -54,9 +54,12 @@ def test_parse_arxiv_atom_prefers_solver_problem_for_krylov_operator_paper() -> 
     entry = parse_arxiv_atom(feed)[0]
 
     assert entry["real_problem"] == (
-        "Evaluate whether learned solver aids accelerate PDE linear systems while preserving convergence and generalization."
+        "Validate NSPOD DeepONet-learned POD preconditioners for Krylov linear solvers under multigrid-like subspace quality, unstructured CAD geometry, solid-mechanics PDE, AMG comparison, and convergence-speed constraints."
     )
-    assert entry["real_problem_zh"] == "评估学习型求解器辅助是否能加速 PDE 线性系统，同时保持收敛性和泛化能力。"
+    assert (
+        entry["real_problem_zh"]
+        == "验证 Krylov linear solver 的 NSPOD DeepONet-learned POD preconditioner，并检查 multigrid-like subspace quality、unstructured CAD geometry、solid-mechanics PDE、AMG 对比和收敛加速约束。"
+    )
 
 
 def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() -> None:
@@ -198,6 +201,12 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "A label-free energy fine-tuning step keeps warm-started Newton Jacobians positive definite for Krylov-compatible large-scale PDE solves.",
             "Audit spectrally safe neural-operator warm starts for large-scale Newton PDE solvers under Jacobian definiteness, Krylov compatibility, label-free energy fine-tuning, and speedup constraints.",
             "审计 large-scale Newton PDE solver 的 spectrally safe neural-operator warm start，并检查 Jacobian definiteness、Krylov compatibility、label-free energy fine-tuning 和加速约束。",
+        ),
+        (
+            "Hybrid Iterative Solvers with Geometry-Aware Neural Preconditioners for Parametric PDEs",
+            "Geo-DeepONet extracts domain information from finite element discretizations and couples geometry-aware neural preconditioners with relaxation schemes and Krylov subspace algorithms on unstructured meshes.",
+            "Validate geometry-aware neural preconditioners for hybrid iterative parametric-PDE solvers under unstructured-mesh geometry transfer, relaxation/Krylov coupling, robustness, and efficiency constraints.",
+            "验证 hybrid iterative parametric-PDE solver 的 geometry-aware neural preconditioner，并检查 unstructured-mesh geometry transfer、relaxation/Krylov coupling、鲁棒性和效率约束。",
         ),
         (
             "From LIF to QIF: Toward Differentiable Spiking Neurons for Scientific Machine Learning",
