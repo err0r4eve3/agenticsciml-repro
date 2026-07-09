@@ -469,6 +469,12 @@ ul {
   gap: 14px;
 }
 
+.wiki-health-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .metric-grid.compact {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -489,14 +495,66 @@ ul {
   font-size: 12px;
 }
 
+.wiki-queue-tools {
+  display: grid;
+  gap: 8px;
+}
+
+.wiki-search-field {
+  display: grid;
+  gap: 5px;
+}
+
+.wiki-search-field span,
+.wiki-queue-tools small {
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.wiki-search-field input {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffaf1;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  padding: 0 10px;
+}
+
+.wiki-filter-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wiki-filter-tabs button {
+  min-height: 30px;
+  border-color: rgba(203, 183, 154, 0.8);
+  background: #fff7eb;
+  color: var(--ink-muted);
+  font-size: 11px;
+  line-height: 1;
+  padding: 0 9px;
+  white-space: nowrap;
+}
+
+.wiki-filter-tabs button.selected {
+  border-color: #2f7c58;
+  background: #eef8ef;
+  color: var(--green-strong);
+}
+
 .wiki-node-row {
   display: grid;
   width: 100%;
   align-items: start;
   align-content: start;
   justify-content: stretch;
-  min-height: 128px;
-  gap: 10px;
+  min-height: 154px;
+  gap: 8px;
   border: 1px solid rgba(203, 183, 154, 0.7);
   border-radius: 8px;
   background: #fff7eb;
@@ -554,6 +612,15 @@ ul {
 
 .wiki-node-row em {
   color: var(--ink-muted);
+}
+
+.wiki-empty-state {
+  border: 1px dashed rgba(203, 183, 154, 0.9);
+  border-radius: 8px;
+  color: var(--ink-muted);
+  font-size: 12px;
+  margin: 0;
+  padding: 14px;
 }
 
 .wiki-editor-actions {
@@ -2544,6 +2611,10 @@ tbody tr:hover,
   .scientific-card-grid,
   .pure-composer {
     grid-template-columns: 1fr;
+  }
+
+  .wiki-health-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .wiki-diff-row {

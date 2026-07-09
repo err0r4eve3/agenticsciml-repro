@@ -126,6 +126,46 @@ const AGENT_PANEL_MIN_WIDTH = 280;
 const AGENT_PANEL_MAX_WIDTH = 560;
 const AGENT_PANEL_DEFAULT_WIDTH = 360;
 const RUN_POLL_ATTEMPTS = 120;
+const RUN_MODE_LABELS: Record<RunMode, string> = {
+  mock: "mock（模拟）",
+  dry_run: "dry_run（预演）",
+  real: "real（真实模型）"
+};
+const RUN_STATE_LABELS: Record<string, string> = {
+  allowed: "允许",
+  blocked: "已阻止",
+  completed: "已完成",
+  downgraded: "已降级",
+  duplicate: "重复",
+  dry_run: "预演完成",
+  exported: "已导出",
+  failed: "失败",
+  finalized: "已定稿",
+  idle: "空闲",
+  missing: "缺失",
+  partial: "部分完成",
+  pending: "等待中",
+  ready: "已就绪",
+  ready_with_warnings: "带警告就绪",
+  running: "运行中",
+  skipped: "已跳过",
+  applied: "已应用",
+  unknown: "未知"
+};
+const WIKI_STATUS_LABELS: Record<string, string> = {
+  draft: "草稿",
+  edited: "已编辑",
+  manual_review_required: "待人工审阅",
+  promoted: "已提升",
+  rejected: "已拒绝",
+  source_candidate: "候选来源"
+};
+const WORKSPACE_SCOPE_LABELS: Record<WorkspaceScope, string> = {
+  repo: "共享仓库",
+  account: "账号工作区",
+  run: "运行工作区",
+  solution: "候选解工作区"
+};
 
 type AccountOption = {
   account_id: string;
@@ -1159,7 +1199,7 @@ export function App() {
       if (background) {
         pollBackgroundRun(run.run_id, activeAccountId);
       }
-      addAssistantMessage(`${nextMode} run 已登记：${run.run_id}`);
+      addAssistantMessage(`${RUN_MODE_LABELS[nextMode]} 运行已登记：${run.run_id}`);
     } catch (exc) {
       setError(String(exc));
     } finally {
@@ -1287,7 +1327,7 @@ export function App() {
         const nextScope = action.payload?.scope;
         if (!actionBelongsToActiveAccount(action)) continue;
         if (nextScope === "repo") {
-          addAssistantMessage("Agent 模式不能打开 shared repo；请使用当前账号 workspace。");
+          addAssistantMessage("Agent 模式不能打开共享仓库；请使用当前账号工作区。");
           continue;
         }
         if (nextScope === "account" || nextScope === "run" || nextScope === "solution") {
@@ -1333,7 +1373,7 @@ export function App() {
   function actionBelongsToActiveAccount(action: SolverAction) {
     const actionAccountId = action.payload?.account_id;
     if (typeof actionAccountId === "string" && actionAccountId !== activeAccountId) {
-      addAssistantMessage("已拦截跨账号 action：Agent 只能操作当前账号创建的工作区内容。");
+      addAssistantMessage("已拦截跨账号动作：Agent 只能操作当前账号创建的工作区内容。");
       return false;
     }
     return true;
@@ -1389,7 +1429,7 @@ export function App() {
       if (payload.background) {
         pollBackgroundRun(run.run_id, activeAccountId);
       }
-      addAssistantMessage(`${actionMode} run 已登记：${run.run_id}`);
+      addAssistantMessage(`${RUN_MODE_LABELS[actionMode]} 运行已登记：${run.run_id}`);
     } catch (exc) {
       setError(String(exc));
     } finally {
@@ -1754,7 +1794,7 @@ export function App() {
       ) : null}
       {activePage === "wiki" ? (
         <section className="wiki-page" aria-label="LLM Wiki OKF 页面" data-testid="page-wiki">
-          <PageHeader title="LLM Wiki" subtitle="OKF Graph" />
+          <PageHeader title="LLM Wiki" subtitle="OKF 知识图谱" />
           {error ? <div className="error-line" role="alert">{error}</div> : null}
           <LlmWikiPage
             copied={wikiCopied}
@@ -1891,8 +1931,27 @@ function LlmWikiPage({
     ...paperProblemCases.filter((node) => !reviewNodeIds.has(node.id)).slice(0, 12)
   ];
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [wikiQuery, setWikiQuery] = useState("");
+  const [wikiStatusFilter, setWikiStatusFilter] = useState("all");
   const [jsonAdvancedOpen, setJsonAdvancedOpen] = useState(false);
-  const selectedNode = indexNodes.find((node) => node.id === selectedNodeId) ?? indexNodes[0] ?? nodes[0] ?? null;
+  const incidentNodeIds = new Set(edges.flatMap((edge) => [edge.source, edge.target]));
+  const sourceBackedCount = nodes.filter((node) => node.source && Object.keys(node.source).length > 0).length;
+  const linkedNodeCount = nodes.filter((node) => incidentNodeIds.has(node.id)).length;
+  const bilingualNodeCount = nodes.filter((node) => node.title_zh?.trim() && node.description_zh?.trim()).length;
+  const statusCounts = indexNodes.reduce<Record<string, number>>((counts, node) => {
+    const status = wikiNodeStatus(node, reviewNodeIds);
+    counts[status] = (counts[status] ?? 0) + 1;
+    return counts;
+  }, {});
+  const normalizedWikiQuery = wikiQuery.trim().toLowerCase();
+  const visibleIndexNodes = indexNodes.filter((node) => {
+    const status = wikiNodeStatus(node, reviewNodeIds);
+    return (
+      (wikiStatusFilter === "all" || status === wikiStatusFilter) &&
+      (!normalizedWikiQuery || wikiNodeMatchesQuery(node, normalizedWikiQuery))
+    );
+  });
+  const selectedNode = visibleIndexNodes.find((node) => node.id === selectedNodeId) ?? visibleIndexNodes[0] ?? indexNodes[0] ?? nodes[0] ?? null;
   const selectedQueueNode = queueNodes.find((node) => node.id === selectedNode?.id);
   const selectedSourceNode = payload?.nodes.find((node) => node.id === selectedNode?.id) ?? (selectedQueueNode ? queueNodeToWikiNode(selectedQueueNode, parsed) : null);
   const selectedEdges = selectedNode ? edges.filter((edge) => edge.source === selectedNode.id || edge.target === selectedNode.id) : [];
@@ -1935,26 +1994,56 @@ function LlmWikiPage({
     <section className="wiki-content">
       <section className="wiki-head">
         <div>
-          <p className="eyebrow">Agent-generated bilingual graph</p>
-          <h2>{payload?.title_zh ?? payload?.title ?? "AgenticSciML LLM Wiki Knowledge Graph"}</h2>
-          <span>{payload?.generator?.source_boundary ?? "Repository catalog plus reviewed paper metadata."}</span>
+          <p className="eyebrow">AI 生成的双语知识图谱</p>
+          <h2>{payload?.title_zh ?? payload?.title ?? "AgenticSciML LLM Wiki 知识图谱"}</h2>
+          <span>{payload?.generator?.source_boundary ?? "由仓库目录与已审阅论文元数据生成。"}</span>
         </div>
-        <StatusBadge tone={isOkf ? "good" : "bad"}>{isOkf ? "OKF valid" : "JSON invalid"}</StatusBadge>
+        <StatusBadge tone={isOkf ? "good" : "bad"}>{isOkf ? "OKF 有效" : "JSON 无效"}</StatusBadge>
       </section>
+      <div className="wiki-health-strip" aria-label="LLM Wiki 健康度">
+        <Metric label="来源" value={`${sourceBackedCount}/${nodes.length}`} />
+        <Metric label="已连接" value={`${linkedNodeCount}/${nodes.length}`} />
+        <Metric label="双语" value={`${bilingualNodeCount}/${nodes.length}`} />
+        <Metric label="待审" value={String(queueNodes.length)} />
+      </div>
       <div className="wiki-grid">
-        <DataRegion title="Review Queue">
+        <DataRegion title="审阅队列">
           <div className="metric-grid compact">
-            <Metric label="nodes" value={String(nodes.length)} />
-            <Metric label="edges" value={String(edges.length)} />
-            <Metric label="queue" value={String(queueNodes.length)} />
-            <Metric label="changed" value={String(diffRows.length)} />
+            <Metric label="节点" value={String(nodes.length)} />
+            <Metric label="边" value={String(edges.length)} />
+            <Metric label="队列" value={String(queueNodes.length)} />
+            <Metric label="已变更" value={String(diffRows.length)} />
           </div>
           <div className="wiki-review-meta">
             <span>{reviewQueue?.latest_round_id ?? "latest"} · {reviewQueue?.queue?.graph_path ?? "llm_wiki/llm_wiki_okf.json"}</span>
-            <span>{reviewQueue?.queue?.status ?? "manual_review_required"}</span>
+            <span>{displayWikiStatus(reviewQueue?.queue?.status ?? "manual_review_required")}</span>
           </div>
-          <div className="wiki-node-list" aria-label="Wiki nodes">
-            {indexNodes.map((node) => (
+          <div className="wiki-queue-tools">
+            <label className="wiki-search-field">
+              <span>索引搜索</span>
+              <input
+                value={wikiQuery}
+                onChange={(event) => setWikiQuery(event.target.value)}
+                placeholder="标题、问题、标签、来源"
+              />
+            </label>
+            <div className="wiki-filter-tabs" aria-label="Wiki 状态过滤">
+              {["all", "manual_review_required", "edited", "promoted", "rejected"].map((status) => (
+                <button
+                  className={wikiStatusFilter === status ? "selected" : ""}
+                  key={status}
+                  type="button"
+                  onClick={() => setWikiStatusFilter(status)}
+                >
+                  {status === "all" ? "全部" : displayWikiStatus(status)}
+                  {status === "all" ? ` ${indexNodes.length}` : ` ${statusCounts[status] ?? 0}`}
+                </button>
+              ))}
+            </div>
+            <small>{visibleIndexNodes.length} 可见 · {indexNodes.length} 已索引</small>
+          </div>
+          <div className="wiki-node-list" aria-label="Wiki 节点">
+            {visibleIndexNodes.map((node) => (
               <button
                 className={selectedNode?.id === node.id ? "wiki-node-row selected" : "wiki-node-row"}
                 aria-pressed={selectedNode?.id === node.id}
@@ -1964,60 +2053,62 @@ function LlmWikiPage({
               >
                 <strong>{node.title_zh ?? node.title}</strong>
                 <span>{node.description_zh ?? node.description}</span>
-                <em>{node.wiki_promotion_status ?? (reviewNodeIds.has(node.id) ? "manual_review_required" : node.type)}</em>
+                <small>{wikiSourceLabel(node)}</small>
+                <em>{displayWikiStatus(wikiNodeStatus(node, reviewNodeIds))}</em>
               </button>
             ))}
+            {visibleIndexNodes.length === 0 ? <p className="wiki-empty-state">没有匹配的 Wiki 节点。</p> : null}
           </div>
           <div className="claim-boundary">
             <AlertTriangle size={15} />
-            <span>{payload?.edit_policy?.claim_boundary ?? "Edited wiki text is planning context, not benchmark evidence."}</span>
+            <span>{payload?.edit_policy?.claim_boundary ?? "已编辑 Wiki 文本仅作为规划上下文，不是基准证据。"}</span>
           </div>
         </DataRegion>
-        <DataRegion title="Node Inspector">
+        <DataRegion title="节点检查器">
           <div className="wiki-editor-actions">
             <button className="icon-text-button secondary" type="button" onClick={onRefresh}>
               <RefreshCw size={15} />
-              Regenerate
+              重新生成
             </button>
             <button className="icon-text-button secondary" type="button" onClick={onLoadLoopGraph}>
               <GitGraph size={15} />
-              Load loop graph
+              加载循环图谱
             </button>
             <button className="icon-text-button secondary" disabled={!isOkf} type="button" onClick={onSave}>
               <FileText size={15} />
-              {saved ? "Saved" : "Save"}
+              {saved ? "已保存" : "保存"}
             </button>
             <button className="icon-text-button" disabled={!text.trim()} type="button" onClick={onCopy}>
               <FileText size={15} />
-              {copied ? "Copied" : "Copy"}
+              {copied ? "已复制" : "复制"}
             </button>
           </div>
           {selectedNode ? (
             <div className="wiki-inspector">
               <div className="wiki-node-toolbar">
                 <StatusBadge tone={validationIssues.length ? "bad" : "good"}>
-                  {validationIssues.length ? validationIssues[0] : "draft valid"}
+                  {validationIssues.length ? validationIssues[0] : "草稿有效"}
                 </StatusBadge>
                 <div className="wiki-promotion-actions">
                   <button type="button" onClick={() => setPromotionStatus("manual_review_required")}>
-                    Review
+                    待审阅
                   </button>
                   <button type="button" onClick={() => setPromotionStatus("edited")}>
-                    Edited
+                    已编辑
                   </button>
                   <button type="button" onClick={() => setPromotionStatus("promoted")}>
-                    Promote
+                    提升
                   </button>
                   <button type="button" onClick={() => setPromotionStatus("rejected")}>
-                    Reject
+                    拒绝
                   </button>
                 </div>
               </div>
               <div className="wiki-form-grid">
-                <WikiTextField label="Title" value={selectedNode.title} onChange={(value) => patchSelectedNode({ title: value })} />
+                <WikiTextField label="题名" value={selectedNode.title} onChange={(value) => patchSelectedNode({ title: value })} />
                 <WikiTextField label="标题" value={selectedNode.title_zh ?? ""} onChange={(value) => patchSelectedNode({ title_zh: value })} />
                 <WikiTextField
-                  label="Description"
+                  label="说明（英文）"
                   multiline
                   value={selectedNode.description}
                   onChange={(value) => patchSelectedNode({ description: value })}
@@ -2029,7 +2120,7 @@ function LlmWikiPage({
                   onChange={(value) => patchSelectedNode({ description_zh: value })}
                 />
                 <WikiTextField
-                  label="Real problem"
+                  label="现实问题（英文）"
                   multiline
                   value={selectedNode.real_problem ?? ""}
                   onChange={(value) => patchSelectedNode({ real_problem: value })}
@@ -2040,17 +2131,17 @@ function LlmWikiPage({
                   value={selectedNode.real_problem_zh ?? ""}
                   onChange={(value) => patchSelectedNode({ real_problem_zh: value })}
                 />
-                <WikiTextField label="Tags" value={(selectedNode.tags ?? []).join(", ")} onChange={(value) => patchTags("tags", value)} />
+                <WikiTextField label="标签（英文）" value={(selectedNode.tags ?? []).join(", ")} onChange={(value) => patchTags("tags", value)} />
                 <WikiTextField label="中文标签" value={(selectedNode.tags_zh ?? []).join(", ")} onChange={(value) => patchTags("tags_zh", value)} />
               </div>
               <div className="wiki-context-grid">
                 <div className="wiki-context-panel">
-                  <strong>Source</strong>
+                  <strong>来源</strong>
                   <span>{selectedNode.id}</span>
-                  <code>{selectedNode.source ? JSON.stringify(selectedNode.source, null, 2) : "No source metadata"}</code>
+                  <code>{selectedNode.source ? JSON.stringify(selectedNode.source, null, 2) : "没有来源元数据"}</code>
                 </div>
                 <div className="wiki-context-panel">
-                  <strong>Graph context</strong>
+                  <strong>图谱上下文</strong>
                   {selectedEdges.length ? (
                     selectedEdges.slice(0, 8).map((edge) => (
                       <span key={`${edge.source}-${edge.relation}-${edge.target}`}>
@@ -2058,27 +2149,27 @@ function LlmWikiPage({
                       </span>
                     ))
                   ) : (
-                    <span>No adjacent edges.</span>
+                    <span>没有相邻边。</span>
                   )}
                 </div>
               </div>
               <div className="wiki-diff">
-                <strong>Draft diff</strong>
+                <strong>草稿差异</strong>
                 {diffRows.length ? (
                   diffRows.map((row) => (
                     <div className="wiki-diff-row" key={row.field}>
                       <span>{row.field}</span>
-                      <del>{row.before || "empty"}</del>
-                      <ins>{row.after || "empty"}</ins>
+                      <del>{row.before || "空"}</del>
+                      <ins>{row.after || "空"}</ins>
                     </div>
                   ))
                 ) : (
-                  <span>No unsaved field changes.</span>
+                  <span>没有未保存字段变更。</span>
                 )}
               </div>
             </div>
           ) : (
-            <p className="muted">No Wiki node selected.</p>
+            <p className="muted">未选择 Wiki 节点。</p>
           )}
           <details className="wiki-json-advanced" open={jsonAdvancedOpen} onToggle={(event) => setJsonAdvancedOpen(event.currentTarget.open)}>
             <summary>
@@ -2154,13 +2245,13 @@ function PureChatUI({
             <div className="command-orb">
               <Sparkles size={18} />
             </div>
-            <h2>今天要做什么？</h2>
-            <p>直接提问；需要代码或算法证据时，使用左侧分页切换。</p>
+            <h2>请选择实验操作</h2>
+            <p>描述科学问题、解释证据边界，或进入算法与代码工作区。</p>
             <div className="prompt-pills">
               <button type="button" onClick={() => onQuickPrompt("我有一个新的科学机器学习问题，先帮我判断应该怎么跑", { assistantMode: "plan" })}>
                 新问题规划
               </button>
-              <button type="button" onClick={() => onQuickPrompt("解释最近一次 run 的科学证据边界和下一步验证")}>
+              <button type="button" onClick={() => onQuickPrompt("解释最近一次运行的科学证据边界和下一步验证")}>
                 解释证据
               </button>
               <button type="button" onClick={onOpenLibrary}>
@@ -2176,11 +2267,11 @@ function PureChatUI({
       </div>
       <form className="pure-composer" onSubmit={onSubmit}>
         <input
-          aria-label="给 AgenticSciML 发消息"
+          aria-label="描述科学问题或证据请求"
           data-testid="chat-main-input"
           value={mainPrompt}
           onChange={(event) => onChange(event.target.value)}
-          placeholder="给 AgenticSciML 发消息"
+          placeholder="描述科学问题、请求证据解释，或指定要打开的工作区"
         />
         <div className="composer-tools">
           <AssistantModeSwitch mode={assistantMode} settings={modeSettings} onChange={onAssistantModeChange} />
@@ -2206,7 +2297,7 @@ function AssistantModeSwitch({
 }) {
   return (
     <div className={`assistant-mode-wrap ${compact ? "compact" : ""}`}>
-      <div className={`assistant-mode ${compact ? "compact" : ""}`} aria-label="Assistant mode" role="group">
+      <div className={`assistant-mode ${compact ? "compact" : ""}`} aria-label="助手模式" role="group">
         {(["ask", "plan", "agent"] as const).map((item) => (
           <button
             aria-pressed={mode === item}
@@ -2222,7 +2313,7 @@ function AssistantModeSwitch({
       </div>
       {settings ? (
         <span className="mode-setting" title={`reasoning_effort=${settings.reasoning_effort}; temperature=${settings.temperature}`}>
-          think {settings.reasoning_effort} · temp {settings.temperature}
+          推理 {settings.reasoning_effort} · 温度 {settings.temperature}
         </span>
       ) : null}
     </div>
@@ -2262,7 +2353,7 @@ function TopBar({
       </div>
       <div className="topbar-controls">
         <label className="compact-field">
-          <span>Benchmark</span>
+          <span>基准任务</span>
           <select value={selectedBenchmark} onChange={(event) => onSelectBenchmark(event.target.value)}>
             {benchmarks.map((benchmark) => (
               <option key={benchmark.name} value={benchmark.name}>
@@ -2280,25 +2371,25 @@ function TopBar({
               type="button"
               onClick={() => onModeChange(item)}
             >
-              {item}
+              {RUN_MODE_LABELS[item]}
             </button>
           ))}
         </div>
         <StatusBadge tone={qualityGate ? "good" : qualityGate === false ? "bad" : "neutral"}>
-          gate {qualityGate === undefined ? "pending" : qualityGate ? "pass" : "fail"}
+          {displayQualityGate(qualityGate)}
         </StatusBadge>
-        <StatusBadge tone={runState === "idle" ? "neutral" : "info"}>{runState}</StatusBadge>
+        <StatusBadge tone={runState === "idle" ? "neutral" : "info"}>{displayRunState(runState)}</StatusBadge>
         <button className="icon-text-button" disabled={busy} type="button" onClick={onRun}>
           <Play size={15} />
-          Run
+          启动运行
         </button>
         <button aria-label="刷新" className="icon-button" type="button" onClick={onRefresh} title="刷新">
           <RefreshCw size={16} />
         </button>
       </div>
       <div className="active-run">
-        <span>active run</span>
-        <strong>{activeRunId ?? "none"}</strong>
+        <span>当前运行</span>
+        <strong>{activeRunId ?? "无"}</strong>
       </div>
     </header>
   );
@@ -2407,11 +2498,11 @@ function AlgorithmLibraryPage({
     <section className="library-content paper-lab">
       <section className="paper-lab-head">
         <div>
-          <p className="eyebrow">Paper Workflow Evidence</p>
-          <h2>算法库 / 论文工作流证据</h2>
-          <span>S1 任务、faithful-small / proxy benchmark、selector votes、solution loss 和本地 artifact 只读证据，不表示论文成绩复现。</span>
+          <p className="eyebrow">论文流程证据</p>
+          <h2>算法库 / 论文流程证据</h2>
+          <span>S1 任务、faithful-small / proxy benchmark、选择器投票、候选解损失和本地 artifact 只读证据；这些结果不表示论文成绩复现。</span>
         </div>
-        <StatusBadge tone="info">not paper-score evidence</StatusBadge>
+        <StatusBadge tone="info">非论文成绩证据</StatusBadge>
       </section>
       <PaperTaskTabs tasks={paperTasks} selected={selectedPaperTask} onSelect={onSelectPaperTask} />
       <div className="paper-lab-grid">
@@ -2447,7 +2538,7 @@ function AlgorithmLibraryPage({
         solutionsPayload={solutionsPayload}
         onSelectArtifact={onSelectArtifact}
       />
-      <DataRegion title="Paper primitive catalog">
+      <DataRegion title="论文原语目录">
         <div className="catalog-toolbar" aria-label="算法库语言切换">
           <div>
             <span>{language === "zh" ? "算法说明" : "Algorithm notes"}</span>
@@ -2477,11 +2568,11 @@ function AlgorithmLibraryPage({
         <div className="algorithm-context">
           {selectedPaperTask ? (
             <p>
-              {selectedPaperTask.paper_section} 当前绑定 {selectedPaperTask.algorithms.length} 个 paper reference primitive；
-              score、champion 和科学声明仍只来自 evaluator 与 run artifacts。
+              {selectedPaperTask.paper_section} 当前绑定 {selectedPaperTask.algorithms.length} 个论文参考原语；
+              评分、当前最优候选解和科学声明仍只来自评测器与运行证据文件。
             </p>
           ) : (
-            <p>尚未加载 S1 task mapping。</p>
+            <p>尚未加载 S1 任务映射。</p>
           )}
         </div>
         <AlgorithmCatalog
@@ -2529,7 +2620,7 @@ function PaperTaskTabs({
   tasks: PaperTask[];
 }) {
   return (
-    <div className="paper-task-tabs" aria-label="Paper S1 tasks">
+    <div className="paper-task-tabs" aria-label="论文 S1 任务">
       {tasks.map((task) => (
         <button
           aria-pressed={selected?.paper_section === task.paper_section}
@@ -2542,7 +2633,7 @@ function PaperTaskTabs({
           <strong>{task.title}</strong>
         </button>
       ))}
-      {tasks.length === 0 ? <span className="muted">S1 task mapping 尚未加载。</span> : null}
+      {tasks.length === 0 ? <span className="muted">S1 任务映射尚未加载。</span> : null}
     </div>
   );
 }
@@ -2560,13 +2651,13 @@ function ProblemIntakePanel({
 }) {
   const canPlan = problemIntake.problem_statement.trim().length >= 20;
   return (
-    <DataRegion title="Problem Intake">
+    <DataRegion title="问题录入">
       <div className="problem-intake">
-        <div className="flow-strip" aria-label="run workflow">
+        <div className="flow-strip" aria-label="运行工作流">
           <span className="active">1 描述问题</span>
           <span>2 自动匹配</span>
-          <span>3 Readiness</span>
-          <span>4 Run / 证据卡</span>
+          <span>3 就绪性检查</span>
+          <span>4 运行 / 证据卡</span>
         </div>
         <label>
           <span>完整问题描述</span>
@@ -2578,7 +2669,7 @@ function ProblemIntakePanel({
         </label>
         <div className="problem-intake-grid">
           <label>
-            <span>Requirements</span>
+            <span>约束条件</span>
             <textarea
               value={problemIntake.requirements}
               onChange={(event) => onChange({ requirements: event.target.value })}
@@ -2586,25 +2677,25 @@ function ProblemIntakePanel({
             />
           </label>
           <label>
-            <span>Evaluation</span>
+            <span>评价标准</span>
             <textarea
               value={problemIntake.evaluation_criteria}
               onChange={(event) => onChange({ evaluation_criteria: event.target.value })}
-              placeholder="metric、loss、验证方式"
+              placeholder="指标、损失值、验证方式"
             />
           </label>
           <label>
-            <span>Data</span>
+            <span>数据说明</span>
             <textarea
               value={problemIntake.data_description}
               onChange={(event) => onChange({ data_description: event.target.value })}
-              placeholder="数据形状、变量、train/validation 边界"
+              placeholder="数据形状、变量、训练/验证边界"
             />
           </label>
         </div>
         <button className="icon-text-button full-width" disabled={!canPlan} type="button" onClick={onPlan}>
           <Sparkles size={15} />
-          自动评选 benchmark 与解法
+          自动匹配基准任务与解法
         </button>
         {problemPlan ? <ProblemPlanSummary plan={problemPlan} /> : null}
       </div>
@@ -2616,12 +2707,12 @@ function ProblemPlanSummary({ plan }: { plan: ProblemRunPlan }) {
   return (
     <div className="problem-plan-summary">
       <div>
-        <span>recommended benchmark</span>
+        <span>推荐基准任务</span>
         <strong>{plan.recommended_benchmark.name}</strong>
       </div>
       <div>
-        <span>selected algorithms</span>
-        <strong>{plan.selected_algorithm_ids.join(", ") || "none"}</strong>
+        <span>选定算法策略</span>
+        <strong>{plan.selected_algorithm_ids.join(", ") || "无"}</strong>
       </div>
       <p>{plan.claim_boundary}</p>
       {plan.custom_problem_package ? (
@@ -2629,8 +2720,8 @@ function ProblemPlanSummary({ plan }: { plan: ProblemRunPlan }) {
           <span>{plan.custom_problem_package.status}</span>
           <strong>{plan.custom_problem_package.evaluator_trust_level}</strong>
           <small>
-            paper_equivalent={String(plan.custom_problem_package.paper_benchmark_equivalent)} · replacement_required=
-            {String(plan.custom_problem_package.requires_replacement_for_scientific_claim)}
+            论文等价={displayBoolean(plan.custom_problem_package.paper_benchmark_equivalent)} · 需要替换评测器=
+            {displayBoolean(plan.custom_problem_package.requires_replacement_for_scientific_claim)}
           </small>
         </div>
       ) : null}
@@ -2653,7 +2744,7 @@ function StrategyLocksPanel({
   onUpdate: (lockId: string, next: Partial<StrategyLock>) => void;
 }) {
   return (
-    <DataRegion title="Strategy Locks">
+    <DataRegion title="策略锁">
       <div className="strategy-locks">
         {locks.map((lock) => (
           <div className="strategy-lock-row" key={lock.lock_id}>
@@ -2662,25 +2753,25 @@ function StrategyLocksPanel({
                 value={lock.kind}
                 onChange={(event) => onUpdate(lock.lock_id, { kind: event.target.value as StrategyLock["kind"] })}
               >
-                <option value="constraint">constraint</option>
-                <option value="invariant">invariant</option>
-                <option value="mathematical_intuition">mathematical intuition</option>
-                <option value="modeling_choice">modeling choice</option>
-                <option value="assumption">assumption</option>
+                <option value="constraint">约束</option>
+                <option value="invariant">不变量</option>
+                <option value="mathematical_intuition">数学直觉</option>
+                <option value="modeling_choice">建模选择</option>
+                <option value="assumption">假设</option>
               </select>
               <select
                 value={lock.scope}
                 onChange={(event) => onUpdate(lock.lock_id, { scope: event.target.value as StrategyLock["scope"] })}
               >
-                <option value="all_branches">all branches</option>
-                <option value="selected_algorithms">selected algorithms</option>
+                <option value="all_branches">全部分支</option>
+                <option value="selected_algorithms">选定算法</option>
               </select>
               <button
-                aria-label={`移除 strategy lock ${lock.lock_id}`}
+                aria-label={`移除策略锁 ${lock.lock_id}`}
                 className="icon-button"
                 type="button"
                 onClick={() => onRemove(lock.lock_id)}
-                title="移除 strategy lock"
+                title="移除策略锁"
               >
                 <X size={15} />
               </button>
@@ -2688,14 +2779,14 @@ function StrategyLocksPanel({
             <textarea
               value={lock.text}
               onChange={(event) => onUpdate(lock.lock_id, { text: event.target.value })}
-              placeholder="例如：保持 bias-free linear branch net，所有 sibling branch 都必须继承"
+              placeholder="例如：保持无偏线性分支网络（bias-free linear branch net），所有同级分支都必须继承"
             />
           </div>
         ))}
         {locks.length === 0 ? <p className="muted">尚未设置人工策略锁。</p> : null}
         <button className="icon-text-button full-width secondary" type="button" onClick={onAdd}>
           <Plus size={15} />
-          添加 strategy lock
+          添加策略锁
         </button>
       </div>
     </DataRegion>
@@ -2711,7 +2802,7 @@ function PaperTaskDetail({
 }) {
   if (!task) {
     return (
-      <DataRegion title="Paper Tasks">
+      <DataRegion title="论文任务">
         <p className="muted">等待 /api/paper-tasks。</p>
       </DataRegion>
     );
@@ -2722,7 +2813,7 @@ function PaperTaskDetail({
         <p>{task.summary}</p>
         <div className="paper-task-columns">
           <div>
-            <strong>Benchmarks</strong>
+            <strong>基准任务</strong>
             {task.benchmarks.map((benchmark) => (
               <div
                 className={benchmark.name === selectedBenchmark ? "paper-benchmark-row selected" : "paper-benchmark-row"}
@@ -2734,7 +2825,7 @@ function PaperTaskDetail({
             ))}
           </div>
           <div>
-            <strong>Reference primitives</strong>
+            <strong>参考原语</strong>
             {task.reference_primitives.map((primitive) => (
               <span className="primitive-chip" key={primitive}>{primitive}</span>
             ))}
@@ -2773,10 +2864,10 @@ function RunConfigPanel({
   onStartRun: () => void;
 }) {
   return (
-    <DataRegion title="Run Config">
+    <DataRegion title="运行配置">
       <div className="run-config-panel">
         <div className="run-config-mode">
-          <span>mode</span>
+          <span>模式</span>
           <div className="segmented compact" aria-label="Paper run mode" role="group">
             {(["mock", "dry_run", "real"] as const).map((item) => (
               <button
@@ -2786,38 +2877,38 @@ function RunConfigPanel({
                 type="button"
                 onClick={() => onModeChange(item)}
               >
-                {item}
+                {RUN_MODE_LABELS[item]}
               </button>
             ))}
           </div>
         </div>
         <div className="config-grid">
           <NumberField
-            label="target solutions"
+            label="目标解数量"
             min={1}
             value={runConfig.target_solution_count}
             onChange={(value) => onRunConfigChange({ target_solution_count: value })}
           />
           <NumberField
-            label="max iterations"
+            label="最大迭代数"
             min={0}
             value={budgetPreview.max_iterations}
             onChange={(value) => onRunConfigChange({ max_iterations: value, target_solution_count: 1 + value * runConfig.parallel_mutations })}
           />
           <NumberField
-            label="parallel mutations"
+            label="并行变异数"
             min={1}
             value={runConfig.parallel_mutations}
             onChange={(value) => onRunConfigChange({ parallel_mutations: value })}
           />
           <NumberField
-            label="selector votes"
+            label="选择器投票数"
             min={1}
             value={runConfig.selector_vote_count}
             onChange={(value) => onRunConfigChange({ selector_vote_count: value })}
           />
           <NumberField
-            label="max children/node"
+            label="每节点最大子代数"
             min={1}
             value={runConfig.max_children_per_node}
             onChange={(value) => onRunConfigChange({ max_children_per_node: value })}
@@ -2825,40 +2916,40 @@ function RunConfigPanel({
         </div>
         <div className="budget-preview">
           <div>
-            <span>actual budget</span>
+            <span>实际预算</span>
             <strong>{budgetPreview.planned_solution_budget}</strong>
           </div>
           <div>
-            <span>root + children</span>
+            <span>根解 + 子解</span>
             <strong>1 + {budgetPreview.max_iterations * runConfig.parallel_mutations}</strong>
           </div>
           <div>
-            <span>benchmark</span>
+            <span>基准任务</span>
             <strong>{selectedBenchmark}</strong>
           </div>
           <div>
-            <span>operator scheduler</span>
+            <span>算子调度</span>
             <strong>auto-audited</strong>
           </div>
         </div>
         <button className="icon-text-button full-width secondary" disabled={busy} type="button" onClick={onPreviewReadiness}>
           <AlertTriangle size={15} />
-          先检查 readiness
+          先检查就绪性
         </button>
         <button
-          aria-label={readinessReport?.launch_allowed === false ? "readiness blocked" : "启动配置 run"}
+          aria-label={readinessReport?.launch_allowed === false ? "就绪性检查未通过" : "启动配置运行"}
           className="icon-text-button full-width"
           disabled={busy || readinessReport?.launch_allowed === false}
           type="button"
           onClick={onStartRun}
-          title={readinessReport?.launch_allowed === false ? "readiness blocked" : "启动配置 run"}
+          title={readinessReport?.launch_allowed === false ? "就绪性检查未通过" : "启动配置运行"}
         >
           <Play size={15} />
-          启动配置 run
+          启动配置运行
         </button>
         {readinessReport ? <RunReadinessSummary report={readinessReport} /> : null}
         {mode === "real" ? (
-          <p className="warning-text">real mode 仍需要后端显式开关与二次确认，不会绕过预算或 claim boundary。</p>
+          <p className="warning-text">真实模型模式仍需要后端显式开关与二次确认，不会绕过预算或声明边界。</p>
         ) : null}
       </div>
     </DataRegion>
@@ -2872,24 +2963,24 @@ function RunReadinessSummary({ report }: { report: ReadinessReport }) {
   return (
     <div className={`readiness-summary ${report.status}`}>
       <div className="readiness-title">
-        <strong>{report.status}</strong>
+        <strong>{displayRunState(report.status)}</strong>
         <span>
-          {report.summary.blocker_count} blockers / {report.summary.warning_count} warnings
+          {report.summary.blocker_count} 个阻断项 / {report.summary.warning_count} 个警告
         </span>
       </div>
       <div className="readiness-meta">
-        <span>{report.benchmark_fidelity_preview[0]?.fidelity_level ?? "unknown"} fidelity</span>
-        <span>{report.algorithm_seed_preview.length} strategy seeds</span>
-        <span>{report.claim_gate.claim_level} claim</span>
-        <span>KB {report.kb_manifest?.coverage_status ?? "unknown"}</span>
+        <span>保真度 {report.benchmark_fidelity_preview[0]?.fidelity_level ?? "unknown"}</span>
+        <span>{report.algorithm_seed_preview.length} 个策略种子</span>
+        <span>声明 {report.claim_gate.claim_level}</span>
+        <span>知识库 {report.kb_manifest?.coverage_status ?? "unknown"}</span>
       </div>
       <div className="claim-gate-mini">
-        <span>{report.claim_gate.status}</span>
+        <span>{displayRunState(report.claim_gate.status)}</span>
         <strong>{report.claim_gate.evaluator_trust_level}</strong>
         <small>
-          paper={String(report.claim_gate.paper_level_claim_supported)} · scientific=
-          {String(report.claim_gate.scientific_claim_supported)} · selector=
-          {String(report.selector_panel_preview?.configured_heterogeneous ?? false)}
+          论文级={displayBoolean(report.claim_gate.paper_level_claim_supported)} · 科学声明=
+          {displayBoolean(report.claim_gate.scientific_claim_supported)} · 选择器=
+          {displayBoolean(report.selector_panel_preview?.configured_heterogeneous ?? false)}
         </small>
       </div>
       {visibleChecks.map((check) => (
@@ -2937,21 +3028,21 @@ function RoleModelPanel({
   roles: AgentRole[];
 }) {
   return (
-    <DataRegion title="Layered model routing">
+    <DataRegion title="分层模型路由">
       <div className="role-model-panel">
         <p>
-          默认使用后端单一 adapter；只有填写 role override 时才按层路由。reasoning_effort 会写入 audit，
-          并传给支持该参数的 provider。
+          默认使用后端单一模型适配器；只有填写角色覆盖配置时才按层路由。reasoning_effort 会写入审计记录，
+          并传给支持该参数的服务提供方。
         </p>
         <div className="role-model-table">
           <table>
             <thead>
               <tr>
-                <th>role</th>
-                <th>layer</th>
-                <th>model override</th>
-                <th>temp</th>
-                <th>thinking</th>
+                <th>角色</th>
+                <th>层级</th>
+                <th>模型覆盖</th>
+                <th>温度</th>
+                <th>推理强度</th>
               </tr>
             </thead>
             <tbody>
@@ -2966,7 +3057,7 @@ function RoleModelPanel({
                         aria-label={`${role.label} model`}
                         value={config.model}
                         onChange={(event) => onUpdate(role.role, { model: event.target.value })}
-                        placeholder="default"
+                        placeholder="默认"
                       />
                     </td>
                     <td>
@@ -2999,7 +3090,7 @@ function RoleModelPanel({
               })}
               {roles.length === 0 ? (
                 <tr>
-                  <td colSpan={5}>等待 /api/agent-roles。</td>
+                  <td colSpan={5}>等待 /api/agent-roles 返回角色配置。</td>
                 </tr>
               ) : null}
             </tbody>
@@ -3023,13 +3114,13 @@ function EvidencePanel({
     <div className="evidence-stack">
       <ScientificResultCardView card={solutionsPayload?.scientific_result_card} onSelectArtifact={onSelectArtifact} />
       <div className="evidence-grid">
-        <DataRegion title="Selector votes">
+        <DataRegion title="选择器投票">
           <SelectorVotesView payload={selectorVotes} />
         </DataRegion>
-        <DataRegion title="Solution loss / tree">
+        <DataRegion title="候选解损失 / 解树">
           <SolutionsTable payload={solutionsPayload} />
         </DataRegion>
-        <DataRegion title="Local figures">
+        <DataRegion title="本地图像">
           <FigureArtifactsView figures={solutionsPayload?.figures ?? []} />
         </DataRegion>
       </div>
@@ -3046,46 +3137,46 @@ function ScientificResultCardView({
 }) {
   if (!card?.available) {
     return (
-      <DataRegion title="Scientific result card">
-        <p className="muted">选择完成导出的 run 后显示 scientific_result_card。</p>
+      <DataRegion title="科学结果证据卡">
+        <p className="muted">选择完成导出的运行后显示科学结果证据卡。</p>
       </DataRegion>
     );
   }
   const supportTone = card.scientific_claim_supported ? "good" : "info";
   return (
-    <DataRegion title="Scientific result card">
+    <DataRegion title="科学结果证据卡">
       <div className="scientific-card">
         <div className="scientific-card-head">
           <div>
-            <p className="eyebrow">Evidence grade</p>
+            <p className="eyebrow">证据等级</p>
             <h3>{card.evidence_grade ?? "unknown"}</h3>
           </div>
-          <StatusBadge tone={supportTone}>{card.scientific_claim_supported ? "scientific supported" : "workflow evidence"}</StatusBadge>
+          <StatusBadge tone={supportTone}>{card.scientific_claim_supported ? "科学声明已支持" : "仅工作流证据"}</StatusBadge>
         </div>
         <div className="scientific-card-grid">
           <span>
-            champion
+            当前最优候选解
             <strong>{card.champion_node_id ?? "n/a"}</strong>
           </span>
           <span>
-            metric
+            指标
             <strong>{card.metric ?? "n/a"}</strong>
           </span>
           <span>
-            score
+            分数
             <strong>{formatScore(card.champion_value)}</strong>
           </span>
           <span>
-            improvement
+            相对根解改进
             <strong>{formatScore(card.improvement_over_root)}</strong>
           </span>
           <span>
-            readiness
-            <strong>{card.readiness_status ?? "unknown"}</strong>
+            就绪性
+            <strong>{displayRunState(card.readiness_status)}</strong>
           </span>
           <span>
-            claim gate
-            <strong>{card.claim_gate_status ?? "unknown"}</strong>
+            声明门禁
+            <strong>{displayRunState(card.claim_gate_status)}</strong>
           </span>
         </div>
         <div className="inline-warnings">
@@ -3093,7 +3184,7 @@ function ScientificResultCardView({
             <span key={flag}>{flag}</span>
           ))}
           {card.uncertainty_flag_count && card.uncertainty_flag_count > 3 ? (
-            <span>+{card.uncertainty_flag_count - 3} more</span>
+            <span>另有 {card.uncertainty_flag_count - 3} 项</span>
           ) : null}
         </div>
         <div className="scientific-card-actions">
@@ -3103,11 +3194,11 @@ function ScientificResultCardView({
           </button>
           <button type="button" onClick={() => onSelectArtifact("reports/scientific_discovery_readiness.md")}>
             <AlertTriangle size={14} />
-            Readiness
+            就绪性
           </button>
           <button type="button" onClick={() => onSelectArtifact("leaderboard.csv")}>
             <Database size={14} />
-            Leaderboard
+            排行榜
           </button>
         </div>
       </div>
@@ -3116,8 +3207,8 @@ function ScientificResultCardView({
 }
 
 function SelectorVotesView({ payload }: { payload: SelectorVotesPayload | null }) {
-  if (!payload) return <p className="muted">选择 run 后显示 selector votes。</p>;
-  if (!payload.available) return <p className="muted">该 run 没有 reports/selector_votes.json。</p>;
+  if (!payload) return <p className="muted">选择运行后显示选择器投票。</p>;
+  if (!payload.available) return <p className="muted">该运行没有 reports/selector_votes.json。</p>;
   const counts = Object.entries(payload.vote_counts);
   return (
     <div className="votes-view">
@@ -3150,19 +3241,19 @@ function SolutionsTable({ payload }: { payload: SolutionsPayload | null }) {
   return (
     <div className="solution-table-stack">
       <div className="compact-metrics">
-        <span>operator scheduler {health?.operator_scheduler_mode ?? "auto-audited"}</span>
-        <span>operators {operatorCount ?? "n/a"}</span>
+        <span>算子调度 {health?.operator_scheduler_mode ?? "auto-audited"}</span>
+        <span>算子数 {operatorCount ?? "n/a"}</span>
         <span>
-          assignments {health?.operator_assignment_count ?? "n/a"}/
+          分配 {health?.operator_assignment_count ?? "n/a"}/
           {health?.operator_assignment_expected_count ?? "n/a"}
         </span>
-        <span>missing assignments {(health?.missing_operator_assignment_nodes ?? []).length}</span>
-        <span>unique code {health?.unique_code_count ?? "n/a"}</span>
-        <span>duplicates {health?.duplicate_code_count ?? "n/a"}</span>
-        <span>plateau {health?.max_plateau_length ?? "n/a"}</span>
-        <span>best improvement {formatScore(health?.best_improvement)}</span>
-        <span>innovation axes {innovation?.novelty_axis_count ?? "n/a"}</span>
-        <span>candidate emergence {innovation?.candidate_emergent_count ?? "n/a"}</span>
+        <span>缺失分配 {(health?.missing_operator_assignment_nodes ?? []).length}</span>
+        <span>唯一代码 {health?.unique_code_count ?? "n/a"}</span>
+        <span>重复代码 {health?.duplicate_code_count ?? "n/a"}</span>
+        <span>平台期 {health?.max_plateau_length ?? "n/a"}</span>
+        <span>最佳改进 {formatScore(health?.best_improvement)}</span>
+        <span>创新轴 {innovation?.novelty_axis_count ?? "n/a"}</span>
+        <span>候选涌现 {innovation?.candidate_emergent_count ?? "n/a"}</span>
       </div>
       {(health?.warnings ?? []).length ? (
         <div className="inline-warnings">
@@ -3174,7 +3265,7 @@ function SolutionsTable({ payload }: { payload: SolutionsPayload | null }) {
       {innovation?.available ? (
         <div className="inline-warnings muted">
           <span>{innovation.innovation_claim_level ?? "workflow_exploration_only"}</span>
-          <span>scientific novelty {String(innovation.scientific_novelty_supported ?? false)}</span>
+          <span>科学新颖性 {displayBoolean(innovation.scientific_novelty_supported ?? false)}</span>
           {(innovation.top_axes ?? []).filter(Boolean).map((axis) => (
             <span key={axis ?? "axis"}>{axis}</span>
           ))}
@@ -3184,25 +3275,25 @@ function SolutionsTable({ payload }: { payload: SolutionsPayload | null }) {
         <table>
           <thead>
             <tr>
-              <th>node</th>
-              <th>parent</th>
-              <th>status</th>
-              <th>metric</th>
-              <th>loss/score</th>
-              <th>delta</th>
-              <th>operator</th>
-              <th>kb</th>
-              <th>mutation</th>
-              <th>emergence</th>
+              <th>节点</th>
+              <th>父节点</th>
+              <th>状态</th>
+              <th>指标</th>
+              <th>损失/分数</th>
+              <th>变化</th>
+              <th>算子</th>
+              <th>知识库</th>
+              <th>变异</th>
+              <th>涌现</th>
             </tr>
           </thead>
           <tbody>
             {rows.slice(0, 12).map((solution) => (
               <tr key={solution.node_id}>
                 <td>{solution.node_id}</td>
-                <td>{solution.parent_id ?? "root"}</td>
-                <td>{solution.status ?? "unknown"}</td>
-                <td>{solution.metric ?? "metric"}</td>
+                <td>{solution.parent_id ?? "根解"}</td>
+                <td>{displayRunState(solution.status)}</td>
+                <td>{solution.metric ?? "指标"}</td>
                 <td>{formatScore(solution.loss ?? solution.score)}</td>
                 <td>{formatScore(solution.score_delta_from_parent)}</td>
                 <td>{formatOperatorAssignment(solution.operator_assignment)}</td>
@@ -3213,7 +3304,7 @@ function SolutionsTable({ payload }: { payload: SolutionsPayload | null }) {
             ))}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={10}>选择包含 tree.json 的 run 后显示 solution tree summary。</td>
+                <td colSpan={10}>选择包含 tree.json 的运行后显示候选解树摘要。</td>
               </tr>
             ) : null}
           </tbody>
@@ -3224,28 +3315,28 @@ function SolutionsTable({ payload }: { payload: SolutionsPayload | null }) {
 }
 
 function formatOperatorAssignment(operator: SolutionSummary["operator_assignment"]): string {
-  if (!operator?.available) return "root";
-  const warning = operator.warning_count ? `, ${operator.warning_count} warn` : "";
-  return `${operator.operator_id ?? "operator"} · ${operator.mutation_axis ?? "axis"}${warning}`;
+  if (!operator?.available) return "根解";
+  const warning = operator.warning_count ? `, ${operator.warning_count} 个警告` : "";
+  return `${operator.operator_id ?? "算子"} · ${operator.mutation_axis ?? "变异轴"}${warning}`;
 }
 
 function formatKbApplication(kb: SolutionSummary["kb_application"]): string {
-  if (!kb?.available) return "none";
-  const warnings = kb.warning_count ? `, ${kb.warning_count} warn` : "";
-  return `${kb.status ?? "unknown"}${warnings}`;
+  if (!kb?.available) return "无";
+  const warnings = kb.warning_count ? `, ${kb.warning_count} 个警告` : "";
+  return `${displayRunState(kb.status)}${warnings}`;
 }
 
 function formatMutationEffect(effect: SolutionSummary["mutation_effect"]): string {
-  if (!effect?.available) return "root";
-  if (effect.duplicate_of) return `${effect.status ?? "duplicate"} -> ${effect.duplicate_of}`;
+  if (!effect?.available) return "根解";
+  if (effect.duplicate_of) return `${displayRunState(effect.status ?? "duplicate")} -> ${effect.duplicate_of}`;
   const lines = effect.diff_line_count ?? "n/a";
-  return `${effect.status ?? "unknown"} (${lines})`;
+  return `${displayRunState(effect.status)} (${lines})`;
 }
 
 function formatEmergenceClaim(
   audit: SolutionSummary["emergence_audit"]
 ): string {
-  if (!audit?.available) return "none";
+  if (!audit?.available) return "无";
   const gaps = audit.blocking_gap_count ?? 0;
   return gaps ? `${audit.claim_level ?? "unknown"} (${gaps})` : audit.claim_level ?? "unknown";
 }
@@ -3270,6 +3361,30 @@ function formatScore(value: number | null | undefined) {
   if (value === null || value === undefined || Number.isNaN(value)) return "n/a";
   if (Math.abs(value) >= 1000 || Math.abs(value) < 0.001) return value.toExponential(3);
   return value.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function displayRunState(value: string | null | undefined): string {
+  if (!value) return RUN_STATE_LABELS.unknown;
+  return RUN_STATE_LABELS[value] ?? value;
+}
+
+function displayQualityGate(value: boolean | undefined): string {
+  if (value === undefined) return "门禁待检查";
+  return value ? "门禁通过" : "门禁失败";
+}
+
+function displayBoolean(value: boolean): string {
+  return value ? "是" : "否";
+}
+
+function displayWikiStatus(value: string | null | undefined): string {
+  if (!value) return RUN_STATE_LABELS.unknown;
+  return WIKI_STATUS_LABELS[value] ?? value;
+}
+
+function displayWorkspaceScope(value: WorkspaceScope | null | undefined): string {
+  if (!value) return RUN_STATE_LABELS.unknown;
+  return WORKSPACE_SCOPE_LABELS[value] ?? value;
 }
 
 function asRunMode(value: unknown, fallback: RunMode): RunMode {
@@ -3462,13 +3577,13 @@ function DashboardView({
     <div className="view-stack">
       <section className="section-head">
         <div>
-          <p className="eyebrow">Run dashboard</p>
-          <h2>{activeRun?.run_id ?? "尚未选择 run"}</h2>
+          <p className="eyebrow">运行看板</p>
+          <h2>{activeRun?.run_id ?? "尚未选择运行"}</h2>
         </div>
         <div className="section-actions">
           <button type="button" onClick={onOpenArtifacts}>
             <FolderTree size={15} />
-            Artifacts
+            证据文件
           </button>
           <button type="button" onClick={onOpenCode}>
             <Code2 size={15} />
@@ -3477,28 +3592,28 @@ function DashboardView({
         </div>
       </section>
       <div className="metric-grid">
-        <Metric label="status" value={activeRun?.status ?? "idle"} />
-        <Metric label="run_state" value={metadata?.run_state ?? "pending"} />
-        <Metric label="benchmark" value={selected?.name ?? "unknown"} />
-        <Metric label="fidelity" value={selected?.fidelity_level ?? "unknown"} />
-        <Metric label="scientific_claim" value={metadata?.scientific_claim ?? selected?.scientific_claim ?? "unknown"} />
-        <Metric label="claim_gate" value={metadata?.claim_gate?.status ?? "unknown"} />
-        <Metric label="claim_level" value={metadata?.claim_gate?.claim_level ?? "workflow_proxy"} />
-        <Metric label="kb" value={metadata?.kb_manifest?.coverage_status ?? "unknown"} />
-        <Metric label="multimodal" value={metadata?.multimodal_evidence?.analysis_mode ?? "unknown"} />
-        <Metric label="quality_gate" value={String(qualityGate ?? "pending")} />
-        <Metric label="champion" value={metadata?.champion_node_id ?? "none"} />
-        <Metric label="solutions" value={String(metadata?.solution_count ?? 0)} />
+        <Metric label="状态" value={displayRunState(activeRun?.status ?? "idle")} />
+        <Metric label="运行阶段" value={displayRunState(metadata?.run_state ?? "pending")} />
+        <Metric label="基准任务" value={selected?.name ?? "未知"} />
+        <Metric label="保真度" value={selected?.fidelity_level ?? "未知"} />
+        <Metric label="科学声明" value={metadata?.scientific_claim ?? selected?.scientific_claim ?? "未知"} />
+        <Metric label="声明门禁" value={displayRunState(metadata?.claim_gate?.status ?? "unknown")} />
+        <Metric label="声明等级" value={metadata?.claim_gate?.claim_level ?? "workflow_proxy"} />
+        <Metric label="知识库" value={metadata?.kb_manifest?.coverage_status ?? "未知"} />
+        <Metric label="多模态" value={metadata?.multimodal_evidence?.analysis_mode ?? "未知"} />
+        <Metric label="质量门禁" value={displayQualityGate(qualityGate)} />
+        <Metric label="当前最优候选解" value={metadata?.champion_node_id ?? "无"} />
+        <Metric label="候选解数量" value={String(metadata?.solution_count ?? 0)} />
       </div>
       <div className="split-grid">
-        <DataRegion title="Leaderboard">
+        <DataRegion title="排行榜">
           <Leaderboard rows={activeRun?.leaderboard ?? []} />
         </DataRegion>
-        <DataRegion title="Trace preview">
-          <TraceList events={events.slice(0, 8)} emptyText="尚无 trace event。" />
+        <DataRegion title="轨迹预览">
+          <TraceList events={events.slice(0, 8)} emptyText="尚无轨迹事件。" />
         </DataRegion>
       </div>
-      <DataRegion title="Artifacts">
+      <DataRegion title="证据文件">
         <ArtifactChips artifacts={(activeRun?.artifacts ?? []).slice(0, 18)} />
       </DataRegion>
     </div>
@@ -3535,7 +3650,7 @@ function CommandCenter({
         <div>
           <p className="eyebrow">ChatUI</p>
           <h2>欢迎来到 AgenticSciML</h2>
-          <span>用自然语言启动实验、解释 trace、浏览 evidence，并打开 solution workspace。</span>
+          <span>用自然语言启动实验、解释轨迹日志、浏览证据，并打开候选解工作区。</span>
         </div>
       </div>
       <form className="main-composer" onSubmit={onSubmit}>
@@ -3543,7 +3658,7 @@ function CommandCenter({
           aria-label="请输入实验意图"
           value={mainPrompt}
           onChange={(event) => onChange(event.target.value)}
-          placeholder="请输入你的实验意图，例如：跑 mock、解释这个 trace、打开 champion"
+          placeholder="请输入实验意图，例如：启动 mock 工作流、解释轨迹日志、打开当前最优候选解"
         />
         <div className="composer-tools">
           <AssistantModeSwitch compact mode={assistantMode} onChange={onAssistantModeChange} />
@@ -3555,22 +3670,22 @@ function CommandCenter({
       <div className="prompt-pills">
         <button
           type="button"
-          onClick={() => onQuickPrompt(`跑一个 ${selectedBenchmark} mock 实验`, { mode: "mock", assistantMode: "agent" })}
+          onClick={() => onQuickPrompt(`启动一个 ${selectedBenchmark} mock 工作流`, { mode: "mock", assistantMode: "agent" })}
         >
-          跑 mock
+          启动 mock 工作流
         </button>
-        <button type="button" disabled={!activeRunId} onClick={() => onQuickPrompt("解释这个 trace")}>
-          解释 trace
+        <button type="button" disabled={!activeRunId} onClick={() => onQuickPrompt("解释这个轨迹日志")}>
+          解释轨迹日志
         </button>
         <button
           type="button"
           disabled={!activeRunId}
-          onClick={() => onQuickPrompt("打开 champion solution", { workspaceScope: "solution" })}
+          onClick={() => onQuickPrompt("打开当前最优候选解工作区", { workspaceScope: "solution" })}
         >
-          打开 champion
+          打开当前最优候选解
         </button>
-        <button type="button" onClick={() => onQuickPrompt("比较两个 run")}>
-          比较 run
+        <button type="button" onClick={() => onQuickPrompt("比较两个运行结果")}>
+          比较运行结果
         </button>
       </div>
     </section>
@@ -3594,31 +3709,31 @@ function RunsView({
     <div className="view-stack">
       <section className="section-head">
         <div>
-          <p className="eyebrow">Run catalog</p>
+          <p className="eyebrow">运行目录</p>
           <h2>实验运行记录</h2>
         </div>
         <div className="section-actions">
           <button type="button" onClick={onRefresh}>
             <RefreshCw size={15} />
-            Refresh
+            刷新
           </button>
           <button type="button" onClick={onStartMock}>
             <Play size={15} />
-            Mock
+            mock 工作流
           </button>
         </div>
       </section>
-      <DataRegion title="Runs">
+      <DataRegion title="运行记录">
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>run</th>
-                <th>status</th>
-                <th>run_state</th>
-                <th>champion</th>
-                <th>solutions</th>
-                <th>gate</th>
+                <th>运行</th>
+                <th>状态</th>
+                <th>阶段</th>
+                <th>当前最优候选解</th>
+                <th>候选解数</th>
+                <th>门禁</th>
               </tr>
             </thead>
             <tbody>
@@ -3626,7 +3741,7 @@ function RunsView({
                 <tr className={run.run_id === activeRunId ? "selected-row" : ""} key={run.run_id}>
                   <td>
                     <button
-                      aria-label={`选择 run ${run.run_id}`}
+                      aria-label={`选择运行 ${run.run_id}`}
                       aria-pressed={run.run_id === activeRunId}
                       className="table-link"
                       title={run.run_id}
@@ -3636,16 +3751,16 @@ function RunsView({
                       {run.run_id}
                     </button>
                   </td>
-                  <td>{run.status}</td>
-                  <td>{run.metadata?.run_state ?? "unknown"}</td>
-                  <td>{run.metadata?.champion_node_id ?? "none"}</td>
+                  <td>{displayRunState(run.status)}</td>
+                  <td>{displayRunState(run.metadata?.run_state)}</td>
+                  <td>{run.metadata?.champion_node_id ?? "无"}</td>
                   <td>{run.metadata?.solution_count ?? 0}</td>
-                  <td>{String(run.trace_summary?.quality_gate?.passed ?? "pending")}</td>
+                  <td>{displayQualityGate(run.trace_summary?.quality_gate?.passed)}</td>
                 </tr>
               ))}
               {runs.length === 0 ? (
                 <tr>
-                  <td colSpan={6}>没有发现 run。可以先启动一个 mock run。</td>
+                  <td colSpan={6}>没有发现运行记录。可以先启动一个 mock 工作流。</td>
                 </tr>
               ) : null}
             </tbody>
@@ -3678,8 +3793,8 @@ function ArtifactsView({
       <section className="artifact-browser">
         <div className="section-head compact">
           <div>
-            <p className="eyebrow">Artifacts</p>
-            <h2>{activeRun?.run_id ?? "未选择 run"}</h2>
+            <p className="eyebrow">证据文件</p>
+            <h2>{activeRun?.run_id ?? "未选择运行"}</h2>
           </div>
         </div>
         <div className="artifact-list-vertical">
@@ -3696,23 +3811,23 @@ function ArtifactsView({
               <small>{artifact.kind}</small>
             </button>
           ))}
-          {!activeRun ? <p className="muted">先在 Runs 或 Dashboard 中选择一个 run。</p> : null}
+          {!activeRun ? <p className="muted">先在运行记录或运行看板中选择一个运行。</p> : null}
         </div>
       </section>
       <section className="artifact-detail">
-        <DataRegion title="Artifact preview">
+        <DataRegion title="证据文件预览">
           <ArtifactPreview payload={artifactPayload} />
         </DataRegion>
-        <DataRegion title="Trace events">
+        <DataRegion title="轨迹事件">
           <div className="filter-line">
             <input
-              aria-label="过滤 trace events"
+              aria-label="过滤轨迹事件"
               value={filter}
               onChange={(event) => onFilterChange(event.target.value)}
-              placeholder="按 event name / node id / 文本过滤"
+              placeholder="按事件名 / 节点 ID / 文本过滤"
             />
           </div>
-          <TraceList events={events} emptyText="没有匹配的 trace event。" />
+          <TraceList events={events} emptyText="没有匹配的轨迹事件。" />
         </DataRegion>
       </section>
     </div>
@@ -3764,8 +3879,8 @@ function WorkspaceSelector({
           <h1>工作空间</h1>
           <span>
             {activeRunId
-              ? `account: ${accountId} / active run: ${activeRunId}`
-              : `account: ${accountId} / 选择一个独立代码目录进入 AI IDE`}
+              ? `账号: ${accountId} / 当前运行: ${activeRunId}`
+              : `账号: ${accountId} / 选择一个独立代码目录进入 AI IDE`}
           </span>
         </div>
         <div className="workspace-actions">
@@ -3796,10 +3911,10 @@ function WorkspaceSelector({
             {workspaces.map((workspace) => (
               <tr data-testid={`workspace-row-${workspace.id}`} key={workspace.id}>
                 <td title={workspace.label}>{workspace.label}</td>
-                <td>{workspace.account_id ?? "shared"}</td>
-                <td>{workspace.scope}</td>
+                <td>{workspace.account_id ?? "共享"}</td>
+                <td>{displayWorkspaceScope(workspace.scope)}</td>
                 <td title={workspace.workspace}>{workspace.workspace}</td>
-                <td>{workspace.status}</td>
+                <td>{displayRunState(workspace.status)}</td>
                 <td>
                   <button
                     type="button"
@@ -3904,13 +4019,13 @@ function AgentPanel({
         <div className="pending-action" role="alert" aria-live="assertive">
           <AlertTriangle size={16} />
           <div>
-            <strong>Real mode action 已拦截</strong>
+            <strong>真实模型动作已拦截</strong>
             <p>真实模型动作需要显式凭据、预算和边界检查。当前不会自动执行。</p>
             <button type="button" onClick={onConfirmRealAction}>
               显式确认执行
             </button>
             <button type="button" onClick={onDismissRealAction}>
-              Dismiss
+              关闭
             </button>
           </div>
         </div>
@@ -3956,17 +4071,17 @@ function ChatTranscript({ messages }: { messages: AgentMessage[] }) {
 
 function StructuredResponse({ response }: { response: SolverResponse }) {
   const settings = [
-    `thinking ${response.model_settings.reasoning_effort}`,
-    `temp ${response.model_settings.temperature}`,
+    `推理强度 ${response.model_settings.reasoning_effort}`,
+    `温度 ${response.model_settings.temperature}`,
   ];
   return (
     <div className="structured-response">
-      <KeyValueList label="mode" values={[response.assistant_mode]} />
-      <KeyValueList label="settings" values={settings} />
-      {response.actions.length ? <KeyValueList label="actions" values={response.actions.map((action) => action.type)} /> : null}
-      {response.warnings.length ? <KeyValueList label="warnings" values={response.warnings} tone="warning" /> : null}
-      {response.artifacts.length ? <KeyValueList label="artifacts" values={response.artifacts.map((artifact) => String(artifact.path ?? "artifact"))} /> : null}
-      {response.trace_refs.length ? <KeyValueList label="trace refs" values={response.trace_refs.map((ref) => JSON.stringify(ref))} /> : null}
+      <KeyValueList label="模式" values={[response.assistant_mode]} />
+      <KeyValueList label="模型设置" values={settings} />
+      {response.actions.length ? <KeyValueList label="动作" values={response.actions.map((action) => action.type)} /> : null}
+      {response.warnings.length ? <KeyValueList label="警告" values={response.warnings} tone="warning" /> : null}
+      {response.artifacts.length ? <KeyValueList label="证据文件" values={response.artifacts.map((artifact) => String(artifact.path ?? "artifact"))} /> : null}
+      {response.trace_refs.length ? <KeyValueList label="轨迹引用" values={response.trace_refs.map((ref) => JSON.stringify(ref))} /> : null}
     </div>
   );
 }
@@ -4067,14 +4182,47 @@ function parseTagInput(value: string): string[] {
     .filter(Boolean);
 }
 
+function wikiNodeStatus(node: LlmWikiNode, reviewNodeIds: Set<string>): string {
+  return node.wiki_promotion_status ?? (reviewNodeIds.has(node.id) ? "manual_review_required" : node.type);
+}
+
+function wikiNodeMatchesQuery(node: LlmWikiNode, query: string): boolean {
+  return [
+    node.id,
+    node.type,
+    node.title,
+    node.title_zh,
+    node.description,
+    node.description_zh,
+    node.real_problem,
+    node.real_problem_zh,
+    ...(node.tags ?? []),
+    ...(node.tags_zh ?? []),
+    node.source ? JSON.stringify(node.source) : ""
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .includes(query);
+}
+
+function wikiSourceLabel(node: LlmWikiNode): string {
+  const source = node.source;
+  if (!source || Object.keys(source).length === 0) return "来源未记录";
+  if (typeof source.url === "string") return source.url.replace(/^https?:\/\//, "");
+  if (typeof source.path === "string") return source.path;
+  if (typeof source.title === "string") return source.title;
+  return "来源元数据";
+}
+
 function wikiDraftIssues(node: LlmWikiNode | null, isOkf: boolean): string[] {
-  if (!isOkf) return ["JSON is not valid OKF"];
-  if (!node) return ["No selected node"];
-  if (!node.title.trim()) return ["Title is required"];
+  if (!isOkf) return ["JSON 不是有效 OKF"];
+  if (!node) return ["未选择节点"];
+  if (!node.title.trim()) return ["题名必填"];
   if (!node.title_zh?.trim()) return ["标题必填"];
-  if (!node.description.trim()) return ["Description is required"];
+  if (!node.description.trim()) return ["说明必填"];
   if (!node.description_zh?.trim()) return ["说明必填"];
-  if (!Array.isArray(node.tags) || node.tags.length === 0) return ["Tags required"];
+  if (!Array.isArray(node.tags) || node.tags.length === 0) return ["标签必填"];
   if (!Array.isArray(node.tags_zh) || node.tags_zh.length === 0) return ["中文标签必填"];
   return [];
 }
@@ -4100,11 +4248,11 @@ function Leaderboard({ rows }: { rows: Array<Record<string, string>> }) {
       <table>
         <thead>
           <tr>
-            <th>rank</th>
-            <th>node</th>
-            <th>metric</th>
-            <th>score</th>
-            <th>status</th>
+            <th>排序</th>
+            <th>节点</th>
+            <th>指标</th>
+            <th>分数</th>
+            <th>状态</th>
           </tr>
         </thead>
         <tbody>
@@ -4114,12 +4262,12 @@ function Leaderboard({ rows }: { rows: Array<Record<string, string>> }) {
               <td>{row.node_id}</td>
               <td>{row.metric}</td>
               <td>{row.score}</td>
-              <td>{row.status}</td>
+              <td>{displayRunState(row.status)}</td>
             </tr>
           ))}
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={5}>尚无 leaderboard。</td>
+              <td colSpan={5}>尚无排行榜。</td>
             </tr>
           ) : null}
         </tbody>
@@ -4129,7 +4277,7 @@ function Leaderboard({ rows }: { rows: Array<Record<string, string>> }) {
 }
 
 function ArtifactChips({ artifacts }: { artifacts: ArtifactEntry[] }) {
-  if (!artifacts.length) return <p className="muted">尚无 artifact。</p>;
+  if (!artifacts.length) return <p className="muted">尚无证据文件。</p>;
   return (
     <div className="artifact-chips">
       {artifacts.map((artifact) => (
@@ -4140,7 +4288,7 @@ function ArtifactChips({ artifacts }: { artifacts: ArtifactEntry[] }) {
 }
 
 function ArtifactPreview({ payload }: { payload: ArtifactPayload | null }) {
-  if (!payload) return <p className="muted">选择左侧 artifact 后预览。</p>;
+  if (!payload) return <p className="muted">选择左侧证据文件后预览。</p>;
   if (payload.kind === "directory") {
     return (
       <div className="directory-preview">
