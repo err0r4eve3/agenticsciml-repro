@@ -226,6 +226,8 @@ def _real_problem(title: str, summary: str) -> str:
         return "Validate geometry-aware neural preconditioners for hybrid iterative parametric-PDE solvers under unstructured-mesh geometry transfer, relaxation/Krylov coupling, robustness, and efficiency constraints."
     if "warm-start" in text and "newton" in text and ("spectral" in text or "jacobian" in text):
         return "Audit spectrally safe neural-operator warm starts for large-scale Newton PDE solvers under Jacobian definiteness, Krylov compatibility, label-free energy fine-tuning, and speedup constraints."
+    if "np-newton" in text or "fixed-point neural operator" in text or "unbalanced nonlinearities" in text:
+        return "Evaluate NP-Newton nonlinear solvers under fixed-point neural operator preconditioning, current-iterate-to-solution mapping, adaptive negative step sizes, unbalanced-nonlinearity stagnation or instability, strong-nonlinearity robustness, and efficiency constraints."
     if "newton" in text or "nonlinear solver" in text or "nonlinear system" in text:
         return "Evaluate neural preconditioning for nonlinear solvers under convergence, robustness, and instability constraints."
     if any(term in text for term in ("krylov", "preconditioner", "linear solver", "linear system")):
@@ -365,6 +367,8 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "验证 hybrid iterative parametric-PDE solver 的 geometry-aware neural preconditioner，并检查 unstructured-mesh geometry transfer、relaxation/Krylov coupling、鲁棒性和效率约束。"
     if "warm-start" in text and "newton" in text and ("spectral" in text or "jacobian" in text):
         return "审计 large-scale Newton PDE solver 的 spectrally safe neural-operator warm start，并检查 Jacobian definiteness、Krylov compatibility、label-free energy fine-tuning 和加速约束。"
+    if "np-newton" in text or "fixed-point neural operator" in text or "unbalanced nonlinearities" in text:
+        return "评估 NP-Newton nonlinear solver，并检查 fixed-point neural operator preconditioning、current-iterate-to-solution mapping、adaptive negative step sizes、unbalanced-nonlinearity stagnation/instability、强非线性鲁棒性和效率约束。"
     if "newton" in text or "nonlinear solver" in text or "nonlinear system" in text:
         return "评估非线性求解器中的神经预条件方法，并检查收敛性、鲁棒性和不稳定边界。"
     if any(term in text for term in ("krylov", "preconditioner", "linear solver", "linear system")):

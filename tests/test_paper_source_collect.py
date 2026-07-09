@@ -198,9 +198,9 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
         ),
         (
             "A Neural-Operator Preconditioned Newton Method for Accelerated Nonlinear Solvers",
-            "A fixed-point neural operator preconditions Newton iterations for nonlinear systems.",
-            "Evaluate neural preconditioning for nonlinear solvers under convergence, robustness, and instability constraints.",
-            "评估非线性求解器中的神经预条件方法，并检查收敛性、鲁棒性和不稳定边界。",
+            "NP-Newton uses a fixed-point neural operator to map the current iterate to the solution and adaptively applies negative step sizes to mitigate stagnation or instability from unbalanced nonlinearities.",
+            "Evaluate NP-Newton nonlinear solvers under fixed-point neural operator preconditioning, current-iterate-to-solution mapping, adaptive negative step sizes, unbalanced-nonlinearity stagnation or instability, strong-nonlinearity robustness, and efficiency constraints.",
+            "评估 NP-Newton nonlinear solver，并检查 fixed-point neural operator preconditioning、current-iterate-to-solution mapping、adaptive negative step sizes、unbalanced-nonlinearity stagnation/instability、强非线性鲁棒性和效率约束。",
         ),
         (
             "Spectrally Safe Neural Operator Warm-Starts for Large-Scale Newton Solvers",

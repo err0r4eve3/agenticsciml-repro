@@ -183,6 +183,8 @@ OKF-like JSON 知识图谱。
 - PI-SONet 论文现在会保留 Pontryagin Maximum Principle solution-map、symplectic Hamiltonian preservation、
   latent right-space solver、unseen-configuration generalization 和 sub-second reusable operator 边界，不再退回
   generic multi-agent control。
+- NP-Newton 论文现在会保留 fixed-point neural operator、current-iterate-to-solution mapping、adaptive
+  negative step sizes 和 unbalanced-nonlinearity stagnation/instability 边界，不再退回 generic nonlinear solver。
 
 边界：
 
