@@ -513,6 +513,7 @@ type LlmWikiOkfPayload = {
     source?: Record<string, unknown>;
     real_problem?: string;
     real_problem_zh?: string;
+    wiki_promotion_status?: string;
   }>;
   edges: Array<{
     source: string;
@@ -540,7 +541,10 @@ type LlmWikiReviewQueuePayload = {
       description_zh?: string;
       real_problem?: string;
       real_problem_zh?: string;
+      tags?: string[];
+      tags_zh?: string[];
       wiki_promotion_status?: string;
+      source?: Record<string, unknown>;
     }>;
   };
 };
@@ -552,6 +556,8 @@ type LlmWikiLoopGraphPayload = {
   graph_json?: string;
   payload?: LlmWikiOkfPayload | null;
 };
+
+type LlmWikiNode = LlmWikiOkfPayload["nodes"][number];
 
 const DEFAULT_SOLVER_SETTINGS: SolverSettings = {
   default_assistant_mode: "ask",
@@ -1855,12 +1861,25 @@ function LlmWikiPage({
   onSave: () => void;
 }) {
   const parsed = parseJsonObject(text);
-  const nodes = Array.isArray(parsed?.nodes) ? parsed.nodes : [];
-  const edges = Array.isArray(parsed?.edges) ? parsed.edges : [];
+  const nodes = (Array.isArray(parsed?.nodes) ? parsed.nodes.filter(isWikiNode) : []) as LlmWikiNode[];
+  const edges = Array.isArray(parsed?.edges) ? parsed.edges.filter(isWikiEdge) : [];
   const paperProblemCases = nodes.filter(
-    (node) => isRecord(node) && (node.type === "paper_problem_case" || node.type === "external_paper")
+    (node) => node.type === "paper_problem_case" || node.type === "external_paper"
   );
   const queueNodes = reviewQueue?.queue?.nodes ?? [];
+  const reviewNodeIds = new Set(queueNodes.map((node) => node.id));
+  const reviewNodes = queueNodes.map((node) => nodes.find((item) => item.id === node.id) ?? queueNodeToWikiNode(node, parsed));
+  const indexNodes = [
+    ...reviewNodes,
+    ...paperProblemCases.filter((node) => !reviewNodeIds.has(node.id)).slice(0, 12)
+  ];
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [jsonAdvancedOpen, setJsonAdvancedOpen] = useState(false);
+  const selectedNode = indexNodes.find((node) => node.id === selectedNodeId) ?? indexNodes[0] ?? nodes[0] ?? null;
+  const selectedQueueNode = queueNodes.find((node) => node.id === selectedNode?.id);
+  const selectedSourceNode = payload?.nodes.find((node) => node.id === selectedNode?.id) ?? (selectedQueueNode ? queueNodeToWikiNode(selectedQueueNode, parsed) : null);
+  const selectedEdges = selectedNode ? edges.filter((edge) => edge.source === selectedNode.id || edge.target === selectedNode.id) : [];
+  const diffRows = selectedNode ? wikiDiffRows(selectedSourceNode, selectedNode) : [];
   const isOkf = Boolean(
     parsed &&
       parsed.type === "llm_wiki_knowledge_graph" &&
@@ -1869,6 +1888,31 @@ function LlmWikiPage({
       Array.isArray(parsed.tags) &&
       typeof parsed.timestamp === "string"
   );
+  const validationIssues = wikiDraftIssues(selectedNode, isOkf);
+
+  useEffect(() => {
+    if (selectedNodeId && indexNodes.some((node) => node.id === selectedNodeId)) return;
+    setSelectedNodeId(indexNodes[0]?.id ?? nodes[0]?.id ?? null);
+  }, [indexNodes, nodes, selectedNodeId]);
+
+  function patchSelectedNode(updates: Partial<LlmWikiNode>) {
+    if (!parsed || !selectedNode) return;
+    const fallback = queueNodes.find((node) => node.id === selectedNode.id);
+    const nextNode = { ...queueNodeToWikiNode(fallback, parsed), ...selectedNode, ...updates };
+    const nextNodes = nodes.some((node) => node.id === selectedNode.id)
+      ? nodes.map((node) => (node.id === selectedNode.id ? nextNode : node))
+      : [...nodes, nextNode];
+    onChange(JSON.stringify({ ...parsed, nodes: nextNodes }, null, 2));
+  }
+
+  function patchTags(field: "tags" | "tags_zh", value: string) {
+    const tags = parseTagInput(value);
+    patchSelectedNode(field === "tags" ? { tags } : { tags_zh: tags });
+  }
+
+  function setPromotionStatus(status: string) {
+    patchSelectedNode({ wiki_promotion_status: status });
+  }
 
   return (
     <section className="wiki-content">
@@ -1881,35 +1925,29 @@ function LlmWikiPage({
         <StatusBadge tone={isOkf ? "good" : "bad"}>{isOkf ? "OKF valid" : "JSON invalid"}</StatusBadge>
       </section>
       <div className="wiki-grid">
-        <DataRegion title="Graph Index">
+        <DataRegion title="Review Queue">
           <div className="metric-grid compact">
             <Metric label="nodes" value={String(nodes.length)} />
             <Metric label="edges" value={String(edges.length)} />
-            <Metric label="paper cases" value={String(paperProblemCases.length)} />
-            <Metric label="version" value={payload?.okf_version ?? "0.1"} />
+            <Metric label="queue" value={String(queueNodes.length)} />
+            <Metric label="changed" value={String(diffRows.length)} />
           </div>
-          <div className="wiki-node-list">
-            {queueNodes.length ? (
-              <div className="wiki-review-queue">
-                <strong>Manual review queue</strong>
-                <span>{reviewQueue?.latest_round_id ?? "latest"} · {reviewQueue?.queue?.graph_path ?? "llm_wiki/llm_wiki_okf.json"}</span>
-                {queueNodes.map((node) => (
-                  <div className="wiki-node-row" key={node.id}>
-                    <strong>{node.title_zh ?? node.title ?? node.id}</strong>
-                    <span>{node.description_zh ?? node.description ?? node.id}</span>
-                    {node.real_problem_zh ? <small>{node.real_problem_zh}</small> : null}
-                    <em>{node.wiki_promotion_status ?? "manual_review_required"}</em>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            {paperProblemCases.map((node) => (
-              <div className="wiki-node-row" key={String(node.id)}>
-                <strong>{String(node.title_zh ?? node.title)}</strong>
-                <span>{String(node.description_zh ?? node.description)}</span>
-                {typeof node.real_problem_zh === "string" && <small>{node.real_problem_zh}</small>}
-                <em>{String(node.title)}</em>
-              </div>
+          <div className="wiki-review-meta">
+            <span>{reviewQueue?.latest_round_id ?? "latest"} · {reviewQueue?.queue?.graph_path ?? "llm_wiki/llm_wiki_okf.json"}</span>
+            <span>{reviewQueue?.queue?.status ?? "manual_review_required"}</span>
+          </div>
+          <div className="wiki-node-list" role="listbox" aria-label="Wiki nodes">
+            {indexNodes.map((node) => (
+              <button
+                className={selectedNode?.id === node.id ? "wiki-node-row selected" : "wiki-node-row"}
+                key={node.id}
+                onClick={() => setSelectedNodeId(node.id)}
+                type="button"
+              >
+                <strong>{node.title_zh ?? node.title}</strong>
+                <span>{node.description_zh ?? node.description}</span>
+                <em>{node.wiki_promotion_status ?? (reviewNodeIds.has(node.id) ? "manual_review_required" : node.type)}</em>
+              </button>
             ))}
           </div>
           <div className="claim-boundary">
@@ -1917,7 +1955,7 @@ function LlmWikiPage({
             <span>{payload?.edit_policy?.claim_boundary ?? "Edited wiki text is planning context, not benchmark evidence."}</span>
           </div>
         </DataRegion>
-        <DataRegion title="OKF Editor">
+        <DataRegion title="Node Inspector">
           <div className="wiki-editor-actions">
             <button className="icon-text-button secondary" type="button" onClick={onRefresh}>
               <RefreshCw size={15} />
@@ -1936,15 +1974,132 @@ function LlmWikiPage({
               {copied ? "Copied" : "Copy"}
             </button>
           </div>
-          <textarea
-            className="wiki-editor"
-            value={text}
-            onChange={(event) => onChange(event.target.value)}
-            spellCheck={false}
-          />
+          {selectedNode ? (
+            <div className="wiki-inspector">
+              <div className="wiki-node-toolbar">
+                <StatusBadge tone={validationIssues.length ? "bad" : "good"}>
+                  {validationIssues.length ? validationIssues[0] : "draft valid"}
+                </StatusBadge>
+                <div className="wiki-promotion-actions">
+                  <button type="button" onClick={() => setPromotionStatus("manual_review_required")}>
+                    Review
+                  </button>
+                  <button type="button" onClick={() => setPromotionStatus("edited")}>
+                    Edited
+                  </button>
+                  <button type="button" onClick={() => setPromotionStatus("promoted")}>
+                    Promote
+                  </button>
+                  <button type="button" onClick={() => setPromotionStatus("rejected")}>
+                    Reject
+                  </button>
+                </div>
+              </div>
+              <div className="wiki-form-grid">
+                <WikiTextField label="Title" value={selectedNode.title} onChange={(value) => patchSelectedNode({ title: value })} />
+                <WikiTextField label="标题" value={selectedNode.title_zh ?? ""} onChange={(value) => patchSelectedNode({ title_zh: value })} />
+                <WikiTextField
+                  label="Description"
+                  multiline
+                  value={selectedNode.description}
+                  onChange={(value) => patchSelectedNode({ description: value })}
+                />
+                <WikiTextField
+                  label="说明"
+                  multiline
+                  value={selectedNode.description_zh ?? ""}
+                  onChange={(value) => patchSelectedNode({ description_zh: value })}
+                />
+                <WikiTextField
+                  label="Real problem"
+                  multiline
+                  value={selectedNode.real_problem ?? ""}
+                  onChange={(value) => patchSelectedNode({ real_problem: value })}
+                />
+                <WikiTextField
+                  label="现实问题"
+                  multiline
+                  value={selectedNode.real_problem_zh ?? ""}
+                  onChange={(value) => patchSelectedNode({ real_problem_zh: value })}
+                />
+                <WikiTextField label="Tags" value={(selectedNode.tags ?? []).join(", ")} onChange={(value) => patchTags("tags", value)} />
+                <WikiTextField label="中文标签" value={(selectedNode.tags_zh ?? []).join(", ")} onChange={(value) => patchTags("tags_zh", value)} />
+              </div>
+              <div className="wiki-context-grid">
+                <div className="wiki-context-panel">
+                  <strong>Source</strong>
+                  <span>{selectedNode.id}</span>
+                  <code>{selectedNode.source ? JSON.stringify(selectedNode.source, null, 2) : "No source metadata"}</code>
+                </div>
+                <div className="wiki-context-panel">
+                  <strong>Graph context</strong>
+                  {selectedEdges.length ? (
+                    selectedEdges.slice(0, 8).map((edge) => (
+                      <span key={`${edge.source}-${edge.relation}-${edge.target}`}>
+                        {edge.source === selectedNode.id ? "->" : "<-"} {edge.relation} {edge.source === selectedNode.id ? edge.target : edge.source}
+                      </span>
+                    ))
+                  ) : (
+                    <span>No adjacent edges.</span>
+                  )}
+                </div>
+              </div>
+              <div className="wiki-diff">
+                <strong>Draft diff</strong>
+                {diffRows.length ? (
+                  diffRows.map((row) => (
+                    <div className="wiki-diff-row" key={row.field}>
+                      <span>{row.field}</span>
+                      <del>{row.before || "empty"}</del>
+                      <ins>{row.after || "empty"}</ins>
+                    </div>
+                  ))
+                ) : (
+                  <span>No unsaved field changes.</span>
+                )}
+              </div>
+            </div>
+          ) : (
+            <p className="muted">No Wiki node selected.</p>
+          )}
+          <details className="wiki-json-advanced" open={jsonAdvancedOpen} onToggle={(event) => setJsonAdvancedOpen(event.currentTarget.open)}>
+            <summary>
+              <ChevronRight size={15} />
+              JSON advanced
+            </summary>
+            <textarea
+              className="wiki-editor"
+              value={text}
+              onChange={(event) => onChange(event.target.value)}
+              spellCheck={false}
+            />
+          </details>
         </DataRegion>
       </div>
     </section>
+  );
+}
+
+function WikiTextField({
+  label,
+  multiline = false,
+  value,
+  onChange
+}: {
+  label: string;
+  multiline?: boolean;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className={multiline ? "wiki-field multiline" : "wiki-field"}>
+      <span>{label}</span>
+      {multiline ? (
+        <textarea value={value} onChange={(event) => onChange(event.target.value)} />
+      ) : (
+        <input value={value} onChange={(event) => onChange(event.target.value)} />
+      )}
+    </label>
   );
 }
 
@@ -3812,6 +3967,83 @@ function parseJsonObject(text: string): Record<string, unknown> | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isWikiNode(value: unknown): value is LlmWikiNode {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.type === "string" &&
+    typeof value.title === "string" &&
+    typeof value.description === "string" &&
+    Array.isArray(value.tags)
+  );
+}
+
+function isWikiEdge(value: unknown): value is LlmWikiOkfPayload["edges"][number] {
+  return (
+    isRecord(value) &&
+    typeof value.source === "string" &&
+    typeof value.target === "string" &&
+    typeof value.relation === "string" &&
+    typeof value.description === "string"
+  );
+}
+
+function queueNodeToWikiNode(
+  node: NonNullable<NonNullable<LlmWikiReviewQueuePayload["queue"]>["nodes"]>[number] | undefined,
+  graph: Record<string, unknown> | null
+): LlmWikiNode {
+  const now = typeof graph?.timestamp === "string" ? graph.timestamp : new Date().toISOString();
+  return {
+    id: node?.id ?? "wiki-node",
+    type: "source_candidate",
+    title: node?.title ?? node?.id ?? "Untitled source",
+    title_zh: node?.title_zh,
+    description: node?.description ?? "",
+    description_zh: node?.description_zh,
+    real_problem: node?.real_problem,
+    real_problem_zh: node?.real_problem_zh,
+    tags: node?.tags ?? ["paper", "source-candidate", "manual-review-required"],
+    tags_zh: node?.tags_zh ?? ["论文", "候选来源", "需要人工审核"],
+    timestamp: now,
+    source: node?.source,
+    wiki_promotion_status: node?.wiki_promotion_status ?? "manual_review_required"
+  };
+}
+
+function parseTagInput(value: string): string[] {
+  return value
+    .split(/[,\n]/)
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
+function wikiDraftIssues(node: LlmWikiNode | null, isOkf: boolean): string[] {
+  if (!isOkf) return ["JSON is not valid OKF"];
+  if (!node) return ["No selected node"];
+  if (!node.title.trim()) return ["Title is required"];
+  if (!node.title_zh?.trim()) return ["标题必填"];
+  if (!node.description.trim()) return ["Description is required"];
+  if (!node.description_zh?.trim()) return ["说明必填"];
+  if (!Array.isArray(node.tags) || node.tags.length === 0) return ["Tags required"];
+  if (!Array.isArray(node.tags_zh) || node.tags_zh.length === 0) return ["中文标签必填"];
+  return [];
+}
+
+function wikiDiffRows(before: LlmWikiNode | null, after: LlmWikiNode): Array<{ field: string; before: string; after: string }> {
+  const source = before ?? after;
+  return (["title", "title_zh", "description", "description_zh", "real_problem", "real_problem_zh", "tags", "tags_zh", "wiki_promotion_status"] as const)
+    .map((field) => {
+      const beforeValue = wikiFieldValue(source[field]);
+      const afterValue = wikiFieldValue(after[field]);
+      return { field, before: beforeValue, after: afterValue };
+    })
+    .filter((row) => row.before !== row.after);
+}
+
+function wikiFieldValue(value: unknown): string {
+  return Array.isArray(value) ? value.join(", ") : typeof value === "string" ? value : "";
 }
 
 function Leaderboard({ rows }: { rows: Array<Record<string, string>> }) {
