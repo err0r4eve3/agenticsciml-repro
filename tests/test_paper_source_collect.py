@@ -66,9 +66,9 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
     cases = [
         (
             "Curvature-Aware Optimization for High-Accuracy Physics-Informed Neural Networks",
-            "Natural Gradient, BFGS, Broyden, and quasi-Newton optimizers accelerate PINN convergence for PDEs.",
-            "Audit optimizer and conditioning choices for high-accuracy PINN convergence on challenging PDE or ODE systems.",
-            "审计 optimizer 与 conditioning 选择对高精度 PINN 在困难 PDE 或 ODE 系统上收敛的影响。",
+            "Natural Gradient and Self-Scaling BFGS and Broyden optimizers accelerate PINN convergence on Helmholtz, Stokes, inviscid Burgers, Euler high-speed flow, and stiff pharmacokinetics ODE problems with batched quasi-Newton scaling and high-order numerical comparisons.",
+            "Audit curvature-aware PINN optimizers under Natural Gradient, Self-Scaling BFGS/Broyden, batched quasi-Newton scaling, Helmholtz/Stokes/Burgers/Euler/high-speed-flow/stiff-ODE benchmark coverage, high-order numerical comparisons, and high-accuracy convergence constraints.",
+            "审计 curvature-aware PINN optimizer，并检查 Natural Gradient、Self-Scaling BFGS/Broyden、batched quasi-Newton scaling、Helmholtz/Stokes/Burgers/Euler/high-speed-flow/stiff-ODE benchmark coverage、高阶数值方法对比和 high-accuracy convergence 约束。",
         ),
         (
             "Optimizing the Optimizer for Physics-Informed Neural Networks and Kolmogorov-Arnold Networks",

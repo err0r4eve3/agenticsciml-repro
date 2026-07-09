@@ -218,6 +218,8 @@ def _real_problem(title: str, summary: str) -> str:
         and ("pde" in text or "deeponet" in text or "operator learning" in text)
     ):
         return "Audit self-scaled quasi-Newton optimizer selection across PINN, PIKAN, and DeepONet training under nonlinear loss landscapes, saddle points, PDE benchmark diversity, line-search strategy, and accuracy-vs-efficiency constraints."
+    if "curvature-aware" in text or ("natural gradient" in text and "self-scaling bfgs" in text):
+        return "Audit curvature-aware PINN optimizers under Natural Gradient, Self-Scaling BFGS/Broyden, batched quasi-Newton scaling, Helmholtz/Stokes/Burgers/Euler/high-speed-flow/stiff-ODE benchmark coverage, high-order numerical comparisons, and high-accuracy convergence constraints."
     if any(term in text for term in ("optimizer", "natural gradient", "bfgs", "broyden", "curvature-aware")):
         return "Audit optimizer and conditioning choices for high-accuracy PINN convergence on challenging PDE or ODE systems."
     if "nspod" in text or "neural subspace proper orthogonal decomposition" in text:
@@ -359,6 +361,8 @@ def _real_problem_zh(title: str, summary: str) -> str:
         and ("pde" in text or "deeponet" in text or "operator learning" in text)
     ):
         return "审计 PINN、PIKAN 与 DeepONet training 中的 self-scaled quasi-Newton optimizer selection，并检查 nonlinear loss landscape、saddle point、PDE benchmark diversity、line-search strategy 和 accuracy-vs-efficiency 约束。"
+    if "curvature-aware" in text or ("natural gradient" in text and "self-scaling bfgs" in text):
+        return "审计 curvature-aware PINN optimizer，并检查 Natural Gradient、Self-Scaling BFGS/Broyden、batched quasi-Newton scaling、Helmholtz/Stokes/Burgers/Euler/high-speed-flow/stiff-ODE benchmark coverage、高阶数值方法对比和 high-accuracy convergence 约束。"
     if any(term in text for term in ("optimizer", "natural gradient", "bfgs", "broyden", "curvature-aware")):
         return "审计 optimizer 与 conditioning 选择对高精度 PINN 在困难 PDE 或 ODE 系统上收敛的影响。"
     if "nspod" in text or "neural subspace proper orthogonal decomposition" in text:

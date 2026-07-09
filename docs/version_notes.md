@@ -185,6 +185,9 @@ OKF-like JSON 知识图谱。
   generic multi-agent control。
 - NP-Newton 论文现在会保留 fixed-point neural operator、current-iterate-to-solution mapping、adaptive
   negative step sizes 和 unbalanced-nonlinearity stagnation/instability 边界，不再退回 generic nonlinear solver。
+- Curvature-aware PINN optimizer 论文现在会保留 Natural Gradient、Self-Scaling BFGS/Broyden、
+  batched quasi-Newton scaling、Helmholtz/Stokes/Burgers/Euler/high-speed-flow/stiff-ODE benchmark 和
+  high-order numerical comparison 边界，不再退回 generic optimizer/conditioning。
 
 边界：
 
