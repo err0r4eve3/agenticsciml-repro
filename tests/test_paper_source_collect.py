@@ -97,8 +97,8 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
         (
             "State-space models are accurate and efficient neural operators for dynamical systems",
             "Mamba state-space models improve neural operator learning for long-range dependencies, extrapolation, and chaotic dynamics, with a pharmacology application under limited data.",
-            "Validate state-space or Mamba neural operators for dynamical systems under long-range dependency, extrapolation, chaotic rollout, and computational-efficiency constraints.",
-            "验证 dynamical system 的 state-space 或 Mamba neural operator，并检查 long-range dependency、外推、chaotic rollout 和计算效率约束。",
+            "Validate Mamba state-space neural operators for dynamical-system operator learning under long-time integration, long-range dependency, chaotic dynamics, strict extrapolation testbeds beyond interpolation, 11-baseline comparison, lowest-computational-cost claims, and limited-data quantitative-systems-pharmacology drug-efficacy constraints.",
+            "验证 dynamical-system operator learning 的 Mamba state-space neural operator，并检查 long-time integration、long-range dependency、chaotic dynamics、超出 interpolation 的 strict extrapolation testbeds、11-baseline comparison、lowest-computational-cost claim 和 limited-data quantitative-systems-pharmacology drug-efficacy 约束。",
         ),
         (
             "Kinetic-Mamba: Mamba-Assisted Predictions of Stiff Chemical Kinetics",

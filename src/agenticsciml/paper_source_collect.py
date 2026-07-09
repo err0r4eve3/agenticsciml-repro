@@ -176,6 +176,10 @@ def _real_problem(title: str, summary: str) -> str:
         return "Validate Kinetic-Mamba stiff-chemical-kinetics surrogates under standalone, mass-constrained, regime-informed, and latent Mamba variants, thermochemical state evolution from initial conditions, temperature-dependent regime splitting, time-decomposition and recursive-prediction evaluation, OOD extrapolation, conservation, and CFD-coupling constraints."
     if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical")):
         return "Validate multi-output neural operator surrogates for stiff chemical kinetics under conservation, stiffness, and CFD-coupling constraints."
+    if "state-space models are accurate and efficient neural operators" in text or (
+        "strict extrapolation testbeds" in text and "11 baselines" in text
+    ):
+        return "Validate Mamba state-space neural operators for dynamical-system operator learning under long-time integration, long-range dependency, chaotic dynamics, strict extrapolation testbeds beyond interpolation, 11-baseline comparison, lowest-computational-cost claims, and limited-data quantitative-systems-pharmacology drug-efficacy constraints."
     if ("state-space model" in text or "mamba" in text) and ("operator learning" in text or "neural operator" in text):
         return "Validate state-space or Mamba neural operators for dynamical systems under long-range dependency, extrapolation, chaotic rollout, and computational-efficiency constraints."
     if "systems pharmacology" in text:
@@ -331,6 +335,10 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "验证 Kinetic-Mamba stiff chemical kinetics surrogate，并检查 standalone、mass-constrained、regime-informed 与 latent Mamba variants、thermochemical state evolution from initial conditions、temperature-dependent regime splitting、time-decomposition / recursive-prediction evaluation、OOD extrapolation、守恒和 CFD-coupling 约束。"
     if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical")):
         return "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。"
+    if "state-space models are accurate and efficient neural operators" in text or (
+        "strict extrapolation testbeds" in text and "11 baselines" in text
+    ):
+        return "验证 dynamical-system operator learning 的 Mamba state-space neural operator，并检查 long-time integration、long-range dependency、chaotic dynamics、超出 interpolation 的 strict extrapolation testbeds、11-baseline comparison、lowest-computational-cost claim 和 limited-data quantitative-systems-pharmacology drug-efficacy 约束。"
     if ("state-space model" in text or "mamba" in text) and ("operator learning" in text or "neural operator" in text):
         return "验证 dynamical system 的 state-space 或 Mamba neural operator，并检查 long-range dependency、外推、chaotic rollout 和计算效率约束。"
     if "systems pharmacology" in text:

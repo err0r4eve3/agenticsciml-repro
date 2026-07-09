@@ -110,8 +110,10 @@ OKF-like JSON 知识图谱。
   parameterization / regularization / cost / warm-start 对比审计，而不是被摘要中的 optimizer 字样误归为
   PINN optimizer 问题。
 - State-space / Mamba neural operator 论文现在优先落到 dynamical-system operator learning 的
-  long-range dependency、外推、chaotic rollout 和效率审计；不会再因 pharmacology 应用段落误归为
-  biomedical PIML review。
+  long-time integration、long-range dependency、chaotic dynamics、strict extrapolation testbeds、11-baseline
+  comparison、lowest-computational-cost claim 和 limited-data quantitative-systems-pharmacology drug-efficacy
+  审计；不会再因 pharmacology 应用段落误归为 biomedical PIML review，也不会退回过宽的 generic
+  Mamba operator-learning 描述。
 - Bluff-body turbulence-closure 论文现在优先落到 PINN-trained closure 的 solver stability、
   geometry generalization 和 closure-model 审计；不会再因摘要里描述传统 inverse / adjoint 校准方法而误归为
   adjoint-vs-PINN inverse-problem 对比。
