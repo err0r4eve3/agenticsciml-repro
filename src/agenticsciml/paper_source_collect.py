@@ -204,7 +204,8 @@ def _real_problem(title: str, summary: str) -> str:
         return "Compare adjoint optimization and PINNs for PDE-constrained inverse problems under matched formulations, parameterizations, regularization, cost, and warm-start tradeoffs."
     if "optimizing the optimizer" in text or (
         any(term in text for term in ("kolmogorov-arnold", "pikan"))
-        and any(term in text for term in ("self-scaled", "bfgs", "broyden", "quasi-newton", "line search"))
+        and any(term in text for term in ("ssbfgs", "ssbroyden", "self-scaled bfgs", "self-scaled broyden"))
+        and any(term in text for term in ("quasi-newton", "line search", "bfgs", "broyden"))
         and ("pde" in text or "deeponet" in text or "operator learning" in text)
     ):
         return "Audit self-scaled quasi-Newton optimizer selection across PINN, PIKAN, and DeepONet training under nonlinear loss landscapes, saddle points, PDE benchmark diversity, line-search strategy, and accuracy-vs-efficiency constraints."
@@ -333,7 +334,8 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "对比 PDE-constrained inverse problem 中的 adjoint optimization 与 PINN，并检查 formulation、parameterization、regularization、成本和 warm-start 取舍。"
     if "optimizing the optimizer" in text or (
         any(term in text for term in ("kolmogorov-arnold", "pikan"))
-        and any(term in text for term in ("self-scaled", "bfgs", "broyden", "quasi-newton", "line search"))
+        and any(term in text for term in ("ssbfgs", "ssbroyden", "self-scaled bfgs", "self-scaled broyden"))
+        and any(term in text for term in ("quasi-newton", "line search", "bfgs", "broyden"))
         and ("pde" in text or "deeponet" in text or "operator learning" in text)
     ):
         return "审计 PINN、PIKAN 与 DeepONet training 中的 self-scaled quasi-Newton optimizer selection，并检查 nonlinear loss landscape、saddle point、PDE benchmark diversity、line-search strategy 和 accuracy-vs-efficiency 约束。"

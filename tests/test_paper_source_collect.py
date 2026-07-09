@@ -294,7 +294,7 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
         ),
         (
             "KKANs: Kurkova-Kolmogorov-Arnold Networks and Their Learning Dynamics",
-            "Kolmogorov-Arnold networks are analyzed with information bottleneck theory and geometric complexity.",
+            "Kolmogorov-Arnold networks are analyzed with information bottleneck theory, geometric complexity, signal-to-noise ratio, and self-scaled residual-based attention weights.",
             "Audit KAN-style SciML architectures through approximation behavior, learning dynamics, and signal-to-noise generalization controls.",
             "通过逼近行为、learning dynamics 和 signal-to-noise 泛化控制审计 KAN-style SciML 架构。",
         ),

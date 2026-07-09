@@ -171,6 +171,9 @@ OKF-like JSON 知识图谱。
   configuration / precision / scalability / data-sparse non-unique inverse-problem 约束；meta-solver 论文会落到
   PDE-discretization linear systems、Jacobi/Gauss-Seidel/Krylov composition、DeepONet coarse preconditioning、
   Pareto metrics 和 preference selection，而不是泛化成 time-dependent PDE 审计。
+- Optimizing-the-Optimizer 路由继续收窄为 `SSBFGS` / `SSBroyden` 或 `Self-Scaled BFGS/Broyden`
+  信号，避免 KKANs 论文中的 `self-scaled residual-based attention weights` 被误读成 quasi-Newton
+  optimizer 论文；KKANs 会回到 KAN-style architecture / learning dynamics / SNR generalization 审计。
 
 边界：
 
