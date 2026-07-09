@@ -423,7 +423,7 @@ ul {
   font-size: 24px;
 }
 
-.paper-lab-head span {
+.paper-lab-head > div > span {
   display: block;
   margin-top: 6px;
   color: var(--ink-muted);
