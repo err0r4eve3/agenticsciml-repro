@@ -289,8 +289,8 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
         (
             "DeepVIVONet: Using deep neural operators to optimize sensor locations with application to vortex-induced vibrations",
             "Sparse spatio-temporal measurements reconstruct and forecast vortex-induced vibrations of a marine riser.",
-            "Optimize sparse sensor placement for vortex-induced vibration reconstruction and forecasting under transfer-learning constraints.",
-            "优化 vortex-induced vibration 重建与 forecasting 的稀疏传感器布置，并检查 transfer-learning 约束。",
+            "Optimize DeepVIVONet sensor placement for vortex-induced vibration reconstruction and forecasting under field-data marine-riser dynamics, sparse spatio-temporal measurements, transfer to unseen flow conditions, outer-loop location optimization, POD sensor-placement comparison, and cost-effective configuration constraints.",
+            "优化 DeepVIVONet 的 vortex-induced vibration sensor placement，并检查 field-data marine-riser dynamics、sparse spatio-temporal measurements、unseen flow condition transfer、outer-loop location optimization、POD sensor-placement comparison 和 cost-effective configuration 约束。",
         ),
         (
             "Fusion-DeepONet: A Data-Efficient Neural Operator for Geometry-Dependent Hypersonic and Supersonic Flows",

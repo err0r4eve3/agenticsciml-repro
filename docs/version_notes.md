@@ -69,7 +69,8 @@ OKF-like JSON 知识图谱。
 - PINN multiple-solution / deep ensemble 论文现在落到多解发现与初始化/ensemble 多样性审计；
   DeepSeek/ChatGPT/Claude SciML 对比论文会落到 LLM 科学计算能力 benchmark 审计。
 - DeepVIVONet、Fusion-DeepONet、KKANs、diesel-engine digital twin 和 brittle-fracture DeepONet
-  论文现在分别落到 sensor placement、hypersonic/supersonic surrogate、KAN learning dynamics、
+  论文现在分别落到 field-data marine-riser / outer-loop / POD 对照约束下的 sensor placement、
+  hypersonic/supersonic surrogate、KAN learning dynamics、
   engine health monitoring 和 fracture surrogate 的具体审计问题。
 - Source mapping 规则收紧了短子串和优先级：不再用裸 `viv` 命中 VIV，reactor/chemical 与
   pharmacology 优先于 KAN/hypersonic 泛化，multi-agent control 不再误归为 LLM agent workflow。

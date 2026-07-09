@@ -209,7 +209,9 @@ def _real_problem(title: str, summary: str) -> str:
         return "Audit automated meta-solver discovery for time-dependent nonlinear PDEs under Newton-Raphson or IMEX discretization, Krylov and neural-operator composition, Pareto accuracy-speed-memory tradeoffs, preference selection, and reaction-diffusion/fluid/solid-mechanics coverage."
     if "meta-solver" in text or "meta solver" in text or "multi-objective" in text or "pareto" in text:
         return "Audit neural-operator-assisted meta-solver discovery for PDE-discretization linear systems under Jacobi/Gauss-Seidel/Krylov composition, DeepONet coarse preconditioning, Pareto metrics, preference selection, and spectrum-split error constraints."
-    if any(term in text for term in ("sensor location", "sensor placement", "vortex-induced", "marine riser", "deepvivonet")):
+    if "deepvivonet" in text or ("vortex-induced vibrations" in text and "marine riser" in text):
+        return "Optimize DeepVIVONet sensor placement for vortex-induced vibration reconstruction and forecasting under field-data marine-riser dynamics, sparse spatio-temporal measurements, transfer to unseen flow conditions, outer-loop location optimization, POD sensor-placement comparison, and cost-effective configuration constraints."
+    if any(term in text for term in ("sensor location", "sensor placement", "vortex-induced", "marine riser")):
         return "Optimize sparse sensor placement for vortex-induced vibration reconstruction and forecasting under transfer-learning constraints."
     if any(term in text for term in ("hypersonic", "supersonic", "reentry", "arbitrary grids", "geometry-dependent")):
         return "Validate data-efficient neural operator surrogates for geometry-dependent hypersonic or supersonic flow prediction on scarce data."
@@ -360,7 +362,9 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "审计 time-dependent nonlinear PDE 的 automated meta-solver discovery，并检查 Newton-Raphson 或 IMEX discretization、Krylov 与 neural-operator composition、Pareto accuracy-speed-memory tradeoff、preference selection 以及 reaction-diffusion/fluid/solid-mechanics 覆盖。"
     if "meta-solver" in text or "meta solver" in text or "multi-objective" in text or "pareto" in text:
         return "审计 PDE-discretization linear system 的 neural-operator-assisted meta-solver discovery，并检查 Jacobi/Gauss-Seidel/Krylov composition、DeepONet coarse preconditioning、Pareto metrics、preference selection 和 spectrum-split error 约束。"
-    if any(term in text for term in ("sensor location", "sensor placement", "vortex-induced", "marine riser", "deepvivonet")):
+    if "deepvivonet" in text or ("vortex-induced vibrations" in text and "marine riser" in text):
+        return "优化 DeepVIVONet 的 vortex-induced vibration sensor placement，并检查 field-data marine-riser dynamics、sparse spatio-temporal measurements、unseen flow condition transfer、outer-loop location optimization、POD sensor-placement comparison 和 cost-effective configuration 约束。"
+    if any(term in text for term in ("sensor location", "sensor placement", "vortex-induced", "marine riser")):
         return "优化 vortex-induced vibration 重建与 forecasting 的稀疏传感器布置，并检查 transfer-learning 约束。"
     if any(term in text for term in ("hypersonic", "supersonic", "reentry", "arbitrary grids", "geometry-dependent")):
         return "验证稀缺数据下 geometry-dependent hypersonic 或 supersonic flow 预测的高效神经算子 surrogate。"
