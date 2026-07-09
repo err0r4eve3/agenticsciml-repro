@@ -154,7 +154,9 @@ def _real_problem(title: str, summary: str) -> str:
         return "Benchmark LLM capability for scientific computing and SciML tasks while preserving model-specific failure modes and decision points."
     if "multi-agent systems" in text and "control" in text:
         return "Assess physics-informed operator networks for real-time optimal control of multi-agent dynamical systems under stability constraints."
-    if any(term in text for term in ("risk-aware set-based", "set-based engineering design", "cvar", "airfoil design")):
+    if any(term in text for term in ("knowledge-guided multi-agent", "graph ontologist", "design knowledge graph")):
+        return "Audit knowledge-guided multi-agent engineering-design workflows under domain-graph construction, requirement formulation, candidate generation, systems-engineer review, manager validation, and tool-backed optimization constraints."
+    if any(term in text for term in ("risk-aware set-based", "set-based engineering design", "cvar")):
         return "Audit risk-aware multi-agent engineering-design workflows under CVaR filtering, human-in-the-loop review, tool validation, and CFD evidence constraints."
     if any(term in text for term in ("graft-athena", "adaptive factored trees", "self-improving agentic", "autonomous discovery", "action space")):
         return "Audit self-improving agentic scientific-discovery workflows under reusable method substrates, action-space expansion, probabilistic-tree policy, and production-solver evidence constraints."
@@ -269,7 +271,9 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "评测 LLM 在 scientific computing 和 SciML 任务中的能力，同时保留模型特定失败模式和决策点。"
     if "multi-agent systems" in text and "control" in text:
         return "评估 real-time optimal control 中的 physics-informed operator network，并检查多智能体动力系统稳定性约束。"
-    if any(term in text for term in ("risk-aware set-based", "set-based engineering design", "cvar", "airfoil design")):
+    if any(term in text for term in ("knowledge-guided multi-agent", "graph ontologist", "design knowledge graph")):
+        return "审计 knowledge-guided multi-agent engineering-design 工作流，并检查 domain-graph construction、requirement formulation、candidate generation、systems-engineer review、manager validation 和 tool-backed optimization 约束。"
+    if any(term in text for term in ("risk-aware set-based", "set-based engineering design", "cvar")):
         return "审计 risk-aware multi-agent engineering-design 工作流，并检查 CVaR 过滤、human-in-the-loop review、工具验证和 CFD 证据约束。"
     if any(term in text for term in ("graft-athena", "adaptive factored trees", "self-improving agentic", "autonomous discovery", "action space")):
         return "审计 self-improving agentic scientific-discovery 工作流，并检查可复用 method substrate、action-space expansion、probabilistic-tree policy 和 production-solver 证据约束。"

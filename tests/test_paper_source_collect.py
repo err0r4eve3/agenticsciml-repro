@@ -248,6 +248,12 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "审计 risk-aware multi-agent engineering-design 工作流，并检查 CVaR 过滤、human-in-the-loop review、工具验证和 CFD 证据约束。",
         ),
         (
+            "Toward Autonomous Engineering Design: A Knowledge-Guided Multi-Agent Framework",
+            "A Graph Ontologist constructs domain-specific knowledge graphs, a Systems Engineer formulates requirements, and a Design Engineer proposes NACA airfoil candidates for manager validation and optimization.",
+            "Audit knowledge-guided multi-agent engineering-design workflows under domain-graph construction, requirement formulation, candidate generation, systems-engineer review, manager validation, and tool-backed optimization constraints.",
+            "审计 knowledge-guided multi-agent engineering-design 工作流，并检查 domain-graph construction、requirement formulation、candidate generation、systems-engineer review、manager validation 和 tool-backed optimization 约束。",
+        ),
+        (
             "GRAFT-ATHENA: Self-Improving Agentic Teams for Autonomous Discovery and Evolutionary Numerical Algorithms",
             "GRAFT projects combinatorial decisions into adaptive factored trees and expands its own action space across production solvers.",
             "Audit self-improving agentic scientific-discovery workflows under reusable method substrates, action-space expansion, probabilistic-tree policy, and production-solver evidence constraints.",

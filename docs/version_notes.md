@@ -128,6 +128,9 @@ OKF-like JSON 知识图谱。
   benchmark example 和 claim-boundary 约束；不再退回 generic PDE-constrained SciML workflow。
 - Solitary-wave PINN 触发词已收窄为 `solitary wave` / `initial-value iterative`，避免 PILNO 这类
   Laplace Neural Operator 论文仅因 forced KdV benchmark 被误归为 solitary-wave simulation。
+- Knowledge-guided multi-agent engineering design 论文现在落到 domain-graph construction、
+  requirements、candidate generation、systems-engineer review、manager validation 和 tool-backed
+  optimization 审计；不再因为 airfoil design 场景误归为 risk-aware / CVaR set-based design。
 - Web 保存与生产循环审计现在复用同一个 LLM Wiki OKF schema gate：根对象、所有节点和边都必须保留
   中英文槽位，边必须引用现有节点；旧格式 account Wiki 若不满足当前 schema，会回退到自动生成图谱而不是继续返回坏上下文。
 - 自动 Wiki 的 project/workflow/paper task/benchmark/algorithm 节点现在写入中文标题、中文说明和中文标签，
