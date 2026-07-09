@@ -74,9 +74,10 @@ OKF-like JSON 知识图谱。
   engine health monitoring 和 fracture surrogate 的具体审计问题。
 - Source mapping 规则收紧了短子串和优先级：不再用裸 `viv` 命中 VIV，reactor/chemical 与
   pharmacology 优先于 KAN/hypersonic 泛化，multi-agent control 不再误归为 LLM agent workflow。
-- Many-body message-passing neural operator 与 multi-task DeepONet 论文现在分别落到
-  complex-system geometry/dynamics 和 PDE task-coupling/geometry-generalization 审计问题，不再退回过宽的
-  neural operator reliability 问题。
+- Many-body message-passing neural operator 与 MT-DeepONet 论文现在分别落到
+  complex-system geometry/dynamics，以及 branch-network modification、binary-mask geometry encoding、
+  Fisher source-term、2D Darcy / 3D heat-transfer geometry transfer 和 training-cost 约束下的 PDE 多任务审计；
+  不再退回过宽的 neural operator reliability 问题。
 - Source collection 的 domain-specific 规则现在优先于泛化方法词：reactor 论文不会因 `optimizer`
   退回 PINN optimizer，biomedical review 不会因 `uncertainty quantification` 退回湍流不确定性审计，
   turbulence closure 论文不会因 `adjoints` 退回 PDE control 对比。

@@ -361,8 +361,8 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
         (
             "Synergistic Learning with Multi-Task DeepONet for Efficient PDE Problem Solving",
             "MT-DeepONet applies multi-task learning to PDEs with multiple source terms and parameterized geometries.",
-            "Validate multi-task DeepONet workflows for efficient PDE problem solving under task coupling, geometry generalization, accuracy, and training-cost constraints.",
-            "验证 efficient PDE problem solving 的 multi-task DeepONet 工作流，并检查任务耦合、几何泛化、精度和训练成本约束。",
+            "Validate MT-DeepONet PDE workflows under multi-task synergistic learning, branch-network modifications for parameterized coefficients, binary-mask geometry encoding in the loss, Fisher source-term tasks, 2D Darcy and 3D heat-transfer geometry transfer, convergence, accuracy, and reduced neural-operator training-cost constraints.",
+            "验证 MT-DeepONet PDE workflow，并检查 multi-task synergistic learning、parameterized coefficient 的 branch-network modification、loss 中的 binary-mask geometry encoding、Fisher source-term task、2D Darcy 与 3D heat-transfer geometry transfer、收敛性、精度和 neural-operator training-cost 降低约束。",
         ),
     ]
 

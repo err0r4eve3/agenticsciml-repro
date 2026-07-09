@@ -284,6 +284,8 @@ def _real_problem(title: str, summary: str) -> str:
         return "Evaluate generative operator models for turbulent-flow super-resolution, forecasting, and sparse reconstruction without losing fine-scale structure."
     if any(term in text for term in ("message passing", "message-passing", "many-body", "renormalized operators", "multiscale attention")):
         return "Validate message-passing neural operators for many-body complex-system geometry and dynamics under scalability, stability, and multiscale-fidelity constraints."
+    if "mt-deeponet" in text or "multi-task deeponet" in text or "synergistic learning with multi-task" in text:
+        return "Validate MT-DeepONet PDE workflows under multi-task synergistic learning, branch-network modifications for parameterized coefficients, binary-mask geometry encoding in the loss, Fisher source-term tasks, 2D Darcy and 3D heat-transfer geometry transfer, convergence, accuracy, and reduced neural-operator training-cost constraints."
     if (
         any(term in text for term in ("multi-task", "multitask", "mt-deeponet", "synergistic learning"))
         and ("deeponet" in text or "operator network" in text)
@@ -437,6 +439,8 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "评估湍流 super-resolution、forecasting 和 sparse reconstruction 的生成式算子模型，避免丢失细尺度结构。"
     if any(term in text for term in ("message passing", "message-passing", "many-body", "renormalized operators", "multiscale attention")):
         return "验证 many-body complex-system 几何与动力学的 message-passing neural operator，并检查可扩展性、稳定性和多尺度保真度约束。"
+    if "mt-deeponet" in text or "multi-task deeponet" in text or "synergistic learning with multi-task" in text:
+        return "验证 MT-DeepONet PDE workflow，并检查 multi-task synergistic learning、parameterized coefficient 的 branch-network modification、loss 中的 binary-mask geometry encoding、Fisher source-term task、2D Darcy 与 3D heat-transfer geometry transfer、收敛性、精度和 neural-operator training-cost 降低约束。"
     if (
         any(term in text for term in ("multi-task", "multitask", "mt-deeponet", "synergistic learning"))
         and ("deeponet" in text or "operator network" in text)
