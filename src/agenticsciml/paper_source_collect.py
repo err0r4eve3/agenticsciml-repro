@@ -178,6 +178,10 @@ def _real_problem(title: str, summary: str) -> str:
         term in text for term in ("kolmogorov-arnold", "pikan", "chebyshev kan")
     ):
         return "Audit Bayesian KAN or PIKAN uncertainty workflows under gradient-free inference, overfitting, stability, and parameter-efficiency constraints."
+    if "physics-informed neural networks and extensions" in text or (
+        "review" in text and "physics-informed neural networks" in text and "governing differential equations" in text
+    ):
+        return "Audit PINN review and extension coverage for governing-equation discovery under residual formulation, practical-extension, benchmark-example, and claim-boundary constraints."
     if "from pinns to pikans" in text or ("recent advances" in text and "pikan" in text):
         return "Audit PINN-to-PIKAN Kolmogorov-Arnold SciML review coverage under architecture, optimization, uncertainty, and application-diversity constraints."
     if any(term in text for term in ("uncertainty quantification", "bayesian", "dropout", "repulsive ensemble")) and (
@@ -289,6 +293,10 @@ def _real_problem_zh(title: str, summary: str) -> str:
         term in text for term in ("kolmogorov-arnold", "pikan", "chebyshev kan")
     ):
         return "审计 Bayesian KAN 或 PIKAN 不确定性工作流，并检查 gradient-free inference、过拟合、稳定性和参数效率约束。"
+    if "physics-informed neural networks and extensions" in text or (
+        "review" in text and "physics-informed neural networks" in text and "governing differential equations" in text
+    ):
+        return "审计 PINN review 与 extensions 覆盖，并检查 governing-equation discovery、residual formulation、practical extension、benchmark example 和 claim-boundary 约束。"
     if "from pinns to pikans" in text or ("recent advances" in text and "pikan" in text):
         return "审计 PINN-to-PIKAN Kolmogorov-Arnold SciML review 覆盖，并检查架构、优化、不确定性和应用多样性边界。"
     if any(term in text for term in ("uncertainty quantification", "bayesian", "dropout", "repulsive ensemble")) and (

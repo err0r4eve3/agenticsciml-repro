@@ -158,6 +158,12 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "审计 PINN-to-PIKAN Kolmogorov-Arnold SciML review 覆盖，并检查架构、优化、不确定性和应用多样性边界。",
         ),
         (
+            "Physics-Informed Neural Networks and Extensions",
+            "This review presents practical extensions of Physics-Informed Neural Networks and an example in data-driven discovery of governing differential equations.",
+            "Audit PINN review and extension coverage for governing-equation discovery under residual formulation, practical-extension, benchmark-example, and claim-boundary constraints.",
+            "审计 PINN review 与 extensions 覆盖，并检查 governing-equation discovery、residual formulation、practical extension、benchmark example 和 claim-boundary 约束。",
+        ),
+        (
             "Scalable Bayesian Physics-Informed Kolmogorov-Arnold Networks",
             "Uncertainty quantification combines dropout Tikhonov ensemble Kalman inversion with Chebyshev KANs.",
             "Audit Bayesian KAN or PIKAN uncertainty workflows under gradient-free inference, overfitting, stability, and parameter-efficiency constraints.",

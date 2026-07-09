@@ -123,6 +123,9 @@ OKF-like JSON 知识图谱。
 - Agents' Last Exam 现在优先落到 economically valuable real-world workflow 的长周期 agent benchmark
   审计，并保留 sustained performance、可验证结果、domain coverage 和 deployment-gap 边界；不再退回
   generic agent/LLM workflow。
+- Physics-Informed Neural Networks and Extensions 现在落到 PINN review/extensions 与
+  governing-equation discovery 的覆盖审计，并保留 residual formulation、practical extension、
+  benchmark example 和 claim-boundary 约束；不再退回 generic PDE-constrained SciML workflow。
 - Web 保存与生产循环审计现在复用同一个 LLM Wiki OKF schema gate：根对象、所有节点和边都必须保留
   中英文槽位，边必须引用现有节点；旧格式 account Wiki 若不满足当前 schema，会回退到自动生成图谱而不是继续返回坏上下文。
 - 自动 Wiki 的 project/workflow/paper task/benchmark/algorithm 节点现在写入中文标题、中文说明和中文标签，
