@@ -186,6 +186,8 @@ def _real_problem(title: str, summary: str) -> str:
         return "Validate data-efficient neural operator surrogates for geometry-dependent hypersonic or supersonic flow prediction on scarce data."
     if any(term in text for term in ("optimizer", "natural gradient", "bfgs", "broyden", "curvature-aware")):
         return "Audit optimizer and conditioning choices for high-accuracy PINN convergence on challenging PDE or ODE systems."
+    if "warm-start" in text and "newton" in text and ("spectral" in text or "jacobian" in text):
+        return "Audit spectrally safe neural-operator warm starts for large-scale Newton PDE solvers under Jacobian definiteness, Krylov compatibility, label-free energy fine-tuning, and speedup constraints."
     if "newton" in text or "nonlinear solver" in text or "nonlinear system" in text:
         return "Evaluate neural preconditioning for nonlinear solvers under convergence, robustness, and instability constraints."
     if any(term in text for term in ("krylov", "preconditioner", "linear solver", "linear system")):
@@ -281,6 +283,8 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "验证稀缺数据下 geometry-dependent hypersonic 或 supersonic flow 预测的高效神经算子 surrogate。"
     if any(term in text for term in ("optimizer", "natural gradient", "bfgs", "broyden", "curvature-aware")):
         return "审计 optimizer 与 conditioning 选择对高精度 PINN 在困难 PDE 或 ODE 系统上收敛的影响。"
+    if "warm-start" in text and "newton" in text and ("spectral" in text or "jacobian" in text):
+        return "审计 large-scale Newton PDE solver 的 spectrally safe neural-operator warm start，并检查 Jacobian definiteness、Krylov compatibility、label-free energy fine-tuning 和加速约束。"
     if "newton" in text or "nonlinear solver" in text or "nonlinear system" in text:
         return "评估非线性求解器中的神经预条件方法，并检查收敛性、鲁棒性和不稳定边界。"
     if any(term in text for term in ("krylov", "preconditioner", "linear solver", "linear system")):

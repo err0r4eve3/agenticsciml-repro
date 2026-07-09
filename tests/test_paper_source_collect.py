@@ -146,6 +146,12 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "评估非线性求解器中的神经预条件方法，并检查收敛性、鲁棒性和不稳定边界。",
         ),
         (
+            "Spectrally Safe Neural Operator Warm-Starts for Large-Scale Newton Solvers",
+            "A label-free energy fine-tuning step keeps warm-started Newton Jacobians positive definite for Krylov-compatible large-scale PDE solves.",
+            "Audit spectrally safe neural-operator warm starts for large-scale Newton PDE solvers under Jacobian definiteness, Krylov compatibility, label-free energy fine-tuning, and speedup constraints.",
+            "审计 large-scale Newton PDE solver 的 spectrally safe neural-operator warm start，并检查 Jacobian definiteness、Krylov compatibility、label-free energy fine-tuning 和加速约束。",
+        ),
+        (
             "From LIF to QIF: Toward Differentiable Spiking Neurons for Scientific Machine Learning",
             "QIF spiking neural networks support stable gradients for operator learning and PDE solving.",
             "Evaluate differentiable spiking-neuron models for stable SciML regression, operator learning, and PDE solving.",
