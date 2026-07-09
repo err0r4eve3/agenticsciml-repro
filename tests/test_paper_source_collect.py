@@ -80,6 +80,12 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "对比 PDE-constrained inverse problem 中的 adjoint optimization 与 PINN，并检查 formulation、parameterization、regularization、成本和 warm-start 取舍。",
         ),
         (
+            "State-space models are accurate and efficient neural operators for dynamical systems",
+            "Mamba state-space models improve neural operator learning for long-range dependencies, extrapolation, and chaotic dynamics, with a pharmacology application under limited data.",
+            "Validate state-space or Mamba neural operators for dynamical systems under long-range dependency, extrapolation, chaotic rollout, and computational-efficiency constraints.",
+            "验证 dynamical system 的 state-space 或 Mamba neural operator，并检查 long-range dependency、外推、chaotic rollout 和计算效率约束。",
+        ),
+        (
             "Spectral bias in physics-informed and operator learning: Analysis and mitigation guidelines",
             "Frequency-resolved diagnostics expose high-frequency failure modes in neural operators.",
             "Diagnose high-frequency failure modes in physics-informed or operator learning and test mitigation controls.",
