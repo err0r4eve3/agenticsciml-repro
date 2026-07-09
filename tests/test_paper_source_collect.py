@@ -92,6 +92,18 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "审计 physics-informed 湍流反问题建模中的不确定性校准，并权衡 Bayesian、dropout 和 ensemble 方法。",
         ),
         (
+            "From PINNs to PIKANs: Recent Advances in Physics-Informed Machine Learning",
+            "This review covers network architectures, optimization techniques, uncertainty quantification, and PIKAN applications.",
+            "Audit PINN-to-PIKAN Kolmogorov-Arnold SciML review coverage under architecture, optimization, uncertainty, and application-diversity constraints.",
+            "审计 PINN-to-PIKAN Kolmogorov-Arnold SciML review 覆盖，并检查架构、优化、不确定性和应用多样性边界。",
+        ),
+        (
+            "Scalable Bayesian Physics-Informed Kolmogorov-Arnold Networks",
+            "Uncertainty quantification combines dropout Tikhonov ensemble Kalman inversion with Chebyshev KANs.",
+            "Audit Bayesian KAN or PIKAN uncertainty workflows under gradient-free inference, overfitting, stability, and parameter-efficiency constraints.",
+            "审计 Bayesian KAN 或 PIKAN 不确定性工作流，并检查 gradient-free inference、过拟合、稳定性和参数效率约束。",
+        ),
+        (
             "NeuroSEM: A hybrid framework for simulating multiphysics problems by coupling PINNs and spectral elements",
             "NeuroSEM integrates PINNs with the Spectral Element Method solver for turbulence-aware multiphysics simulation.",
             "Validate hybrid PINN and spectral-element workflows for coupled multiphysics simulation under data assimilation, solver integration, and turbulence robustness constraints.",

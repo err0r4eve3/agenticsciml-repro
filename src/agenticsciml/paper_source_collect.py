@@ -162,6 +162,12 @@ def _real_problem(title: str, summary: str) -> str:
         return "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints."
     if any(term in text for term in ("biomedical", "biofluid", "biosolid", "medical imaging", "cell signaling", "physiological", "pharmacology")):
         return "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints."
+    if any(term in text for term in ("bayesian", "dteki", "hmc", "ensemble kalman", "tikhonov")) and any(
+        term in text for term in ("kolmogorov-arnold", "pikan", "chebyshev kan")
+    ):
+        return "Audit Bayesian KAN or PIKAN uncertainty workflows under gradient-free inference, overfitting, stability, and parameter-efficiency constraints."
+    if "from pinns to pikans" in text or ("recent advances" in text and "pikan" in text):
+        return "Audit PINN-to-PIKAN Kolmogorov-Arnold SciML review coverage under architecture, optimization, uncertainty, and application-diversity constraints."
     if any(term in text for term in ("uncertainty quantification", "bayesian", "dropout", "repulsive ensemble")) and (
         "pinn" in text or "physics-informed" in text or "turbulence" in text or "turbulent" in text
     ):
@@ -241,6 +247,12 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。"
     if any(term in text for term in ("biomedical", "biofluid", "biosolid", "medical imaging", "cell signaling", "physiological", "pharmacology")):
         return "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。"
+    if any(term in text for term in ("bayesian", "dteki", "hmc", "ensemble kalman", "tikhonov")) and any(
+        term in text for term in ("kolmogorov-arnold", "pikan", "chebyshev kan")
+    ):
+        return "审计 Bayesian KAN 或 PIKAN 不确定性工作流，并检查 gradient-free inference、过拟合、稳定性和参数效率约束。"
+    if "from pinns to pikans" in text or ("recent advances" in text and "pikan" in text):
+        return "审计 PINN-to-PIKAN Kolmogorov-Arnold SciML review 覆盖，并检查架构、优化、不确定性和应用多样性边界。"
     if any(term in text for term in ("uncertainty quantification", "bayesian", "dropout", "repulsive ensemble")) and (
         "pinn" in text or "physics-informed" in text or "turbulence" in text or "turbulent" in text
     ):
