@@ -125,6 +125,7 @@ type PageKey = "chat" | "ide" | "library" | "wiki";
 const AGENT_PANEL_MIN_WIDTH = 280;
 const AGENT_PANEL_MAX_WIDTH = 560;
 const AGENT_PANEL_DEFAULT_WIDTH = 360;
+const RUN_POLL_ATTEMPTS = 120;
 
 type AccountOption = {
   account_id: string;
@@ -912,10 +913,13 @@ export function App() {
     if (!activeRunId) return;
     setEvents([]);
     const source = new EventSource(
-      `/api/runs/${encodeURIComponent(activeRunId)}/events?follow=false&${accountParams(activeAccountId)}`
+      `/api/runs/${encodeURIComponent(activeRunId)}/events?follow=true&timeout_s=30&${accountParams(activeAccountId)}`
     );
     source.addEventListener("trace", (event) => {
       setEvents((current) => [event.data, ...current].slice(0, 80));
+    });
+    source.addEventListener("heartbeat", () => {
+      refreshActiveRun(activeRunId).catch((exc) => setError(String(exc)));
     });
     source.addEventListener("end", () => source.close());
     source.onerror = () => source.close();
@@ -993,7 +997,7 @@ export function App() {
     setSolutionsPayload(solutions);
   }
 
-  function pollBackgroundRun(runId: string, accountId = activeAccountId, attemptsLeft = 8) {
+  function pollBackgroundRun(runId: string, accountId = activeAccountId, attemptsLeft = RUN_POLL_ATTEMPTS) {
     window.setTimeout(async () => {
       try {
         const run = await api.getRun(runId, accountId);
@@ -1012,7 +1016,7 @@ export function App() {
       } catch (exc) {
         setError(String(exc));
       }
-    }, attemptsLeft === 8 ? 1200 : 1000);
+    }, attemptsLeft === RUN_POLL_ATTEMPTS ? 1200 : 1000);
   }
 
   async function refreshAll() {
@@ -1055,8 +1059,19 @@ export function App() {
   }
 
   async function copyWikiText() {
-    await navigator.clipboard?.writeText(wikiText);
-    setWikiCopied(true);
+    if (!navigator.clipboard?.writeText) {
+      setWikiCopied(false);
+      setError("Clipboard API unavailable，无法复制。");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(wikiText);
+      setWikiCopied(true);
+      setError(null);
+    } catch (exc) {
+      setWikiCopied(false);
+      setError(String(exc));
+    }
   }
 
   async function saveWiki() {
@@ -1613,7 +1628,7 @@ export function App() {
       {activePage === "chat" ? (
         <section className="chatgpt-page" aria-label="ChatUI 页面" data-testid="page-chat">
           <PageHeader title="AgenticSciML" subtitle="ChatUI" />
-          {error ? <div className="error-line">{error}</div> : null}
+          {error ? <div className="error-line" role="alert">{error}</div> : null}
           <PureChatUI
             assistantMode={assistantMode}
             modeSettings={solverSettings.assistant_modes[assistantMode]}
@@ -1687,7 +1702,7 @@ export function App() {
             onRun={() => startRun(mode, false)}
             onSelectBenchmark={setSelectedBenchmark}
           />
-          {error ? <div className="error-line">{error}</div> : null}
+          {error ? <div className="error-line" role="alert">{error}</div> : null}
           <AlgorithmLibraryPage
             activeRun={activeRun}
             activeRunId={activeRunId}
@@ -1695,6 +1710,7 @@ export function App() {
             agentRoles={agentRoles}
             algorithms={algorithms}
             artifactPayload={artifactPayload}
+            busy={busy}
             events={filteredEvents}
             filter={traceFilter}
             language={libraryLanguage}
@@ -1739,7 +1755,7 @@ export function App() {
       {activePage === "wiki" ? (
         <section className="wiki-page" aria-label="LLM Wiki OKF 页面" data-testid="page-wiki">
           <PageHeader title="LLM Wiki" subtitle="OKF Graph" />
-          {error ? <div className="error-line">{error}</div> : null}
+          {error ? <div className="error-line" role="alert">{error}</div> : null}
           <LlmWikiPage
             copied={wikiCopied}
             payload={wikiPayload}
@@ -1797,6 +1813,7 @@ function FunctionNav({
             data-testid={`nav-${page.key}`}
             key={page.key}
             onClick={() => onSelectPage(page.key)}
+            aria-current={activePage === page.key ? "page" : undefined}
             title={page.label}
             type="button"
           >
@@ -1936,10 +1953,11 @@ function LlmWikiPage({
             <span>{reviewQueue?.latest_round_id ?? "latest"} · {reviewQueue?.queue?.graph_path ?? "llm_wiki/llm_wiki_okf.json"}</span>
             <span>{reviewQueue?.queue?.status ?? "manual_review_required"}</span>
           </div>
-          <div className="wiki-node-list" role="listbox" aria-label="Wiki nodes">
+          <div className="wiki-node-list" aria-label="Wiki nodes">
             {indexNodes.map((node) => (
               <button
                 className={selectedNode?.id === node.id ? "wiki-node-row selected" : "wiki-node-row"}
+                aria-pressed={selectedNode?.id === node.id}
                 key={node.id}
                 onClick={() => setSelectedNodeId(node.id)}
                 type="button"
@@ -2158,6 +2176,7 @@ function PureChatUI({
       </div>
       <form className="pure-composer" onSubmit={onSubmit}>
         <input
+          aria-label="给 AgenticSciML 发消息"
           data-testid="chat-main-input"
           value={mainPrompt}
           onChange={(event) => onChange(event.target.value)}
@@ -2165,10 +2184,7 @@ function PureChatUI({
         />
         <div className="composer-tools">
           <AssistantModeSwitch mode={assistantMode} settings={modeSettings} onChange={onAssistantModeChange} />
-          <button type="button" title="Artifact context">
-            <Database size={15} />
-          </button>
-          <button className="send-button" data-testid="chat-main-send" disabled={busy} type="submit" title="发送">
+          <button aria-label="发送" className="send-button" data-testid="chat-main-send" disabled={busy} type="submit" title="发送">
             <Send size={16} />
           </button>
         </div>
@@ -2190,9 +2206,10 @@ function AssistantModeSwitch({
 }) {
   return (
     <div className={`assistant-mode-wrap ${compact ? "compact" : ""}`}>
-      <div className={`assistant-mode ${compact ? "compact" : ""}`} aria-label="Assistant mode">
+      <div className={`assistant-mode ${compact ? "compact" : ""}`} aria-label="Assistant mode" role="group">
         {(["ask", "plan", "agent"] as const).map((item) => (
           <button
+            aria-pressed={mode === item}
             key={item}
             className={mode === item ? "selected" : ""}
             data-testid={`assistant-mode-${item}`}
@@ -2254,9 +2271,10 @@ function TopBar({
             ))}
           </select>
         </label>
-        <div className="segmented" aria-label="运行模式">
+        <div className="segmented" aria-label="运行模式" role="group">
           {(["mock", "dry_run", "real"] as const).map((item) => (
             <button
+              aria-pressed={mode === item}
               key={item}
               className={mode === item ? "selected" : ""}
               type="button"
@@ -2274,7 +2292,7 @@ function TopBar({
           <Play size={15} />
           Run
         </button>
-        <button className="icon-button" type="button" onClick={onRefresh} title="刷新">
+        <button aria-label="刷新" className="icon-button" type="button" onClick={onRefresh} title="刷新">
           <RefreshCw size={16} />
         </button>
       </div>
@@ -2293,6 +2311,7 @@ function AlgorithmLibraryPage({
   agentRoles,
   algorithms,
   artifactPayload,
+  busy,
   events,
   filter,
   language,
@@ -2338,6 +2357,7 @@ function AlgorithmLibraryPage({
   agentRoles: AgentRole[];
   algorithms: AlgorithmSpec[];
   artifactPayload: ArtifactPayload | null;
+  busy: boolean;
   events: string[];
   filter: string;
   language: LibraryLanguage;
@@ -2403,7 +2423,7 @@ function AlgorithmLibraryPage({
         />
         <RunConfigPanel
           budgetPreview={runBudgetPreview}
-          busy={false}
+          busy={busy}
           mode={mode}
           readinessReport={readinessReport}
           runConfig={runConfig}
@@ -2435,6 +2455,7 @@ function AlgorithmLibraryPage({
           </div>
           <div className="language-toggle" role="group" aria-label="Algorithm catalog language">
             <button
+              aria-pressed={language === "zh"}
               className={language === "zh" ? "selected" : ""}
               data-testid="algorithm-language-zh"
               type="button"
@@ -2443,6 +2464,7 @@ function AlgorithmLibraryPage({
               中文
             </button>
             <button
+              aria-pressed={language === "en"}
               className={language === "en" ? "selected" : ""}
               data-testid="algorithm-language-en"
               type="button"
@@ -2510,6 +2532,7 @@ function PaperTaskTabs({
     <div className="paper-task-tabs" aria-label="Paper S1 tasks">
       {tasks.map((task) => (
         <button
+          aria-pressed={selected?.paper_section === task.paper_section}
           className={selected?.paper_section === task.paper_section ? "selected" : ""}
           key={task.paper_section}
           type="button"
@@ -2652,7 +2675,13 @@ function StrategyLocksPanel({
                 <option value="all_branches">all branches</option>
                 <option value="selected_algorithms">selected algorithms</option>
               </select>
-              <button className="icon-button" type="button" onClick={() => onRemove(lock.lock_id)} title="移除 strategy lock">
+              <button
+                aria-label={`移除 strategy lock ${lock.lock_id}`}
+                className="icon-button"
+                type="button"
+                onClick={() => onRemove(lock.lock_id)}
+                title="移除 strategy lock"
+              >
                 <X size={15} />
               </button>
             </div>
@@ -2748,9 +2777,10 @@ function RunConfigPanel({
       <div className="run-config-panel">
         <div className="run-config-mode">
           <span>mode</span>
-          <div className="segmented compact" aria-label="Paper run mode">
+          <div className="segmented compact" aria-label="Paper run mode" role="group">
             {(["mock", "dry_run", "real"] as const).map((item) => (
               <button
+                aria-pressed={mode === item}
                 className={mode === item ? "selected" : ""}
                 key={item}
                 type="button"
@@ -2815,7 +2845,14 @@ function RunConfigPanel({
           <AlertTriangle size={15} />
           先检查 readiness
         </button>
-        <button className="icon-text-button full-width" type="button" onClick={onStartRun}>
+        <button
+          aria-label={readinessReport?.launch_allowed === false ? "readiness blocked" : "启动配置 run"}
+          className="icon-text-button full-width"
+          disabled={busy || readinessReport?.launch_allowed === false}
+          type="button"
+          onClick={onStartRun}
+          title={readinessReport?.launch_allowed === false ? "readiness blocked" : "启动配置 run"}
+        >
           <Play size={15} />
           启动配置 run
         </button>
@@ -2926,6 +2963,7 @@ function RoleModelPanel({
                     <td>{role.kind}</td>
                     <td>
                       <input
+                        aria-label={`${role.label} model`}
                         value={config.model}
                         onChange={(event) => onUpdate(role.role, { model: event.target.value })}
                         placeholder="default"
@@ -2933,6 +2971,7 @@ function RoleModelPanel({
                     </td>
                     <td>
                       <input
+                        aria-label={`${role.label} temperature`}
                         min={0}
                         max={2}
                         step={0.05}
@@ -2943,6 +2982,7 @@ function RoleModelPanel({
                     </td>
                     <td>
                       <select
+                        aria-label={`${role.label} reasoning effort`}
                         value={config.reasoning_effort ?? "medium"}
                         onChange={(event) =>
                           onUpdate(role.role, { reasoning_effort: event.target.value as ReasoningEffort })
@@ -3377,7 +3417,7 @@ function AlgorithmCatalog({
             {algorithm.implementation_path ? <code>{algorithm.implementation_path}</code> : null}
             <strong>{safetyNotes}</strong>
             {onToggle ? (
-              <button type="button" onClick={() => onToggle(algorithm.id)}>
+              <button aria-pressed={selected} type="button" onClick={() => onToggle(algorithm.id)}>
                 {selected ? (isChinese ? "已选" : "Selected") : isChinese ? "选择" : "Select"}
               </button>
             ) : null}
@@ -3500,16 +3540,14 @@ function CommandCenter({
       </div>
       <form className="main-composer" onSubmit={onSubmit}>
         <input
+          aria-label="请输入实验意图"
           value={mainPrompt}
           onChange={(event) => onChange(event.target.value)}
           placeholder="请输入你的实验意图，例如：跑 mock、解释这个 trace、打开 champion"
         />
         <div className="composer-tools">
-          <button type="button" title="Artifact context">
-            <Database size={15} />
-          </button>
           <AssistantModeSwitch compact mode={assistantMode} onChange={onAssistantModeChange} />
-          <button className="send-button" disabled={busy} type="submit" title="发送">
+          <button aria-label="发送" className="send-button" disabled={busy} type="submit" title="发送">
             <Send size={16} />
           </button>
         </div>
@@ -3585,12 +3623,19 @@ function RunsView({
             </thead>
             <tbody>
               {runs.map((run) => (
-                <tr
-                  className={run.run_id === activeRunId ? "selected-row" : ""}
-                  key={run.run_id}
-                  onClick={() => onSelectRun(run)}
-                >
-                  <td>{run.run_id}</td>
+                <tr className={run.run_id === activeRunId ? "selected-row" : ""} key={run.run_id}>
+                  <td>
+                    <button
+                      aria-label={`选择 run ${run.run_id}`}
+                      aria-pressed={run.run_id === activeRunId}
+                      className="table-link"
+                      title={run.run_id}
+                      type="button"
+                      onClick={() => onSelectRun(run)}
+                    >
+                      {run.run_id}
+                    </button>
+                  </td>
                   <td>{run.status}</td>
                   <td>{run.metadata?.run_state ?? "unknown"}</td>
                   <td>{run.metadata?.champion_node_id ?? "none"}</td>
@@ -3640,6 +3685,7 @@ function ArtifactsView({
         <div className="artifact-list-vertical">
           {(activeRun?.artifacts ?? []).map((artifact) => (
             <button
+              aria-pressed={selectedArtifactPath === artifact.path}
               className={selectedArtifactPath === artifact.path ? "artifact-row selected" : "artifact-row"}
               key={artifact.path}
               type="button"
@@ -3660,6 +3706,7 @@ function ArtifactsView({
         <DataRegion title="Trace events">
           <div className="filter-line">
             <input
+              aria-label="过滤 trace events"
               value={filter}
               onChange={(event) => onFilterChange(event.target.value)}
               placeholder="按 event name / node id / 文本过滤"
@@ -3732,7 +3779,7 @@ function WorkspaceSelector({
           </button>
         </div>
       </header>
-      {error ? <div className="error-line inline">{error}</div> : null}
+      {error ? <div className="error-line inline" role="alert">{error}</div> : null}
       <div className="workspace-table">
         <table>
           <thead>
@@ -3747,11 +3794,11 @@ function WorkspaceSelector({
           </thead>
           <tbody>
             {workspaces.map((workspace) => (
-              <tr data-testid={`workspace-row-${workspace.id}`} key={workspace.id} onClick={() => onOpenWorkspace(workspace)}>
-                <td>{workspace.label}</td>
+              <tr data-testid={`workspace-row-${workspace.id}`} key={workspace.id}>
+                <td title={workspace.label}>{workspace.label}</td>
                 <td>{workspace.account_id ?? "shared"}</td>
                 <td>{workspace.scope}</td>
-                <td>{workspace.workspace}</td>
+                <td title={workspace.workspace}>{workspace.workspace}</td>
                 <td>{workspace.status}</td>
                 <td>
                   <button
@@ -3854,7 +3901,7 @@ function AgentPanel({
       </header>
       <AssistantModeSwitch compact mode={assistantMode} settings={modeSettings} onChange={onAssistantModeChange} />
       {pendingRealAction ? (
-        <div className="pending-action">
+        <div className="pending-action" role="alert" aria-live="assertive">
           <AlertTriangle size={16} />
           <div>
             <strong>Real mode action 已拦截</strong>
@@ -3879,6 +3926,7 @@ function AgentPanel({
       </div>
       <form className="composer" onSubmit={onSend}>
         <input
+          aria-label="向 IDE Agent 提问"
           data-testid="ide-agent-input"
           value={message}
           onChange={(event) => onChangeMessage(event.target.value)}

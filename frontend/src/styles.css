@@ -19,9 +19,9 @@
   --ink-subtle: #a09384;
   --line: #dfd1bd;
   --line-strong: #cbb79a;
-  --green: #8a5a2b;
-  --green-strong: #6f411c;
-  --blue: #5d6f9f;
+  --green: #2f7d5b;
+  --green-strong: #1f6a49;
+  --blue: #3f63b8;
   --amber: #b76a2a;
   --red: #a0442d;
   --shadow: 0 12px 28px rgba(64, 43, 24, 0.08);
@@ -372,7 +372,7 @@ ul {
 }
 
 .active-run {
-  display: none;
+  display: grid;
   min-width: 0;
   gap: 4px;
   justify-items: end;
@@ -1430,10 +1430,6 @@ ul {
   font-size: 14px;
 }
 
-.pure-composer input:focus-visible {
-  outline: 0;
-}
-
 .view-stack {
   display: grid;
   gap: 14px;
@@ -1726,10 +1722,6 @@ ul {
   min-height: 46px;
   border: 0;
   font-size: 14px;
-}
-
-.main-composer input:focus-visible {
-  outline: 0;
 }
 
 .composer-tools {
@@ -2039,6 +2031,18 @@ tbody tr:hover,
   background: #f4e3ce;
 }
 
+.table-link {
+  min-height: 0;
+  justify-content: flex-start;
+  border: 0;
+  background: transparent;
+  color: var(--blue);
+  padding: 0;
+  font-size: inherit;
+  font-weight: 700;
+  text-align: left;
+}
+
 .artifact-chips {
   display: flex;
   flex-wrap: wrap;
@@ -2286,8 +2290,8 @@ tbody tr:hover,
   z-index: 3;
   top: 0;
   bottom: 0;
-  left: 0;
-  width: 10px;
+  left: -7px;
+  width: 24px;
   min-height: 0;
   border: 0;
   border-radius: 0;
@@ -2558,8 +2562,7 @@ tbody tr:hover,
     padding: 9px 12px;
   }
 
-  .nav-page span,
-  .nav-account select {
+  .nav-page span {
     display: none;
   }
 

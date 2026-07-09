@@ -32,6 +32,7 @@ try {
 
   await expectVisible(page, "[data-testid='page-chat']", "Chat page did not render");
   await expectNotVisibleText(page, "[data-testid='page-chat']", "实验工作台", "Chat page leaked workbench copy");
+  await assertUiAccessibilitySemantics(page, "chat");
 
   await sendChatMessage(page, "你是谁");
   await expectVisibleText(page, "[data-testid='chat-transcript']", "AgenticSciML 助手", "Ask identity reply missing");
@@ -69,6 +70,7 @@ try {
 
   await page.locator("[data-testid='nav-library']").click();
   await expectVisible(page, "[data-testid='page-library']", "Library page did not render");
+  await assertUiAccessibilitySemantics(page, "library");
   await expectVisibleText(page, "[data-testid='page-library']", "实验工作台", "Library page should contain workbench copy");
   await expectVisibleText(page, "[data-testid='page-library']", "对应问题", "Library algorithm catalog did not render Chinese problem-fit text");
   await page.locator("[data-testid='algorithm-language-en']").click();
@@ -94,6 +96,7 @@ try {
           "library_workbench_boundary",
           "algorithm_catalog_language_switch",
           "algorithm_catalog_problem_fit",
+          "ui_accessibility_semantics",
         ],
         code_server_websocket_url: codeServerWebsocketUrl,
         observed_websocket_count: websocketEvents.length,
@@ -128,6 +131,23 @@ async function expectNotVisibleText(page, selector, text, message) {
   const count = await page.locator(selector).getByText(text, { exact: false }).count();
   if (count !== 0) {
     throw new Error(`${message}: found ${count} visible match(es) for ${JSON.stringify(text)}`);
+  }
+}
+
+async function assertUiAccessibilitySemantics(page, label) {
+  const selectedWithoutState = await page.locator("button.selected:not([aria-pressed]):not([aria-current])").count();
+  if (selectedWithoutState !== 0) {
+    throw new Error(`${label} page has ${selectedWithoutState} selected button(s) without aria state`);
+  }
+
+  const titleOnlyButtons = await page.locator("button[title]:not([aria-label])").count();
+  if (titleOnlyButtons !== 0) {
+    throw new Error(`${label} page has ${titleOnlyButtons} title-only button(s)`);
+  }
+
+  const mainInput = page.locator("[data-testid='chat-main-input']");
+  if ((await mainInput.count()) > 0 && !(await mainInput.first().getAttribute("aria-label"))) {
+    throw new Error("Chat main input is missing an aria-label");
   }
 }
 
