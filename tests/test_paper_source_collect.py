@@ -323,6 +323,12 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。",
         ),
         (
+            "Quantification of total uncertainty in the physics-informed reconstruction of CVSim-6 physiology",
+            "MC X-TFC uses random projections and Monte-Carlo sampling to estimate states and parameters of a six-compartment stiff ODE physiology model under aleatoric, epistemic, and model-form uncertainty, sparse noisy data, and model-form misspecification.",
+            "Audit physics-informed CVSim-6 physiology reconstruction under aleatoric, epistemic, and model-form uncertainty decomposition, MC X-TFC random-projection Monte-Carlo sampling, sparse noisy data, parameter/state estimation, and model-misspecification constraints.",
+            "审计 physics-informed CVSim-6 physiology reconstruction，并检查 aleatoric、epistemic 与 model-form uncertainty decomposition、MC X-TFC random-projection Monte-Carlo sampling、稀疏噪声数据、parameter/state estimation 和 model-misspecification 约束。",
+        ),
+        (
             "Representation Meets Optimization: Training PINNs and PIKANs for Gray-Box Discovery in Systems Pharmacology",
             "PIKANs use Kolmogorov-Arnold networks and optimizers for systems pharmacology modeling under ill-posed, non-unique, and data-sparse gray-box discovery conditions.",
             "Audit PINN and PIKAN gray-box systems-pharmacology discovery under representation choice, optimizer schedule, training configuration, numerical precision, scalability, and data-sparse non-unique inverse-problem constraints.",

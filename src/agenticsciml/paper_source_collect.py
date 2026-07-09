@@ -176,6 +176,8 @@ def _real_problem(title: str, summary: str) -> str:
         return "Validate state-space or Mamba neural operators for dynamical systems under long-range dependency, extrapolation, chaotic rollout, and computational-efficiency constraints."
     if "systems pharmacology" in text:
         return "Audit PINN and PIKAN gray-box systems-pharmacology discovery under representation choice, optimizer schedule, training configuration, numerical precision, scalability, and data-sparse non-unique inverse-problem constraints."
+    if "cvsim-6" in text or ("total uncertainty" in text and "physiology" in text):
+        return "Audit physics-informed CVSim-6 physiology reconstruction under aleatoric, epistemic, and model-form uncertainty decomposition, MC X-TFC random-projection Monte-Carlo sampling, sparse noisy data, parameter/state estimation, and model-misspecification constraints."
     if any(term in text for term in ("biomedical", "biofluid", "biosolid", "medical imaging", "cell signaling", "physiological", "pharmacology")):
         return "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints."
     if any(term in text for term in ("bayesian", "dteki", "hmc", "ensemble kalman", "tikhonov")) and any(
@@ -311,6 +313,8 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "验证 dynamical system 的 state-space 或 Mamba neural operator，并检查 long-range dependency、外推、chaotic rollout 和计算效率约束。"
     if "systems pharmacology" in text:
         return "审计 PINN 与 PIKAN 的 gray-box systems-pharmacology discovery，并检查 representation choice、optimizer schedule、training configuration、数值精度、可扩展性和数据稀缺非唯一反问题约束。"
+    if "cvsim-6" in text or ("total uncertainty" in text and "physiology" in text):
+        return "审计 physics-informed CVSim-6 physiology reconstruction，并检查 aleatoric、epistemic 与 model-form uncertainty decomposition、MC X-TFC random-projection Monte-Carlo sampling、稀疏噪声数据、parameter/state estimation 和 model-misspecification 约束。"
     if any(term in text for term in ("biomedical", "biofluid", "biosolid", "medical imaging", "cell signaling", "physiological", "pharmacology")):
         return "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。"
     if any(term in text for term in ("bayesian", "dteki", "hmc", "ensemble kalman", "tikhonov")) and any(

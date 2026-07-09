@@ -178,6 +178,8 @@ OKF-like JSON 知识图谱。
   前者保留 Newton-Raphson / IMEX、Krylov + neural-operator composition、reaction-diffusion/fluid/solid-mechanics
   覆盖；后者保留 Jacobi/Gauss-Seidel/Krylov、DeepONet coarse preconditioning、spectrum-split error 和
   preference selection。
+- CVSim-6 physiology uncertainty 论文现在会落到 total uncertainty decomposition、MC X-TFC、sparse noisy
+  data、state/parameter estimation 和 model-form misspecification 审计，不再退回 generic biomedical review。
 
 边界：
 
