@@ -16,6 +16,8 @@ def test_source_mapping_themes_ignore_substring_false_positives() -> None:
     many_body_themes = _mapping_themes("many-body complex systems with message passing neural operators")
     multitask_themes = _mapping_themes("multi-task DeepONet with task coupling for PDE workflows")
     closure_themes = _mapping_themes("PINN-trained turbulence closures across bluff-body shapes under solver stability")
+    risk_design_themes = _mapping_themes("risk-aware set-based engineering design with CVaR and CFD evidence")
+    method_substrate_themes = _mapping_themes("GRAFT-ATHENA adaptive factored trees grow a reusable method substrate")
 
     assert "agent" not in themes
     assert "engine" not in themes
@@ -28,6 +30,8 @@ def test_source_mapping_themes_ignore_substring_false_positives() -> None:
     assert "many_body_operator" in many_body_themes
     assert "multitask_operator" in multitask_themes
     assert "turbulence_closure" in closure_themes
+    assert "risk_design" in risk_design_themes
+    assert "method_substrate" in method_substrate_themes
 
 
 def test_paper_problem_loop_audit_writes_passed_bilingual_artifact(tmp_path: Path) -> None:

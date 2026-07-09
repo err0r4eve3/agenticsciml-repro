@@ -21,6 +21,8 @@ LOOP_HEALTH_JSON = "paper_problem_loop_health.json"
 SOURCE_MAPPING_THEMES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("llm", ("llm", "large language model", "chatgpt", "claude", "deepseek")),
     ("agent", ("agent", "multi-agent", "agentic")),
+    ("risk_design", ("risk-aware", "set-based", "cvar", "engineering design", "airfoil", "cfd")),
+    ("method_substrate", ("graft-athena", "adaptive factored trees", "action-space", "action space", "method substrate", "probabilistic-tree", "production-solver")),
     ("sciml_workflow", ("sciml", "scientific ml", "scientific machine learning")),
     ("operator_learning", ("operator", "deeponet", "fno", "neural operator", "laplace neural operator", "pilno", "surrogate", "parametric")),
     ("multitask_operator", ("multi-task", "multitask", "mt-deeponet", "synergistic learning", "task coupling", "task-coupling")),

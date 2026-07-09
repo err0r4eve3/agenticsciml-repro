@@ -154,6 +154,10 @@ def _real_problem(title: str, summary: str) -> str:
         return "Benchmark LLM capability for scientific computing and SciML tasks while preserving model-specific failure modes and decision points."
     if "multi-agent systems" in text and "control" in text:
         return "Assess physics-informed operator networks for real-time optimal control of multi-agent dynamical systems under stability constraints."
+    if any(term in text for term in ("risk-aware set-based", "set-based engineering design", "cvar", "airfoil design")):
+        return "Audit risk-aware multi-agent engineering-design workflows under CVaR filtering, human-in-the-loop review, tool validation, and CFD evidence constraints."
+    if any(term in text for term in ("graft-athena", "adaptive factored trees", "self-improving agentic", "autonomous discovery", "action space")):
+        return "Audit self-improving agentic scientific-discovery workflows under reusable method substrates, action-space expansion, probabilistic-tree policy, and production-solver evidence constraints."
     if "agent" in text or "llm" in text:
         return "Audit long-horizon agent or LLM workflows with verifiable outcomes and explicit failure boundaries."
     if "multiple solutions" in text or "solution multiplicity" in text:
@@ -239,6 +243,10 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "评测 LLM 在 scientific computing 和 SciML 任务中的能力，同时保留模型特定失败模式和决策点。"
     if "multi-agent systems" in text and "control" in text:
         return "评估 real-time optimal control 中的 physics-informed operator network，并检查多智能体动力系统稳定性约束。"
+    if any(term in text for term in ("risk-aware set-based", "set-based engineering design", "cvar", "airfoil design")):
+        return "审计 risk-aware multi-agent engineering-design 工作流，并检查 CVaR 过滤、human-in-the-loop review、工具验证和 CFD 证据约束。"
+    if any(term in text for term in ("graft-athena", "adaptive factored trees", "self-improving agentic", "autonomous discovery", "action space")):
+        return "审计 self-improving agentic scientific-discovery 工作流，并检查可复用 method substrate、action-space expansion、probabilistic-tree policy 和 production-solver 证据约束。"
     if "agent" in text or "llm" in text:
         return "审计长周期 agent 或 LLM 工作流，要求结果可验证并显式记录失败边界。"
     if "multiple solutions" in text or "solution multiplicity" in text:

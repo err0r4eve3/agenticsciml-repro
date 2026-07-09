@@ -164,6 +164,18 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "评测 LLM 在 scientific computing 和 SciML 任务中的能力，同时保留模型特定失败模式和决策点。",
         ),
         (
+            "Agentic Risk-Aware Set-Based Engineering Design",
+            "A multi-agent LLM framework performs airfoil design with CVaR risk filtering and high-fidelity CFD evidence.",
+            "Audit risk-aware multi-agent engineering-design workflows under CVaR filtering, human-in-the-loop review, tool validation, and CFD evidence constraints.",
+            "审计 risk-aware multi-agent engineering-design 工作流，并检查 CVaR 过滤、human-in-the-loop review、工具验证和 CFD 证据约束。",
+        ),
+        (
+            "GRAFT-ATHENA: Self-Improving Agentic Teams for Autonomous Discovery and Evolutionary Numerical Algorithms",
+            "GRAFT projects combinatorial decisions into adaptive factored trees and expands its own action space across production solvers.",
+            "Audit self-improving agentic scientific-discovery workflows under reusable method substrates, action-space expansion, probabilistic-tree policy, and production-solver evidence constraints.",
+            "审计 self-improving agentic scientific-discovery 工作流，并检查可复用 method substrate、action-space expansion、probabilistic-tree policy 和 production-solver 证据约束。",
+        ),
+        (
             "DeepVIVONet: Using deep neural operators to optimize sensor locations with application to vortex-induced vibrations",
             "Sparse spatio-temporal measurements reconstruct and forecast vortex-induced vibrations of a marine riser.",
             "Optimize sparse sensor placement for vortex-induced vibration reconstruction and forecasting under transfer-learning constraints.",
