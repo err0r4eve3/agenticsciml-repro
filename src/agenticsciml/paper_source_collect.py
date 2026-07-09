@@ -206,6 +206,8 @@ def _real_problem(title: str, summary: str) -> str:
         return "Diagnose spectral-bias high-frequency failure modes in convolutional neural operators and validate HFS controls for multiscale single- and two-phase fluid systems against diffusion-conditioned baselines."
     if "diffusion model" in text and ("turbulence" in text or "turbulent" in text):
         return "Validate diffusion-corrected neural operator surrogates for turbulent-flow spectral fidelity, high-frequency structure, and long-horizon rollout stability."
+    if "in-context operator" in text and ("spectral audit" in text or "tangent operator" in text or "jacobian" in text):
+        return "Audit in-context operator networks with Jacobian-based spectral tangent-operator diagnostics for local PDE mechanism fidelity, stability, sensitivity, and prompt consistency beyond prediction error."
     if "spectral bias" in text or "high-frequency" in text or "frequency-resolved" in text:
         return "Diagnose high-frequency failure modes in physics-informed or operator learning and test mitigation controls."
     if "laplace neural operator" in text or "pilno" in text or "virtual inputs" in text or "out-of-distribution" in text:
@@ -303,6 +305,8 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "诊断 convolutional neural operator 的 spectral-bias 高频失效模式，并验证 HFS 控制在多尺度单相/两相流体系统中相对 diffusion-conditioned baseline 的效果。"
     if "diffusion model" in text and ("turbulence" in text or "turbulent" in text):
         return "验证 turbulent-flow spectral fidelity 的 diffusion-corrected neural operator surrogate，并检查高频结构和长周期 rollout 稳定性。"
+    if "in-context operator" in text and ("spectral audit" in text or "tangent operator" in text or "jacobian" in text):
+        return "用基于 Jacobian 的 spectral tangent-operator 诊断审计 in-context operator network，并检查 local PDE mechanism fidelity、稳定性、敏感性和 prompt consistency，而不只看预测误差。"
     if "spectral bias" in text or "high-frequency" in text or "frequency-resolved" in text:
         return "诊断 physics-informed 或 operator learning 中的高频失效模式，并测试缓解控制。"
     if "laplace neural operator" in text or "pilno" in text or "virtual inputs" in text or "out-of-distribution" in text:

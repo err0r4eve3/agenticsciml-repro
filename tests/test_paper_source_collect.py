@@ -80,6 +80,12 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "诊断 physics-informed 或 operator learning 中的高频失效模式，并测试缓解控制。",
         ),
         (
+            "Spectral Audit of In-Context Operator Networks",
+            "A Jacobian-based spectral audit views the query-function derivative as a learned tangent operator and detects high-frequency degradation, sensitivity failures, and prompt-operator inconsistencies.",
+            "Audit in-context operator networks with Jacobian-based spectral tangent-operator diagnostics for local PDE mechanism fidelity, stability, sensitivity, and prompt consistency beyond prediction error.",
+            "用基于 Jacobian 的 spectral tangent-operator 诊断审计 in-context operator network，并检查 local PDE mechanism fidelity、稳定性、敏感性和 prompt consistency，而不只看预测误差。",
+        ),
+        (
             "Mitigating Spectral Bias in Neural Operators via High-Frequency Scaling for Physical Systems",
             "High-frequency scaling mitigates spectral bias in convolutional neural operators for turbulence and two-phase flow systems, with diffusion models used as conditioned baselines.",
             "Diagnose spectral-bias high-frequency failure modes in convolutional neural operators and validate HFS controls for multiscale single- and two-phase fluid systems against diffusion-conditioned baselines.",

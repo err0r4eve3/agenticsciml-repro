@@ -96,6 +96,9 @@ OKF-like JSON 知识图谱。
   neural preconditioning 问题。
 - NeuroSEM 论文摘要中的 Rayleigh-Bénard 场景不再触发 AIVT/KAN field-inference 路由；它会稳定落到
   hybrid PINN + spectral-element solver 的 multiphysics/data-assimilation 审计。
+- In-context operator spectral audit 论文现在优先落到 Jacobian / tangent-operator 的 local PDE
+  mechanism fidelity、stability、sensitivity 和 prompt consistency 审计，而不是 generic spectral-bias
+  mitigation 问题。
 - Web 保存与生产循环审计现在复用同一个 LLM Wiki OKF schema gate：根对象、所有节点和边都必须保留
   中英文槽位，边必须引用现有节点；旧格式 account Wiki 若不满足当前 schema，会回退到自动生成图谱而不是继续返回坏上下文。
 - 自动 Wiki 的 project/workflow/paper task/benchmark/algorithm 节点现在写入中文标题、中文说明和中文标签，
