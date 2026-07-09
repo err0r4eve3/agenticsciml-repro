@@ -135,7 +135,7 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
         ),
         (
             "FMEnets: Flow, Material, and Energy networks for non-ideal plug flow reactor design",
-            "A physics-informed framework predicts flow, material and energy states for reactor design.",
+            "A physics-informed framework predicts flow, material and energy states for reactor design with independent optimizers.",
             "Validate multi-output neural operator surrogates for stiff chemical kinetics under conservation, stiffness, and CFD-coupling constraints.",
             "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。",
         ),
@@ -183,7 +183,7 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
         ),
         (
             "Physics-Informed Machine Learning in Biomedical Science and Engineering",
-            "Biomedical PIML reviews PINNs, NODEs and neural operators for biofluid mechanics and cell signaling.",
+            "Biomedical PIML reviews PINNs, NODEs and neural operators for biofluid mechanics, cell signaling, and uncertainty quantification.",
             "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints.",
             "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。",
         ),
@@ -204,6 +204,12 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "A symplectic operator network learns real-time optimal control of multi-agent systems.",
             "Assess physics-informed operator networks for real-time optimal control of multi-agent dynamical systems under stability constraints.",
             "评估 real-time optimal control 中的 physics-informed operator network，并检查多智能体动力系统稳定性约束。",
+        ),
+        (
+            "Generalizable turbulence closures across bluff-body shapes by PINN-based solver-agnostic training",
+            "The RANS residual trains closures without deriving adjoints; the final closure must remain solver-stable across bluff-body wakes.",
+            "Assess PINN-trained turbulence closures across bluff-body shapes under solver stability, geometry generalization, and closure-model constraints.",
+            "评估跨 bluff-body 形状的 PINN-trained turbulence closure，并检查求解器稳定性、几何泛化和 closure-model 约束。",
         ),
         (
             "Connecting the geometry and dynamics of many-body complex systems with message passing neural operators",

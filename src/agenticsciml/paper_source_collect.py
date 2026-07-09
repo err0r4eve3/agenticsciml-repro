@@ -158,18 +158,22 @@ def _real_problem(title: str, summary: str) -> str:
         return "Audit long-horizon agent or LLM workflows with verifiable outcomes and explicit failure boundaries."
     if "multiple solutions" in text or "solution multiplicity" in text:
         return "Audit PINN discovery of multiple nonlinear ODE/PDE solutions under initialization, ensemble diversity, and solver-refinement constraints."
+    if "systems pharmacology" in text:
+        return "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints."
+    if any(term in text for term in ("biomedical", "biofluid", "biosolid", "medical imaging", "cell signaling", "physiological", "pharmacology")):
+        return "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints."
     if any(term in text for term in ("uncertainty quantification", "bayesian", "dropout", "repulsive ensemble")) and (
         "pinn" in text or "physics-informed" in text or "turbulence" in text or "turbulent" in text
     ):
         return "Audit uncertainty calibration for physics-informed turbulent-flow inverse modeling under Bayesian, dropout, and ensemble tradeoffs."
     if "meta-solver" in text or "meta solver" in text or "multi-objective" in text or "pareto" in text:
         return "Audit automated meta-solver discovery for time-dependent PDEs under accuracy, speed, memory, and preference-selection tradeoffs."
-    if "systems pharmacology" in text:
-        return "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints."
     if any(term in text for term in ("sensor location", "sensor placement", "vortex-induced", "marine riser", "deepvivonet")):
         return "Optimize sparse sensor placement for vortex-induced vibration reconstruction and forecasting under transfer-learning constraints."
     if any(term in text for term in ("hypersonic", "supersonic", "reentry", "arbitrary grids", "geometry-dependent")):
         return "Validate data-efficient neural operator surrogates for geometry-dependent hypersonic or supersonic flow prediction on scarce data."
+    if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical", "plug flow reactor", "reactor design")):
+        return "Validate multi-output neural operator surrogates for stiff chemical kinetics under conservation, stiffness, and CFD-coupling constraints."
     if any(term in text for term in ("optimizer", "natural gradient", "bfgs", "broyden", "curvature-aware")):
         return "Audit optimizer and conditioning choices for high-accuracy PINN convergence on challenging PDE or ODE systems."
     if "newton" in text or "nonlinear solver" in text or "nonlinear system" in text:
@@ -180,6 +184,8 @@ def _real_problem(title: str, summary: str) -> str:
         return "Audit online ML bias-correction for Earth-system models under stability, portability, and runtime cadence constraints."
     if "stabilization" in text or "hji" in text or "lyapunov" in text or "differential game" in text:
         return "Assess robust safe-control learning for nonlinear dynamical systems under adversarial disturbances and stability constraints."
+    if any(term in text for term in ("turbulence closure", "turbulence closures", "bluff-body", "rans residual", "reynolds stress", "reynolds force")):
+        return "Assess PINN-trained turbulence closures across bluff-body shapes under solver stability, geometry generalization, and closure-model constraints."
     if "optimal control" in text or "adjoint" in text or "direct vs indirect" in text:
         return "Compare PINN control formulations against adjoint or optimality-system baselines for PDE-constrained control."
     if "spectral bias" in text or "high-frequency" in text or "frequency-resolved" in text:
@@ -190,10 +196,6 @@ def _real_problem(title: str, summary: str) -> str:
         "pinn" in text or "physics-informed" in text or "multiphysics" in text
     ):
         return "Validate hybrid PINN and spectral-element workflows for coupled multiphysics simulation under data assimilation, solver integration, and turbulence robustness constraints."
-    if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical", "plug flow reactor", "reactor design")):
-        return "Validate multi-output neural operator surrogates for stiff chemical kinetics under conservation, stiffness, and CFD-coupling constraints."
-    if any(term in text for term in ("biomedical", "biofluid", "biosolid", "medical imaging", "cell signaling", "physiological", "pharmacology")):
-        return "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints."
     if any(term in text for term in ("crack nucleation", "crack propagation", "brittle", "fracture", "phase-field")):
         return "Validate DeepONet surrogates for brittle-fracture crack nucleation and propagation under phase-field physics constraints."
     if any(term in text for term in ("kolmogorov-arnold", "kkan", "kan", "information bottleneck", "geometric complexity")):
@@ -235,18 +237,22 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "审计长周期 agent 或 LLM 工作流，要求结果可验证并显式记录失败边界。"
     if "multiple solutions" in text or "solution multiplicity" in text:
         return "审计 PINN 对非线性 ODE/PDE 多解的发现能力，并检查初始化、ensemble 多样性和求解器细化约束。"
+    if "systems pharmacology" in text:
+        return "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。"
+    if any(term in text for term in ("biomedical", "biofluid", "biosolid", "medical imaging", "cell signaling", "physiological", "pharmacology")):
+        return "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。"
     if any(term in text for term in ("uncertainty quantification", "bayesian", "dropout", "repulsive ensemble")) and (
         "pinn" in text or "physics-informed" in text or "turbulence" in text or "turbulent" in text
     ):
         return "审计 physics-informed 湍流反问题建模中的不确定性校准，并权衡 Bayesian、dropout 和 ensemble 方法。"
     if "meta-solver" in text or "meta solver" in text or "multi-objective" in text or "pareto" in text:
         return "审计 time-dependent PDE 的自动 meta-solver 发现，并权衡精度、速度、内存和偏好选择。"
-    if "systems pharmacology" in text:
-        return "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。"
     if any(term in text for term in ("sensor location", "sensor placement", "vortex-induced", "marine riser", "deepvivonet")):
         return "优化 vortex-induced vibration 重建与 forecasting 的稀疏传感器布置，并检查 transfer-learning 约束。"
     if any(term in text for term in ("hypersonic", "supersonic", "reentry", "arbitrary grids", "geometry-dependent")):
         return "验证稀缺数据下 geometry-dependent hypersonic 或 supersonic flow 预测的高效神经算子 surrogate。"
+    if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical", "plug flow reactor", "reactor design")):
+        return "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。"
     if any(term in text for term in ("optimizer", "natural gradient", "bfgs", "broyden", "curvature-aware")):
         return "审计 optimizer 与 conditioning 选择对高精度 PINN 在困难 PDE 或 ODE 系统上收敛的影响。"
     if "newton" in text or "nonlinear solver" in text or "nonlinear system" in text:
@@ -257,6 +263,8 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "审计 Earth-system model 的在线 ML 偏差校正，同时检查稳定性、可迁移性和运行 cadence 约束。"
     if "stabilization" in text or "hji" in text or "lyapunov" in text or "differential game" in text:
         return "评估非线性动力系统在对抗扰动和稳定性约束下的鲁棒安全控制学习。"
+    if any(term in text for term in ("turbulence closure", "turbulence closures", "bluff-body", "rans residual", "reynolds stress", "reynolds force")):
+        return "评估跨 bluff-body 形状的 PINN-trained turbulence closure，并检查求解器稳定性、几何泛化和 closure-model 约束。"
     if "optimal control" in text or "adjoint" in text or "direct vs indirect" in text:
         return "对比 PINN 控制 formulation 与伴随法或最优性系统基线在 PDE 约束控制中的表现。"
     if "spectral bias" in text or "high-frequency" in text or "frequency-resolved" in text:
@@ -267,10 +275,6 @@ def _real_problem_zh(title: str, summary: str) -> str:
         "pinn" in text or "physics-informed" in text or "multiphysics" in text
     ):
         return "验证混合 PINN 与 spectral-element 工作流在耦合 multiphysics 模拟中的数据同化、求解器集成和湍流鲁棒性。"
-    if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical", "plug flow reactor", "reactor design")):
-        return "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。"
-    if any(term in text for term in ("biomedical", "biofluid", "biosolid", "medical imaging", "cell signaling", "physiological", "pharmacology")):
-        return "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。"
     if any(term in text for term in ("crack nucleation", "crack propagation", "brittle", "fracture", "phase-field")):
         return "验证 brittle-fracture crack nucleation 与 propagation 的 DeepONet surrogate，并检查 phase-field 物理约束。"
     if any(term in text for term in ("kolmogorov-arnold", "kkan", "kan", "information bottleneck", "geometric complexity")):

@@ -76,6 +76,9 @@ OKF-like JSON 知识图谱。
 - Many-body message-passing neural operator 与 multi-task DeepONet 论文现在分别落到
   complex-system geometry/dynamics 和 PDE task-coupling/geometry-generalization 审计问题，不再退回过宽的
   neural operator reliability 问题。
+- Source collection 的 domain-specific 规则现在优先于泛化方法词：reactor 论文不会因 `optimizer`
+  退回 PINN optimizer，biomedical review 不会因 `uncertainty quantification` 退回湍流不确定性审计，
+  turbulence closure 论文不会因 `adjoints` 退回 PDE control 对比。
 - Web 保存与生产循环审计现在复用同一个 LLM Wiki OKF schema gate：根对象、所有节点和边都必须保留
   中英文槽位，边必须引用现有节点；旧格式 account Wiki 若不满足当前 schema，会回退到自动生成图谱而不是继续返回坏上下文。
 - 自动 Wiki 的 project/workflow/paper task/benchmark/algorithm 节点现在写入中文标题、中文说明和中文标签，
