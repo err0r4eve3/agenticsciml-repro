@@ -94,6 +94,10 @@ OKF-like JSON 知识图谱。
   hypersonic surrogate 或 sensor placement 等具体场景路由。
 - Mapping audit 新增 high-speed-flow 主题，让 hypersonic / supersonic / reentry surrogate 不只靠
   `operator_learning` 泛化主题对齐。
+- Mapping audit 新增 reliability 主题，并把单独的 `stability` 从 safe-control 主题中移出，避免普通
+  stability / fidelity diagnostics 被误读成安全控制。
+- Fluid 主题识别 `turbulent`，让 `turbulent-flow` 场景不只靠 operator-learning 主题对齐；仍不恢复裸
+  `flow`，避免误命中 workflow。
 
 边界：
 

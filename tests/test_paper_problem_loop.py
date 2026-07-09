@@ -11,12 +11,17 @@ from agenticsciml.paper_problem_loop import _mapping_themes, write_paper_problem
 def test_source_mapping_themes_ignore_substring_false_positives() -> None:
     themes = _mapping_themes("tangent behavior in biomedical science and engineering with neural operators")
     high_speed_themes = _mapping_themes("geometry-dependent hypersonic and supersonic flow surrogate")
+    reliability_themes = _mapping_themes("operator reliability, stability, fidelity, and sensitivity diagnostics")
+    fluid_themes = _mapping_themes("turbulent-flow super-resolution and sparse reconstruction")
 
     assert "agent" not in themes
     assert "engine" not in themes
     assert "biomedical" in themes
     assert "operator_learning" in themes
     assert "high_speed_flow" in high_speed_themes
+    assert "reliability" in reliability_themes
+    assert "safe_control" not in reliability_themes
+    assert "fluid" in fluid_themes
 
 
 def test_paper_problem_loop_audit_writes_passed_bilingual_artifact(tmp_path: Path) -> None:
