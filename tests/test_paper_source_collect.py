@@ -86,6 +86,12 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "用基于 Jacobian 的 spectral tangent-operator 诊断审计 in-context operator network，并检查 local PDE mechanism fidelity、稳定性、敏感性和 prompt consistency，而不只看预测误差。",
         ),
         (
+            "UFO: A Domain-Unification-Free Operator Framework for Generalized Operator Learning",
+            "A cross-domain neural operator enables discretization decoupling across irregular sampling, spectral mismatch, nonlinear dynamics, and stochastic high-frequency fields.",
+            "Validate cross-domain neural operator frameworks for discretization-decoupled generalized operator learning under irregular sampling, spectral mismatch, distribution shift, and arbitrary-resolution query constraints.",
+            "验证 discretization-decoupled generalized operator learning 的 cross-domain neural operator framework，并检查 irregular sampling、spectral mismatch、distribution shift 和任意分辨率查询约束。",
+        ),
+        (
             "Mitigating Spectral Bias in Neural Operators via High-Frequency Scaling for Physical Systems",
             "High-frequency scaling mitigates spectral bias in convolutional neural operators for turbulence and two-phase flow systems, with diffusion models used as conditioned baselines.",
             "Diagnose spectral-bias high-frequency failure modes in convolutional neural operators and validate HFS controls for multiscale single- and two-phase fluid systems against diffusion-conditioned baselines.",
