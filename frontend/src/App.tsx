@@ -131,6 +131,11 @@ const RUN_MODE_LABELS: Record<RunMode, string> = {
   dry_run: "dry_run（预演）",
   real: "real（真实模型）"
 };
+const RUN_MODE_LABEL_PARTS: Record<RunMode, { en: string; zh: string }> = {
+  mock: { en: "mock", zh: "模拟" },
+  dry_run: { en: "dry_run", zh: "预演" },
+  real: { en: "real", zh: "真实模型" }
+};
 const RUN_STATE_LABELS: Record<string, string> = {
   allowed: "允许",
   blocked: "已阻止",
@@ -2371,7 +2376,7 @@ function TopBar({
               type="button"
               onClick={() => onModeChange(item)}
             >
-              {RUN_MODE_LABELS[item]}
+              <RunModeButtonLabel mode={item} />
             </button>
           ))}
         </div>
@@ -2877,7 +2882,7 @@ function RunConfigPanel({
                 type="button"
                 onClick={() => onModeChange(item)}
               >
-                {RUN_MODE_LABELS[item]}
+                <RunModeButtonLabel mode={item} />
               </button>
             ))}
           </div>
@@ -4117,6 +4122,16 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 function StatusBadge({ children, tone }: { children: ReactNode; tone: "neutral" | "good" | "bad" | "info" }) {
   return <span className={`status-badge ${tone}`}>{children}</span>;
+}
+
+function RunModeButtonLabel({ mode }: { mode: RunMode }) {
+  const label = RUN_MODE_LABEL_PARTS[mode];
+  return (
+    <span className="run-mode-button-label">
+      <span>{label.en}</span>
+      <span>{label.zh}</span>
+    </span>
+  );
 }
 
 function parseJsonObject(text: string): Record<string, unknown> | null {

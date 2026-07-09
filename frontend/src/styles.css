@@ -334,7 +334,7 @@ ul {
 
 .topbar {
   display: grid;
-  grid-template-columns: minmax(160px, 220px) minmax(360px, 1fr);
+  grid-template-columns: minmax(160px, 220px) minmax(360px, 1fr) minmax(120px, 220px);
   align-items: center;
   gap: 16px;
   min-height: 72px;
@@ -1873,6 +1873,7 @@ ul {
   min-height: 28px;
   border-color: transparent;
   background: transparent;
+  text-align: center;
 }
 
 .segmented .selected {
@@ -1880,6 +1881,17 @@ ul {
   background: #fff8ed;
   box-shadow: 0 1px 4px rgba(64, 43, 24, 0.08);
   color: var(--green-strong);
+}
+
+.run-mode-button-label {
+  display: grid;
+  gap: 1px;
+  justify-items: center;
+  line-height: 1.05;
+}
+
+.run-mode-button-label span:first-child {
+  white-space: nowrap;
 }
 
 .assistant-mode-wrap {
