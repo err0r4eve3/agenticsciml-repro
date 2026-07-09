@@ -123,7 +123,7 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
         ),
         (
             "AMORE: Adaptive Multi-Output Operator Network for Stiff Chemical Kinetics",
-            "Adaptive losses predict thermochemical states for combustion and reactive transport systems.",
+            "Adaptive losses predict thermochemical states for combustion, hypersonics, and reactive transport systems.",
             "Validate multi-output neural operator surrogates for stiff chemical kinetics under conservation, stiffness, and CFD-coupling constraints.",
             "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。",
         ),
