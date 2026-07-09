@@ -123,7 +123,7 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
         ),
         (
             "NeuroSEM: A hybrid framework for simulating multiphysics problems by coupling PINNs and spectral elements",
-            "NeuroSEM integrates PINNs with the Spectral Element Method solver for turbulence-aware multiphysics simulation.",
+            "NeuroSEM integrates PINNs with the Spectral Element Method solver for Rayleigh-Bénard convection, noisy data, and turbulence-aware multiphysics simulation.",
             "Validate hybrid PINN and spectral-element workflows for coupled multiphysics simulation under data assimilation, solver integration, and turbulence robustness constraints.",
             "验证混合 PINN 与 spectral-element 工作流在耦合 multiphysics 模拟中的数据同化、求解器集成和湍流鲁棒性。",
         ),
