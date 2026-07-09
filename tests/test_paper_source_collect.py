@@ -80,6 +80,12 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "对比 PDE-constrained inverse problem 中的 adjoint optimization 与 PINN，并检查 formulation、parameterization、regularization、成本和 warm-start 取舍。",
         ),
         (
+            "Generalizable turbulence closures across bluff-body shapes by PINN-based solver-agnostic training",
+            "Data-driven turbulence closures are calibrated by inverse methods, but this PINN-based workflow imposes RANS residuals, avoids deriving adjoints, and deploys frozen Reynolds stress and Reynolds force closures across bluff-body wakes.",
+            "Assess PINN-trained turbulence closures across bluff-body shapes under solver stability, geometry generalization, and closure-model constraints.",
+            "评估跨 bluff-body 形状的 PINN-trained turbulence closure，并检查求解器稳定性、几何泛化和 closure-model 约束。",
+        ),
+        (
             "State-space models are accurate and efficient neural operators for dynamical systems",
             "Mamba state-space models improve neural operator learning for long-range dependencies, extrapolation, and chaotic dynamics, with a pharmacology application under limited data.",
             "Validate state-space or Mamba neural operators for dynamical systems under long-range dependency, extrapolation, chaotic rollout, and computational-efficiency constraints.",

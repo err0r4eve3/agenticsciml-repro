@@ -186,6 +186,8 @@ def _real_problem(title: str, summary: str) -> str:
         return "Validate multi-output neural operator surrogates for stiff chemical kinetics under conservation, stiffness, and CFD-coupling constraints."
     if any(term in text for term in ("hypersonic", "supersonic", "reentry", "arbitrary grids", "geometry-dependent")):
         return "Validate data-efficient neural operator surrogates for geometry-dependent hypersonic or supersonic flow prediction on scarce data."
+    if any(term in text for term in ("turbulence closure", "turbulence closures", "bluff-body", "rans residual", "reynolds stress", "reynolds force")):
+        return "Assess PINN-trained turbulence closures across bluff-body shapes under solver stability, geometry generalization, and closure-model constraints."
     if "adjoint" in text and "pinn" in text and "inverse problem" in text:
         return "Compare adjoint optimization and PINNs for PDE-constrained inverse problems under matched formulations, parameterizations, regularization, cost, and warm-start tradeoffs."
     if any(term in text for term in ("optimizer", "natural gradient", "bfgs", "broyden", "curvature-aware")):
@@ -200,8 +202,6 @@ def _real_problem(title: str, summary: str) -> str:
         return "Audit online ML bias-correction for Earth-system models under stability, portability, and runtime cadence constraints."
     if "stabilization" in text or "hji" in text or "lyapunov" in text or "differential game" in text:
         return "Assess robust safe-control learning for nonlinear dynamical systems under adversarial disturbances and stability constraints."
-    if any(term in text for term in ("turbulence closure", "turbulence closures", "bluff-body", "rans residual", "reynolds stress", "reynolds force")):
-        return "Assess PINN-trained turbulence closures across bluff-body shapes under solver stability, geometry generalization, and closure-model constraints."
     if any(term in text for term in ("lagrangian velocity", "velocimetry-thermometry", "temperature fields")):
         return "Validate physics-informed KAN field-inference workflows for turbulent velocity and temperature reconstruction under sparse Lagrangian measurements and DNS-fidelity constraints."
     if "optimal control" in text or "adjoint" in text or "direct vs indirect" in text:
@@ -291,6 +291,8 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。"
     if any(term in text for term in ("hypersonic", "supersonic", "reentry", "arbitrary grids", "geometry-dependent")):
         return "验证稀缺数据下 geometry-dependent hypersonic 或 supersonic flow 预测的高效神经算子 surrogate。"
+    if any(term in text for term in ("turbulence closure", "turbulence closures", "bluff-body", "rans residual", "reynolds stress", "reynolds force")):
+        return "评估跨 bluff-body 形状的 PINN-trained turbulence closure，并检查求解器稳定性、几何泛化和 closure-model 约束。"
     if "adjoint" in text and "pinn" in text and "inverse problem" in text:
         return "对比 PDE-constrained inverse problem 中的 adjoint optimization 与 PINN，并检查 formulation、parameterization、regularization、成本和 warm-start 取舍。"
     if any(term in text for term in ("optimizer", "natural gradient", "bfgs", "broyden", "curvature-aware")):
@@ -305,8 +307,6 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "审计 Earth-system model 的在线 ML 偏差校正，同时检查稳定性、可迁移性和运行 cadence 约束。"
     if "stabilization" in text or "hji" in text or "lyapunov" in text or "differential game" in text:
         return "评估非线性动力系统在对抗扰动和稳定性约束下的鲁棒安全控制学习。"
-    if any(term in text for term in ("turbulence closure", "turbulence closures", "bluff-body", "rans residual", "reynolds stress", "reynolds force")):
-        return "评估跨 bluff-body 形状的 PINN-trained turbulence closure，并检查求解器稳定性、几何泛化和 closure-model 约束。"
     if any(term in text for term in ("lagrangian velocity", "velocimetry-thermometry", "temperature fields")):
         return "验证 turbulent velocity 与 temperature reconstruction 的 physics-informed KAN field-inference 工作流，并检查稀疏 Lagrangian measurements 和 DNS-fidelity 约束。"
     if "optimal control" in text or "adjoint" in text or "direct vs indirect" in text:
