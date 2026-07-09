@@ -2633,13 +2633,16 @@ tbody tr:hover,
     padding: 9px 12px;
   }
 
-  .nav-page span {
-    display: none;
+  .nav-page {
+    width: 46px;
+    min-height: 48px;
+    gap: 2px;
+    padding: 4px 2px;
   }
 
-  .nav-page {
-    width: 42px;
-    min-height: 42px;
+  .nav-page span {
+    font-size: 9px;
+    line-height: 1;
   }
 
   .pure-chat-thread {
