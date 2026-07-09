@@ -236,6 +236,12 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "审计 self-improving agentic scientific-discovery 工作流，并检查可复用 method substrate、action-space expansion、probabilistic-tree policy 和 production-solver 证据约束。",
         ),
         (
+            "ATHENA: Agentic Team for Hierarchical Evolutionary Numerical Algorithms",
+            "An agentic framework models scientific research as a knowledge-driven contextual bandit process, using conceptual scaffolding to design, verify, repair, and orchestrate symbolic-numeric scientific pipelines.",
+            "Audit agentic numerical-algorithm discovery workflows under conceptual scaffolding, contextual-bandit policy, solver construction, symbolic-numeric orchestration, verification, and repair constraints.",
+            "审计 agentic numerical-algorithm discovery 工作流，并检查 conceptual scaffolding、contextual-bandit policy、solver construction、symbolic-numeric orchestration、verification 和 repair 约束。",
+        ),
+        (
             "DeepVIVONet: Using deep neural operators to optimize sensor locations with application to vortex-induced vibrations",
             "Sparse spatio-temporal measurements reconstruct and forecast vortex-induced vibrations of a marine riser.",
             "Optimize sparse sensor placement for vortex-induced vibration reconstruction and forecasting under transfer-learning constraints.",
