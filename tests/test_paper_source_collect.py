@@ -80,6 +80,12 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "诊断 physics-informed 或 operator learning 中的高频失效模式，并测试缓解控制。",
         ),
         (
+            "Mitigating Spectral Bias in Neural Operators via High-Frequency Scaling for Physical Systems",
+            "High-frequency scaling mitigates spectral bias in convolutional neural operators for turbulence and two-phase flow systems, with diffusion models used as conditioned baselines.",
+            "Diagnose spectral-bias high-frequency failure modes in convolutional neural operators and validate HFS controls for multiscale single- and two-phase fluid systems against diffusion-conditioned baselines.",
+            "诊断 convolutional neural operator 的 spectral-bias 高频失效模式，并验证 HFS 控制在多尺度单相/两相流体系统中相对 diffusion-conditioned baseline 的效果。",
+        ),
+        (
             "Inferring turbulent velocity and temperature fields and their statistics from Lagrangian velocity measurements using physics-informed Kolmogorov-Arnold Networks",
             "AIVT reconstructs turbulent temperature fields from sparse Lagrangian velocity measurements at DNS-level fidelity.",
             "Validate physics-informed KAN field-inference workflows for turbulent velocity and temperature reconstruction under sparse Lagrangian measurements and DNS-fidelity constraints.",
