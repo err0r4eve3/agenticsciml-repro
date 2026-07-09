@@ -135,7 +135,7 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
         ),
         (
             "Physics-Informed Laplace Neural Operator for Solving Partial Differential Equations",
-            "PILNO uses virtual inputs for small-data and out-of-distribution PDE operator generalization.",
+            "PILNO uses virtual inputs for small-data and out-of-distribution PDE operator generalization across Burgers, Darcy, reaction-diffusion, and forced KdV benchmarks.",
             "Validate physics-informed neural operator surrogates for data-efficient PDE solving under small-data and out-of-distribution generalization constraints.",
             "验证数据稀缺和 OOD 泛化约束下用于 PDE 求解的 physics-informed neural operator surrogate。",
         ),
