@@ -342,9 +342,9 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
         ),
         (
             "PI-SONet: A Physics-Informed Symplectic Operator Network for Real-Time Optimal Control of Multi-Agent Systems",
-            "A symplectic operator network learns real-time optimal control of multi-agent systems.",
-            "Assess physics-informed operator networks for real-time optimal control of multi-agent dynamical systems under stability constraints.",
-            "评估 real-time optimal control 中的 physics-informed operator network，并检查多智能体动力系统稳定性约束。",
+            "A latent right-space solver and conditional symplectic operator approximate Pontryagin Maximum Principle solution maps, preserve Hamiltonian structure, generalize across unseen problem settings, and provide sub-second inference for high-dimensional multi-agent control.",
+            "Assess PI-SONet real-time optimal control for high-dimensional multi-agent systems under Pontryagin Maximum Principle solution-map learning, symplectic Hamiltonian preservation, latent right-space solver decomposition, unseen-configuration generalization, and sub-second reusable-operator inference constraints.",
+            "评估 high-dimensional multi-agent system 的 PI-SONet real-time optimal control，并检查 Pontryagin Maximum Principle solution-map learning、symplectic Hamiltonian preservation、latent right-space solver decomposition、unseen-configuration generalization 和 sub-second reusable-operator inference 约束。",
         ),
         (
             "Generalizable turbulence closures across bluff-body shapes by PINN-based solver-agnostic training",

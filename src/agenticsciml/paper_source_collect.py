@@ -152,6 +152,8 @@ def _real_problem(title: str, summary: str) -> str:
         "scientific computing" in text or "scientific machine learning" in text
     ):
         return "Benchmark LLM capability for scientific computing and SciML tasks while preserving model-specific failure modes and decision points."
+    if "pi-sonet" in text or "physics-informed symplectic operator network" in text:
+        return "Assess PI-SONet real-time optimal control for high-dimensional multi-agent systems under Pontryagin Maximum Principle solution-map learning, symplectic Hamiltonian preservation, latent right-space solver decomposition, unseen-configuration generalization, and sub-second reusable-operator inference constraints."
     if "multi-agent systems" in text and "control" in text:
         return "Assess physics-informed operator networks for real-time optimal control of multi-agent dynamical systems under stability constraints."
     if any(term in text for term in ("knowledge-guided multi-agent", "graph ontologist", "design knowledge graph")):
@@ -289,6 +291,8 @@ def _real_problem_zh(title: str, summary: str) -> str:
         "scientific computing" in text or "scientific machine learning" in text
     ):
         return "评测 LLM 在 scientific computing 和 SciML 任务中的能力，同时保留模型特定失败模式和决策点。"
+    if "pi-sonet" in text or "physics-informed symplectic operator network" in text:
+        return "评估 high-dimensional multi-agent system 的 PI-SONet real-time optimal control，并检查 Pontryagin Maximum Principle solution-map learning、symplectic Hamiltonian preservation、latent right-space solver decomposition、unseen-configuration generalization 和 sub-second reusable-operator inference 约束。"
     if "multi-agent systems" in text and "control" in text:
         return "评估 real-time optimal control 中的 physics-informed operator network，并检查多智能体动力系统稳定性约束。"
     if any(term in text for term in ("knowledge-guided multi-agent", "graph ontologist", "design knowledge graph")):

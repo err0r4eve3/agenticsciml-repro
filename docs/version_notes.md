@@ -180,6 +180,9 @@ OKF-like JSON 知识图谱。
   preference selection。
 - CVSim-6 physiology uncertainty 论文现在会落到 total uncertainty decomposition、MC X-TFC、sparse noisy
   data、state/parameter estimation 和 model-form misspecification 审计，不再退回 generic biomedical review。
+- PI-SONet 论文现在会保留 Pontryagin Maximum Principle solution-map、symplectic Hamiltonian preservation、
+  latent right-space solver、unseen-configuration generalization 和 sub-second reusable operator 边界，不再退回
+  generic multi-agent control。
 
 边界：
 
