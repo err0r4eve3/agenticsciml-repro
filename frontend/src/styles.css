@@ -228,6 +228,7 @@ ul {
   background: transparent;
   color: var(--ink-muted);
   padding: 6px 4px;
+  text-align: center;
 }
 
 .nav-page::before {
@@ -242,7 +243,7 @@ ul {
 
 .nav-page span {
   font-size: 10px;
-  line-height: 1;
+  line-height: 1.1;
 }
 
 .nav-page.selected {
@@ -494,8 +495,8 @@ ul {
   align-items: start;
   align-content: start;
   justify-content: stretch;
-  min-height: 92px;
-  gap: 4px;
+  min-height: 128px;
+  gap: 10px;
   border: 1px solid rgba(203, 183, 154, 0.7);
   border-radius: 8px;
   background: #fff7eb;
@@ -512,20 +513,26 @@ ul {
 
 .wiki-node-row strong {
   display: -webkit-box;
+  width: 100%;
+  min-width: 0;
   color: var(--ink);
   font-size: 13px;
-  line-height: 1.3;
+  line-height: 1.35;
   overflow: hidden;
+  overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
 .wiki-node-row span {
   display: -webkit-box;
+  width: 100%;
+  min-width: 0;
   color: var(--ink-muted);
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.5;
   overflow: hidden;
+  overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
@@ -533,13 +540,16 @@ ul {
 .wiki-node-row small,
 .wiki-node-row em {
   display: -webkit-box;
+  width: 100%;
+  min-width: 0;
   color: #79423a;
   font-size: 11px;
   font-style: normal;
   line-height: 1.4;
   overflow: hidden;
+  overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
 }
 
 .wiki-node-row em {
@@ -551,6 +561,18 @@ ul {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.wiki-editor-actions .icon-text-button {
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.wiki-editor-actions .icon-text-button svg {
+  flex: 0 0 auto;
 }
 
 .wiki-inspector {
@@ -573,6 +595,8 @@ ul {
 }
 
 .wiki-promotion-actions button {
+  align-items: center;
+  justify-content: center;
   min-height: 32px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -580,7 +604,10 @@ ul {
   color: var(--ink);
   font-size: 12px;
   font-weight: 700;
+  line-height: 1;
   padding: 0 10px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .wiki-form-grid {
