@@ -90,6 +90,10 @@ OKF-like JSON 知识图谱。
   里的 `Newton` 误归为 nonlinear solver preconditioning。
 - 多解发现路由不再把 `deep ensemble` 单独当作充分信号，必须出现 `multiple solutions` 或
   `solution multiplicity`。
+- Optimizer 路由收窄到训练优化信号，`shape optimization` 和 `optimize sensor locations` 会先走
+  hypersonic surrogate 或 sensor placement 等具体场景路由。
+- Mapping audit 新增 high-speed-flow 主题，让 hypersonic / supersonic / reentry surrogate 不只靠
+  `operator_learning` 泛化主题对齐。
 
 边界：
 

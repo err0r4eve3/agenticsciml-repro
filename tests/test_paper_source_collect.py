@@ -159,7 +159,7 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
         ),
         (
             "Fusion-DeepONet: A Data-Efficient Neural Operator for Geometry-Dependent Hypersonic and Supersonic Flows",
-            "A geometry-dependent surrogate predicts hypersonic and supersonic flow fields on arbitrary grids with scarce data.",
+            "Shape optimization uses a geometry-dependent surrogate to predict hypersonic and supersonic flow fields on arbitrary grids with scarce data.",
             "Validate data-efficient neural operator surrogates for geometry-dependent hypersonic or supersonic flow prediction on scarce data.",
             "验证稀缺数据下 geometry-dependent hypersonic 或 supersonic flow 预测的高效神经算子 surrogate。",
         ),
