@@ -168,7 +168,9 @@ def _real_problem(title: str, summary: str) -> str:
         return "Audit long-horizon agent or LLM workflows with verifiable outcomes and explicit failure boundaries."
     if "multiple solutions" in text or "solution multiplicity" in text:
         return "Audit PINN discovery of multiple nonlinear ODE/PDE solutions under initialization, ensemble diversity, and solver-refinement constraints."
-    if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical", "plug flow reactor", "reactor design")):
+    if any(term in text for term in ("fmenets", "plug flow reactor", "reactor design")):
+        return "Validate physics-informed Flow-Material-Energy networks for non-ideal plug-flow reactor design under coupled Navier-Stokes, material-balance, energy-balance, sparse inverse-measurement, and finite-element comparison constraints."
+    if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical")):
         return "Validate multi-output neural operator surrogates for stiff chemical kinetics under conservation, stiffness, and CFD-coupling constraints."
     if ("state-space model" in text or "mamba" in text) and ("operator learning" in text or "neural operator" in text):
         return "Validate state-space or Mamba neural operators for dynamical systems under long-range dependency, extrapolation, chaotic rollout, and computational-efficiency constraints."
@@ -285,7 +287,9 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "审计长周期 agent 或 LLM 工作流，要求结果可验证并显式记录失败边界。"
     if "multiple solutions" in text or "solution multiplicity" in text:
         return "审计 PINN 对非线性 ODE/PDE 多解的发现能力，并检查初始化、ensemble 多样性和求解器细化约束。"
-    if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical", "plug flow reactor", "reactor design")):
+    if any(term in text for term in ("fmenets", "plug flow reactor", "reactor design")):
+        return "验证 non-ideal plug-flow reactor design 的 physics-informed Flow-Material-Energy network，并检查 coupled Navier-Stokes、material balance、energy balance、sparse inverse measurement 和 finite-element 对比约束。"
+    if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical")):
         return "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。"
     if ("state-space model" in text or "mamba" in text) and ("operator learning" in text or "neural operator" in text):
         return "验证 dynamical system 的 state-space 或 Mamba neural operator，并检查 long-range dependency、外推、chaotic rollout 和计算效率约束。"

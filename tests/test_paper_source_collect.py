@@ -220,8 +220,8 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
         (
             "FMEnets: Flow, Material, and Energy networks for non-ideal plug flow reactor design",
             "A physics-informed framework predicts flow, material and energy states for reactor design with independent optimizers.",
-            "Validate multi-output neural operator surrogates for stiff chemical kinetics under conservation, stiffness, and CFD-coupling constraints.",
-            "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。",
+            "Validate physics-informed Flow-Material-Energy networks for non-ideal plug-flow reactor design under coupled Navier-Stokes, material-balance, energy-balance, sparse inverse-measurement, and finite-element comparison constraints.",
+            "验证 non-ideal plug-flow reactor design 的 physics-informed Flow-Material-Energy network，并检查 coupled Navier-Stokes、material balance、energy balance、sparse inverse measurement 和 finite-element 对比约束。",
         ),
         (
             "Learning and discovering multiple solutions using physics-informed neural networks with random initialization and deep ensemble",
