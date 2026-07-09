@@ -92,6 +92,12 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "验证 dynamical system 的 state-space 或 Mamba neural operator，并检查 long-range dependency、外推、chaotic rollout 和计算效率约束。",
         ),
         (
+            "Kinetic-Mamba: Mamba-Assisted Predictions of Stiff Chemical Kinetics",
+            "A Mamba-based neural operator predicts thermochemical state variables for combustion, enforces mass conservation, and evaluates extrapolation on OOD chemical kinetics mechanisms.",
+            "Validate multi-output neural operator surrogates for stiff chemical kinetics under conservation, stiffness, and CFD-coupling constraints.",
+            "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。",
+        ),
+        (
             "Spectral bias in physics-informed and operator learning: Analysis and mitigation guidelines",
             "Frequency-resolved diagnostics expose high-frequency failure modes in neural operators.",
             "Diagnose high-frequency failure modes in physics-informed or operator learning and test mitigation controls.",
