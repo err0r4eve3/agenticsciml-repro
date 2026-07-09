@@ -174,6 +174,10 @@ OKF-like JSON 知识图谱。
 - Optimizing-the-Optimizer 路由继续收窄为 `SSBFGS` / `SSBroyden` 或 `Self-Scaled BFGS/Broyden`
   信号，避免 KKANs 论文中的 `self-scaled residual-based attention weights` 被误读成 quasi-Newton
   optimizer 论文；KKANs 会回到 KAN-style architecture / learning dynamics / SNR generalization 审计。
+- Meta-solver 路由区分 2025 time-dependent nonlinear PDE 论文和 2024 linear-system meta-solver 论文：
+  前者保留 Newton-Raphson / IMEX、Krylov + neural-operator composition、reaction-diffusion/fluid/solid-mechanics
+  覆盖；后者保留 Jacobi/Gauss-Seidel/Krylov、DeepONet coarse preconditioning、spectrum-split error 和
+  preference selection。
 
 边界：
 

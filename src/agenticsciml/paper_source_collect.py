@@ -192,6 +192,11 @@ def _real_problem(title: str, summary: str) -> str:
         "pinn" in text or "physics-informed" in text or "turbulence" in text or "turbulent" in text
     ):
         return "Audit uncertainty calibration for physics-informed turbulent-flow inverse modeling under Bayesian, dropout, and ensemble tradeoffs."
+    if (
+        "time-dependent nonlinear pde" in text
+        or (("newton--raphson" in text or "imex" in text) and "time-dependent" in text)
+    ):
+        return "Audit automated meta-solver discovery for time-dependent nonlinear PDEs under Newton-Raphson or IMEX discretization, Krylov and neural-operator composition, Pareto accuracy-speed-memory tradeoffs, preference selection, and reaction-diffusion/fluid/solid-mechanics coverage."
     if "meta-solver" in text or "meta solver" in text or "multi-objective" in text or "pareto" in text:
         return "Audit neural-operator-assisted meta-solver discovery for PDE-discretization linear systems under Jacobi/Gauss-Seidel/Krylov composition, DeepONet coarse preconditioning, Pareto metrics, preference selection, and spectrum-split error constraints."
     if any(term in text for term in ("sensor location", "sensor placement", "vortex-induced", "marine riser", "deepvivonet")):
@@ -322,6 +327,11 @@ def _real_problem_zh(title: str, summary: str) -> str:
         "pinn" in text or "physics-informed" in text or "turbulence" in text or "turbulent" in text
     ):
         return "审计 physics-informed 湍流反问题建模中的不确定性校准，并权衡 Bayesian、dropout 和 ensemble 方法。"
+    if (
+        "time-dependent nonlinear pde" in text
+        or (("newton--raphson" in text or "imex" in text) and "time-dependent" in text)
+    ):
+        return "审计 time-dependent nonlinear PDE 的 automated meta-solver discovery，并检查 Newton-Raphson 或 IMEX discretization、Krylov 与 neural-operator composition、Pareto accuracy-speed-memory tradeoff、preference selection 以及 reaction-diffusion/fluid/solid-mechanics 覆盖。"
     if "meta-solver" in text or "meta solver" in text or "multi-objective" in text or "pareto" in text:
         return "审计 PDE-discretization linear system 的 neural-operator-assisted meta-solver discovery，并检查 Jacobi/Gauss-Seidel/Krylov composition、DeepONet coarse preconditioning、Pareto metrics、preference selection 和 spectrum-split error 约束。"
     if any(term in text for term in ("sensor location", "sensor placement", "vortex-induced", "marine riser", "deepvivonet")):

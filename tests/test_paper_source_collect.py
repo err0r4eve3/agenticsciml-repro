@@ -227,6 +227,12 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。",
         ),
         (
+            "Automatic discovery of optimal meta-solvers for time-dependent nonlinear PDEs",
+            "The framework solves time-dependent nonlinear PDEs after discretization by integrating Krylov methods with neural operators; Newton--Raphson or IMEX time integration produces large linear systems, and Pareto sets balance accuracy, speed, and memory for reaction-diffusion, fluid dynamics, and solid mechanics.",
+            "Audit automated meta-solver discovery for time-dependent nonlinear PDEs under Newton-Raphson or IMEX discretization, Krylov and neural-operator composition, Pareto accuracy-speed-memory tradeoffs, preference selection, and reaction-diffusion/fluid/solid-mechanics coverage.",
+            "审计 time-dependent nonlinear PDE 的 automated meta-solver discovery，并检查 Newton-Raphson 或 IMEX discretization、Krylov 与 neural-operator composition、Pareto accuracy-speed-memory tradeoff、preference selection 以及 reaction-diffusion/fluid/solid-mechanics 覆盖。",
+        ),
+        (
             "Automatic discovery of optimal meta-solvers via multi-objective optimization",
             "Neural operators combine with Jacobi, Gauss-Seidel, GMRES, and BiCGStab for PDE-discretization linear systems; DeepONet trunk bases act as coarse preconditioners and Pareto metrics plus preference functions select solvers.",
             "Audit neural-operator-assisted meta-solver discovery for PDE-discretization linear systems under Jacobi/Gauss-Seidel/Krylov composition, DeepONet coarse preconditioning, Pareto metrics, preference selection, and spectrum-split error constraints.",
