@@ -175,7 +175,7 @@ def _real_problem(title: str, summary: str) -> str:
     if ("state-space model" in text or "mamba" in text) and ("operator learning" in text or "neural operator" in text):
         return "Validate state-space or Mamba neural operators for dynamical systems under long-range dependency, extrapolation, chaotic rollout, and computational-efficiency constraints."
     if "systems pharmacology" in text:
-        return "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints."
+        return "Audit PINN and PIKAN gray-box systems-pharmacology discovery under representation choice, optimizer schedule, training configuration, numerical precision, scalability, and data-sparse non-unique inverse-problem constraints."
     if any(term in text for term in ("biomedical", "biofluid", "biosolid", "medical imaging", "cell signaling", "physiological", "pharmacology")):
         return "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints."
     if any(term in text for term in ("bayesian", "dteki", "hmc", "ensemble kalman", "tikhonov")) and any(
@@ -193,7 +193,7 @@ def _real_problem(title: str, summary: str) -> str:
     ):
         return "Audit uncertainty calibration for physics-informed turbulent-flow inverse modeling under Bayesian, dropout, and ensemble tradeoffs."
     if "meta-solver" in text or "meta solver" in text or "multi-objective" in text or "pareto" in text:
-        return "Audit automated meta-solver discovery for time-dependent PDEs under accuracy, speed, memory, and preference-selection tradeoffs."
+        return "Audit neural-operator-assisted meta-solver discovery for PDE-discretization linear systems under Jacobi/Gauss-Seidel/Krylov composition, DeepONet coarse preconditioning, Pareto metrics, preference selection, and spectrum-split error constraints."
     if any(term in text for term in ("sensor location", "sensor placement", "vortex-induced", "marine riser", "deepvivonet")):
         return "Optimize sparse sensor placement for vortex-induced vibration reconstruction and forecasting under transfer-learning constraints."
     if any(term in text for term in ("hypersonic", "supersonic", "reentry", "arbitrary grids", "geometry-dependent")):
@@ -202,6 +202,12 @@ def _real_problem(title: str, summary: str) -> str:
         return "Assess PINN-trained turbulence closures across bluff-body shapes under solver stability, geometry generalization, and closure-model constraints."
     if "adjoint" in text and "pinn" in text and "inverse problem" in text:
         return "Compare adjoint optimization and PINNs for PDE-constrained inverse problems under matched formulations, parameterizations, regularization, cost, and warm-start tradeoffs."
+    if "optimizing the optimizer" in text or (
+        any(term in text for term in ("kolmogorov-arnold", "pikan"))
+        and any(term in text for term in ("self-scaled", "bfgs", "broyden", "quasi-newton", "line search"))
+        and ("pde" in text or "deeponet" in text or "operator learning" in text)
+    ):
+        return "Audit self-scaled quasi-Newton optimizer selection across PINN, PIKAN, and DeepONet training under nonlinear loss landscapes, saddle points, PDE benchmark diversity, line-search strategy, and accuracy-vs-efficiency constraints."
     if any(term in text for term in ("optimizer", "natural gradient", "bfgs", "broyden", "curvature-aware")):
         return "Audit optimizer and conditioning choices for high-accuracy PINN convergence on challenging PDE or ODE systems."
     if "nspod" in text or "neural subspace proper orthogonal decomposition" in text:
@@ -298,7 +304,7 @@ def _real_problem_zh(title: str, summary: str) -> str:
     if ("state-space model" in text or "mamba" in text) and ("operator learning" in text or "neural operator" in text):
         return "验证 dynamical system 的 state-space 或 Mamba neural operator，并检查 long-range dependency、外推、chaotic rollout 和计算效率约束。"
     if "systems pharmacology" in text:
-        return "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。"
+        return "审计 PINN 与 PIKAN 的 gray-box systems-pharmacology discovery，并检查 representation choice、optimizer schedule、training configuration、数值精度、可扩展性和数据稀缺非唯一反问题约束。"
     if any(term in text for term in ("biomedical", "biofluid", "biosolid", "medical imaging", "cell signaling", "physiological", "pharmacology")):
         return "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。"
     if any(term in text for term in ("bayesian", "dteki", "hmc", "ensemble kalman", "tikhonov")) and any(
@@ -316,7 +322,7 @@ def _real_problem_zh(title: str, summary: str) -> str:
     ):
         return "审计 physics-informed 湍流反问题建模中的不确定性校准，并权衡 Bayesian、dropout 和 ensemble 方法。"
     if "meta-solver" in text or "meta solver" in text or "multi-objective" in text or "pareto" in text:
-        return "审计 time-dependent PDE 的自动 meta-solver 发现，并权衡精度、速度、内存和偏好选择。"
+        return "审计 PDE-discretization linear system 的 neural-operator-assisted meta-solver discovery，并检查 Jacobi/Gauss-Seidel/Krylov composition、DeepONet coarse preconditioning、Pareto metrics、preference selection 和 spectrum-split error 约束。"
     if any(term in text for term in ("sensor location", "sensor placement", "vortex-induced", "marine riser", "deepvivonet")):
         return "优化 vortex-induced vibration 重建与 forecasting 的稀疏传感器布置，并检查 transfer-learning 约束。"
     if any(term in text for term in ("hypersonic", "supersonic", "reentry", "arbitrary grids", "geometry-dependent")):
@@ -325,6 +331,12 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "评估跨 bluff-body 形状的 PINN-trained turbulence closure，并检查求解器稳定性、几何泛化和 closure-model 约束。"
     if "adjoint" in text and "pinn" in text and "inverse problem" in text:
         return "对比 PDE-constrained inverse problem 中的 adjoint optimization 与 PINN，并检查 formulation、parameterization、regularization、成本和 warm-start 取舍。"
+    if "optimizing the optimizer" in text or (
+        any(term in text for term in ("kolmogorov-arnold", "pikan"))
+        and any(term in text for term in ("self-scaled", "bfgs", "broyden", "quasi-newton", "line search"))
+        and ("pde" in text or "deeponet" in text or "operator learning" in text)
+    ):
+        return "审计 PINN、PIKAN 与 DeepONet training 中的 self-scaled quasi-Newton optimizer selection，并检查 nonlinear loss landscape、saddle point、PDE benchmark diversity、line-search strategy 和 accuracy-vs-efficiency 约束。"
     if any(term in text for term in ("optimizer", "natural gradient", "bfgs", "broyden", "curvature-aware")):
         return "审计 optimizer 与 conditioning 选择对高精度 PINN 在困难 PDE 或 ODE 系统上收敛的影响。"
     if "nspod" in text or "neural subspace proper orthogonal decomposition" in text:

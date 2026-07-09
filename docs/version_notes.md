@@ -165,6 +165,12 @@ OKF-like JSON 知识图谱。
   stability / fidelity diagnostics 被误读成安全控制。
 - Fluid 主题识别 `turbulent`，让 `turbulent-flow` 场景不只靠 operator-learning 主题对齐；仍不恢复裸
   `flow`，避免误命中 workflow。
+- Optimizing-the-Optimizer、systems-pharmacology gray-box discovery 和 automatic meta-solver 论文映射继续收紧：
+  Self-Scaled BFGS/Broyden 论文会保留 PINN/PIKAN/DeepONet、line-search、PDE benchmark diversity 和
+  accuracy-vs-efficiency 边界；systems pharmacology 论文会保留 representation / optimizer / training
+  configuration / precision / scalability / data-sparse non-unique inverse-problem 约束；meta-solver 论文会落到
+  PDE-discretization linear systems、Jacobi/Gauss-Seidel/Krylov composition、DeepONet coarse preconditioning、
+  Pareto metrics 和 preference selection，而不是泛化成 time-dependent PDE 审计。
 
 边界：
 

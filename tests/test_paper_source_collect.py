@@ -71,6 +71,12 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "审计 optimizer 与 conditioning 选择对高精度 PINN 在困难 PDE 或 ODE 系统上收敛的影响。",
         ),
         (
+            "Optimizing the Optimizer for Physics-Informed Neural Networks and Kolmogorov-Arnold Networks",
+            "Self-Scaled BFGS and Self-Scaled Broyden optimizers are compared across PINNs, PIKANs, and DeepONet on Burgers, Allen-Cahn, Kuramoto-Sivashinsky, Ginzburg-Landau, and Stokes PDE benchmarks.",
+            "Audit self-scaled quasi-Newton optimizer selection across PINN, PIKAN, and DeepONet training under nonlinear loss landscapes, saddle points, PDE benchmark diversity, line-search strategy, and accuracy-vs-efficiency constraints.",
+            "审计 PINN、PIKAN 与 DeepONet training 中的 self-scaled quasi-Newton optimizer selection，并检查 nonlinear loss landscape、saddle point、PDE benchmark diversity、line-search strategy 和 accuracy-vs-efficiency 约束。",
+        ),
+        (
             "PINNs in PDE Constrained Optimal Control Problems: Direct vs Indirect Methods",
             "The study compares direct PINNs with indirect adjoint optimality-system formulations.",
             "Compare PINN control formulations against adjoint or optimality-system baselines for PDE-constrained control.",
@@ -221,10 +227,10 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。",
         ),
         (
-            "Automatic discovery of optimal meta-solvers for time-dependent nonlinear PDEs",
-            "Multi-objective optimization discovers Pareto optimal meta-solvers for Newton and IMEX time integration.",
-            "Audit automated meta-solver discovery for time-dependent PDEs under accuracy, speed, memory, and preference-selection tradeoffs.",
-            "审计 time-dependent PDE 的自动 meta-solver 发现，并权衡精度、速度、内存和偏好选择。",
+            "Automatic discovery of optimal meta-solvers via multi-objective optimization",
+            "Neural operators combine with Jacobi, Gauss-Seidel, GMRES, and BiCGStab for PDE-discretization linear systems; DeepONet trunk bases act as coarse preconditioners and Pareto metrics plus preference functions select solvers.",
+            "Audit neural-operator-assisted meta-solver discovery for PDE-discretization linear systems under Jacobi/Gauss-Seidel/Krylov composition, DeepONet coarse preconditioning, Pareto metrics, preference selection, and spectrum-split error constraints.",
+            "审计 PDE-discretization linear system 的 neural-operator-assisted meta-solver discovery，并检查 Jacobi/Gauss-Seidel/Krylov composition、DeepONet coarse preconditioning、Pareto metrics、preference selection 和 spectrum-split error 约束。",
         ),
         (
             "FMEnets: Flow, Material, and Energy networks for non-ideal plug flow reactor design",
@@ -312,9 +318,9 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
         ),
         (
             "Representation Meets Optimization: Training PINNs and PIKANs for Gray-Box Discovery in Systems Pharmacology",
-            "PIKANs use Kolmogorov-Arnold networks and optimizers for systems pharmacology modeling.",
-            "Audit physics-informed biomedical modeling under data scarcity, interpretability, uncertainty, and multiscale physiology constraints.",
-            "审计 physics-informed biomedical modeling 在数据稀缺、可解释性、不确定性和多尺度生理约束下的可靠性。",
+            "PIKANs use Kolmogorov-Arnold networks and optimizers for systems pharmacology modeling under ill-posed, non-unique, and data-sparse gray-box discovery conditions.",
+            "Audit PINN and PIKAN gray-box systems-pharmacology discovery under representation choice, optimizer schedule, training configuration, numerical precision, scalability, and data-sparse non-unique inverse-problem constraints.",
+            "审计 PINN 与 PIKAN 的 gray-box systems-pharmacology discovery，并检查 representation choice、optimizer schedule、training configuration、数值精度、可扩展性和数据稀缺非唯一反问题约束。",
         ),
         (
             "Learning Turbulent Flows with Generative Models: Super-resolution, Forecasting, and Sparse Flow Reconstruction",
