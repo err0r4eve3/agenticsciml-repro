@@ -186,9 +186,9 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
         ),
         (
             "Retrofitting Earth System Models with Cadence-Limited Neural Operator Updates",
-            "Online bias correction tendencies retrofit ESM predictions under runtime cadence limits.",
-            "Audit online ML bias-correction for Earth-system models under stability, portability, and runtime cadence constraints.",
-            "审计 Earth-system model 的在线 ML 偏差校正，同时检查稳定性、可迁移性和运行 cadence 约束。",
+            "IUNet and M and M operator architectures map instantaneous E3SM states to bias-correction tendencies, train on ERA5-nudged simulations, generalize across height levels and seasons, and remain stable and feasible in online hybrid multi-year runs.",
+            "Audit cadence-limited neural-operator retrofits for E3SM under instantaneous-state bias-correction tendencies, IUNet and M&M operator architectures, ERA5-nudged training data, height-level and seasonal generalization, online hybrid multi-year stability, runtime feasibility, and cross-scale portability constraints.",
+            "审计 E3SM 的 cadence-limited neural-operator retrofit，并检查 instantaneous-state bias-correction tendencies、IUNet 与 M&M operator architecture、ERA5-nudged training data、height-level/seasonal generalization、online hybrid 多年稳定性、runtime feasibility 和 cross-scale portability 约束。",
         ),
         (
             "Adversarial Physics-Informed Machine Learning for Robust Optimal Safe Predefined-Time Stabilization",

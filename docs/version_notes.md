@@ -188,6 +188,9 @@ OKF-like JSON 知识图谱。
 - Curvature-aware PINN optimizer 论文现在会保留 Natural Gradient、Self-Scaling BFGS/Broyden、
   batched quasi-Newton scaling、Helmholtz/Stokes/Burgers/Euler/high-speed-flow/stiff-ODE benchmark 和
   high-order numerical comparison 边界，不再退回 generic optimizer/conditioning。
+- E3SM cadence-limited neural-operator retrofit 论文现在会保留 IUNet / M&M architecture、ERA5-nudged
+  training、height-level/seasonal generalization、online hybrid multi-year stability 和 runtime feasibility，
+  不再退回 generic Earth-system bias-correction。
 
 边界：
 

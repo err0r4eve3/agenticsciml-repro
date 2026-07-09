@@ -234,6 +234,8 @@ def _real_problem(title: str, summary: str) -> str:
         return "Evaluate neural preconditioning for nonlinear solvers under convergence, robustness, and instability constraints."
     if any(term in text for term in ("krylov", "preconditioner", "linear solver", "linear system")):
         return "Evaluate whether learned solver aids accelerate PDE linear systems while preserving convergence and generalization."
+    if "e3sm" in text or "inception u-net" in text or "era5" in text:
+        return "Audit cadence-limited neural-operator retrofits for E3SM under instantaneous-state bias-correction tendencies, IUNet and M&M operator architectures, ERA5-nudged training data, height-level and seasonal generalization, online hybrid multi-year stability, runtime feasibility, and cross-scale portability constraints."
     if "earth system" in text or "esm" in text or "bias correction" in text or "cadence-limited" in text:
         return "Audit online ML bias-correction for Earth-system models under stability, portability, and runtime cadence constraints."
     if "stabilization" in text or "hji" in text or "lyapunov" in text or "differential game" in text:
@@ -377,6 +379,8 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "评估非线性求解器中的神经预条件方法，并检查收敛性、鲁棒性和不稳定边界。"
     if any(term in text for term in ("krylov", "preconditioner", "linear solver", "linear system")):
         return "评估学习型求解器辅助是否能加速 PDE 线性系统，同时保持收敛性和泛化能力。"
+    if "e3sm" in text or "inception u-net" in text or "era5" in text:
+        return "审计 E3SM 的 cadence-limited neural-operator retrofit，并检查 instantaneous-state bias-correction tendencies、IUNet 与 M&M operator architecture、ERA5-nudged training data、height-level/seasonal generalization、online hybrid 多年稳定性、runtime feasibility 和 cross-scale portability 约束。"
     if "earth system" in text or "esm" in text or "bias correction" in text or "cadence-limited" in text:
         return "审计 Earth-system model 的在线 ML 偏差校正，同时检查稳定性、可迁移性和运行 cadence 约束。"
     if "stabilization" in text or "hji" in text or "lyapunov" in text or "differential game" in text:
