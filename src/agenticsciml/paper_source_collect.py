@@ -206,6 +206,14 @@ def _real_problem(title: str, summary: str) -> str:
         term in text for term in ("generative", "super-resolution", "forecasting", "sparse", "reconstruction")
     ):
         return "Evaluate generative operator models for turbulent-flow super-resolution, forecasting, and sparse reconstruction without losing fine-scale structure."
+    if any(term in text for term in ("message passing", "message-passing", "many-body", "renormalized operators", "multiscale attention")):
+        return "Validate message-passing neural operators for many-body complex-system geometry and dynamics under scalability, stability, and multiscale-fidelity constraints."
+    if (
+        any(term in text for term in ("multi-task", "multitask", "mt-deeponet", "synergistic learning"))
+        and ("deeponet" in text or "operator network" in text)
+        and ("pde" in text or "partial differential" in text or "geometry" in text)
+    ):
+        return "Validate multi-task DeepONet workflows for efficient PDE problem solving under task coupling, geometry generalization, accuracy, and training-cost constraints."
     if "operator" in text:
         return "Evaluate neural operator reliability beyond average prediction error using stability and fidelity diagnostics."
     if "turbulence" in text or "fluid" in text:
@@ -275,6 +283,14 @@ def _real_problem_zh(title: str, summary: str) -> str:
         term in text for term in ("generative", "super-resolution", "forecasting", "sparse", "reconstruction")
     ):
         return "评估湍流 super-resolution、forecasting 和 sparse reconstruction 的生成式算子模型，避免丢失细尺度结构。"
+    if any(term in text for term in ("message passing", "message-passing", "many-body", "renormalized operators", "multiscale attention")):
+        return "验证 many-body complex-system 几何与动力学的 message-passing neural operator，并检查可扩展性、稳定性和多尺度保真度约束。"
+    if (
+        any(term in text for term in ("multi-task", "multitask", "mt-deeponet", "synergistic learning"))
+        and ("deeponet" in text or "operator network" in text)
+        and ("pde" in text or "partial differential" in text or "geometry" in text)
+    ):
+        return "验证 efficient PDE problem solving 的 multi-task DeepONet 工作流，并检查任务耦合、几何泛化、精度和训练成本约束。"
     if "operator" in text:
         return "用稳定性和保真度诊断评估神经算子可靠性，而不只看平均预测误差。"
     if "turbulence" in text or "fluid" in text:

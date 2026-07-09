@@ -13,6 +13,8 @@ def test_source_mapping_themes_ignore_substring_false_positives() -> None:
     high_speed_themes = _mapping_themes("geometry-dependent hypersonic and supersonic flow surrogate")
     reliability_themes = _mapping_themes("operator reliability, stability, fidelity, and sensitivity diagnostics")
     fluid_themes = _mapping_themes("turbulent-flow super-resolution and sparse reconstruction")
+    many_body_themes = _mapping_themes("many-body complex systems with message passing neural operators")
+    multitask_themes = _mapping_themes("multi-task DeepONet with task coupling for PDE workflows")
 
     assert "agent" not in themes
     assert "engine" not in themes
@@ -22,6 +24,8 @@ def test_source_mapping_themes_ignore_substring_false_positives() -> None:
     assert "reliability" in reliability_themes
     assert "safe_control" not in reliability_themes
     assert "fluid" in fluid_themes
+    assert "many_body_operator" in many_body_themes
+    assert "multitask_operator" in multitask_themes
 
 
 def test_paper_problem_loop_audit_writes_passed_bilingual_artifact(tmp_path: Path) -> None:

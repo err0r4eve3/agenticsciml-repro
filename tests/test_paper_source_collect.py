@@ -205,6 +205,18 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "Assess physics-informed operator networks for real-time optimal control of multi-agent dynamical systems under stability constraints.",
             "评估 real-time optimal control 中的 physics-informed operator network，并检查多智能体动力系统稳定性约束。",
         ),
+        (
+            "Connecting the geometry and dynamics of many-body complex systems with message passing neural operators",
+            "ROMA learns multiscale evolution operators for many-body complex systems with message passing and noisy input-output data.",
+            "Validate message-passing neural operators for many-body complex-system geometry and dynamics under scalability, stability, and multiscale-fidelity constraints.",
+            "验证 many-body complex-system 几何与动力学的 message-passing neural operator，并检查可扩展性、稳定性和多尺度保真度约束。",
+        ),
+        (
+            "Synergistic Learning with Multi-Task DeepONet for Efficient PDE Problem Solving",
+            "MT-DeepONet applies multi-task learning to PDEs with multiple source terms and parameterized geometries.",
+            "Validate multi-task DeepONet workflows for efficient PDE problem solving under task coupling, geometry generalization, accuracy, and training-cost constraints.",
+            "验证 efficient PDE problem solving 的 multi-task DeepONet 工作流，并检查任务耦合、几何泛化、精度和训练成本约束。",
+        ),
     ]
 
     for title, summary, expected, expected_zh in cases:

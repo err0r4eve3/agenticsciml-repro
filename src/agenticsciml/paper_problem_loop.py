@@ -23,6 +23,8 @@ SOURCE_MAPPING_THEMES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("agent", ("agent", "multi-agent", "agentic")),
     ("sciml_workflow", ("sciml", "scientific ml", "scientific machine learning")),
     ("operator_learning", ("operator", "deeponet", "fno", "neural operator", "laplace neural operator", "pilno", "surrogate", "parametric")),
+    ("multitask_operator", ("multi-task", "multitask", "mt-deeponet", "synergistic learning", "task coupling", "task-coupling")),
+    ("many_body_operator", ("many-body", "message passing", "message-passing", "renormalized operator", "multiscale attention")),
     ("physics_informed", ("physics-informed", "pinn", "physics residual", "physics-residual", "pde residual", "pde-constrained", "known physics")),
     ("pde_workflow", ("pde", "partial differential", "wave equation", "physics-residual", "representation", "pde-constrained")),
     ("ood_generalization", ("out-of-distribution", "ood", "small-data", "small data", "virtual input")),
