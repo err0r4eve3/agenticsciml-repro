@@ -111,9 +111,11 @@ OKF-like JSON 知识图谱。
 - Bluff-body turbulence-closure 论文现在优先落到 PINN-trained closure 的 solver stability、
   geometry generalization 和 closure-model 审计；不会再因摘要里描述传统 inverse / adjoint 校准方法而误归为
   adjoint-vs-PINN inverse-problem 对比。
-- Kinetic-Mamba 这类 stiff chemical kinetics 论文现在优先落到 conservation / stiffness /
-  CFD-coupling 的化学动力学 surrogate 审计；不会因 `Mamba` 与 `neural operator` 方法词误归为泛化
-  state-space neural operator 动力系统审计。
+- Kinetic-Mamba 论文现在落到特异的 stiff-chemical-kinetics surrogate 审计，并保留
+  standalone、mass-constrained、regime-informed、latent Mamba variants、OOD extrapolation、
+  time-decomposition / recursive-prediction evaluation 和 CFD-coupling 边界；不会因 `Mamba` 与
+  `neural operator` 方法词误归为泛化 state-space neural operator 动力系统审计，也不会退回过宽的
+  generic chemical-kinetics surrogate 描述。
 - ATHENA hierarchical evolutionary numerical algorithms 论文现在优先落到 agentic numerical-algorithm
   discovery，并保留 conceptual scaffolding、contextual-bandit policy、symbolic-numeric orchestration、
   verification 和 repair 约束；不再退回 generic agent/LLM workflow。

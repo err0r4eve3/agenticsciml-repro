@@ -103,8 +103,8 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
         (
             "Kinetic-Mamba: Mamba-Assisted Predictions of Stiff Chemical Kinetics",
             "A Mamba-based neural operator predicts thermochemical state variables for combustion, enforces mass conservation, and evaluates extrapolation on OOD chemical kinetics mechanisms.",
-            "Validate multi-output neural operator surrogates for stiff chemical kinetics under conservation, stiffness, and CFD-coupling constraints.",
-            "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。",
+            "Validate Kinetic-Mamba stiff-chemical-kinetics surrogates under standalone, mass-constrained, regime-informed, and latent Mamba variants, thermochemical state evolution from initial conditions, temperature-dependent regime splitting, time-decomposition and recursive-prediction evaluation, OOD extrapolation, conservation, and CFD-coupling constraints.",
+            "验证 Kinetic-Mamba stiff chemical kinetics surrogate，并检查 standalone、mass-constrained、regime-informed 与 latent Mamba variants、thermochemical state evolution from initial conditions、temperature-dependent regime splitting、time-decomposition / recursive-prediction evaluation、OOD extrapolation、守恒和 CFD-coupling 约束。",
         ),
         (
             "Spectral bias in physics-informed and operator learning: Analysis and mitigation guidelines",

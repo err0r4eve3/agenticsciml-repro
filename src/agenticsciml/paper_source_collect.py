@@ -172,6 +172,8 @@ def _real_problem(title: str, summary: str) -> str:
         return "Audit PINN discovery of multiple nonlinear ODE/PDE solutions under initialization, ensemble diversity, and solver-refinement constraints."
     if any(term in text for term in ("fmenets", "plug flow reactor", "reactor design")):
         return "Validate physics-informed Flow-Material-Energy networks for non-ideal plug-flow reactor design under coupled Navier-Stokes, material-balance, energy-balance, sparse inverse-measurement, and finite-element comparison constraints."
+    if "kinetic-mamba" in text or ("mamba-assisted" in text and "stiff chemical kinetics" in text):
+        return "Validate Kinetic-Mamba stiff-chemical-kinetics surrogates under standalone, mass-constrained, regime-informed, and latent Mamba variants, thermochemical state evolution from initial conditions, temperature-dependent regime splitting, time-decomposition and recursive-prediction evaluation, OOD extrapolation, conservation, and CFD-coupling constraints."
     if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical")):
         return "Validate multi-output neural operator surrogates for stiff chemical kinetics under conservation, stiffness, and CFD-coupling constraints."
     if ("state-space model" in text or "mamba" in text) and ("operator learning" in text or "neural operator" in text):
@@ -317,6 +319,8 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "审计 PINN 对非线性 ODE/PDE 多解的发现能力，并检查初始化、ensemble 多样性和求解器细化约束。"
     if any(term in text for term in ("fmenets", "plug flow reactor", "reactor design")):
         return "验证 non-ideal plug-flow reactor design 的 physics-informed Flow-Material-Energy network，并检查 coupled Navier-Stokes、material balance、energy balance、sparse inverse measurement 和 finite-element 对比约束。"
+    if "kinetic-mamba" in text or ("mamba-assisted" in text and "stiff chemical kinetics" in text):
+        return "验证 Kinetic-Mamba stiff chemical kinetics surrogate，并检查 standalone、mass-constrained、regime-informed 与 latent Mamba variants、thermochemical state evolution from initial conditions、temperature-dependent regime splitting、time-decomposition / recursive-prediction evaluation、OOD extrapolation、守恒和 CFD-coupling 约束。"
     if any(term in text for term in ("stiff chemical", "chemical kinetics", "combustion", "reactive transport", "thermochemical")):
         return "验证 stiff chemical kinetics 的多输出神经算子 surrogate，并检查守恒、刚性和 CFD 耦合约束。"
     if ("state-space model" in text or "mamba" in text) and ("operator learning" in text or "neural operator" in text):
