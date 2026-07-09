@@ -196,8 +196,12 @@ def _real_problem(title: str, summary: str) -> str:
         return "Assess robust safe-control learning for nonlinear dynamical systems under adversarial disturbances and stability constraints."
     if any(term in text for term in ("turbulence closure", "turbulence closures", "bluff-body", "rans residual", "reynolds stress", "reynolds force")):
         return "Assess PINN-trained turbulence closures across bluff-body shapes under solver stability, geometry generalization, and closure-model constraints."
+    if any(term in text for term in ("lagrangian velocity", "velocimetry-thermometry", "temperature fields", "rayleigh-bénard", "rayleigh-benard")):
+        return "Validate physics-informed KAN field-inference workflows for turbulent velocity and temperature reconstruction under sparse Lagrangian measurements and DNS-fidelity constraints."
     if "optimal control" in text or "adjoint" in text or "direct vs indirect" in text:
         return "Compare PINN control formulations against adjoint or optimality-system baselines for PDE-constrained control."
+    if "diffusion model" in text and ("turbulence" in text or "turbulent" in text):
+        return "Validate diffusion-corrected neural operator surrogates for turbulent-flow spectral fidelity, high-frequency structure, and long-horizon rollout stability."
     if "spectral bias" in text or "high-frequency" in text or "frequency-resolved" in text:
         return "Diagnose high-frequency failure modes in physics-informed or operator learning and test mitigation controls."
     if "laplace neural operator" in text or "pilno" in text or "virtual inputs" in text or "out-of-distribution" in text:
@@ -285,8 +289,12 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "评估非线性动力系统在对抗扰动和稳定性约束下的鲁棒安全控制学习。"
     if any(term in text for term in ("turbulence closure", "turbulence closures", "bluff-body", "rans residual", "reynolds stress", "reynolds force")):
         return "评估跨 bluff-body 形状的 PINN-trained turbulence closure，并检查求解器稳定性、几何泛化和 closure-model 约束。"
+    if any(term in text for term in ("lagrangian velocity", "velocimetry-thermometry", "temperature fields", "rayleigh-bénard", "rayleigh-benard")):
+        return "验证 turbulent velocity 与 temperature reconstruction 的 physics-informed KAN field-inference 工作流，并检查稀疏 Lagrangian measurements 和 DNS-fidelity 约束。"
     if "optimal control" in text or "adjoint" in text or "direct vs indirect" in text:
         return "对比 PINN 控制 formulation 与伴随法或最优性系统基线在 PDE 约束控制中的表现。"
+    if "diffusion model" in text and ("turbulence" in text or "turbulent" in text):
+        return "验证 turbulent-flow spectral fidelity 的 diffusion-corrected neural operator surrogate，并检查高频结构和长周期 rollout 稳定性。"
     if "spectral bias" in text or "high-frequency" in text or "frequency-resolved" in text:
         return "诊断 physics-informed 或 operator learning 中的高频失效模式，并测试缓解控制。"
     if "laplace neural operator" in text or "pilno" in text or "virtual inputs" in text or "out-of-distribution" in text:

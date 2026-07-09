@@ -80,6 +80,18 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "诊断 physics-informed 或 operator learning 中的高频失效模式，并测试缓解控制。",
         ),
         (
+            "Inferring turbulent velocity and temperature fields and their statistics from Lagrangian velocity measurements using physics-informed Kolmogorov-Arnold Networks",
+            "AIVT reconstructs turbulent temperature fields from sparse Lagrangian velocity measurements at DNS-level fidelity.",
+            "Validate physics-informed KAN field-inference workflows for turbulent velocity and temperature reconstruction under sparse Lagrangian measurements and DNS-fidelity constraints.",
+            "验证 turbulent velocity 与 temperature reconstruction 的 physics-informed KAN field-inference 工作流，并检查稀疏 Lagrangian measurements 和 DNS-fidelity 约束。",
+        ),
+        (
+            "Integrating Neural Operators with Diffusion Models Improves Spectral Representation in Turbulence Modeling",
+            "Diffusion models correct neural operator forecasts to improve turbulent-flow spectra and long-horizon autoregressive rollout stability.",
+            "Validate diffusion-corrected neural operator surrogates for turbulent-flow spectral fidelity, high-frequency structure, and long-horizon rollout stability.",
+            "验证 turbulent-flow spectral fidelity 的 diffusion-corrected neural operator surrogate，并检查高频结构和长周期 rollout 稳定性。",
+        ),
+        (
             "Physics-Informed Laplace Neural Operator for Solving Partial Differential Equations",
             "PILNO uses virtual inputs for small-data and out-of-distribution PDE operator generalization.",
             "Validate physics-informed neural operator surrogates for data-efficient PDE solving under small-data and out-of-distribution generalization constraints.",

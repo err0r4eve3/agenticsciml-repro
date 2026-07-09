@@ -85,6 +85,9 @@ OKF-like JSON 知识图谱。
   review coverage 或 Bayesian KAN uncertainty 审计，不再被通用 `uncertainty quantification` 规则误归为湍流 UQ。
 - Agentic risk-aware set-based design 与 GRAFT-ATHENA 论文现在分别落到 CVaR/human-in-the-loop/CFD
   engineering-design 审计和 self-improving method-substrate 审计，不再退回通用 agent/LLM workflow。
+- AIVT turbulent velocity/temperature field inference 与 diffusion-corrected neural-operator turbulence
+  论文现在分别落到 field-inference/DNS-fidelity 和 diffusion spectral-fidelity/rollout-stability 审计，
+  不再退回 generic KAN 或 generic spectral-bias 问题。
 - Web 保存与生产循环审计现在复用同一个 LLM Wiki OKF schema gate：根对象、所有节点和边都必须保留
   中英文槽位，边必须引用现有节点；旧格式 account Wiki 若不满足当前 schema，会回退到自动生成图谱而不是继续返回坏上下文。
 - 自动 Wiki 的 project/workflow/paper task/benchmark/algorithm 节点现在写入中文标题、中文说明和中文标签，

@@ -38,6 +38,8 @@ SOURCE_MAPPING_THEMES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("uncertainty", ("uncertainty", "calibration", "bayesian", "dropout", "ensemble")),
     ("high_speed_flow", ("hypersonic", "supersonic", "reentry", "aerospace", "geometry-dependent")),
     ("turbulence_closure", ("turbulence closure", "turbulence closures", "bluff-body", "rans residual", "reynolds stress", "reynolds force")),
+    ("field_inference", ("field inference", "field-inference", "temperature reconstruction", "temperature fields", "lagrangian", "dns-fidelity", "velocimetry")),
+    ("diffusion_operator", ("diffusion-corrected", "diffusion model", "diffusion models", "rollout stability")),
     ("multiphysics", ("multiphysics", "multiscale")),
     ("earth_system", ("earth system", "esm", "bias-correction", "bias correction", "cadence")),
     ("solver", ("solver", "newton", "krylov", "preconditioner")),

@@ -18,6 +18,8 @@ def test_source_mapping_themes_ignore_substring_false_positives() -> None:
     closure_themes = _mapping_themes("PINN-trained turbulence closures across bluff-body shapes under solver stability")
     risk_design_themes = _mapping_themes("risk-aware set-based engineering design with CVaR and CFD evidence")
     method_substrate_themes = _mapping_themes("GRAFT-ATHENA adaptive factored trees grow a reusable method substrate")
+    field_inference_themes = _mapping_themes("temperature reconstruction from Lagrangian velocity data at DNS-fidelity")
+    diffusion_operator_themes = _mapping_themes("diffusion-corrected neural operator rollout stability")
 
     assert "agent" not in themes
     assert "engine" not in themes
@@ -32,6 +34,8 @@ def test_source_mapping_themes_ignore_substring_false_positives() -> None:
     assert "turbulence_closure" in closure_themes
     assert "risk_design" in risk_design_themes
     assert "method_substrate" in method_substrate_themes
+    assert "field_inference" in field_inference_themes
+    assert "diffusion_operator" in diffusion_operator_themes
 
 
 def test_paper_problem_loop_audit_writes_passed_bilingual_artifact(tmp_path: Path) -> None:
