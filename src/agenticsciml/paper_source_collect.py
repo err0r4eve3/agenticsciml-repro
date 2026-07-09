@@ -160,6 +160,8 @@ def _real_problem(title: str, summary: str) -> str:
         return "Audit self-improving agentic scientific-discovery workflows under reusable method substrates, action-space expansion, probabilistic-tree policy, and production-solver evidence constraints."
     if "athena" in text and any(term in text for term in ("hierarchical evolutionary", "contextual bandit", "numerical algorithms", "scientific pipelines")):
         return "Audit agentic numerical-algorithm discovery workflows under conceptual scaffolding, contextual-bandit policy, solver construction, symbolic-numeric orchestration, verification, and repair constraints."
+    if "agents' last exam" in text or "sustained performance measurement" in text:
+        return "Audit long-horizon agent benchmarks for economically valuable real-world workflows under sustained performance, verifiable outcome, domain coverage, and deployment-gap constraints."
     if "agent" in text or "llm" in text:
         return "Audit long-horizon agent or LLM workflows with verifiable outcomes and explicit failure boundaries."
     if "multiple solutions" in text or "solution multiplicity" in text:
@@ -269,6 +271,8 @@ def _real_problem_zh(title: str, summary: str) -> str:
         return "审计 self-improving agentic scientific-discovery 工作流，并检查可复用 method substrate、action-space expansion、probabilistic-tree policy 和 production-solver 证据约束。"
     if "athena" in text and any(term in text for term in ("hierarchical evolutionary", "contextual bandit", "numerical algorithms", "scientific pipelines")):
         return "审计 agentic numerical-algorithm discovery 工作流，并检查 conceptual scaffolding、contextual-bandit policy、solver construction、symbolic-numeric orchestration、verification 和 repair 约束。"
+    if "agents' last exam" in text or "sustained performance measurement" in text:
+        return "审计 economically valuable real-world workflow 的长周期 agent benchmark，并检查 sustained performance、可验证结果、domain coverage 和 deployment-gap 约束。"
     if "agent" in text or "llm" in text:
         return "审计长周期 agent 或 LLM 工作流，要求结果可验证并显式记录失败边界。"
     if "multiple solutions" in text or "solution multiplicity" in text:

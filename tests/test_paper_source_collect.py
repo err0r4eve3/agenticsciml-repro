@@ -230,6 +230,12 @@ def test_parse_arxiv_atom_uses_specific_problem_for_recent_pde_paper_themes() ->
             "评测 LLM 在 scientific computing 和 SciML 任务中的能力，同时保留模型特定失败模式和决策点。",
         ),
         (
+            "Agents' Last Exam",
+            "The ALE benchmark evaluates AI agents on long horizon, economically valuable, real world tasks with sustained performance measurement and verifiable outcomes.",
+            "Audit long-horizon agent benchmarks for economically valuable real-world workflows under sustained performance, verifiable outcome, domain coverage, and deployment-gap constraints.",
+            "审计 economically valuable real-world workflow 的长周期 agent benchmark，并检查 sustained performance、可验证结果、domain coverage 和 deployment-gap 约束。",
+        ),
+        (
             "Agentic Risk-Aware Set-Based Engineering Design",
             "A multi-agent LLM framework performs airfoil design with CVaR risk filtering and high-fidelity CFD evidence.",
             "Audit risk-aware multi-agent engineering-design workflows under CVaR filtering, human-in-the-loop review, tool validation, and CFD evidence constraints.",
