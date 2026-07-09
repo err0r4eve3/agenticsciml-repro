@@ -455,7 +455,7 @@ ul {
   font-size: 24px;
 }
 
-.wiki-head span {
+.wiki-head > div > span {
   display: block;
   margin-top: 6px;
   color: var(--ink-muted);
