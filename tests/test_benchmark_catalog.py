@@ -40,6 +40,15 @@ EXPECTED_BENCHMARKS = {
 ORCHESTRATOR_SMOKE_BENCHMARKS = (
     "function_approx",
     "function_approx_faithful_small",
+    "poisson_lshape",
+    "poisson_lshape_faithful_small",
+    "burgers_pinn",
+    "burgers_pinn_faithful_small",
+    "antiderivative_operator",
+    "antiderivative_operator_faithful_small",
+    "reaction_diffusion_operator",
+    "reaction_diffusion_operator_faithful_small",
+    "cylinder_wake_reconstruction",
     "cylinder_wake_reconstruction_faithful_small",
 )
 
@@ -130,6 +139,8 @@ def _problem_bundle_from_dir(path: Path, spec: BenchmarkSpec) -> ProblemBundle:
 
 def test_benchmark_catalog_lists_all_paper_benchmarks() -> None:
     assert set(BENCHMARKS) == EXPECTED_BENCHMARKS
+    assert len(ORCHESTRATOR_SMOKE_BENCHMARKS) == len(set(ORCHESTRATOR_SMOKE_BENCHMARKS))
+    assert set(ORCHESTRATOR_SMOKE_BENCHMARKS) == EXPECTED_BENCHMARKS
     for name, spec in BENCHMARKS.items():
         assert spec.path.exists(), name
         assert spec.metric
@@ -949,41 +960,73 @@ def test_cli_lists_benchmark_fidelity_and_claim(cli_env: dict[str, str]) -> None
     assert "not_validated" in result.stdout
 
 
-def test_mock_orchestrator_root_only_runs_representative_benchmarks(tmp_path: Path) -> None:
-    for name in ORCHESTRATOR_SMOKE_BENCHMARKS:
-        spec = BENCHMARKS[name]
-        config = ExperimentConfig(
-            experiment_id=f"{name}-root",
-            benchmark_dir=spec.path,
-            output_dir=tmp_path,
-            evolution=EvolutionConfig(max_iterations=0, max_debug_retries=0),
-            use_mock=True,
-        )
+def _assert_mock_workflow_evidence_is_fail_closed(run_dir: Path) -> None:
+    trace_summary = json.loads((run_dir / "trace_summary.json").read_text(encoding="utf-8"))
+    readiness = json.loads(
+        (run_dir / "reports" / "scientific_discovery_readiness.json").read_text(encoding="utf-8")
+    )
 
-        run_dir = AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+    assert trace_summary["quality_gate"]["passed"] is True
+    assert readiness["status"] == "blocked"
+    assert readiness["scientific_claim_supported"] is False
 
+
+@pytest.mark.parametrize("name", ORCHESTRATOR_SMOKE_BENCHMARKS)
+def test_mock_orchestrator_root_only_runs_all_benchmarks(tmp_path: Path, name: str) -> None:
+    spec = BENCHMARKS[name]
+    config = ExperimentConfig(
+        experiment_id=f"{name}-root",
+        benchmark_dir=spec.path,
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, max_debug_retries=0),
+        use_mock=True,
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+    tree = json.loads((run_dir / "tree.json").read_text(encoding="utf-8"))
+    checkpoint = json.loads((run_dir / "checkpoint.json").read_text(encoding="utf-8"))
+    nodes = tree["nodes"]
+
+    assert [node["node_id"] for node in nodes] == ["solution_000"]
+    assert nodes[0]["status"] == "evaluated"
+    assert nodes[0]["benchmark_name"] == name
+    assert nodes[0]["contract_hash"]
+    assert checkpoint["completed_iterations"] == 0
+    eval_data = json.loads(
+        (run_dir / "solutions" / "solution_000" / "eval.json").read_text(encoding="utf-8")
+    )
+    assert eval_data["metric"] == spec.metric
+    _assert_mock_workflow_evidence_is_fail_closed(run_dir)
+
+
+@pytest.mark.parametrize("name", ORCHESTRATOR_SMOKE_BENCHMARKS)
+def test_mock_orchestrator_one_iteration_runs_all_benchmarks(tmp_path: Path, name: str) -> None:
+    spec = BENCHMARKS[name]
+    config = ExperimentConfig(
+        experiment_id=f"{name}-evolution",
+        benchmark_dir=spec.path,
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=1, parallel_mutations=2, max_debug_retries=0),
+        use_mock=True,
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+    tree = json.loads((run_dir / "tree.json").read_text(encoding="utf-8"))
+    checkpoint = json.loads((run_dir / "checkpoint.json").read_text(encoding="utf-8"))
+    nodes = tree["nodes"]
+
+    assert {node["node_id"] for node in nodes} == {
+        "solution_000",
+        "solution_001",
+        "solution_002",
+    }
+    assert all(node["status"] == "evaluated" for node in nodes)
+    assert all(node["benchmark_name"] == name for node in nodes)
+    assert all(node["contract_hash"] for node in nodes)
+    assert checkpoint["completed_iterations"] == 1
+    for node in nodes:
         eval_data = json.loads(
-            (run_dir / "solutions" / "solution_000" / "eval.json").read_text(encoding="utf-8")
+            (run_dir / "solutions" / node["node_id"] / "eval.json").read_text(encoding="utf-8")
         )
         assert eval_data["metric"] == spec.metric
-        tree = json.loads((run_dir / "tree.json").read_text(encoding="utf-8"))
-        assert tree["nodes"][0]["benchmark_name"] == name
-        assert tree["nodes"][0]["contract_hash"]
-
-
-def test_mock_orchestrator_one_iteration_runs_representative_benchmarks(tmp_path: Path) -> None:
-    for name in ORCHESTRATOR_SMOKE_BENCHMARKS:
-        spec = BENCHMARKS[name]
-        config = ExperimentConfig(
-            experiment_id=f"{name}-evolution",
-            benchmark_dir=spec.path,
-            output_dir=tmp_path,
-            evolution=EvolutionConfig(max_iterations=1, parallel_mutations=2, max_debug_retries=0),
-            use_mock=True,
-        )
-
-        run_dir = AgenticSciMLOrchestrator(config, MockLLMClient()).run()
-        tree = json.loads((run_dir / "tree.json").read_text(encoding="utf-8"))
-
-        assert len(tree["nodes"]) >= 2
-        assert (run_dir / "solutions" / "solution_001" / "eval.json").exists()
+    _assert_mock_workflow_evidence_is_fail_closed(run_dir)
