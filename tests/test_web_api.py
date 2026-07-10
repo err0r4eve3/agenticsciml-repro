@@ -15,6 +15,9 @@ from fastapi.testclient import TestClient
 from agenticsciml.web.app import create_app
 
 
+TEST_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
 def test_web_benchmarks_match_catalog() -> None:
     client = TestClient(create_app())
 
@@ -2227,7 +2230,7 @@ def test_code_server_url_uses_loopback_without_token_when_repo_workspace_enabled
     assert "PASSWORD=" not in payload["command_hint"]
     assert "--auth none" in payload["command_hint"]
     assert payload["auth_mode"] == "upstream_account"
-    assert payload["workspace"].endswith("New project 11")
+    assert Path(payload["workspace"]).resolve() == TEST_REPO_ROOT
 
 
 def test_code_server_workspaces_list_independent_directories(
@@ -2251,7 +2254,7 @@ def test_code_server_workspaces_list_independent_directories(
 
     assert response.status_code == 200
     workspaces = {item["id"]: item for item in response.json()["workspaces"]}
-    assert workspaces["repo"]["workspace"].endswith("New project 11")
+    assert Path(workspaces["repo"]["workspace"]).resolve() == TEST_REPO_ROOT
     assert workspaces["run:web-test"]["workspace"] == str(run_dir.resolve())
     assert workspaces["champion:web-test"]["workspace"] == str((run_dir / "champion").resolve())
     assert workspaces["solution:web-test:solution_000"]["workspace"] == str(
