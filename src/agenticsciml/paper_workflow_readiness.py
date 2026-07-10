@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import math
+import shlex
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -329,26 +331,67 @@ def render_command_plan_markdown(bundle: dict[str, Any]) -> str:
 
 
 def _provider_readiness(env: Mapping[str, str]) -> dict[str, Any]:
-    base_url = env.get("OPENAI_BASE_URL") or None
+    base_url = str(env.get("OPENAI_BASE_URL") or "").strip() or None
     capabilities = capabilities_for_openai_compatible(base_url).to_dict()
-    budget_keys = (
+    integer_budget_keys = (
         "AGENTICSCIML_MAX_LLM_CALLS",
         "AGENTICSCIML_MAX_PROMPT_TOKENS",
         "AGENTICSCIML_MAX_OUTPUT_TOKENS",
         "AGENTICSCIML_MAX_TOTAL_TOKENS",
-        "AGENTICSCIML_MAX_COST_USD",
     )
-    budget = {key: "set" if env.get(key) else "missing" for key in budget_keys}
+    float_budget_keys = (
+        "AGENTICSCIML_MAX_COST_USD",
+        "AGENTICSCIML_COST_PER_1K_TOKENS_USD",
+    )
+    budget: dict[str, str] = {}
+    budget_issues: list[str] = []
+    for key in integer_budget_keys:
+        status, issue = _positive_budget_value_status(env.get(key), integer=True)
+        budget[key] = status
+        if issue:
+            budget_issues.append(f"{key}: {issue}")
+    for key in float_budget_keys:
+        status, issue = _positive_budget_value_status(env.get(key), integer=False)
+        budget[key] = status
+        if issue:
+            budget_issues.append(f"{key}: {issue}")
+    if (
+        budget["AGENTICSCIML_MAX_COST_USD"] == "valid"
+        and budget["AGENTICSCIML_COST_PER_1K_TOKENS_USD"] != "valid"
+    ):
+        budget["AGENTICSCIML_MAX_COST_USD"] = "invalid"
+        budget_issues.append(
+            "AGENTICSCIML_MAX_COST_USD requires a valid "
+            "AGENTICSCIML_COST_PER_1K_TOKENS_USD"
+        )
+    limit_keys = (*integer_budget_keys, "AGENTICSCIML_MAX_COST_USD")
     return {
-        "api_key_present": bool(env.get("OPENAI_API_KEY")),
-        "model": env.get("OPENAI_MODEL", "gpt-5-mini"),
+        "api_key_present": bool(str(env.get("OPENAI_API_KEY") or "").strip()),
+        "model": str(env.get("OPENAI_MODEL") or "gpt-5-mini").strip() or "gpt-5-mini",
         "base_url_present": bool(base_url),
         "provider_hint": capabilities["provider"],
         "capabilities": capabilities,
         "budget": budget,
-        "budget_configured": any(value == "set" for value in budget.values()),
+        "budget_issues": budget_issues,
+        "budget_configured": not budget_issues
+        and any(budget[key] == "valid" for key in limit_keys),
         "secret_policy": "credential values are never written to readiness artifacts",
     }
+
+
+def _positive_budget_value_status(raw: object, *, integer: bool) -> tuple[str, str | None]:
+    text = str(raw or "").strip()
+    if not text:
+        return "missing", None
+    try:
+        value = int(text) if integer else float(text)
+    except ValueError:
+        return "invalid", "must be a positive integer" if integer else "must be a positive number"
+    if isinstance(value, float) and not math.isfinite(value):
+        return "invalid", "must be finite"
+    if value <= 0:
+        return "invalid", "must be positive"
+    return "valid", None
 
 
 def _selector_readiness(
@@ -430,15 +473,42 @@ def _selector_evidence_packet_readiness(selector_evidence_path: Path | None) -> 
             "paper_workflow_selector_ready": False,
             "blockers": ["selector evidence packet must be a JSON object"],
         }
-    scientific_claim_supported = payload.get("scientific_claim_supported") is True
-    ready = (
-        payload.get("status") == "ready"
-        and payload.get("paper_workflow_selector_ready") is True
-        and scientific_claim_supported is False
+    summary = payload.get("runtime_vote_summary")
+    summary = summary if isinstance(summary, dict) else {}
+    blockers = (
+        [
+            str(item.get("message") or item.get("check_id") or item)
+            if isinstance(item, dict)
+            else str(item)
+            for item in payload.get("blockers", [])
+        ]
+        if isinstance(payload.get("blockers"), list)
+        else []
     )
-    blockers = payload.get("blockers") if isinstance(payload.get("blockers"), list) else []
+    scientific_claim_supported = payload.get("scientific_claim_supported") is True
+    if payload.get("schema_version") != 1:
+        blockers.append("selector evidence packet schema_version must be 1")
+    if payload.get("status") != "ready":
+        blockers.append("selector evidence packet status must be ready")
+    if payload.get("paper_workflow_selector_ready") is not True:
+        blockers.append("selector evidence packet readiness flag must be true")
     if scientific_claim_supported:
-        blockers = [*blockers, "selector evidence packet must not claim scientific support"]
+        blockers.append("selector evidence packet must not claim scientific support")
+    if _nonnegative_int(summary.get("real_vote_count")) < 2:
+        blockers.append("selector evidence requires at least two real runtime votes")
+    if _nonnegative_int(summary.get("mock_vote_count")) != 0:
+        blockers.append("selector evidence must not include mock votes")
+    if _nonnegative_int(summary.get("distinct_member_vote_count")) < 2:
+        blockers.append("selector evidence requires at least two distinct runtime members")
+    if summary.get("repeated_member_votes") is True:
+        blockers.append("selector evidence must not reuse one member for multiple votes")
+    providers = _nonempty_string_list(summary.get("unique_providers"))
+    models = _nonempty_string_list(summary.get("unique_actual_models"))
+    provider_diverse = summary.get("provider_diversity") is True and len(providers) >= 2
+    model_diverse = summary.get("actual_model_diversity") is True and len(models) >= 2
+    if not (provider_diverse or model_diverse):
+        blockers.append("selector evidence must be heterogeneous by provider or actual model")
+    ready = not blockers
     return {
         "path": str(path),
         "exists": True,
@@ -446,11 +516,21 @@ def _selector_evidence_packet_readiness(selector_evidence_path: Path | None) -> 
         "status": payload.get("status"),
         "paper_workflow_selector_ready": ready,
         "scientific_claim_supported": scientific_claim_supported,
-        "runtime_vote_summary": payload.get("runtime_vote_summary")
-        if isinstance(payload.get("runtime_vote_summary"), dict)
-        else {},
+        "runtime_vote_summary": summary,
         "blockers": blockers,
     }
+
+
+def _nonnegative_int(value: object) -> int:
+    if type(value) is not int:
+        return -1
+    return value if value >= 0 else -1
+
+
+def _nonempty_string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return sorted({item.strip() for item in value if isinstance(item, str) and item.strip()})
 
 
 def _paper_benchmark_readiness(benchmark_dir: Path, benchmark: dict[str, object]) -> dict[str, Any]:
@@ -565,13 +645,48 @@ def _ablation_readiness(
 
 
 def _resource_readiness(resource_constraints: dict[str, object], expert_blueprint_id: str | None) -> dict[str, Any]:
-    required = ("cpu", "gpu", "timeout_s", "dependency_limits", "data_limits")
-    missing = [key for key in required if key not in resource_constraints]
+    issues: list[str] = []
+    if not str(resource_constraints.get("cpu") or "").strip():
+        issues.append("cpu must be a non-empty description")
+    if not isinstance(resource_constraints.get("gpu"), bool):
+        issues.append("gpu must be a boolean")
+    timeout = resource_constraints.get("timeout_s")
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, (int, float))
+        or not math.isfinite(float(timeout))
+        or float(timeout) <= 0
+    ):
+        issues.append("timeout_s must be a positive finite number")
+    dependencies = resource_constraints.get("dependency_limits")
+    if not isinstance(dependencies, list) or not dependencies or any(
+        not isinstance(item, str) or not item.strip() for item in dependencies
+    ):
+        issues.append("dependency_limits must be a non-empty list of strings")
+    data_limits = resource_constraints.get("data_limits")
+    if isinstance(data_limits, str):
+        data_limits_ready = bool(data_limits.strip())
+    elif isinstance(data_limits, list):
+        data_limits_ready = bool(data_limits) and all(
+            isinstance(item, str) and bool(item.strip()) for item in data_limits
+        )
+    else:
+        data_limits_ready = False
+    if not data_limits_ready:
+        issues.append("data_limits must be a non-empty string or list of strings")
+    blueprint = str(expert_blueprint_id or "").strip()
+    if not blueprint:
+        issues.append("expert_blueprint_id must be non-empty")
     return {
-        "ready": bool(expert_blueprint_id and not missing),
-        "expert_blueprint_id": expert_blueprint_id,
+        "ready": not issues,
+        "expert_blueprint_id": blueprint or None,
         "resource_constraints": dict(resource_constraints),
-        "missing_resource_keys": missing,
+        "missing_resource_keys": [
+            key
+            for key in ("cpu", "gpu", "timeout_s", "dependency_limits", "data_limits")
+            if key not in resource_constraints
+        ],
+        "issues": issues,
     }
 
 
@@ -600,19 +715,21 @@ def _command_plan(
     ablation_output_dir: Path | None,
 ) -> list[str]:
     selector_json = json.dumps(selector_panel, separators=(",", ":"), sort_keys=True)
+    benchmark_arg = shlex.quote(str(benchmark_dir))
+    selector_arg = shlex.quote(selector_json)
     commands = [
         "export OPENAI_API_KEY=<redacted>",
         "export AGENTICSCIML_MAX_LLM_CALLS=20",
         (
             "PYTHONPATH=src uv run --python 3.11 --extra real-llm python -m agenticsciml.cli run "
-            f"{benchmark_dir} --max-iterations 1 --parallel-mutations 2 --visual-audit-mode real "
-            f"--selector-panel-json '{selector_json}'"
+            f"{benchmark_arg} --real --max-iterations 1 --parallel-mutations 2 --visual-audit-mode real "
+            f"--selector-panel-json {selector_arg}"
         ),
     ]
     if ablation_output_dir is not None:
         commands.append(
             "PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli "
-            f"verify-ablation-evidence {ablation_output_dir} --verified-by domain-reviewer"
+            f"verify-ablation-evidence {shlex.quote(str(ablation_output_dir))} --verified-by domain-reviewer"
         )
     commands.append("PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli trace-summary <run_dir>")
     return commands

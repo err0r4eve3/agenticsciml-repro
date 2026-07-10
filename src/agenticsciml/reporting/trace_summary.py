@@ -13,7 +13,11 @@ from agenticsciml.state import (
 )
 from agenticsciml.storage import atomic_write_text
 from agenticsciml.trace_contracts import FanoutTraceMetadata, fanout_trace_references
-from agenticsciml.evidence import CLAIM_GATE_BLOCKED
+from agenticsciml.evidence import (
+    CLAIM_GATE_ALLOWED,
+    CLAIM_GATE_BLOCKED,
+    CLAIM_GATE_DOWNGRADED,
+)
 
 
 REQUIRED_EVENT_TYPES = (
@@ -85,15 +89,9 @@ def summarize_trace(run_dir: Path) -> dict[str, Any]:
     missing_event_types = [
         event_type for event_type in REQUIRED_EVENT_TYPES if event_counts.get(event_type, 0) == 0
     ]
-    guardrail_failures = [
-        {
-            "name": str(event.get("name", "")),
-            "metadata": event.get("metadata", {}),
-        }
-        for event in events
-        if event.get("event_type") == "guardrail_span"
-        and event.get("metadata", {}).get("passed") is False
-    ]
+    guardrail_failures, recoverable_failures, hard_failures = _classify_guardrail_failures(
+        events
+    )
     agent_roles = sorted(
         {
             str(event.get("metadata", {}).get("spec_role"))
@@ -103,7 +101,12 @@ def summarize_trace(run_dir: Path) -> dict[str, Any]:
     )
     artifact_consistency = _check_artifact_consistency(run_dir, events)
     claim_gate = _summary_claim_gate(run_dir, events)
-    quality = _trace_quality_gate(missing_event_types, guardrail_failures, artifact_consistency)
+    quality = _trace_quality_gate(
+        missing_event_types,
+        recoverable_failures,
+        hard_failures,
+        artifact_consistency,
+    )
     return {
         "event_count": len(events),
         "event_counts": dict(sorted(event_counts.items())),
@@ -132,15 +135,10 @@ def summarize_trace(run_dir: Path) -> dict[str, Any]:
 
 def _trace_quality_gate(
     missing_event_types: list[str],
-    guardrail_failures: list[dict[str, Any]],
+    recoverable_failures: list[dict[str, Any]],
+    hard_failures: list[dict[str, Any]],
     artifact_consistency: dict[str, Any],
 ) -> dict[str, Any]:
-    recoverable_failures = [
-        failure for failure in guardrail_failures if _is_recoverable_guardrail_failure(failure)
-    ]
-    hard_failures = [
-        failure for failure in guardrail_failures if not _is_recoverable_guardrail_failure(failure)
-    ]
     artifact_passed = bool(artifact_consistency.get("passed", True))
     if missing_event_types:
         status = TRACE_QUALITY_FAILED_INCOMPLETE
@@ -163,6 +161,93 @@ def _trace_quality_gate(
         and status == TRACE_QUALITY_DEGRADED_RECOVERED,
         "hard_guardrail_violation": bool(hard_failures),
     }
+
+
+def _classify_guardrail_failures(
+    events: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    guardrail_events = [
+        (index, event)
+        for index, event in enumerate(events)
+        if event.get("event_type") == "guardrail_span"
+    ]
+    failures: list[dict[str, Any]] = []
+    recoverable: list[dict[str, Any]] = []
+    hard: list[dict[str, Any]] = []
+    for position, event in guardrail_events:
+        metadata = event.get("metadata", {})
+        if not isinstance(metadata, dict) or metadata.get("passed") is not False:
+            continue
+        failure = {
+            "name": str(event.get("name", "")),
+            "metadata": metadata,
+            "event_seq": event.get("event_seq"),
+        }
+        failures.append(failure)
+        if _is_recoverable_guardrail_failure(failure) and _has_valid_guardrail_recovery(
+            position,
+            event,
+            guardrail_events,
+        ):
+            recoverable.append(failure)
+        else:
+            hard.append(failure)
+    return failures, recoverable, hard
+
+
+def _has_valid_guardrail_recovery(
+    failure_position: int,
+    failure_event: dict[str, Any],
+    guardrail_events: list[tuple[int, dict[str, Any]]],
+) -> bool:
+    failure_metadata = failure_event.get("metadata", {})
+    if not isinstance(failure_metadata, dict):
+        return False
+    failure_attempt = failure_metadata.get("attempt")
+    failure_seq = failure_event.get("event_seq")
+    for candidate_position, candidate in guardrail_events:
+        if candidate_position <= failure_position:
+            continue
+        candidate_metadata = candidate.get("metadata", {})
+        if not isinstance(candidate_metadata, dict) or candidate_metadata.get("passed") is not True:
+            continue
+        if not _same_guardrail_boundary(failure_event, candidate):
+            continue
+        candidate_seq = candidate.get("event_seq")
+        if isinstance(failure_seq, int) and not isinstance(failure_seq, bool):
+            if (
+                not isinstance(candidate_seq, int)
+                or isinstance(candidate_seq, bool)
+                or candidate_seq <= failure_seq
+            ):
+                continue
+        candidate_attempt = candidate_metadata.get("attempt")
+        if isinstance(failure_attempt, int) and not isinstance(failure_attempt, bool):
+            if (
+                not isinstance(candidate_attempt, int)
+                or isinstance(candidate_attempt, bool)
+                or candidate_attempt <= failure_attempt
+            ):
+                continue
+        return True
+    return False
+
+
+def _same_guardrail_boundary(
+    failure_event: dict[str, Any],
+    candidate_event: dict[str, Any],
+) -> bool:
+    if str(failure_event.get("name", "")) != str(candidate_event.get("name", "")):
+        return False
+    failure_metadata = failure_event.get("metadata", {})
+    candidate_metadata = candidate_event.get("metadata", {})
+    if not isinstance(failure_metadata, dict) or not isinstance(candidate_metadata, dict):
+        return False
+    for key in ("spec_role", "state_node", "schema_name", "solution_id", "node_id"):
+        if key in failure_metadata or key in candidate_metadata:
+            if failure_metadata.get(key) != candidate_metadata.get(key):
+                return False
+    return True
 
 
 def _is_recoverable_guardrail_failure(failure: dict[str, Any]) -> bool:
@@ -271,6 +356,12 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
         events,
     )
     data_analysis_specificity = _check_data_analysis_specificity(run_dir)
+    if data_analysis_specificity.get("passed") is not True:
+        warnings = data_analysis_specificity.get("warnings", [])
+        if isinstance(warnings, list):
+            issues.extend(f"data_analysis_specificity: {warning}" for warning in warnings)
+        else:
+            issues.append("data_analysis_specificity failed without structured warnings")
 
     return {
         "checked": True,
@@ -388,8 +479,11 @@ def _check_claim_gate_consistency(
         return
     paper_supported = claim_gate.get("paper_level_claim_supported") is True
     scientific_supported = claim_gate.get("scientific_claim_supported") is True
-    if claim_gate.get("status") == CLAIM_GATE_BLOCKED and (paper_supported or scientific_supported):
-        issues.append("claim_gate blocked status cannot support paper or scientific claims")
+    gate_status = claim_gate.get("status")
+    if gate_status not in {CLAIM_GATE_ALLOWED, CLAIM_GATE_BLOCKED, CLAIM_GATE_DOWNGRADED}:
+        issues.append("claim_gate status is missing or invalid")
+    elif gate_status != CLAIM_GATE_ALLOWED and (paper_supported or scientific_supported):
+        issues.append("claim_gate non-allowed status cannot support paper or scientific claims")
     if run_metadata.get("paper_level_claim_supported") is True and not paper_supported:
         issues.append("run_metadata.json paper_level_claim_supported overclaims claim_gate")
     if run_metadata.get("scientific_claim_supported") is True and not scientific_supported:
@@ -415,6 +509,22 @@ def _check_claim_gate_consistency(
                 "run_metadata.json",
                 "trace workflow start",
             )
+            _compare_metadata_value(
+                issues,
+                "claim_gate status",
+                claim_gate.get("status"),
+                workflow_gate.get("status"),
+                "run_metadata.json",
+                "trace workflow start",
+            )
+            _compare_metadata_value(
+                issues,
+                "claim_gate scientific_claim_supported",
+                claim_gate.get("scientific_claim_supported"),
+                workflow_gate.get("scientific_claim_supported"),
+                "run_metadata.json",
+                "trace workflow start",
+            )
 
 
 def _check_scientific_discovery_readiness_consistency(
@@ -422,6 +532,7 @@ def _check_scientific_discovery_readiness_consistency(
     run_dir: Path,
     run_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    issue_count_before = len(issues)
     path = run_dir / "reports" / "scientific_discovery_readiness.json"
     if not path.exists():
         return {"checked": False, "passed": True, "path": "reports/scientific_discovery_readiness.json"}
@@ -430,19 +541,38 @@ def _check_scientific_discovery_readiness_consistency(
         issues.append("reports/scientific_discovery_readiness.json is invalid")
         return {"checked": True, "passed": False, "path": "reports/scientific_discovery_readiness.json"}
     supported = readiness.get("scientific_claim_supported") is True
+    readiness_status = readiness.get("status")
+    if readiness_status not in {"ready", "blocked"}:
+        issues.append("scientific discovery readiness status is missing or invalid")
+    elif (readiness_status == "ready") != supported:
+        issues.append(
+            "scientific discovery readiness status must agree with scientific_claim_supported"
+        )
     if run_metadata is not None and run_metadata.get("scientific_claim_supported") is True and not supported:
         issues.append("run_metadata.json scientific_claim_supported overclaims scientific discovery readiness")
     metadata_readiness = run_metadata.get("scientific_discovery_readiness") if run_metadata else None
     if isinstance(metadata_readiness, dict):
-        if metadata_readiness.get("scientific_claim_supported") is True and not supported:
-            issues.append("run_metadata.json scientific_discovery_readiness overclaims readiness report")
+        _compare_metadata_value(
+            issues,
+            "scientific_discovery_readiness status",
+            metadata_readiness.get("status"),
+            readiness_status,
+            "run_metadata.json",
+            "readiness report",
+        )
+        _compare_metadata_value(
+            issues,
+            "scientific_discovery_readiness scientific_claim_supported",
+            metadata_readiness.get("scientific_claim_supported"),
+            readiness.get("scientific_claim_supported"),
+            "run_metadata.json",
+            "readiness report",
+        )
     return {
         "checked": True,
-        "passed": supported or not (
-            run_metadata is not None and run_metadata.get("scientific_claim_supported") is True
-        ),
+        "passed": len(issues) == issue_count_before,
         "path": "reports/scientific_discovery_readiness.json",
-        "status": readiness.get("status"),
+        "status": readiness_status,
         "scientific_claim_supported": supported,
         "blocker_count": len(readiness.get("blockers", []))
         if isinstance(readiness.get("blockers"), list)

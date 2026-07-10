@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import shutil
+import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
 from agenticsciml.agents import (
     DataAnalystAgent,
@@ -52,7 +55,11 @@ from agenticsciml.audit_reports import (
 from agenticsciml.evidence import claim_gate_for_run, evidence_metadata_for_run
 from agenticsciml.emergence_audit import audit_solution_emergence
 from agenticsciml.execution.runner import RunResult
-from agenticsciml.execution.sandbox import prepare_solution_workspace, train_and_evaluate
+from agenticsciml.execution.sandbox import (
+    prepare_run_inputs,
+    prepare_solution_workspace,
+    train_and_evaluate,
+)
 from agenticsciml.llm.base import LLMClient
 from agenticsciml.method_experience import (
     build_method_experience_record,
@@ -108,6 +115,9 @@ BRANCH_INTENTS = (
 EVALUATION_APPROVAL_SCHEMA_VERSION = 1
 ANALYSIS_CONTEXT_SCHEMA_VERSION = 1
 SELECTOR_POLICY_SCHEMA_VERSION = 1
+CHECKPOINT_SCHEMA_VERSION = "orchestrator_checkpoint.v2"
+EXPERIMENT_CONDITIONS_SCHEMA_VERSION = 1
+INFLIGHT_BATCH_SCHEMA_VERSION = 1
 
 
 class EvaluationApprovalRequired(RuntimeError):
@@ -129,6 +139,7 @@ class AgenticSciMLOrchestrator:
         self.nodes: list[SolutionNode] = []
         self.analysis_by_node: dict[str, AnalysisReport] = {}
         self._analysis_lock = threading.RLock()
+        self._checkpoint_lock = threading.RLock()
         self._method_experience_lock = threading.RLock()
         self._role_llms: dict[str, LLMClient] = {}
 
@@ -193,6 +204,13 @@ class AgenticSciMLOrchestrator:
         self.contract: EvaluationContract | None = None
         self.loaded_checkpoint: dict[str, object] | None = None
         self._next_solution_index: int | None = None
+        self._completed_iterations = 0
+        self._target_iterations = config.evolution.max_iterations
+        self._active_iteration_index: int | None = None
+        self._inflight_batch: dict[str, object] | None = None
+        self._source_revision = self._read_source_revision()
+        self._invocation_id: str | None = None
+        self._invocation_started_monotonic: float | None = None
         self._strategy_seed_context_cache: str | None = None
         self._problem_intake_context_cache: str | None = None
 
@@ -226,17 +244,11 @@ class AgenticSciMLOrchestrator:
         if (
             _agent_config_requests_distinct_llm(requested_model, requested_base_url, base_model, base_url)
             and not self.config.use_mock
-            and all(hasattr(self.llm, attr) for attr in ("api_key", "base_url", "timeout_s"))
         ):
-            llm_kwargs = {
-                "model": requested_model or base_model,
-                "api_key": getattr(self.llm, "api_key"),
-                "base_url": requested_base_url if requested_base_url is not None else base_url,
-                "timeout_s": getattr(self.llm, "timeout_s"),
-            }
-            if hasattr(self.llm, "max_retries"):
-                llm_kwargs["max_retries"] = getattr(self.llm, "max_retries")
-            role_llm = self.llm.__class__(**llm_kwargs)
+            role_llm = self._clone_llm_adapter(
+                requested_model=requested_model,
+                requested_base_url=requested_base_url,
+            )
         self._role_llms[role] = role_llm
         return role_llm
 
@@ -248,37 +260,64 @@ class AgenticSciMLOrchestrator:
         if (
             _agent_config_requests_distinct_llm(requested_model, requested_base_url, base_model, base_url)
             and not self.config.use_mock
-            and all(hasattr(self.llm, attr) for attr in ("api_key", "base_url", "timeout_s"))
         ):
-            llm_kwargs = {
-                "model": requested_model or base_model,
-                "api_key": getattr(self.llm, "api_key"),
-                "base_url": requested_base_url if requested_base_url is not None else base_url,
-                "timeout_s": getattr(self.llm, "timeout_s"),
-            }
-            if hasattr(self.llm, "max_retries"):
-                llm_kwargs["max_retries"] = getattr(self.llm, "max_retries")
-            return self.llm.__class__(**llm_kwargs)
+            return self._clone_llm_adapter(
+                requested_model=requested_model,
+                requested_base_url=requested_base_url,
+            )
         return self.llm
+
+    def _clone_llm_adapter(
+        self,
+        *,
+        requested_model: str | None,
+        requested_base_url: str | None,
+    ) -> LLMClient:
+        base_inner = getattr(self.llm, "inner", self.llm)
+        if not all(hasattr(base_inner, attr) for attr in ("api_key", "base_url", "timeout_s")):
+            return self.llm
+        base_model = getattr(base_inner, "model", getattr(self.llm, "model", None))
+        base_url = getattr(base_inner, "base_url", getattr(self.llm, "base_url", None))
+        llm_kwargs: dict[str, object] = {
+            "model": requested_model or base_model,
+            "api_key": getattr(base_inner, "api_key"),
+            "base_url": requested_base_url if requested_base_url is not None else base_url,
+            "timeout_s": getattr(base_inner, "timeout_s"),
+        }
+        if hasattr(base_inner, "max_retries"):
+            llm_kwargs["max_retries"] = getattr(base_inner, "max_retries")
+        cloned_inner = base_inner.__class__(**llm_kwargs)
+        wrap_child = getattr(self.llm, "wrap_child", None)
+        if callable(wrap_child):
+            return wrap_child(cloned_inner)
+        with_inner = getattr(self.llm, "with_inner", None)
+        if callable(with_inner):
+            return with_inner(cloned_inner)
+        return cloned_inner
 
     def run(self) -> Path:
         started = time.monotonic()
+        self._invocation_started_monotonic = started
+        self._invocation_id = self._start_invocation_record()
         self.storage.record_trace(
             "workflow_span",
             "agenticsciml.run.start",
             {
                 "experiment_id": self.config.experiment_id,
+                "invocation_id": self._invocation_id,
                 "run_state": "partial",
                 "benchmark_dir": str(self.config.benchmark_dir),
                 "max_iterations": self.config.evolution.max_iterations,
                 "branch_context_enabled": self.config.evolution.use_branch_context,
                 "strategy_seed_ids": list(self.config.strategy_seed_ids),
+                "source_revision": dict(self._source_revision),
                 **self._planning_trace_metadata(),
                 **self._evidence_metadata(),
             },
         )
         if not self.config.resume:
             self.storage.save_json("config.json", self.config.to_dict())
+            self._save_experiment_conditions()
             self._write_planning_artifacts()
         resumed = self._load_checkpoint_if_requested()
         if resumed:
@@ -286,7 +325,6 @@ class AgenticSciMLOrchestrator:
             self.contract = contract
             if self.loaded_checkpoint is not None:
                 self._validate_loaded_checkpoint(contract)
-            self.storage.save_json("config.json", self.config.to_dict())
             self._write_planning_artifacts()
             if not self.nodes:
                 data_report = self._read_data_report()
@@ -304,12 +342,18 @@ class AgenticSciMLOrchestrator:
             self.nodes.append(root)
             self._save_checkpoint("root_created")
 
-        for _ in range(self.config.evolution.max_iterations):
+        if self._inflight_batch is not None:
+            self._resume_inflight_iteration(contract)
+
+        while self._completed_iterations < self._target_iterations:
+            self._active_iteration_index = self._completed_iterations
             parents = self._select_parents()
             for parent, child in self._create_children_for_parents(parents, contract):
-                parent.children.append(child.node_id)
-                self.nodes.append(child)
-                self._save_checkpoint("child_created")
+                self._attach_child(parent, child)
+            self._inflight_batch = None
+            self._completed_iterations += 1
+            self._active_iteration_index = None
+            self._save_checkpoint("iteration_completed")
 
         self._write_reports(started)
         self._save_checkpoint("completed")
@@ -318,6 +362,7 @@ class AgenticSciMLOrchestrator:
             "agenticsciml.run.end",
             {
                 "experiment_id": self.config.experiment_id,
+                "invocation_id": self._invocation_id,
                 "run_state": "exported",
                 "solution_count": len(self.nodes),
                 "wall_time_s": time.monotonic() - started,
@@ -325,6 +370,11 @@ class AgenticSciMLOrchestrator:
         )
         write_trace_summary(self.storage.run_dir)
         write_sdk_trace_export(self.storage.run_dir)
+        self._finish_invocation_record(
+            self._invocation_id,
+            wall_time_s=time.monotonic() - started,
+            status="completed",
+        )
         return self.storage.run_dir
 
     def _load_or_create_contract(self) -> EvaluationContract:
@@ -341,12 +391,226 @@ class AgenticSciMLOrchestrator:
             data_report = data_report_path.read_text(encoding="utf-8")
         return self.evaluator.create_contract(self.problem_bundle, data_report)
 
+    def _experiment_conditions(self) -> dict[str, object]:
+        config_payload = self.config.to_dict()
+        config_payload.pop("experiment_id", None)
+        config_payload.pop("output_dir", None)
+        config_payload.pop("resume", None)
+        config_payload["benchmark_dir"] = str(self.config.benchmark_dir.resolve())
+        evolution = config_payload.get("evolution")
+        if isinstance(evolution, dict):
+            evolution = dict(evolution)
+            evolution.pop("max_iterations", None)
+            config_payload["evolution"] = evolution
+        return {
+            "config": config_payload,
+            "llm_runtime": self._llm_runtime_identity(self.llm),
+            "source_revision": dict(self._source_revision),
+        }
+
+    def _llm_runtime_identity(self, llm: object) -> dict[str, object]:
+        identity: dict[str, object] = {
+            "adapter_class": f"{llm.__class__.__module__}.{llm.__class__.__qualname__}",
+        }
+        for key in ("model", "provider", "provider_name", "adapter_type", "timeout_s", "max_retries"):
+            value = getattr(llm, key, None)
+            if isinstance(value, str | int | float | bool) or value is None:
+                identity[key] = value
+        inner = getattr(llm, "inner", None)
+        if inner is not None and inner is not llm:
+            identity["inner"] = self._llm_runtime_identity(inner)
+        budget = getattr(llm, "budget", None)
+        if budget is not None:
+            identity["budget_limits"] = {
+                key: getattr(budget, key, None)
+                for key in (
+                    "max_prompt_tokens",
+                    "max_output_tokens",
+                    "max_total_tokens",
+                    "max_calls",
+                    "max_cost_usd",
+                    "cost_per_1k_tokens_usd",
+                )
+            }
+        return identity
+
+    def _conditions_digest(self, conditions: dict[str, object]) -> str:
+        encoded = json.dumps(
+            conditions,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _save_experiment_conditions(self) -> None:
+        conditions = self._experiment_conditions()
+        self.storage.save_json(
+            "experiment_conditions.json",
+            {
+                "schema_version": EXPERIMENT_CONDITIONS_SCHEMA_VERSION,
+                "conditions": conditions,
+                "conditions_digest": self._conditions_digest(conditions),
+                "initial_target_iterations": self.config.evolution.max_iterations,
+            },
+        )
+
+    def _read_source_revision(self) -> dict[str, object]:
+        cwd = self.config.benchmark_dir.resolve()
+        try:
+            commit_result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=cwd,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            status_result = subprocess.run(
+                ["git", "status", "--porcelain", "--untracked-files=normal"],
+                cwd=cwd,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return {"commit": "unknown", "dirty": "unknown"}
+        commit = commit_result.stdout.strip()
+        if not commit:
+            return {"commit": "unknown", "dirty": "unknown"}
+        return {"commit": commit, "dirty": bool(status_result.stdout.strip())}
+
+    def _start_invocation_record(self) -> str:
+        path = self.storage.run_dir / "invocation_history.json"
+        if path.exists():
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict) or not isinstance(payload.get("invocations"), list):
+                raise ValueError("invocation_history.json is invalid")
+        else:
+            payload = {"schema_version": 1, "invocations": []}
+        if payload.get("schema_version") != 1:
+            raise ValueError("invocation_history.json schema_version is unsupported")
+        invocations = payload["invocations"]
+        assert isinstance(invocations, list)
+        invocation_id = f"invocation_{len(invocations) + 1:06d}"
+        conditions = self._experiment_conditions()
+        invocations.append(
+            {
+                "invocation_id": invocation_id,
+                "started_at": time.time(),
+                "completed_at": None,
+                "status": "running",
+                "resume": self.config.resume,
+                "requested_max_iterations": self.config.evolution.max_iterations,
+                "conditions_digest": self._conditions_digest(conditions),
+                "source_revision": dict(self._source_revision),
+                "wall_time_s": None,
+                "wall_time_semantics": "this invocation only",
+            }
+        )
+        self.storage.save_json("invocation_history.json", payload)
+        return invocation_id
+
+    def _finish_invocation_record(
+        self,
+        invocation_id: str | None,
+        *,
+        wall_time_s: float,
+        status: str,
+    ) -> None:
+        if invocation_id is None:
+            return
+        payload = self.storage.load_json("invocation_history.json")
+        if not isinstance(payload, dict) or not isinstance(payload.get("invocations"), list):
+            raise ValueError("invocation_history.json is invalid")
+        for entry in payload["invocations"]:
+            if isinstance(entry, dict) and entry.get("invocation_id") == invocation_id:
+                entry["completed_at"] = time.time()
+                entry["status"] = status
+                entry["wall_time_s"] = wall_time_s
+                entry["completed_iterations"] = self._completed_iterations
+                entry["target_iterations"] = self._target_iterations
+                self.storage.save_json("invocation_history.json", payload)
+                return
+        raise ValueError(f"Invocation record is missing: {invocation_id}")
+
+    def _invocation_history_summary(self) -> dict[str, object]:
+        path = self.storage.run_dir / "invocation_history.json"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {"path": "invocation_history.json", "count": 0}
+        invocations = payload.get("invocations") if isinstance(payload, dict) else None
+        return {
+            "path": "invocation_history.json",
+            "count": len(invocations) if isinstance(invocations, list) else 0,
+            "current_invocation_id": self._invocation_id,
+        }
+
+    def _close_current_invocation(self, status: str) -> None:
+        if self._invocation_id is None or self._invocation_started_monotonic is None:
+            return
+        self._finish_invocation_record(
+            self._invocation_id,
+            wall_time_s=time.monotonic() - self._invocation_started_monotonic,
+            status=status,
+        )
+
+    def _load_stored_experiment_conditions(
+        self,
+        *,
+        validate_current: bool,
+        require_target_match: bool = False,
+    ) -> dict[str, object]:
+        path = self.storage.run_dir / "experiment_conditions.json"
+        if not path.exists():
+            raise ValueError(
+                "Cannot resume legacy run without experiment_conditions.json; "
+                f"checkpoint compatibility requires {CHECKPOINT_SCHEMA_VERSION}"
+            )
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict) or payload.get("schema_version") != EXPERIMENT_CONDITIONS_SCHEMA_VERSION:
+            raise ValueError("Experiment conditions schema_version is unsupported")
+        conditions = payload.get("conditions")
+        if not isinstance(conditions, dict):
+            raise ValueError("Experiment conditions payload is invalid")
+        stored_digest = payload.get("conditions_digest")
+        computed_digest = self._conditions_digest(conditions)
+        if stored_digest != computed_digest:
+            raise ValueError(
+                "Experiment conditions digest mismatch: "
+                f"stored {stored_digest}, computed {computed_digest}"
+            )
+        initial_target = payload.get("initial_target_iterations")
+        if not isinstance(initial_target, int) or isinstance(initial_target, bool) or initial_target < 0:
+            raise ValueError("Experiment conditions initial_target_iterations is invalid")
+        if require_target_match and self.config.evolution.max_iterations != initial_target:
+            raise ValueError(
+                "Cannot change max_iterations while resuming an incomplete pre-root run: "
+                f"stored {initial_target}, requested {self.config.evolution.max_iterations}"
+            )
+        if validate_current:
+            current_digest = self._conditions_digest(self._experiment_conditions())
+            if current_digest != stored_digest:
+                raise ValueError(
+                    "Resume experiment conditions mismatch: "
+                    f"stored {stored_digest}, current {current_digest}"
+                )
+        return payload
+
     def _load_checkpoint_if_requested(self) -> bool:
         if not self.config.resume:
             return False
+        conditions_payload = self._load_stored_experiment_conditions(validate_current=False)
         checkpoint_path = self.storage.run_dir / "checkpoint.json"
         if not checkpoint_path.exists():
             if (self.storage.run_dir / "evaluation_approval.json").exists():
+                self._load_stored_experiment_conditions(
+                    validate_current=True,
+                    require_target_match=True,
+                )
+                self._target_iterations = int(conditions_payload["initial_target_iterations"])
                 self.storage.record_trace(
                     "workflow_span",
                     "agenticsciml.resume.pre_root_loaded",
@@ -355,6 +619,12 @@ class AgenticSciMLOrchestrator:
                 return True
             raise FileNotFoundError(f"Cannot resume without checkpoint: {checkpoint_path}")
         payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        if payload.get("checkpoint_schema_version") != CHECKPOINT_SCHEMA_VERSION:
+            raise ValueError(
+                "Unsupported checkpoint schema_version: "
+                f"{payload.get('checkpoint_schema_version')!r}; expected {CHECKPOINT_SCHEMA_VERSION!r}. "
+                "Legacy checkpoints cannot be resumed safely."
+            )
         self.loaded_checkpoint = payload
         node_issues = validate_solution_tree_artifact_payload(payload, context="checkpoint.json")
         node_payloads = payload.get("nodes", [])
@@ -374,12 +644,44 @@ class AgenticSciMLOrchestrator:
         self.nodes = [SolutionNode.from_dict(node) for node in node_payloads]
         self.analysis_by_node = self._load_analysis_reports(self.nodes)
         self._next_solution_index = self._compute_next_solution_index()
+        completed_iterations = payload.get("completed_iterations")
+        target_iterations = payload.get("target_iterations")
+        if (
+            not isinstance(completed_iterations, int)
+            or isinstance(completed_iterations, bool)
+            or completed_iterations < 0
+        ):
+            raise ValueError("Checkpoint completed_iterations must be a non-negative integer")
+        if (
+            not isinstance(target_iterations, int)
+            or isinstance(target_iterations, bool)
+            or target_iterations < completed_iterations
+        ):
+            raise ValueError("Checkpoint target_iterations must be >= completed_iterations")
+        self._completed_iterations = completed_iterations
+        phase = payload.get("phase")
+        if phase in {"completed", "exported"}:
+            self._target_iterations = completed_iterations + self.config.evolution.max_iterations
+        else:
+            if self.config.evolution.max_iterations != target_iterations:
+                raise ValueError(
+                    "Cannot change max_iterations while resuming an incomplete run: "
+                    f"stored target {target_iterations}, requested {self.config.evolution.max_iterations}"
+                )
+            self._target_iterations = target_iterations
+        inflight_batch = payload.get("inflight_batch")
+        if inflight_batch is not None and not isinstance(inflight_batch, dict):
+            raise ValueError("Checkpoint inflight_batch must be an object or null")
+        self._inflight_batch = dict(inflight_batch) if isinstance(inflight_batch, dict) else None
         self.storage.record_trace(
             "workflow_span",
             "agenticsciml.resume.loaded",
             {
                 "node_count": len(self.nodes),
-                "checkpoint_phase": payload.get("phase"),
+                "checkpoint_phase": phase,
+                "completed_iterations": self._completed_iterations,
+                "target_iterations": self._target_iterations,
+                "inflight_batch": self._inflight_batch is not None,
             },
         )
         return True
@@ -396,18 +698,26 @@ class AgenticSciMLOrchestrator:
 
     def _save_checkpoint(self, phase: str) -> None:
         selector_policy = self._selector_policy_snapshot()
+        conditions = self._experiment_conditions()
+        with self._analysis_lock:
+            analysis_node_ids = sorted(self.analysis_by_node)
         self.storage.save_json(
             "checkpoint.json",
             {
                 "phase": phase,
                 "schema_version": SOLUTION_TREE_SCHEMA_VERSION,
+                "checkpoint_schema_version": CHECKPOINT_SCHEMA_VERSION,
                 "experiment_id": self.config.experiment_id,
                 "benchmark_name": self.problem_bundle.benchmark_name,
                 "contract_hash": self.contract.contract_hash if self.contract else "",
+                "experiment_conditions_digest": self._conditions_digest(conditions),
+                "completed_iterations": self._completed_iterations,
+                "target_iterations": self._target_iterations,
+                "inflight_batch": self._inflight_batch,
                 "selector_policy": selector_policy,
                 "selector_policy_digest": self._selector_policy_digest(selector_policy),
                 "nodes": [node.to_dict() for node in self.nodes],
-                "analysis_node_ids": sorted(self.analysis_by_node),
+                "analysis_node_ids": analysis_node_ids,
             },
         )
         self.storage.record_trace(
@@ -416,6 +726,9 @@ class AgenticSciMLOrchestrator:
             {
                 "phase": phase,
                 "node_count": len(self.nodes),
+                "completed_iterations": self._completed_iterations,
+                "target_iterations": self._target_iterations,
+                "inflight_batch": self._inflight_batch is not None,
             },
         )
 
@@ -447,6 +760,15 @@ class AgenticSciMLOrchestrator:
                 "Checkpoint selector policy mismatch: "
                 f"stored {payload.get('selector_policy_digest')}, expected {selector_policy_digest}"
             )
+        conditions_payload = self._load_stored_experiment_conditions(validate_current=True)
+        stored_conditions_digest = conditions_payload.get("conditions_digest")
+        if payload.get("experiment_conditions_digest") != stored_conditions_digest:
+            raise ValueError(
+                "Checkpoint experiment conditions mismatch: "
+                f"stored {payload.get('experiment_conditions_digest')}, "
+                f"expected {stored_conditions_digest}"
+            )
+        self._validate_inflight_batch_payload(self._inflight_batch)
         for node in self.nodes:
             if node.benchmark_name != contract.benchmark_name:
                 raise ValueError(
@@ -458,6 +780,251 @@ class AgenticSciMLOrchestrator:
                     f"Node {node.node_id} contract hash mismatch: "
                     f"{node.contract_hash} != {contract.contract_hash}"
                 )
+            if node.score is not None:
+                if node.score.metric != contract.metric_name:
+                    raise ValueError(
+                        f"Node {node.node_id} metric mismatch: "
+                        f"{node.score.metric} != {contract.metric_name}"
+                    )
+                if node.score.higher_is_better is not contract.higher_is_better:
+                    raise ValueError(
+                        f"Node {node.node_id} score direction mismatch: "
+                        f"{node.score.higher_is_better} != {contract.higher_is_better}"
+                    )
+
+    def _validate_inflight_batch_payload(self, payload: dict[str, object] | None) -> None:
+        if payload is None:
+            return
+        if payload.get("schema_version") != INFLIGHT_BATCH_SCHEMA_VERSION:
+            raise ValueError("Checkpoint inflight_batch schema_version is unsupported")
+        iteration_index = payload.get("iteration_index")
+        if iteration_index != self._completed_iterations:
+            raise ValueError(
+                "Checkpoint inflight_batch iteration mismatch: "
+                f"stored {iteration_index}, expected {self._completed_iterations}"
+            )
+        jobs = payload.get("jobs")
+        if not isinstance(jobs, list) or not jobs:
+            raise ValueError("Checkpoint inflight_batch jobs must be a non-empty list")
+        known_parents = {node.node_id for node in self.nodes}
+        job_by_child: dict[str, str] = {}
+        for index, job in enumerate(jobs):
+            if not isinstance(job, dict):
+                raise ValueError(f"Checkpoint inflight_batch job {index} must be an object")
+            parent_id = job.get("parent_id")
+            solution_id = job.get("solution_id")
+            if not isinstance(parent_id, str) or parent_id not in known_parents:
+                raise ValueError(f"Checkpoint inflight_batch job {index} has invalid parent_id")
+            if not isinstance(solution_id, str) or solution_id_index(solution_id) is None:
+                raise ValueError(f"Checkpoint inflight_batch job {index} has invalid solution_id")
+            if solution_id in job_by_child:
+                raise ValueError(f"Checkpoint inflight_batch has duplicate solution_id: {solution_id}")
+            job_by_child[solution_id] = parent_id
+        completed = payload.get("completed_children")
+        if not isinstance(completed, list):
+            raise ValueError("Checkpoint inflight_batch completed_children must be a list")
+        completed_ids: set[str] = set()
+        for index, entry in enumerate(completed):
+            if not isinstance(entry, dict) or not isinstance(entry.get("child"), dict):
+                raise ValueError(
+                    f"Checkpoint inflight_batch completed child {index} must contain a child object"
+                )
+            child = SolutionNode.from_dict(entry["child"])
+            parent_id = entry.get("parent_id")
+            if job_by_child.get(child.node_id) != parent_id or child.parent_id != parent_id:
+                raise ValueError(
+                    f"Checkpoint inflight_batch completed child {child.node_id} parent mismatch"
+                )
+            if child.node_id in completed_ids:
+                raise ValueError(
+                    f"Checkpoint inflight_batch has duplicate completed child: {child.node_id}"
+                )
+            completed_ids.add(child.node_id)
+            path_issues = validate_solution_node_artifact_paths(
+                child.to_dict(),
+                run_dir=self.storage.run_dir,
+                context=f"checkpoint.json inflight child {child.node_id}",
+            )
+            if path_issues:
+                raise ValueError("Invalid checkpoint inflight child: " + "; ".join(path_issues))
+        for field_name in ("branch_contexts", "operator_assignments"):
+            value = payload.get(field_name)
+            if not isinstance(value, dict) or any(child_id not in value for child_id in job_by_child):
+                raise ValueError(
+                    f"Checkpoint inflight_batch {field_name} must cover every child job"
+                )
+
+    def _attach_child(self, parent: SolutionNode, child: SolutionNode) -> None:
+        existing = self._node_by_id(child.node_id)
+        if existing is not None:
+            if existing.to_dict() != child.to_dict():
+                raise ValueError(f"Conflicting child node already exists: {child.node_id}")
+            if child.node_id not in parent.children:
+                parent.children.append(child.node_id)
+            return
+        if child.parent_id != parent.node_id:
+            raise ValueError(
+                f"Child {child.node_id} parent mismatch: {child.parent_id} != {parent.node_id}"
+            )
+        if child.node_id not in parent.children:
+            parent.children.append(child.node_id)
+        self.nodes.append(child)
+
+    def _record_inflight_child(self, parent: SolutionNode, child: SolutionNode) -> None:
+        with self._checkpoint_lock:
+            if self._inflight_batch is None:
+                return
+            completed = self._inflight_batch.setdefault("completed_children", [])
+            if not isinstance(completed, list):
+                raise ValueError("Internal inflight completed_children payload is invalid")
+            if any(
+                isinstance(entry, dict)
+                and isinstance(entry.get("child"), dict)
+                and entry["child"].get("node_id") == child.node_id
+                for entry in completed
+            ):
+                return
+            completed.append({"parent_id": parent.node_id, "child": child.to_dict()})
+            self._save_checkpoint("children_inflight")
+
+    def _resume_inflight_iteration(self, contract: EvaluationContract) -> None:
+        payload = self._inflight_batch
+        if payload is None:
+            return
+        resumed_batch_started = time.monotonic()
+        self._validate_inflight_batch_payload(payload)
+        jobs_payload = payload["jobs"]
+        completed_payload = payload["completed_children"]
+        assert isinstance(jobs_payload, list)
+        assert isinstance(completed_payload, list)
+        completed_ids: set[str] = set()
+        for entry in completed_payload:
+            assert isinstance(entry, dict)
+            child_payload = entry["child"]
+            assert isinstance(child_payload, dict)
+            child = SolutionNode.from_dict(child_payload)
+            parent = self._node_by_id(str(entry["parent_id"]))
+            if parent is None:
+                raise ValueError(f"Inflight child parent is missing: {entry['parent_id']}")
+            self._attach_child(parent, child)
+            completed_ids.add(child.node_id)
+
+        branch_contexts = payload["branch_contexts"]
+        assignment_payloads = payload["operator_assignments"]
+        assert isinstance(branch_contexts, dict)
+        assert isinstance(assignment_payloads, dict)
+        pending: list[tuple[SolutionNode, str]] = []
+        for job in jobs_payload:
+            assert isinstance(job, dict)
+            solution_id = str(job["solution_id"])
+            if solution_id in completed_ids:
+                continue
+            parent = self._node_by_id(str(job["parent_id"]))
+            if parent is None:
+                raise ValueError(f"Inflight child parent is missing: {job['parent_id']}")
+            pending.append((parent, solution_id))
+
+        self.storage.record_trace(
+            "workflow_span",
+            "agenticsciml.parallel_children.resume",
+            {
+                "iteration_index": self._completed_iterations,
+                "child_count": len(jobs_payload),
+                "completed_child_count": len(completed_ids),
+                "pending_child_count": len(pending),
+            },
+        )
+        all_pairs = [
+            (str(job["parent_id"]), str(job["solution_id"]))
+            for job in jobs_payload
+            if isinstance(job, dict)
+        ]
+        fanout_trace = FanoutTraceMetadata.from_pairs(all_pairs)
+        execution_mode = (
+            "parallel"
+            if min(len(all_pairs), self.config.evolution.parallel_mutations) > 1
+            else "sequential"
+        )
+        self.storage.record_trace(
+            "workflow_span",
+            "agenticsciml.parallel_children.start",
+            {
+                "execution_mode": execution_mode,
+                "child_count": len(all_pairs),
+                "max_workers": min(len(all_pairs), self.config.evolution.parallel_mutations),
+                "resume_recovery": True,
+                **fanout_trace.to_dict(),
+            },
+        )
+        max_workers = min(len(pending), self.config.evolution.parallel_mutations)
+
+        def run_pending(parent: SolutionNode, solution_id: str) -> tuple[SolutionNode, SolutionNode]:
+            context = branch_contexts.get(solution_id)
+            if not isinstance(context, dict):
+                raise ValueError(f"Inflight branch context is invalid for {solution_id}")
+            assignment_payload = assignment_payloads.get(solution_id)
+            if not isinstance(assignment_payload, dict):
+                raise ValueError(f"Inflight operator assignment is invalid for {solution_id}")
+            assignment = self._operator_assignment_from_payload(assignment_payload)
+            child = self._run_child_job(parent, contract, solution_id, context, assignment)
+            return parent, child
+
+        recovered: list[tuple[SolutionNode, SolutionNode]] = []
+        if max_workers == 1:
+            for parent, solution_id in pending:
+                pair = run_pending(parent, solution_id)
+                recovered.append(pair)
+        elif max_workers > 1:
+            with ThreadPoolExecutor(
+                max_workers=max_workers,
+                thread_name_prefix="agenticsciml-resume-child",
+            ) as executor:
+                futures = [
+                    executor.submit(run_pending, parent, solution_id)
+                    for parent, solution_id in pending
+                ]
+                for future in futures:
+                    pair = future.result()
+                    recovered.append(pair)
+        for parent, child in recovered:
+            self._attach_child(parent, child)
+        self.storage.record_trace(
+            "workflow_span",
+            "agenticsciml.parallel_children.end",
+            {
+                "execution_mode": execution_mode,
+                "child_count": len(all_pairs),
+                "max_workers": min(len(all_pairs), self.config.evolution.parallel_mutations),
+                "resume_recovery": True,
+                "duration_s": time.monotonic() - resumed_batch_started,
+                **fanout_trace.to_dict(),
+            },
+        )
+        self._inflight_batch = None
+        self._completed_iterations += 1
+        self._active_iteration_index = None
+        self._save_checkpoint("iteration_completed")
+
+    def _operator_assignment_from_payload(self, payload: dict[str, object]) -> OperatorAssignment:
+        try:
+            return OperatorAssignment(
+                solution_id=str(payload["solution_id"]),
+                parent_id=str(payload["parent_id"]),
+                operator_id=str(payload["operator_id"]),
+                operator_name=str(payload["operator_name"]),
+                operator_family=str(payload["operator_family"]),
+                mutation_axis=str(payload["mutation_axis"]),
+                selection_source=str(payload["selection_source"]),
+                compatibility_reason=str(payload["compatibility_reason"]),
+                expected_static_terms=tuple(str(item) for item in payload["operator_expected_terms"]),
+                risk_notes=tuple(str(item) for item in payload["risk_notes"]),
+                selected_algorithm_ids=tuple(str(item) for item in payload["selected_algorithm_ids"]),
+                candidate_operator_ids=tuple(str(item) for item in payload["candidate_operator_ids"]),
+                penalized_operator_ids=tuple(str(item) for item in payload["penalized_operator_ids"]),
+                warnings=tuple(str(item) for item in payload.get("warnings", [])),
+            )
+        except (KeyError, TypeError) as exc:
+            raise ValueError("Checkpoint inflight operator assignment is invalid") from exc
 
     def _read_data_report(self) -> str:
         data_report_path = self.storage.run_dir / "reports" / "data_analysis.md"
@@ -480,10 +1047,11 @@ class AgenticSciMLOrchestrator:
                 "evaluation_contract.json",
                 "reports/evaluation_contract.md",
                 "reports/data_analysis.md",
-                "Problem.md",
-                "Requirements.md",
-                "Evaluation.md",
-                "guidelines.md",
+                "run_inputs/public/Problem.md",
+                "run_inputs/public/Requirements.md",
+                "run_inputs/public/Evaluation.md",
+                "run_inputs/public/guidelines.md",
+                "run_inputs/private_eval/evaluate.py",
             ],
             "next_action": (
                 "Set status to 'approved' only after reviewing the evaluator, guidelines, "
@@ -497,6 +1065,7 @@ class AgenticSciMLOrchestrator:
         }
 
     def _require_evaluation_approval(self, contract: EvaluationContract) -> None:
+        prepare_run_inputs(self.config.benchmark_dir, self._run_inputs_dir())
         approval_path = self.storage.run_dir / "evaluation_approval.json"
         if approval_path.exists():
             payload = json.loads(approval_path.read_text(encoding="utf-8"))
@@ -526,12 +1095,18 @@ class AgenticSciMLOrchestrator:
                     "agenticsciml.evaluation_approval.rejected",
                     {"contract_hash": contract.contract_hash, "passed": False},
                 )
+                self._close_current_invocation("evaluation_rejected")
                 raise RuntimeError("Evaluation contract was rejected; root generation is blocked.")
             self.storage.record_trace(
                 "guardrail_span",
                 "agenticsciml.evaluation_approval.required",
-                {"status": status or "pending", "contract_hash": contract.contract_hash, "passed": False},
+                {
+                    "status": status or "pending",
+                    "contract_hash": contract.contract_hash,
+                    "decision": "pending_user_review",
+                },
             )
+            self._close_current_invocation("paused_for_evaluation_approval")
             raise EvaluationApprovalRequired(
                 "Evaluation approval required before root generation: review evaluation_approval.json "
                 "and set status to 'approved' before resuming."
@@ -560,8 +1135,13 @@ class AgenticSciMLOrchestrator:
         self.storage.record_trace(
             "guardrail_span",
             "agenticsciml.evaluation_approval.required",
-            {"contract_hash": contract.contract_hash, "passed": False},
+            {
+                "status": "pending",
+                "contract_hash": contract.contract_hash,
+                "decision": "pending_user_review",
+            },
         )
+        self._close_current_invocation("paused_for_evaluation_approval")
         raise EvaluationApprovalRequired(
             "Evaluation approval required before root generation: review evaluation_approval.json "
             "and set status to 'approved' before resuming."
@@ -812,20 +1392,34 @@ class AgenticSciMLOrchestrator:
         )
         operator_assignments = self._operator_assignments(jobs, branch_contexts)
 
+        if self._active_iteration_index is not None:
+            self._inflight_batch = {
+                "schema_version": INFLIGHT_BATCH_SCHEMA_VERSION,
+                "iteration_index": self._active_iteration_index,
+                "jobs": [
+                    {"parent_id": parent.node_id, "solution_id": solution_id}
+                    for parent, solution_id in jobs
+                ],
+                "branch_contexts": branch_contexts,
+                "operator_assignments": {
+                    solution_id: assignment.to_dict()
+                    for solution_id, assignment in operator_assignments.items()
+                },
+                "completed_children": [],
+            }
+            self._save_checkpoint("children_inflight")
+
         if max_workers == 1:
-            children = [
-                (
+            children = []
+            for parent, solution_id in jobs:
+                child = self._run_child_job(
                     parent,
-                    self._run_child_job(
-                        parent,
-                        contract,
-                        solution_id,
-                        branch_contexts[solution_id],
-                        operator_assignments[solution_id],
-                    ),
+                    contract,
+                    solution_id,
+                    branch_contexts[solution_id],
+                    operator_assignments[solution_id],
                 )
-                for parent, solution_id in jobs
-            ]
+                children.append((parent, child))
         else:
             with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="agenticsciml-child") as executor:
                 futures = [
@@ -995,6 +1589,7 @@ class AgenticSciMLOrchestrator:
                 "duration_s": time.monotonic() - started,
             },
         )
+        self._record_inflight_child(parent, child)
         return child
 
     def _operator_trace_metadata(self, operator_assignment: OperatorAssignment | None) -> dict[str, object]:
@@ -1291,15 +1886,28 @@ class AgenticSciMLOrchestrator:
         error = None
         eval_path = workspace / "eval.json"
         if result.exit_code == 0 and eval_path.exists():
-            payload = json.loads(eval_path.read_text(encoding="utf-8"))
-            score = SolutionScore(
-                metric=str(payload["metric"]),
-                value=float(payload["score"]),
-                higher_is_better=bool(payload.get("higher_is_better", False)),
+            score, error = self._validated_evaluation_score(solution_id, eval_path, contract)
+            if score is not None:
+                status = "evaluated"
+            else:
+                self._quarantine_invalid_evaluation(eval_path)
+        elif result.exit_code == 0:
+            error = "Evaluation contract violation: evaluator did not write eval.json"
+            self.storage.record_trace(
+                "guardrail_span",
+                "evaluation_contract:result",
+                {
+                    "solution_id": solution_id,
+                    "passed": False,
+                    "error": error,
+                    "expected_metric": contract.metric_name,
+                    "expected_higher_is_better": contract.higher_is_better,
+                },
             )
-            status = "evaluated"
         else:
             error = result.stderr or result.stdout[-1000:]
+            if eval_path.exists():
+                self._quarantine_invalid_evaluation(eval_path)
 
         report = self.result_analyst.analyze(solution_id, workspace)
         with self._analysis_lock:
@@ -1328,6 +1936,98 @@ class AgenticSciMLOrchestrator:
         if parent_node is None:
             self._write_method_experience_record(node)
         return node
+
+    def _validated_evaluation_score(
+        self,
+        solution_id: str,
+        eval_path: Path,
+        contract: EvaluationContract,
+    ) -> tuple[SolutionScore | None, str | None]:
+        try:
+            payload = json.loads(
+                eval_path.read_text(encoding="utf-8"),
+                parse_constant=lambda value: (_ for _ in ()).throw(
+                    ValueError(f"non-finite JSON constant {value}")
+                ),
+            )
+            if not isinstance(payload, dict):
+                raise ValueError("eval.json must contain a JSON object")
+            metric = payload.get("metric")
+            if metric != contract.metric_name:
+                raise ValueError(
+                    f"metric {metric!r} does not match EvaluationContract metric "
+                    f"{contract.metric_name!r}"
+                )
+            higher_is_better = payload.get("higher_is_better")
+            if not isinstance(higher_is_better, bool):
+                raise ValueError("higher_is_better must be a boolean")
+            if higher_is_better is not contract.higher_is_better:
+                raise ValueError(
+                    f"higher_is_better={higher_is_better} does not match EvaluationContract "
+                    f"higher_is_better={contract.higher_is_better}"
+                )
+            value = payload.get("score")
+            if (
+                not isinstance(value, int | float)
+                or isinstance(value, bool)
+                or not math.isfinite(float(value))
+            ):
+                raise ValueError("score must be a finite numeric value")
+            score = SolutionScore(
+                metric=contract.metric_name,
+                value=float(value),
+                higher_is_better=contract.higher_is_better,
+            )
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            error = f"Evaluation contract violation: {exc}"
+            self.storage.save_json(
+                Path("solutions") / solution_id / "evaluation_contract_validation.json",
+                {
+                    "schema_version": 1,
+                    "passed": False,
+                    "error": error,
+                    "expected_metric": contract.metric_name,
+                    "expected_higher_is_better": contract.higher_is_better,
+                },
+            )
+            self.storage.record_trace(
+                "guardrail_span",
+                "evaluation_contract:result",
+                {
+                    "solution_id": solution_id,
+                    "passed": False,
+                    "error": error,
+                    "expected_metric": contract.metric_name,
+                    "expected_higher_is_better": contract.higher_is_better,
+                },
+            )
+            return None, error
+        self.storage.save_json(
+            Path("solutions") / solution_id / "evaluation_contract_validation.json",
+            {
+                "schema_version": 1,
+                "passed": True,
+                "metric": score.metric,
+                "score": score.value,
+                "higher_is_better": score.higher_is_better,
+            },
+        )
+        self.storage.record_trace(
+            "guardrail_span",
+            "evaluation_contract:result",
+            {
+                "solution_id": solution_id,
+                "passed": True,
+                "metric": score.metric,
+                "higher_is_better": score.higher_is_better,
+            },
+        )
+        return score, None
+
+    def _quarantine_invalid_evaluation(self, eval_path: Path) -> Path:
+        invalid_path = eval_path.with_name("eval.invalid.json")
+        eval_path.replace(invalid_path)
+        return invalid_path
 
     def _write_emergence_report(
         self,
@@ -1411,6 +2111,7 @@ class AgenticSciMLOrchestrator:
             node
             for node in self.nodes
             if len(node.children) < self.config.evolution.max_children_per_node
+            and self._node_can_parent(node)
         ]
         if not available:
             return []
@@ -1419,11 +2120,11 @@ class AgenticSciMLOrchestrator:
             random_seed=self.config.evolution.random_seed,
             include_random=True,
         )
-        selected = policy.select(self.nodes, max_to_select=self.config.evolution.parallel_mutations)
+        selected = policy.select(available, max_to_select=self.config.evolution.parallel_mutations)
         if len(available) <= self.config.evolution.parallel_mutations:
             return selected
 
-        best = selected[0] if selected else self._best_node(available)
+        best = selected[0] if selected else (self._best_node(available) or available[0])
         selected = [best]
         vote_result = self._select_with_selector_panel(
             candidates=[node.to_dict() for node in available],
@@ -1454,13 +2155,18 @@ class AgenticSciMLOrchestrator:
             if node and node.node_id not in selected_ids:
                 selected.append(node)
                 selected_ids.add(node.node_id)
-        for node in policy.select(self.nodes, max_to_select=self.config.evolution.parallel_mutations):
+        for node in policy.select(available, max_to_select=self.config.evolution.parallel_mutations):
             if len(selected) >= self.config.evolution.parallel_mutations:
                 break
             if node.node_id not in selected_ids:
                 selected.append(node)
                 selected_ids.add(node.node_id)
         return selected[: self.config.evolution.parallel_mutations]
+
+    def _node_can_parent(self, node: SolutionNode) -> bool:
+        if node.status != "failed":
+            return True
+        return (Path(node.workspace) / "solution.py").is_file()
 
     def _select_with_selector_panel(
         self,
@@ -1604,15 +2310,22 @@ class AgenticSciMLOrchestrator:
             "source": source,
         }
 
-    def _best_node(self, nodes: list[SolutionNode] | None = None) -> SolutionNode:
-        candidates = nodes or self.nodes
+    def _best_node(self, nodes: list[SolutionNode] | None = None) -> SolutionNode | None:
+        candidates = self.nodes if nodes is None else nodes
         best: SolutionNode | None = None
         for node in candidates:
-            if node.score is None:
+            if node.status != "evaluated" or node.score is None:
+                continue
+            if not math.isfinite(node.score.value):
+                continue
+            if self.contract is not None and (
+                node.score.metric != self.contract.metric_name
+                or node.score.higher_is_better is not self.contract.higher_is_better
+            ):
                 continue
             if best is None or node.score.better_than(best.score):
                 best = node
-        return best or candidates[0]
+        return best
 
     def _failure_kind(self, timed_out: bool, status: str, error: str | None) -> str | None:
         if status == "evaluated":
@@ -1833,16 +2546,24 @@ class AgenticSciMLOrchestrator:
             multi_seed_ablation_evidence=multi_seed_ablation_evidence,
         )
         best = self._best_node()
-        scientific_result_card = build_scientific_result_card(
-            nodes=self.nodes,
-            champion=best,
-            run_dir=self.storage.run_dir,
-            benchmark_name=self.problem_bundle.benchmark_name,
-            evidence_metadata=evidence_metadata,
-            evolution_health=evolution_health,
-            innovation_report=innovation_report,
-            scientific_readiness=scientific_readiness,
-        )
+        if best is None:
+            scientific_result_card = self._scientific_result_card_without_champion(
+                evidence_metadata=evidence_metadata,
+                evolution_health=evolution_health,
+                innovation_report=innovation_report,
+                scientific_readiness=scientific_readiness,
+            )
+        else:
+            scientific_result_card = build_scientific_result_card(
+                nodes=self.nodes,
+                champion=best,
+                run_dir=self.storage.run_dir,
+                benchmark_name=self.problem_bundle.benchmark_name,
+                evidence_metadata=evidence_metadata,
+                evolution_health=evolution_health,
+                innovation_report=innovation_report,
+                scientific_readiness=scientific_readiness,
+            )
         self.storage.save_json("reports/scientific_result_card.json", scientific_result_card)
         self.storage.save_text(
             "reports/scientific_result_card.md",
@@ -1850,16 +2571,17 @@ class AgenticSciMLOrchestrator:
         )
         champion_dir = self.storage.run_dir / "champion"
         champion_dir.mkdir(exist_ok=True)
-        best_workspace = Path(best.workspace)
-        for filename in ["solution.py", "analysis.md", "eval.json"]:
-            source = best_workspace / filename
-            if source.exists():
-                shutil.copy2(source, champion_dir / filename)
+        if best is not None:
+            best_workspace = Path(best.workspace)
+            for filename in ["solution.py", "analysis.md", "eval.json"]:
+                source = best_workspace / filename
+                if source.exists():
+                    shutil.copy2(source, champion_dir / filename)
         self.storage.save_json(
             "champion/claim_gate.json",
             {
                 "schema_version": 1,
-                "champion": best.node_id,
+                "champion": best.node_id if best else None,
                 "benchmark_name": self.problem_bundle.benchmark_name,
                 "claim_gate": evidence_metadata.get("claim_gate"),
                 "evidence_mode": evidence_metadata.get("evidence_mode"),
@@ -1871,9 +2593,12 @@ class AgenticSciMLOrchestrator:
             {
                 "run_state": "exported",
                 "wall_time_s": time.monotonic() - started,
+                "wall_time_semantics": "this invocation only; see invocation_history.json for prior resumes",
+                "invocation_history": self._invocation_history_summary(),
+                "source_revision": dict(self._source_revision),
                 "benchmark_name": self.problem_bundle.benchmark_name,
                 "solution_count": len(self.nodes),
-                "champion": best.node_id,
+                "champion": best.node_id if best else None,
                 "visual_audit_mode": self.config.visual_audit_mode,
                 "branch_context_enabled": self.config.evolution.use_branch_context,
                 "strategy_seed_ids": list(self.config.strategy_seed_ids),
@@ -1976,10 +2701,73 @@ class AgenticSciMLOrchestrator:
             "tool_span",
             "export_reports",
             {
-                "champion": best.node_id,
+                "champion": best.node_id if best else None,
                 "solution_count": len(self.nodes),
             },
         )
+
+    def _scientific_result_card_without_champion(
+        self,
+        *,
+        evidence_metadata: dict[str, object],
+        evolution_health: dict[str, object],
+        innovation_report: dict[str, object],
+        scientific_readiness: dict[str, object],
+    ) -> dict[str, object]:
+        claim_gate = evidence_metadata.get("claim_gate")
+        claim_gate_payload = claim_gate if isinstance(claim_gate, dict) else {}
+        blockers = scientific_readiness.get("blockers")
+        return {
+            "schema_version": 1,
+            "card_version": "scientific_result_card.v1",
+            "benchmark_name": self.problem_bundle.benchmark_name,
+            "champion": None,
+            "score": {
+                "metric": self.contract.metric_name if self.contract else None,
+                "higher_is_better": self.contract.higher_is_better if self.contract else None,
+                "champion_value": None,
+                "root_value": None,
+                "score_delta_from_parent": None,
+                "improvement_over_root": None,
+                "score_source": "no valid benchmark evaluator artifact",
+                "score_claim_boundary": "No champion is exported without a contract-valid finite score.",
+            },
+            "evidence_grade": "blocked_or_unverified",
+            "claim_support": {
+                "scientific_claim_supported": False,
+                "paper_level_claim_supported": False,
+                "claim_gate_status": claim_gate_payload.get("status"),
+                "readiness_status": scientific_readiness.get("status"),
+                "evidence_mode": evidence_metadata.get("evidence_mode"),
+                "llm_mode": evidence_metadata.get("llm_mode"),
+                "benchmark_fidelity_level": evidence_metadata.get("benchmark_fidelity_level"),
+                "evaluator_trust_level": claim_gate_payload.get("evaluator_trust_level"),
+            },
+            "run_evidence": {
+                "solution_count": len(self.nodes),
+                "unique_code_count": evolution_health.get("unique_code_count"),
+                "duplicate_code_count": evolution_health.get("duplicate_code_count"),
+                "best_improvement": None,
+                "novelty_axis_count": None,
+                "candidate_emergent_count": None,
+                "readiness_blocker_count": len(blockers) if isinstance(blockers, list) else 0,
+            },
+            "uncertainty_flags": ["No evaluated solution has a contract-valid finite score."],
+            "minimum_next_validation": [
+                "Repair the evaluator or generated solution and produce a contract-valid eval.json."
+            ],
+            "source_artifacts": {
+                "leaderboard": "leaderboard.csv",
+                "tree": "tree.json",
+                "evolution_health": "reports/evolution_health.json",
+                "innovation_report": "reports/innovation_report.json",
+                "scientific_discovery_readiness": "reports/scientific_discovery_readiness.json",
+                "claim_gate": "champion/claim_gate.json",
+            },
+            "claim_boundary": (
+                "No champion or scientific claim is emitted because no solution has a valid evaluator score."
+            ),
+        }
 
     def _run_inputs_dir(self) -> Path:
         return self.storage.run_dir / "run_inputs"

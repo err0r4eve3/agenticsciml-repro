@@ -28,6 +28,24 @@ REDACTED_METADATA_TOKENS = (
     "system",
     "token",
 )
+NON_SECRET_TOKEN_COUNT_KEYS = {
+    "completion_tokens",
+    "cost_per_1k_tokens_usd",
+    "input_tokens",
+    "max_output_tokens",
+    "max_prompt_tokens",
+    "max_total_tokens",
+    "output_tokens",
+    "output_tokens_used",
+    "prompt_token_estimate",
+    "prompt_tokens",
+    "prompt_tokens_used",
+    "response_token_estimate",
+    "token_budget",
+    "token_budget_final",
+    "total_tokens",
+}
+NON_SECRET_TOKEN_COUNT_CONTAINERS = {"token_budget", "token_budget_final"}
 
 
 def write_sdk_trace_export(run_dir: Path, output_path: Path | None = None) -> Path:
@@ -50,6 +68,8 @@ def write_sdk_trace_export(run_dir: Path, output_path: Path | None = None) -> Pa
         "spans": spans,
         "redaction_policy": {
             "metadata_keys_containing": list(REDACTED_METADATA_TOKENS),
+            "numeric_token_count_fields_preserved": True,
+            "non_secret_token_count_keys": sorted(NON_SECRET_TOKEN_COUNT_KEYS),
             "raw_prompt_or_response_exported": False,
         },
     }
@@ -77,7 +97,14 @@ def _sanitize_metadata(value: Any) -> Any:
         result: dict[str, Any] = {}
         for key, item in value.items():
             key_text = str(key)
-            if any(token in key_text.lower() for token in REDACTED_METADATA_TOKENS):
+            if (
+                key_text.lower() in NON_SECRET_TOKEN_COUNT_CONTAINERS
+                and isinstance(item, dict | list)
+            ):
+                result[key_text] = _sanitize_metadata(item)
+            elif _is_non_secret_numeric_count(key_text, item):
+                result[key_text] = item
+            elif any(token in key_text.lower() for token in REDACTED_METADATA_TOKENS):
                 result[key_text] = "<redacted>"
             else:
                 result[key_text] = _sanitize_metadata(item)
@@ -87,3 +114,15 @@ def _sanitize_metadata(value: Any) -> Any:
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return str(value)
+
+
+def _is_non_secret_numeric_count(key: str, value: Any) -> bool:
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        return False
+    normalized = key.lower()
+    return (
+        normalized in NON_SECRET_TOKEN_COUNT_KEYS
+        or normalized.endswith("_token_estimate")
+        or normalized.endswith("_token_count")
+        or normalized.endswith("_tokens")
+    )

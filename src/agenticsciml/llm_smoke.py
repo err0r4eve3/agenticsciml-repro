@@ -7,19 +7,21 @@ import json
 import math
 import os
 import re
+import shutil
 import sys
-import threading
 import time
+import uuid
 from dataclasses import dataclass
-from inspect import Parameter, signature
 from pathlib import Path
 from typing import Any
 
+from agenticsciml.benchmarks import BenchmarkContractFactory, ProblemBundle
 from agenticsciml.config import EvolutionConfig, ExperimentConfig
 from agenticsciml.evidence import EVIDENCE_MODE_REAL_LLM_SMOKE, SCIENTIFIC_CLAIM_NOT_SUPPORTED
 from agenticsciml.llm.base import LLMClient
 from agenticsciml.llm.budget import (
     LLMBudget,
+    RecordingLLMClient,
     combine_llm_call_ranges,
     estimate_orchestrator_llm_call_range,
     llm_call_budget_preflight,
@@ -47,142 +49,7 @@ class LLMSmokeVerification:
     passed: bool
 
 
-class _RecordingLLMClient(LLMClient):
-    def __init__(self, inner: LLMClient, ledger_path: Path, budget: LLMBudget):
-        self.inner = inner
-        self.ledger_path = ledger_path
-        self.provider = _llm_provider_name(inner)
-        self.model = getattr(inner, "model", None) or os.environ.get("OPENAI_MODEL", "gpt-5-mini")
-        self.adapter_type = getattr(inner, "adapter_type", type(inner).__name__)
-        self.provider_capabilities = _llm_provider_capabilities(inner)
-        self.budget = budget
-        self._call_count = 0
-        self._lock = threading.Lock()
-        self._local = threading.local()
-
-    @property
-    def last_call_metadata(self) -> dict[str, Any] | None:
-        metadata = getattr(self._local, "last_call_metadata", None)
-        return metadata if isinstance(metadata, dict) else None
-
-    def complete_text(
-        self,
-        prompt: str,
-        system: str | None = None,
-        temperature: float = 0.0,
-        reasoning_effort: str | None = None,
-    ) -> str:
-        return self._record_call(
-            method="complete_text",
-            schema_name=None,
-            prompt=prompt,
-            system=system,
-            temperature=temperature,
-            reasoning_effort=reasoning_effort,
-            call=lambda: _call_inner_complete_text(
-                self.inner,
-                prompt,
-                system=system,
-                temperature=temperature,
-                reasoning_effort=reasoning_effort,
-            ),
-        )
-
-    def complete_json(
-        self,
-        prompt: str,
-        schema_name: str,
-        system: str | None = None,
-        temperature: float = 0.0,
-        reasoning_effort: str | None = None,
-    ) -> dict[str, Any]:
-        return self._record_call(
-            method="complete_json",
-            schema_name=schema_name,
-            prompt=prompt,
-            system=system,
-            temperature=temperature,
-            reasoning_effort=reasoning_effort,
-            call=lambda: _call_inner_complete_json(
-                self.inner,
-                prompt,
-                schema_name,
-                system=system,
-                temperature=temperature,
-                reasoning_effort=reasoning_effort,
-            ),
-        )
-
-    def _record_call(
-        self,
-        *,
-        method: str,
-        schema_name: str | None,
-        prompt: str,
-        system: str | None,
-        temperature: float,
-        reasoning_effort: str | None,
-        call: Any,
-    ) -> Any:
-        prompt_tokens = _estimate_tokens(prompt)
-        with self._lock:
-            self.budget.reserve_call(prompt_tokens)
-            self._call_count += 1
-            call_id = f"llm_call_{self._call_count:06d}"
-        started_wall = time.time()
-        started = time.monotonic()
-        record: dict[str, Any] = {
-            "schema_version": 1,
-            "call_id": call_id,
-            "provider": self.provider,
-            "model": self.model,
-            "adapter_type": self.adapter_type,
-            "provider_capabilities": self.provider_capabilities,
-            "method": method,
-            "schema_name": schema_name,
-            "span_kind": "generation_span",
-            "prompt_hash": _hash_text(prompt),
-            "system_hash": _hash_text(system or ""),
-            "prompt_token_estimate": prompt_tokens,
-            "temperature": temperature,
-            "started_at_unix": started_wall,
-        }
-        if reasoning_effort is not None:
-            record["reasoning_effort"] = reasoning_effort
-        try:
-            response = call()
-        except Exception as exc:
-            record.update(
-                {
-                    "success": False,
-                    "error_type": type(exc).__name__,
-                    "duration_s": time.monotonic() - started,
-                }
-            )
-            self._local.last_call_metadata = _trace_call_metadata(record)
-            self._append_ledger(record)
-            raise
-        response_tokens = _response_token_count(response, getattr(self.inner, "last_call_metadata", None))
-        with self._lock:
-            self.budget.record_response(output_tokens=response_tokens)
-        record.update(
-            {
-                "success": True,
-                "response_hash": _hash_payload(response) if isinstance(response, dict) else _hash_text(str(response)),
-                "response_token_estimate": response_tokens,
-                "duration_s": time.monotonic() - started,
-            }
-        )
-        self._local.last_call_metadata = _trace_call_metadata(record)
-        self._append_ledger(record)
-        return response
-
-    def _append_ledger(self, record: dict[str, Any]) -> None:
-        self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"
-        with self._lock:
-            with self.ledger_path.open("a", encoding="utf-8") as f:
-                f.write(line)
+_RecordingLLMClient = RecordingLLMClient
 
 
 def run_llm_smoke(
@@ -198,10 +65,70 @@ def run_llm_smoke(
     llm_fast_mode: bool = False,
     llm_client: LLMClient | None = None,
 ) -> LLMSmokeResult:
+    benchmark_dir = Path(benchmark_dir).resolve()
+    output_dir = Path(output_dir).resolve()
     selected_variants = variants or list(DEFAULT_SMOKE_VARIANTS)
     _validate_smoke_variants(selected_variants)
     if not dry_run:
         _require_paired_contrast(selected_variants)
+    _validate_smoke_arguments(
+        benchmark_dir=benchmark_dir,
+        timeout_s=timeout_s,
+        max_iterations=max_iterations,
+        parallel_mutations=parallel_mutations,
+    )
+    benchmark_snapshot = _validated_benchmark_snapshot(benchmark_dir)
+    backup_dir: Path | None = None
+    completed_bundle_exists = _is_completed_smoke_bundle(output_dir)
+    if dry_run and completed_bundle_exists:
+        raise ValueError(
+            "Refusing to overwrite a completed real LLM smoke bundle with a dry run; "
+            "choose a different --output-dir"
+        )
+    if not dry_run and completed_bundle_exists:
+        backup_dir = output_dir.with_name(
+            f".{output_dir.name}.previous-{uuid.uuid4().hex}"
+        )
+        output_dir.rename(backup_dir)
+    try:
+        result = _run_llm_smoke_once(
+            benchmark_dir=benchmark_dir,
+            output_dir=output_dir,
+            selected_variants=selected_variants,
+            seed=seed,
+            dry_run=dry_run,
+            timeout_s=timeout_s,
+            max_iterations=max_iterations,
+            parallel_mutations=parallel_mutations,
+            llm_fast_mode=llm_fast_mode,
+            llm_client=llm_client,
+            benchmark_snapshot=benchmark_snapshot,
+        )
+    except Exception:
+        if backup_dir is not None:
+            if output_dir.exists():
+                shutil.rmtree(output_dir)
+            backup_dir.rename(output_dir)
+        raise
+    if backup_dir is not None:
+        shutil.rmtree(backup_dir)
+    return result
+
+
+def _run_llm_smoke_once(
+    *,
+    benchmark_dir: Path,
+    output_dir: Path,
+    selected_variants: list[str],
+    seed: int,
+    dry_run: bool,
+    timeout_s: int,
+    max_iterations: int,
+    parallel_mutations: int,
+    llm_fast_mode: bool,
+    llm_client: LLMClient | None,
+    benchmark_snapshot: dict[str, object],
+) -> LLMSmokeResult:
     output_dir.mkdir(parents=True, exist_ok=True)
     budget = LLMBudget.from_env()
     plan = _build_plan(
@@ -213,6 +140,7 @@ def run_llm_smoke(
         max_iterations,
         parallel_mutations,
         dry_run=dry_run,
+        benchmark_snapshot=benchmark_snapshot,
     )
     plan_path = output_dir / "real_llm_smoke_plan.json"
     plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True), encoding="utf-8")
@@ -280,6 +208,12 @@ def run_llm_smoke(
     report_path.write_text(_render_real_report(plan, rows, paired_gate), encoding="utf-8")
     if gate_issues:
         raise RuntimeError(f"Real LLM smoke gate failed; see {report_path}: {'; '.join(gate_issues)}")
+    manifest["status"] = "completed"
+    manifest["report_status"] = "passed"
+    manifest["report_sha256"] = _file_sha256(report_path)
+    manifest["runs_csv_sha256"] = _file_sha256(runs_csv)
+    manifest["token_budget_final"] = budget.to_dict()
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     return LLMSmokeResult(plan_json=plan_path, report_md=report_path, manifest_json=manifest_path, runs_csv=runs_csv)
 
 
@@ -301,6 +235,7 @@ def _build_plan(
     parallel_mutations: int,
     *,
     dry_run: bool,
+    benchmark_snapshot: dict[str, object],
 ) -> dict[str, Any]:
     runs = [
         {
@@ -336,7 +271,9 @@ def _build_plan(
     ]
     return {
         "schema_version": 1,
+        "bundle_id": uuid.uuid4().hex,
         "benchmark_dir": str(benchmark_dir),
+        "benchmark": benchmark_snapshot,
         "output_dir": str(output_dir),
         "seed": seed,
         "timeout_s": timeout_s,
@@ -593,16 +530,39 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
     if manifest:
         manifest_issues, manifest_call_range = _manifest_schema_issues(manifest, output_dir)
         issues.extend(manifest_issues)
+        if report_path.exists() and manifest.get("report_sha256") != _file_sha256(report_path):
+            issues.append("manifest report_sha256 does not match real_llm_smoke_report.md")
+        if runs_csv.exists() and manifest.get("runs_csv_sha256") != _file_sha256(runs_csv):
+            issues.append("manifest runs_csv_sha256 does not match real_llm_smoke_runs.csv")
     if plan:
         expected_hash = _hash_payload(plan)
         if manifest and manifest.get("plan_hash") != expected_hash:
             issues.append("manifest plan_hash does not match plan payload")
         if manifest and manifest.get("config_hash") != expected_hash:
             issues.append("manifest config_hash does not match plan payload")
+        if manifest and manifest.get("bundle_id") != plan.get("bundle_id"):
+            issues.append("manifest bundle_id does not match plan bundle_id")
         if plan.get("execution_mode") != "real":
             issues.append("plan execution_mode must be real for smoke verification")
         if Path(str(plan.get("output_dir", ""))).resolve() != output_dir.resolve():
             issues.append("plan output_dir does not match verification bundle")
+        plan_benchmark = plan.get("benchmark")
+        if not isinstance(plan_benchmark, dict):
+            issues.append("plan benchmark must be an object")
+        else:
+            benchmark_path = Path(str(plan_benchmark.get("path", ""))).resolve()
+            if Path(str(plan.get("benchmark_dir", ""))).resolve() != benchmark_path:
+                issues.append("plan benchmark_dir does not match benchmark.path")
+            try:
+                current_benchmark = _validated_benchmark_snapshot(benchmark_path)
+            except Exception as exc:
+                issues.append(
+                    "could not validate planned benchmark: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+            else:
+                if current_benchmark != plan_benchmark:
+                    issues.append("planned benchmark snapshot is stale or does not match current benchmark")
         variants = [str(entry.get("variant")) for entry in plan.get("runs", []) if isinstance(entry, dict)]
         try:
             _require_paired_contrast(variants)
@@ -646,6 +606,17 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
             issues.append(f"{variant}: could not recompute smoke row: {type(exc).__name__}: {exc}")
             continue
         recomputed_rows.append(recomputed)
+        issues.extend(
+            _run_binding_issues(
+                run_dir,
+                variant=variant,
+                seed=seed,
+                plan_entry=plan_entry,
+                plan_benchmark=plan.get("benchmark"),
+            )
+        )
+        if not _csv_row_matches_recomputed(row, recomputed):
+            issues.append(f"{variant}: runs CSV row is stale or does not match recomputed run evidence")
         if not _truthy(recomputed["smoke_gate_passed"]):
             issues.append(f"{variant}: smoke gate failed: {recomputed['smoke_gate_issues']}")
         issues.extend(_parallel_trace_issues(run_dir, variant, plan))
@@ -706,6 +677,81 @@ def _read_rows(path: Path, issues: list[str]) -> list[dict[str, str]]:
     except Exception as exc:
         issues.append(f"could not read {path.name}: {type(exc).__name__}: {exc}")
         return []
+
+
+def _csv_row_matches_recomputed(row: dict[str, str], recomputed: dict[str, Any]) -> bool:
+    if set(row) != set(recomputed):
+        return False
+    order_insensitive_trace_fields = {
+        "llm_ledger_call_ids",
+        "llm_ledger_methods",
+        "llm_ledger_schema_names",
+        "llm_trace_call_ids",
+        "llm_trace_methods",
+        "llm_trace_schema_names",
+    }
+    return all(
+        str(row[key]) == str(recomputed[key])
+        for key in recomputed
+        if key not in order_insensitive_trace_fields
+    )
+
+
+def _run_binding_issues(
+    run_dir: Path,
+    *,
+    variant: str,
+    seed: int,
+    plan_entry: dict[str, Any],
+    plan_benchmark: Any,
+) -> list[str]:
+    issues: list[str] = []
+    config = _read_json_or_issue(run_dir / "config.json", issues)
+    metadata = _read_json_or_issue(run_dir / "run_metadata.json", issues)
+    contract = _read_json_or_issue(run_dir / "evaluation_contract.json", issues)
+    if not isinstance(plan_benchmark, dict):
+        return issues
+    expected_benchmark_path = Path(str(plan_benchmark.get("path", ""))).resolve()
+    if config:
+        if config.get("experiment_id") != plan_entry.get("experiment_id"):
+            issues.append(f"{variant}: run config experiment_id does not match plan")
+        if Path(str(config.get("benchmark_dir", ""))).resolve() != expected_benchmark_path:
+            issues.append(f"{variant}: run config benchmark_dir does not match plan benchmark")
+        if config.get("use_mock") is not False:
+            issues.append(f"{variant}: run config use_mock must be false")
+        evolution = config.get("evolution")
+        if not isinstance(evolution, dict):
+            issues.append(f"{variant}: run config evolution must be an object")
+        else:
+            expected_evolution = {
+                "max_iterations": plan_entry.get("max_iterations"),
+                "parallel_mutations": plan_entry.get("parallel_mutations"),
+                "random_seed": seed,
+                "use_branch_context": plan_entry.get("use_branch_context"),
+            }
+            for field, expected in expected_evolution.items():
+                if evolution.get(field) != expected:
+                    issues.append(f"{variant}: run config evolution.{field} does not match plan")
+    if metadata:
+        if metadata.get("run_state") not in {"completed", "exported", "finalized"}:
+            issues.append(f"{variant}: run_metadata run_state is not exported")
+        if metadata.get("benchmark_name") != plan_benchmark.get("name"):
+            issues.append(f"{variant}: run_metadata benchmark_name does not match plan")
+        if metadata.get("benchmark_fidelity_level") != plan_benchmark.get("fidelity_level"):
+            issues.append(f"{variant}: run_metadata benchmark fidelity does not match plan")
+        if metadata.get("llm_mode") != "real":
+            issues.append(f"{variant}: run_metadata llm_mode must be real")
+    if contract:
+        if contract.get("benchmark_name") != plan_benchmark.get("name"):
+            issues.append(f"{variant}: evaluation contract benchmark_name does not match plan")
+        if contract.get("contract_hash") != plan_benchmark.get("contract_hash"):
+            issues.append(f"{variant}: evaluation contract hash does not match planned benchmark")
+        if (
+            contract.get("benchmark_source_manifest_digest")
+            != plan_benchmark.get("benchmark_source_manifest_digest")
+        ):
+            issues.append(f"{variant}: evaluation contract source manifest does not match plan")
+    return issues
 
 
 def _read_llm_call_ledger(run_dir: Path, variant: str) -> tuple[list[dict[str, Any]], list[str]]:
@@ -968,6 +1014,13 @@ def _manifest_schema_issues(manifest: dict[str, Any], output_dir: Path) -> tuple
         issues.append("manifest output_dir does not match verification bundle")
     if manifest.get("real_mode_explicit") is not True:
         issues.append("manifest real_mode_explicit must be true for smoke verification")
+    _required_non_empty_string(manifest.get("bundle_id"), "manifest bundle_id", issues)
+    if manifest.get("status") != "completed":
+        issues.append("manifest status must be completed for smoke verification")
+    if manifest.get("report_status") != "passed":
+        issues.append("manifest report_status must be passed for smoke verification")
+    for field in ("report_sha256", "runs_csv_sha256"):
+        _validate_sha256_hex(manifest.get(field), f"manifest {field}", issues)
     _required_non_empty_string(manifest.get("provider"), "manifest provider", issues)
     _required_non_empty_string(manifest.get("model"), "manifest model", issues)
     _required_non_empty_string(manifest.get("adapter_type"), "manifest adapter_type", issues)
@@ -1072,6 +1125,55 @@ def _llm_call_count(metadata: dict[str, Any], variant: str, issues: list[str]) -
     if total is not None and total <= 0:
         issues.append(f"{variant}: llm_calls.total must be positive in real smoke")
     return total
+
+
+def _validate_smoke_arguments(
+    *,
+    benchmark_dir: Path,
+    timeout_s: int,
+    max_iterations: int,
+    parallel_mutations: int,
+) -> None:
+    if max_iterations < 0:
+        raise ValueError("max_iterations must be >= 0")
+    if parallel_mutations < 1:
+        raise ValueError("parallel_mutations must be >= 1")
+    if timeout_s <= 0:
+        raise ValueError("timeout_s must be > 0")
+    if not benchmark_dir.is_dir():
+        raise ValueError(f"Benchmark directory does not exist: {benchmark_dir}")
+
+
+def _validated_benchmark_snapshot(benchmark_dir: Path) -> dict[str, object]:
+    bundle = ProblemBundle.load(benchmark_dir)
+    contract = BenchmarkContractFactory.create_contract(bundle)
+    return {
+        "name": bundle.benchmark_name,
+        "path": str(benchmark_dir.resolve()),
+        "family": bundle.benchmark_spec.family,
+        "fidelity_level": bundle.benchmark_spec.fidelity_level,
+        "metric": bundle.benchmark_spec.metric,
+        "contract_hash": contract.contract_hash,
+        "benchmark_source_manifest_digest": contract.benchmark_source_manifest_digest,
+    }
+
+
+def _is_completed_smoke_bundle(output_dir: Path) -> bool:
+    manifest_path = output_dir / "real_llm_smoke_manifest.json"
+    if not manifest_path.exists():
+        return False
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(manifest, dict)
+        and manifest.get("status") == "completed"
+        and manifest.get("report_status") == "passed"
+        and (output_dir / "real_llm_smoke_plan.json").exists()
+        and (output_dir / "real_llm_smoke_report.md").exists()
+        and (output_dir / "real_llm_smoke_runs.csv").exists()
+    )
 
 
 def _validate_smoke_variants(variants: list[str]) -> None:
@@ -1281,6 +1383,9 @@ def _build_manifest(plan: dict[str, Any], *, llm_client: LLMClient | None, budge
     )
     return {
         "schema_version": 1,
+        "bundle_id": plan["bundle_id"],
+        "status": "dry_run" if plan["execution_mode"] == "dry_run" else "running",
+        "report_status": "not_executed" if plan["execution_mode"] == "dry_run" else "pending",
         "execution_mode": plan["execution_mode"],
         "real_mode_explicit": plan["real_mode_explicit"],
         "provider": provider,
@@ -1310,66 +1415,8 @@ def _hash_payload(payload: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _hash_text(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def _trace_call_metadata(record: dict[str, Any]) -> dict[str, Any]:
-    metadata = {
-        "llm_call_id": record["call_id"],
-        "span_kind": record["span_kind"],
-        "provider": record["provider"],
-        "model": record["model"],
-        "adapter_type": record["adapter_type"],
-        "provider_capabilities": record["provider_capabilities"],
-        "method": record["method"],
-        "schema_name": record["schema_name"],
-    }
-    if "reasoning_effort" in record:
-        metadata["reasoning_effort"] = record["reasoning_effort"]
-    return metadata
-
-
-def _call_inner_complete_text(
-    inner: LLMClient,
-    prompt: str,
-    *,
-    system: str | None,
-    temperature: float,
-    reasoning_effort: str | None,
-) -> str:
-    kwargs: dict[str, Any] = {"system": system, "temperature": temperature}
-    if reasoning_effort is not None and _accepts_reasoning_effort(inner.complete_text):
-        kwargs["reasoning_effort"] = reasoning_effort
-    return inner.complete_text(prompt, **kwargs)
-
-
-def _call_inner_complete_json(
-    inner: LLMClient,
-    prompt: str,
-    schema_name: str,
-    *,
-    system: str | None,
-    temperature: float,
-    reasoning_effort: str | None,
-) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {"system": system, "temperature": temperature}
-    if reasoning_effort is not None and _accepts_reasoning_effort(inner.complete_json):
-        kwargs["reasoning_effort"] = reasoning_effort
-    return inner.complete_json(prompt, schema_name, **kwargs)
-
-
-def _accepts_reasoning_effort(method: Any) -> bool:
-    try:
-        method_signature = signature(method)
-    except (TypeError, ValueError):
-        return True
-    if "reasoning_effort" in method_signature.parameters:
-        return True
-    return any(
-        parameter.kind == Parameter.VAR_KEYWORD
-        for parameter in method_signature.parameters.values()
-    )
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _default_provider_capabilities() -> Any:
@@ -1402,23 +1449,6 @@ def _llm_provider_capabilities(llm_client: LLMClient | None) -> dict[str, object
         "supports_trace_export": False,
         "supports_prompt_cache": False,
     }
-
-
-def _estimate_tokens(text: str) -> int:
-    return max(1, (len(text) + 3) // 4)
-
-
-def _response_token_count(response: Any, metadata: Any = None) -> int:
-    if isinstance(metadata, dict):
-        usage = metadata.get("usage")
-        if isinstance(usage, dict):
-            for key in ("completion_tokens", "output_tokens"):
-                value = usage.get(key)
-                if isinstance(value, int) and not isinstance(value, bool):
-                    return value
-    if isinstance(response, dict):
-        return _estimate_tokens(json.dumps(response, sort_keys=True, default=str))
-    return _estimate_tokens(str(response))
 
 
 def _validate_provider_capabilities(value: Any, label: str, issues: list[str]) -> None:

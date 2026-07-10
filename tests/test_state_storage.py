@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from agenticsciml.config import EvaluationContract, ExperimentConfig
+from agenticsciml.config import EvaluationContract, EvolutionConfig, ExperimentConfig
 from agenticsciml.state import (
     AgentMessage,
     Proposal,
@@ -215,6 +215,40 @@ def test_storage_trace_events_get_monotonic_event_sequence(tmp_path: Path) -> No
         for line in (storage.run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert [event["event_seq"] for event in events] == [1, 2]
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("max_iterations", -1),
+        ("parallel_mutations", 0),
+        ("max_children_per_node", 0),
+        ("max_debug_retries", -1),
+        ("timeout_s", 0),
+        ("selector_vote_count", 0),
+    ],
+)
+def test_evolution_config_rejects_out_of_range_values(field_name: str, value: int) -> None:
+    with pytest.raises(ValueError, match=field_name):
+        EvolutionConfig(**{field_name: value})
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value", "message"),
+    [
+        ("parallel_mutations", True, "parallel_mutations must be an integer"),
+        ("random_seed", False, "random_seed must be an integer"),
+        ("use_kb", "false", "use_kb must be a boolean"),
+        ("use_debugger", 0, "use_debugger must be a boolean"),
+    ],
+)
+def test_evolution_config_from_dict_rejects_coercible_wrong_types(
+    field_name: str,
+    value: object,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        EvolutionConfig.from_dict({field_name: value})
 
 
 def test_contract_serialization_preserves_commands() -> None:

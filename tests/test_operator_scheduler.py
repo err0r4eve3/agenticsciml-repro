@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from agenticsciml.audit_reports import build_evolution_health_report
 from agenticsciml.operator_scheduler import OperatorScheduler
 from agenticsciml.state import SolutionNode, SolutionScore
@@ -188,3 +190,72 @@ def test_evolution_health_audits_operator_assignment_consistency(tmp_path: Path)
     assert report["operator_assignment_warning_count"] == 1
     assert any("Operator assignment missing" in warning for warning in report["warnings"])
     assert any("method_tags are inconsistent" in warning for warning in report["warnings"])
+
+
+def test_operator_scheduler_rejects_unknown_selected_algorithm(tmp_path: Path) -> None:
+    parent = _node("solution_000", workspace=tmp_path / "solutions" / "solution_000")
+
+    with pytest.raises(ValueError, match="Unknown selected algorithm id.*not-a-real-operator"):
+        OperatorScheduler(
+            benchmark_name="function_approx",
+            benchmark_family="function approximation",
+            selected_algorithm_ids=["not-a-real-operator"],
+            nodes=[parent],
+            run_dir=tmp_path,
+        )
+
+
+def test_evolution_health_does_not_credit_unverified_operator_implementation(tmp_path: Path) -> None:
+    root = _node(
+        "solution_000",
+        workspace=tmp_path / "solutions" / "solution_000",
+        score=1.0,
+        children=["solution_001"],
+    )
+    child = _node(
+        "solution_001",
+        workspace=tmp_path / "solutions" / "solution_001",
+        score=0.4,
+        delta=-0.6,
+        parent_id="solution_000",
+        method_tags=["operator:kernel_surrogate_regression", "axis:optimization_or_schedule"],
+    )
+    for node in (root, child):
+        Path(node.workspace, "solution.py").write_text("MODEL = 'fourier_ridge'\n", encoding="utf-8")
+    Path(child.workspace, "operator_assignment.json").write_text(
+        json.dumps(
+            {
+                "operator_id": "kernel_surrogate_regression",
+                "mutation_axis": "optimization_or_schedule",
+                "operator_expected_terms": ["kernel", "surrogate"],
+                "warnings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    Path(child.workspace, "mutation_effect_report.json").write_text(
+        json.dumps(
+            {
+                "status": "changed_score_moved",
+                "operator_id": "kernel_surrogate_regression",
+                "operator_implementation_verified": False,
+                "operator_static_evidence": {
+                    "kernel": {"proposal_signal": False, "engineer_signal": False, "code_signal": False},
+                    "surrogate": {"proposal_signal": False, "engineer_signal": False, "code_signal": False},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = build_evolution_health_report([root, child], tmp_path)
+    health = report["operator_health"]["kernel_surrogate_regression"]
+
+    assert health["assigned"] == 1
+    assert health["evaluated"] == 1
+    assert health["improved"] == 0
+    assert health["best_improvement"] is None
+    assert health["implementation_verified"] == 0
+    assert health["implementation_unverified"] == 1
+    assert report["operator_implementation_unverified_nodes"] == ["solution_001"]
+    assert any("not verified" in warning for warning in report["warnings"])

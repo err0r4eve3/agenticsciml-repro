@@ -284,6 +284,30 @@ class EvolutionConfig:
     use_branch_context: bool = True
     selector_vote_count: int = 3
 
+    def __post_init__(self) -> None:
+        integer_bounds = {
+            "max_iterations": (self.max_iterations, 0),
+            "parallel_mutations": (self.parallel_mutations, 1),
+            "max_children_per_node": (self.max_children_per_node, 1),
+            "max_debug_retries": (self.max_debug_retries, 0),
+            "timeout_s": (self.timeout_s, 1),
+            "selector_vote_count": (self.selector_vote_count, 1),
+        }
+        for name, (value, minimum) in integer_bounds.items():
+            if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
+                raise ValueError(f"{name} must be an integer >= {minimum}")
+        if not isinstance(self.random_seed, int) or isinstance(self.random_seed, bool):
+            raise ValueError("random_seed must be an integer")
+        for name in (
+            "use_kb",
+            "random_kb",
+            "use_critic",
+            "use_debugger",
+            "use_branch_context",
+        ):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} must be a boolean")
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "max_iterations": self.max_iterations,
@@ -302,19 +326,34 @@ class EvolutionConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "EvolutionConfig":
+        if not isinstance(data, dict):
+            raise ValueError("EvolutionConfig must be a JSON object")
+
+        def integer(name: str, default: int) -> int:
+            value = data.get(name, default)
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError(f"{name} must be an integer")
+            return value
+
+        def boolean(name: str, default: bool) -> bool:
+            value = data.get(name, default)
+            if not isinstance(value, bool):
+                raise ValueError(f"{name} must be a boolean")
+            return value
+
         return cls(
-            max_iterations=int(data.get("max_iterations", 1)),
-            parallel_mutations=int(data.get("parallel_mutations", 2)),
-            max_children_per_node=int(data.get("max_children_per_node", 10)),
-            max_debug_retries=int(data.get("max_debug_retries", 2)),
-            timeout_s=int(data.get("timeout_s", 60)),
-            use_kb=bool(data.get("use_kb", True)),
-            random_kb=bool(data.get("random_kb", False)),
-            random_seed=int(data.get("random_seed", 0)),
-            use_critic=bool(data.get("use_critic", True)),
-            use_debugger=bool(data.get("use_debugger", True)),
-            use_branch_context=bool(data.get("use_branch_context", True)),
-            selector_vote_count=int(data.get("selector_vote_count", 3)),
+            max_iterations=integer("max_iterations", 1),
+            parallel_mutations=integer("parallel_mutations", 2),
+            max_children_per_node=integer("max_children_per_node", 10),
+            max_debug_retries=integer("max_debug_retries", 2),
+            timeout_s=integer("timeout_s", 60),
+            use_kb=boolean("use_kb", True),
+            random_kb=boolean("random_kb", False),
+            random_seed=integer("random_seed", 0),
+            use_critic=boolean("use_critic", True),
+            use_debugger=boolean("use_debugger", True),
+            use_branch_context=boolean("use_branch_context", True),
+            selector_vote_count=integer("selector_vote_count", 3),
         )
 
 

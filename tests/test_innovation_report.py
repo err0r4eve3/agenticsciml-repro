@@ -7,6 +7,7 @@ from agenticsciml.audit_reports import (
     render_innovation_report_markdown,
     render_scientific_result_card_markdown,
 )
+from agenticsciml.emergence_audit import audit_solution_emergence
 from agenticsciml.state import SolutionNode, SolutionScore
 
 
@@ -149,3 +150,136 @@ def test_innovation_report_records_workflow_exploration_without_scientific_claim
     assert any(item.startswith("resolve real_llm") for item in scientific_card["minimum_next_validation"])
     assert "Scientific Result Card" in card_markdown
     assert "scientific claim supported: False" in card_markdown
+
+
+def test_emergence_audit_rejects_incompatible_score_metric_and_direction(
+    tmp_path: Path,
+) -> None:
+    root_workspace = tmp_path / "solutions" / "solution_000"
+    parent_workspace = tmp_path / "solutions" / "solution_001"
+    child_workspace = tmp_path / "solutions" / "solution_002"
+    for workspace in (root_workspace, parent_workspace, child_workspace):
+        workspace.mkdir(parents=True)
+    (child_workspace / "proposal.md").write_text(
+        "Parent analysis found a residual plateau; adapt the boundary correction.",
+        encoding="utf-8",
+    )
+    (child_workspace / "analysis.md").write_text(
+        "The parent residual and score changed after the correction.",
+        encoding="utf-8",
+    )
+    (child_workspace / "policy_fidelity_report.json").write_text(
+        json.dumps({"execution_allowed": True, "status": "passed"}),
+        encoding="utf-8",
+    )
+    root = SolutionNode(
+        node_id="solution_000",
+        parent_id=None,
+        workspace=str(root_workspace),
+        score=SolutionScore("relative_l2", 1.0, higher_is_better=False),
+        status="evaluated",
+    )
+    parent = SolutionNode(
+        node_id="solution_001",
+        parent_id="solution_000",
+        workspace=str(parent_workspace),
+        score=SolutionScore("accuracy", 0.9, higher_is_better=True),
+        status="evaluated",
+    )
+    child = SolutionNode(
+        node_id="solution_002",
+        parent_id="solution_001",
+        workspace=str(child_workspace),
+        score=SolutionScore("relative_l2", 0.2, higher_is_better=False),
+        status="evaluated",
+        score_delta_from_parent=-0.7,
+    )
+
+    report = audit_solution_emergence(
+        node=child,
+        parent_node=parent,
+        root_node=root,
+        benchmark_dir=Path("examples/function_approx"),
+        strategy_seed_ids=[],
+    )
+
+    comparison = report["score_evidence"]["parent_comparison"]
+    assert comparison["comparable"] is False
+    assert comparison["metric_matches"] is False
+    assert comparison["direction_matches"] is False
+    assert report["score_evidence"]["improved_over_parent"] is False
+    assert "parent_score_metric_mismatch" in report["blocking_gaps"]
+    assert "parent_score_direction_mismatch" in report["blocking_gaps"]
+    assert report["claim_level"] != "candidate_emergent"
+
+
+def test_innovation_report_ignores_probe_variable_and_bookkeeping_tags(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    workspace = run_dir / "solutions" / "solution_000"
+    _write_solution_artifacts(
+        workspace,
+        proposal="Use a plain baseline.",
+        engineering="Implemented the plain baseline.",
+        code="probe = model.predict(inputs)\n",
+    )
+    root = SolutionNode(
+        node_id="solution_000",
+        parent_id=None,
+        workspace=str(workspace),
+        score=SolutionScore(metric="relative_l2", value=1.0, higher_is_better=False),
+        status="evaluated",
+        method_tags=["root_baseline", "operator:baseline_mlp_regressor", "axis:representation_or_features"],
+    )
+
+    report = build_innovation_report(
+        nodes=[root],
+        run_dir=run_dir,
+        benchmark_name="function_approx",
+        strategy_seed_ids=["fourier_feature_mlp", "kernel_surrogate_regression"],
+        problem_intake={},
+        planner_snapshot={},
+        evolution_health={"unique_code_count": 1, "duplicate_code_count": 0, "warnings": []},
+        claim_gate={"status": "allowed", "scientific_claim_supported": False},
+    )
+
+    assert report["novelty_axes"] == []
+    assert report["solution_innovation"][0]["novelty_axis_ids"] == []
+
+
+def test_scientific_result_card_lists_every_readiness_blocker(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    workspace = run_dir / "solutions" / "solution_000"
+    _write_solution_artifacts(workspace, proposal="baseline", engineering="baseline", code="MODEL = 1\n")
+    root = SolutionNode(
+        node_id="solution_000",
+        parent_id=None,
+        workspace=str(workspace),
+        score=SolutionScore(metric="relative_l2", value=1.0, higher_is_better=False),
+        status="evaluated",
+        method_tags=["root_baseline"],
+    )
+    blockers = [
+        {"check_id": f"gate_{index}", "message": f"missing gate {index}"}
+        for index in range(8)
+    ]
+
+    card = build_scientific_result_card(
+        nodes=[root],
+        champion=root,
+        run_dir=run_dir,
+        benchmark_name="function_approx",
+        evidence_metadata={
+            "llm_mode": "mock",
+            "evidence_mode": "mock_workflow_shape",
+            "benchmark_fidelity_level": "proxy",
+            "claim_gate": {"status": "allowed", "scientific_claim_supported": False},
+        },
+        evolution_health={"unique_code_count": 1, "duplicate_code_count": 0, "max_plateau_length": 1},
+        innovation_report={"evidence_summary": {"candidate_emergent_count": 0}},
+        scientific_readiness={"status": "blocked", "scientific_claim_supported": False, "blockers": blockers},
+    )
+
+    assert [item for item in card["minimum_next_validation"] if item.startswith("resolve gate_")] == [
+        f"resolve gate_{index}: missing gate {index}"
+        for index in range(8)
+    ]

@@ -91,6 +91,13 @@ class OperatorScheduler:
         self.run_dir = run_dir
         self.algorithms = list_algorithms()
         self.by_id = {algorithm.algorithm_id: algorithm for algorithm in self.algorithms}
+        unknown_ids = sorted(
+            algorithm_id
+            for algorithm_id in self.selected_algorithm_ids
+            if algorithm_id not in self.by_id
+        )
+        if unknown_ids:
+            raise ValueError("Unknown selected algorithm id(s): " + ", ".join(unknown_ids))
         self.history = operator_history(nodes, run_dir)
 
     def assign(

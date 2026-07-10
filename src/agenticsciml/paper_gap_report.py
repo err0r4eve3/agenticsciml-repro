@@ -152,6 +152,9 @@ def _benchmark_specs(benchmark_dirs: Sequence[Path] | None) -> list[BenchmarkSpe
 
 def _benchmark_gap_report(spec: BenchmarkSpec, runs: list[dict[str, Any]]) -> dict[str, Any]:
     matrix = spec.fidelity_matrix()
+    coherent_claim_runs = [
+        run for run in runs if run.get("same_run_paper_claim_evidence") is True
+    ]
     gap_items = [
         _gap_item(
             check_id="benchmark_fidelity",
@@ -209,6 +212,19 @@ def _benchmark_gap_report(spec: BenchmarkSpec, runs: list[dict[str, Any]]) -> di
             evidence=_run_refs(runs),
             blocker="claim_gate does not support paper-level claims",
         ),
+        _gap_item(
+            check_id="same_run_paper_claim_evidence",
+            passed=bool(coherent_claim_runs),
+            requirement=(
+                "one run must jointly provide completed artifacts, passing trace quality, "
+                "real LLM execution, scientific readiness, and claim-gate support"
+            ),
+            evidence=_run_refs(runs),
+            blocker=(
+                "no single supplied run jointly satisfies completed, trace, real LLM, "
+                "scientific readiness, and claim-gate requirements"
+            ),
+        ),
     ]
     open_gaps = [item for item in gap_items if item["status"] != "satisfied"]
     return {
@@ -248,16 +264,31 @@ def _run_evidence_summary(run_dir: Path) -> dict[str, Any]:
     )
     ablation = _read_optional_json(path / "reports" / "multi_seed_ablation_evidence.json", issues)
 
-    claim_gate = _dict_value(metadata, "claim_gate") or _dict_value(trace_summary, "claim_gate")
+    metadata_claim_gate = _dict_value(metadata, "claim_gate")
+    trace_claim_gate = _dict_value(trace_summary, "claim_gate")
+    claim_gate_consistent = _check_claim_gate_sources(
+        issues,
+        metadata_claim_gate,
+        trace_claim_gate,
+    )
+    claim_gate = metadata_claim_gate if claim_gate_consistent else {}
     quality_gate = _dict_value(trace_summary, "quality_gate")
     benchmark_name = _first_str(
         metadata.get("benchmark_name"),
         scientific_card.get("benchmark_name"),
     )
     readiness_supported = (
-        readiness.get("scientific_claim_supported") is True
-        or _nested_bool(metadata, "scientific_discovery_readiness", "scientific_claim_supported")
+        readiness.get("status") == "ready"
+        and readiness.get("scientific_claim_supported") is True
     )
+    metadata_readiness = _dict_value(metadata, "scientific_discovery_readiness")
+    if metadata_readiness:
+        for key in ("status", "scientific_claim_supported"):
+            if metadata_readiness.get(key) != readiness.get(key):
+                issues.append(
+                    f"run_metadata scientific_discovery_readiness.{key} does not match readiness report"
+                )
+                readiness_supported = False
     paper_level_supported = (
         claim_gate.get("status") == CLAIM_GATE_ALLOWED
         and claim_gate.get("paper_level_claim_supported") is True
@@ -269,22 +300,35 @@ def _run_evidence_summary(run_dir: Path) -> dict[str, Any]:
         or ablation.get("verified_multi_seed_ablation") is True
     )
     run_state = _first_str(metadata.get("run_state"))
+    completed_run_artifacts = run_state in COMPLETED_RUN_STATES
+    trace_quality_gate_passed = quality_gate.get("passed") is True
+    llm_mode = _first_str(metadata.get("llm_mode"))
+    same_run_paper_claim_evidence = (
+        completed_run_artifacts
+        and trace_quality_gate_passed
+        and llm_mode == LLM_MODE_REAL
+        and readiness_supported
+        and paper_level_supported
+        and not issues
+    )
     return {
         "path": str(path),
         "exists": path.exists(),
         "benchmark_name": benchmark_name,
         "run_state": run_state,
-        "completed_run_artifacts": run_state in COMPLETED_RUN_STATES,
+        "completed_run_artifacts": completed_run_artifacts,
         "champion": _first_str(metadata.get("champion")),
         "solution_count": _int_or_none(metadata.get("solution_count")),
-        "llm_mode": _first_str(metadata.get("llm_mode")),
+        "llm_mode": llm_mode,
         "evidence_mode": _first_str(metadata.get("evidence_mode")),
         "scientific_claim": _first_str(metadata.get("scientific_claim")),
-        "trace_quality_gate_passed": quality_gate.get("passed") is True,
+        "trace_quality_gate_passed": trace_quality_gate_passed,
         "claim_gate_status": claim_gate.get("status"),
+        "claim_gate_consistent": claim_gate_consistent,
         "scientific_claim_supported": claim_gate.get("scientific_claim_supported") is True,
         "paper_level_claim_supported": paper_level_supported,
         "scientific_readiness_supported": readiness_supported,
+        "same_run_paper_claim_evidence": same_run_paper_claim_evidence,
         "multi_seed_ablation_verified": ablation_verified,
         "scientific_result_card": {
             "present": bool(scientific_card),
@@ -330,10 +374,32 @@ def _run_refs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "llm_mode": run.get("llm_mode"),
             "trace_quality_gate_passed": run.get("trace_quality_gate_passed"),
             "claim_gate_status": run.get("claim_gate_status"),
+            "scientific_readiness_supported": run.get("scientific_readiness_supported"),
+            "paper_level_claim_supported": run.get("paper_level_claim_supported"),
+            "same_run_paper_claim_evidence": run.get("same_run_paper_claim_evidence"),
             "issues": run.get("issues", []),
         }
         for run in runs
     ]
+
+
+def _check_claim_gate_sources(
+    issues: list[str],
+    metadata_claim_gate: dict[str, Any],
+    trace_claim_gate: dict[str, Any],
+) -> bool:
+    if not metadata_claim_gate:
+        issues.append("run_metadata.json claim_gate is missing or invalid")
+    if not trace_claim_gate:
+        issues.append("trace_summary.json claim_gate is missing or invalid")
+    if not metadata_claim_gate or not trace_claim_gate:
+        return False
+    consistent = True
+    for key in ("status", "paper_level_claim_supported", "scientific_claim_supported"):
+        if metadata_claim_gate.get(key) != trace_claim_gate.get(key):
+            issues.append(f"claim_gate {key} differs between run metadata and trace summary")
+            consistent = False
+    return consistent
 
 
 def _fidelity_counts(specs: list[BenchmarkSpec]) -> dict[str, int]:

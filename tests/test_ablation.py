@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from agenticsciml.ablation import _aggregate, run_ablation
+from agenticsciml.ablation_evidence import build_multi_seed_ablation_verified_manifest
 from agenticsciml.evidence import (
     EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE,
     EVIDENCE_MODE_REAL_LLM_ABLATION,
@@ -36,6 +37,7 @@ def test_ablation_runner_writes_summary_and_report(tmp_path: Path) -> None:
     )
 
     rows = list(csv.DictReader(result.summary_csv.open(encoding="utf-8")))
+    run_rows = list(csv.DictReader(result.runs_csv.open(encoding="utf-8")))
     variants = {row["variant"] for row in rows}
     report = result.report_md.read_text(encoding="utf-8")
 
@@ -51,6 +53,15 @@ def test_ablation_runner_writes_summary_and_report(tmp_path: Path) -> None:
     }
     assert result.summary_csv.exists()
     assert result.report_md.exists()
+    assert (tmp_path / "ablation_plan.json").exists()
+    assert (tmp_path / "ablation_manifest.json").exists()
+    assert (tmp_path / "ablation_evidence_bundle.json").exists()
+    assert run_rows[0]["search_seed"] == "0"
+    assert run_rows[0]["data_seed"] == "0"
+    assert run_rows[0]["model_seed"] == ""
+    assert run_rows[0]["provider_seed"] == ""
+    assert run_rows[0]["seed_provenance_complete"] == "False"
+    assert run_rows[0]["execution_mode"] == "mock"
     assert "champion/root improvement" in rows[0]
     assert "valid_runs" in rows[0]
     assert rows[0]["evidence_mode"] == EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE
@@ -156,6 +167,24 @@ def test_cli_ablate_command_runs_mock_pipeline(tmp_path: Path, cli_env: dict[str
     assert (summary_path.parent / "ablation_report.md").exists()
 
 
+def test_mock_ablation_bundle_is_workflow_shape_not_scientific_evidence(tmp_path: Path) -> None:
+    run_ablation(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        seeds=[0, 1],
+        variants=["kb"],
+    )
+
+    manifest = build_multi_seed_ablation_verified_manifest(
+        {"ablation_output_dir": str(tmp_path), "verified_by": "workflow-reviewer"}
+    )
+
+    assert manifest["workflow_shape_verified"] is True
+    assert manifest["scientific_multi_seed_verified"] is False
+    assert manifest["verified"] is False
+    assert manifest["execution_mode"] == "mock"
+
+
 def test_ablation_real_dry_run_writes_plan_without_evidence_csv(
     tmp_path: Path,
     monkeypatch,
@@ -180,6 +209,7 @@ def test_ablation_real_dry_run_writes_plan_without_evidence_csv(
     assert result.report_md.exists()
     assert not (tmp_path / "ablation_runs.csv").exists()
     assert not (tmp_path / "ablation_summary.csv").exists()
+    assert not (tmp_path / "ablation_evidence_bundle.json").exists()
 
     plan = json.loads(result.plan_json.read_text(encoding="utf-8"))
     manifest = json.loads(result.manifest_json.read_text(encoding="utf-8"))
@@ -368,11 +398,18 @@ def test_ablation_real_runner_accepts_injected_llm_without_network(
     assert run_rows[0]["llm_mode"] == LLM_MODE_REAL
     assert run_rows[0]["scientific_claim"] == SCIENTIFIC_CLAIM_NOT_SUPPORTED
     assert run_rows[0]["run_evidence_mode"].startswith("real_llm_")
+    assert run_rows[0]["search_seed"] == "0"
+    assert run_rows[0]["data_seed"] == "0"
+    assert run_rows[0]["model_seed"] == ""
+    assert run_rows[0]["provider_seed"] == ""
+    assert run_rows[0]["seed_provenance_complete"] == "False"
+    assert run_rows[0]["execution_mode"] == "real"
     assert summary_rows[0]["evidence_mode"] == EVIDENCE_MODE_REAL_LLM_ABLATION
     assert summary_rows[0]["scientific_claim"] == SCIENTIFIC_CLAIM_NOT_SUPPORTED
     ledger_path = Path(run_rows[0]["run_dir"]) / "llm_call_ledger.jsonl"
     assert ledger_path.exists()
     assert ledger_path.read_text(encoding="utf-8").strip()
+    assert (tmp_path / "ablation_evidence_bundle.json").exists()
 
 
 def test_cli_ablate_real_dry_run_is_no_key_safe(tmp_path: Path, cli_env: dict[str, str]) -> None:

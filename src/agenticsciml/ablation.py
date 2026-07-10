@@ -45,6 +45,14 @@ DEFAULT_VARIANTS = (
     "no_branch_context",
 )
 
+SEED_PROVENANCE_FIELDS = (
+    "search_seed",
+    "data_seed",
+    "model_seed",
+    "provider_seed",
+)
+SCIENTIFIC_RANDOM_SEED_FIELDS = ("data_seed", "model_seed", "provider_seed")
+
 
 @dataclass(frozen=True, slots=True)
 class AblationResult:
@@ -92,6 +100,25 @@ def run_ablation(
             llm_client=llm_client,
         )
 
+    plan = _build_mock_ablation_plan(
+        benchmark_dir=benchmark_dir,
+        output_dir=output_dir,
+        seeds=seeds,
+        variants=selected_variants,
+        timeout_s=timeout_s,
+    )
+    plan_path = output_dir / "ablation_plan.json"
+    plan_path.write_text(
+        json.dumps(plan, indent=2, sort_keys=True, allow_nan=False),
+        encoding="utf-8",
+    )
+    manifest = _build_mock_ablation_manifest(plan)
+    manifest_path = output_dir / "ablation_manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False),
+        encoding="utf-8",
+    )
+
     run_rows: list[dict[str, Any]] = []
     for variant in selected_variants:
         for seed in seeds:
@@ -106,6 +133,12 @@ def run_ablation(
                 )
             )
 
+    _bind_run_rows_to_execution_artifacts(
+        run_rows,
+        plan=plan,
+        plan_path=plan_path,
+        manifest_path=manifest_path,
+    )
     runs_csv = output_dir / "ablation_runs.csv"
     _write_csv(runs_csv, run_rows)
     summary_rows = _aggregate(run_rows)
@@ -113,6 +146,17 @@ def run_ablation(
     _write_csv(summary_csv, summary_rows)
     report_md = output_dir / "ablation_report.md"
     report_md.write_text(_render_report(summary_rows), encoding="utf-8")
+    _write_ablation_evidence_bundle(
+        output_dir=output_dir,
+        plan=plan,
+        plan_path=plan_path,
+        manifest=manifest,
+        manifest_path=manifest_path,
+        runs_csv=runs_csv,
+        summary_csv=summary_csv,
+        report_md=report_md,
+        run_rows=run_rows,
+    )
     return AblationResult(summary_csv=summary_csv, report_md=report_md, runs_csv=runs_csv)
 
 
@@ -196,12 +240,29 @@ def _run_real_ablation(
         report_md.write_text(_render_real_failure_report(plan, "orchestrator_error", exc), encoding="utf-8")
         raise
 
+    _bind_run_rows_to_execution_artifacts(
+        run_rows,
+        plan=plan,
+        plan_path=plan_path,
+        manifest_path=manifest_path,
+    )
     runs_csv = output_dir / "ablation_runs.csv"
     _write_csv(runs_csv, run_rows)
     summary_rows = _aggregate(run_rows)
     summary_csv = output_dir / "ablation_summary.csv"
     _write_csv(summary_csv, summary_rows)
     report_md.write_text(_render_report(summary_rows), encoding="utf-8")
+    _write_ablation_evidence_bundle(
+        output_dir=output_dir,
+        plan=plan,
+        plan_path=plan_path,
+        manifest=manifest,
+        manifest_path=manifest_path,
+        runs_csv=runs_csv,
+        summary_csv=summary_csv,
+        report_md=report_md,
+        run_rows=run_rows,
+    )
     return AblationResult(
         summary_csv=summary_csv,
         report_md=report_md,
@@ -238,6 +299,16 @@ def _run_variant(
     run_dir = AgenticSciMLOrchestrator(run_config, llm).run()
     tree = json.loads((run_dir / "tree.json").read_text(encoding="utf-8"))
     metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    run_config_payload = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+    evaluation_contract = json.loads(
+        (run_dir / "evaluation_contract.json").read_text(encoding="utf-8")
+    )
+    seed_provenance = _seed_provenance_from_run_artifacts(
+        search_seed=seed,
+        run_config=run_config_payload,
+        run_metadata=metadata,
+        evaluation_contract=evaluation_contract,
+    )
     nodes = tree["nodes"]
     root = next(node for node in nodes if node["node_id"] == "solution_000")
     champion = _champion(nodes)
@@ -275,12 +346,28 @@ def _run_variant(
     return {
         "variant": variant,
         "seed": seed,
+        "experiment_id": experiment_id,
+        "search_seed": seed_provenance["search_seed"],
+        "data_seed": seed_provenance["data_seed"],
+        "model_seed": seed_provenance["model_seed"],
+        "provider_seed": seed_provenance["provider_seed"],
+        "search_seed_source": seed_provenance["search_seed_source"],
+        "data_seed_source": seed_provenance["data_seed_source"],
+        "model_seed_source": seed_provenance["model_seed_source"],
+        "provider_seed_source": seed_provenance["provider_seed_source"],
+        "seed_provenance_complete": seed_provenance["seed_provenance_complete"],
+        "execution_mode": "mock" if mock else "real",
         "evidence_mode": EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE if mock else EVIDENCE_MODE_REAL_LLM_ABLATION,
         "llm_mode": run_llm_mode,
         "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
         "run_evidence_mode": run_evidence_mode,
         "run_scientific_claim": run_scientific_claim,
         "run_dir": str(run_dir),
+        "benchmark_name": str(evaluation_contract.get("benchmark_name") or ""),
+        "benchmark_contract_hash": str(evaluation_contract.get("contract_hash") or ""),
+        "benchmark_source_manifest_digest": str(
+            evaluation_contract.get("benchmark_source_manifest_digest") or ""
+        ),
         "branch_context_enabled": bool(metadata.get("branch_context_enabled", False)),
         "champion_node_id": champion["node_id"],
         "metric_name": champion.get("score", {}).get("metric", ""),
@@ -340,6 +427,167 @@ def _variant_config(variant: str, seed: int, *, timeout_s: int = 60) -> Evolutio
     raise ValueError(f"Unknown ablation variant: {variant}")
 
 
+def _seed_provenance_from_run_artifacts(
+    *,
+    search_seed: int,
+    run_config: dict[str, Any],
+    run_metadata: dict[str, Any],
+    evaluation_contract: dict[str, Any],
+) -> dict[str, Any]:
+    evolution = run_config.get("evolution")
+    configured_search_seed = (
+        _integer_seed(evolution.get("random_seed")) if isinstance(evolution, dict) else None
+    )
+    source_manifest = evaluation_contract.get("benchmark_source_manifest")
+    data_seed = (
+        _integer_seed(source_manifest.get("data_seed"))
+        if isinstance(source_manifest, dict)
+        else None
+    )
+    metadata_provenance = run_metadata.get("seed_provenance")
+    model_seed = _seed_from_metadata(run_metadata, metadata_provenance, "model_seed")
+    provider_seed = _seed_from_metadata(run_metadata, metadata_provenance, "provider_seed")
+    values = {
+        "search_seed": configured_search_seed,
+        "data_seed": data_seed,
+        "model_seed": model_seed,
+        "provider_seed": provider_seed,
+    }
+    return {
+        **values,
+        "search_seed_source": (
+            "config.json:evolution.random_seed"
+            if configured_search_seed is not None and configured_search_seed == search_seed
+            else "unavailable_or_mismatched"
+        ),
+        "data_seed_source": (
+            "evaluation_contract.json:benchmark_source_manifest.data_seed"
+            if data_seed is not None
+            else "unavailable"
+        ),
+        "model_seed_source": (
+            "run_metadata.json:seed_provenance.model_seed"
+            if isinstance(metadata_provenance, dict)
+            and _integer_seed(metadata_provenance.get("model_seed")) is not None
+            else "run_metadata.json:model_seed"
+            if _integer_seed(run_metadata.get("model_seed")) is not None
+            else "unavailable"
+        ),
+        "provider_seed_source": (
+            "run_metadata.json:seed_provenance.provider_seed"
+            if isinstance(metadata_provenance, dict)
+            and _integer_seed(metadata_provenance.get("provider_seed")) is not None
+            else "run_metadata.json:provider_seed"
+            if _integer_seed(run_metadata.get("provider_seed")) is not None
+            else "unavailable"
+        ),
+        "seed_provenance_complete": all(values[field] is not None for field in SEED_PROVENANCE_FIELDS),
+    }
+
+
+def _seed_from_metadata(
+    run_metadata: dict[str, Any],
+    seed_provenance: object,
+    key: str,
+) -> int | None:
+    if isinstance(seed_provenance, dict):
+        nested = _integer_seed(seed_provenance.get(key))
+        if nested is not None:
+            return nested
+    return _integer_seed(run_metadata.get(key))
+
+
+def _integer_seed(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
+
+
+def _build_mock_ablation_plan(
+    *,
+    benchmark_dir: Path,
+    output_dir: Path,
+    seeds: list[int],
+    variants: list[str],
+    timeout_s: int,
+) -> dict[str, Any]:
+    runs = [
+        {
+            "variant": variant,
+            "seed": seed,
+            "experiment_id": f"{variant}-seed-{seed}",
+            "evolution": _variant_config(variant, seed, timeout_s=timeout_s).to_dict(),
+        }
+        for variant in variants
+        for seed in seeds
+    ]
+    plan = {
+        "schema_version": 1,
+        "benchmark_dir": str(benchmark_dir),
+        "benchmark_content_hash": _benchmark_content_hash(benchmark_dir),
+        "output_dir": str(output_dir),
+        "seeds": list(seeds),
+        "variants": list(variants),
+        "timeout_s": timeout_s,
+        "execution_mode": "mock",
+        "real_mode_explicit": False,
+        "provider_calls_enabled": False,
+        "seed_dimensions": list(SEED_PROVENANCE_FIELDS),
+        "scientific_random_seed_dimensions": list(SCIENTIFIC_RANDOM_SEED_FIELDS),
+        "evidence_mode": EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE,
+        "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
+        "runs": runs,
+        "claim_boundary": {
+            "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
+            "paper_score_reproduction": False,
+            "emergent_discovery_supported": False,
+            "notes": "Mock ablation validates workflow shape only.",
+        },
+    }
+    plan["full_stage_plan_hash"] = _hash_payload(
+        {
+            key: plan[key]
+            for key in (
+                "schema_version",
+                "benchmark_dir",
+                "benchmark_content_hash",
+                "seeds",
+                "variants",
+                "timeout_s",
+                "execution_mode",
+                "evidence_mode",
+                "scientific_claim",
+                "runs",
+                "claim_boundary",
+            )
+        }
+    )
+    return plan
+
+
+def _build_mock_ablation_manifest(plan: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "execution_mode": "mock",
+        "real_mode_explicit": False,
+        "provider_calls_enabled": False,
+        "seed_dimensions": list(SEED_PROVENANCE_FIELDS),
+        "scientific_random_seed_dimensions": list(SCIENTIFIC_RANDOM_SEED_FIELDS),
+        "benchmark_dir": plan["benchmark_dir"],
+        "benchmark_content_hash": plan["benchmark_content_hash"],
+        "seeds": list(plan["seeds"]),
+        "variants": list(plan["variants"]),
+        "run_count": len(plan["runs"]),
+        "full_stage_plan_hash": plan["full_stage_plan_hash"],
+        "plan_hash": _hash_payload(plan),
+        "evidence_mode": EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE,
+        "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
+        "claim_boundary": plan["claim_boundary"],
+    }
+
+
 def _build_real_ablation_plan(
     *,
     benchmark_dir: Path,
@@ -361,6 +609,13 @@ def _build_real_ablation_plan(
                 {
                     "variant": variant,
                     "seed": seed,
+                    "seed_provenance": {
+                        "search_seed": seed,
+                        "data_seed": None,
+                        "model_seed": None,
+                        "provider_seed": None,
+                        "status": "resolved_from_completed_run_artifacts",
+                    },
                     "experiment_id": f"{variant}-seed-{seed}",
                     "evolution": config.to_dict(),
                     "expected_llm_call_range": expected_call_range,
@@ -385,6 +640,8 @@ def _build_real_ablation_plan(
         "execution_mode": "dry_run" if dry_run else "real",
         "real_mode_explicit": not dry_run,
         "provider_calls_enabled": not dry_run,
+        "seed_dimensions": list(SEED_PROVENANCE_FIELDS),
+        "scientific_random_seed_dimensions": list(SCIENTIFIC_RANDOM_SEED_FIELDS),
         "evidence_mode": EVIDENCE_MODE_REAL_LLM_ABLATION,
         "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
         "runs": runs,
@@ -612,11 +869,13 @@ def _build_real_ablation_manifest(
         "schema_version": 1,
         "execution_mode": plan["execution_mode"],
         "real_mode_explicit": plan["real_mode_explicit"],
+        "provider_calls_enabled": plan.get("provider_calls_enabled", False),
         "provider": provider_capabilities["provider"],
         "model": getattr(llm_client, "model", None) or os.environ.get("OPENAI_MODEL", "gpt-5-mini"),
         "adapter_type": getattr(llm_client, "adapter_type", None) or provider_capabilities["adapter_type"],
         "provider_capabilities": provider_capabilities,
         "benchmark_content_hash": plan.get("benchmark_content_hash"),
+        "benchmark_dir": plan.get("benchmark_dir"),
         "python_version": sys.version.split()[0],
         "package_versions": _package_versions(),
         "seeds": plan["seeds"],
@@ -640,6 +899,9 @@ def _build_real_ablation_manifest(
         "budget_batch_plan": plan.get("budget_batch_plan"),
         "budget_batch_selection": plan.get("budget_batch_selection"),
         "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
+        "evidence_mode": EVIDENCE_MODE_REAL_LLM_ABLATION,
+        "seed_dimensions": list(SEED_PROVENANCE_FIELDS),
+        "scientific_random_seed_dimensions": list(SCIENTIFIC_RANDOM_SEED_FIELDS),
         "claim_boundary": plan["claim_boundary"],
     }
 
@@ -706,6 +968,185 @@ def _benchmark_content_hash(benchmark_dir: Path) -> str:
     return _hash_payload({"schema_version": 1, "artifacts": items})
 
 
+def _bind_run_rows_to_execution_artifacts(
+    run_rows: list[dict[str, Any]],
+    *,
+    plan: dict[str, Any],
+    plan_path: Path,
+    manifest_path: Path,
+) -> None:
+    plan_hash = _hash_payload(plan)
+    plan_sha256 = _sha256_file(plan_path)
+    manifest_sha256 = _sha256_file(manifest_path)
+    benchmark_content_hash = str(plan.get("benchmark_content_hash") or "")
+    full_stage_plan_hash = str(plan.get("full_stage_plan_hash") or "")
+    execution_mode = str(plan.get("execution_mode") or "")
+    for row in run_rows:
+        row.update(
+            {
+                "benchmark_content_hash": benchmark_content_hash,
+                "plan_hash": plan_hash,
+                "plan_sha256": plan_sha256,
+                "manifest_sha256": manifest_sha256,
+                "full_stage_plan_hash": full_stage_plan_hash,
+                "execution_mode": execution_mode,
+            }
+        )
+
+
+def _write_ablation_evidence_bundle(
+    *,
+    output_dir: Path,
+    plan: dict[str, Any],
+    plan_path: Path,
+    manifest: dict[str, Any],
+    manifest_path: Path,
+    runs_csv: Path,
+    summary_csv: Path,
+    report_md: Path,
+    run_rows: list[dict[str, Any]],
+    source_type: str = "direct_ablation",
+    additional_artifacts: dict[str, Path] | None = None,
+) -> Path:
+    seed_provenance = _seed_provenance_summary(run_rows)
+    artifacts = {
+        "plan_json": _bundle_artifact_descriptor(plan_path, output_dir, include_payload_hash=True),
+        "manifest_json": _bundle_artifact_descriptor(
+            manifest_path,
+            output_dir,
+            include_payload_hash=True,
+        ),
+        "runs_csv": _bundle_artifact_descriptor(runs_csv, output_dir),
+        "summary_csv": _bundle_artifact_descriptor(summary_csv, output_dir),
+        "report_md": _bundle_artifact_descriptor(report_md, output_dir),
+    }
+    for name, path in (additional_artifacts or {}).items():
+        artifacts[name] = _bundle_artifact_descriptor(path, output_dir, include_payload_hash=True)
+    bundle = {
+        "schema_version": 1,
+        "source_type": source_type,
+        "status": "completed",
+        "execution_mode": str(plan.get("execution_mode") or ""),
+        "evidence_mode": str(plan.get("evidence_mode") or ""),
+        "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
+        "benchmark_dir": str(plan.get("benchmark_dir") or ""),
+        "benchmark_content_hash": str(plan.get("benchmark_content_hash") or ""),
+        "full_stage_plan_hash": str(plan.get("full_stage_plan_hash") or ""),
+        "plan_hash": _hash_payload(plan),
+        "manifest_payload_hash": _hash_payload(manifest),
+        "run_count": len(run_rows),
+        "summary_variant_count": len({str(row.get("variant") or "") for row in run_rows}),
+        "seed_provenance": seed_provenance,
+        "artifacts": artifacts,
+        "run_provenance_artifacts": _run_provenance_artifacts(run_rows, output_dir),
+        "claim_boundary": (
+            "This bundle binds the ablation plan, execution manifest, current benchmark digest, "
+            "run CSV, summary CSV, report, and seed provenance. Mock or incomplete seed provenance "
+            "remains workflow-shape evidence only."
+        ),
+    }
+    bundle_path = output_dir / "ablation_evidence_bundle.json"
+    bundle_path.write_text(
+        json.dumps(bundle, indent=2, sort_keys=True, allow_nan=False),
+        encoding="utf-8",
+    )
+    return bundle_path
+
+
+def _run_provenance_artifacts(
+    run_rows: list[dict[str, Any]],
+    output_dir: Path,
+) -> dict[str, dict[str, Any]]:
+    descriptors: dict[str, dict[str, Any]] = {}
+    for row in run_rows:
+        experiment_id = str(row.get("experiment_id") or "").strip()
+        raw_run_dir = str(row.get("run_dir") or "").strip()
+        if not experiment_id or not raw_run_dir:
+            continue
+        run_dir = Path(raw_run_dir).expanduser()
+        if not run_dir.is_absolute():
+            run_dir = output_dir / run_dir
+        artifacts: dict[str, Any] = {"run_dir": str(run_dir.resolve())}
+        for name in (
+            "config.json",
+            "run_metadata.json",
+            "evaluation_contract.json",
+            "trace_summary.json",
+            "llm_call_ledger.jsonl",
+        ):
+            path = run_dir / name
+            if path.is_file():
+                artifacts[name] = _bundle_artifact_descriptor(
+                    path,
+                    output_dir,
+                    include_payload_hash=name.endswith(".json"),
+                )
+        descriptors[experiment_id] = artifacts
+    return descriptors
+
+
+def _bundle_artifact_descriptor(
+    path: Path,
+    output_dir: Path,
+    *,
+    include_payload_hash: bool = False,
+) -> dict[str, Any]:
+    try:
+        relative_path = path.resolve().relative_to(output_dir.resolve()).as_posix()
+    except ValueError:
+        relative_path = str(path.resolve())
+    descriptor: dict[str, Any] = {
+        "path": relative_path,
+        "sha256": _sha256_file(path),
+    }
+    if include_payload_hash:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        descriptor["payload_hash"] = _hash_payload(payload)
+    return descriptor
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _seed_provenance_summary(run_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    values = {
+        field: sorted(
+            {
+                seed
+                for row in run_rows
+                if (seed := _csv_seed(row.get(field))) is not None
+            }
+        )
+        for field in SEED_PROVENANCE_FIELDS
+    }
+    varied_scientific_dimensions = [
+        field for field in SCIENTIFIC_RANDOM_SEED_FIELDS if len(values[field]) >= 2
+    ]
+    return {
+        "required_fields": list(SEED_PROVENANCE_FIELDS),
+        "scientific_random_fields": list(SCIENTIFIC_RANDOM_SEED_FIELDS),
+        "values": values,
+        "seed_provenance_complete": bool(run_rows)
+        and all(_truthy(row.get("seed_provenance_complete")) for row in run_rows),
+        "varied_scientific_dimensions": varied_scientific_dimensions,
+        "scientific_random_dimension_varied": bool(varied_scientific_dimensions),
+    }
+
+
+def _csv_seed(value: object) -> int | None:
+    if isinstance(value, bool) or value in (None, ""):
+        return None
+    try:
+        return int(str(value))
+    except ValueError:
+        return None
+
+
 def _champion(nodes: list[dict[str, Any]]) -> dict[str, Any]:
     scored = [node for node in nodes if node.get("score")]
     if not scored:
@@ -741,15 +1182,33 @@ def _aggregate(run_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         improvements = _numbers(rows, "champion/root improvement")
         valid_rates = _numbers(rows, "valid_solution_rate")
         higher_is_better = _variant_higher_is_better(rows)
+        seed_summary = _seed_provenance_summary(rows)
         summary.append(
             {
                 "variant": variant,
+                "execution_mode": _joined_unique(row.get("execution_mode", "") for row in rows),
                 "evidence_mode": _joined_unique(row.get("evidence_mode", "") for row in rows)
                 or EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE,
                 "llm_mode": _joined_unique(row.get("llm_mode", "") for row in rows),
                 "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
                 "run_evidence_mode": _joined_unique(row.get("run_evidence_mode", "") for row in rows),
                 "run_scientific_claim": _joined_unique(row.get("run_scientific_claim", "") for row in rows),
+                "benchmark_name": _joined_unique(row.get("benchmark_name", "") for row in rows),
+                "benchmark_content_hash": _joined_unique(
+                    row.get("benchmark_content_hash", "") for row in rows
+                ),
+                "plan_hash": _joined_unique(row.get("plan_hash", "") for row in rows),
+                "manifest_sha256": _joined_unique(
+                    row.get("manifest_sha256", "") for row in rows
+                ),
+                "search_seed_count": len(seed_summary["values"]["search_seed"]),
+                "data_seed_count": len(seed_summary["values"]["data_seed"]),
+                "model_seed_count": len(seed_summary["values"]["model_seed"]),
+                "provider_seed_count": len(seed_summary["values"]["provider_seed"]),
+                "seed_provenance_complete": seed_summary["seed_provenance_complete"],
+                "scientific_random_dimensions_varied": ",".join(
+                    seed_summary["varied_scientific_dimensions"]
+                ),
                 "branch_context_enabled": any(_truthy(row.get("branch_context_enabled")) for row in rows),
                 "higher_is_better": higher_is_better,
                 "runs": len(rows),

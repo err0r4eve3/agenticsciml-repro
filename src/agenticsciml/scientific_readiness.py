@@ -100,11 +100,14 @@ def build_scientific_discovery_readiness_report(
         ),
         _check(
             "multi_seed_ablation",
-            "multi-seed or ablation evidence is attached to the run",
-            _multi_seed_or_ablation_present(
-                planner_snapshot,
-                multi_seed_ablation or {},
-                multi_seed_manifest,
+            "artifact-bound real multi-seed evidence has complete seed provenance and scientific seed variation",
+            (
+                not use_mock
+                and _multi_seed_or_ablation_present(
+                    planner_snapshot,
+                    multi_seed_ablation or {},
+                    multi_seed_manifest,
+                )
             ),
             {
                 "planner_snapshot_keys": sorted(planner_snapshot),
@@ -221,22 +224,52 @@ def _multi_seed_or_ablation_present(
     configured_multi_seed: dict[str, Any],
     evidence_manifest: dict[str, Any],
 ) -> bool:
-    if evidence_manifest:
-        return evidence_manifest.get("verified_multi_seed_ablation") is True
-    for multi_seed in (
-        configured_multi_seed,
-        planner_snapshot.get("multi_seed_ablation"),
-    ):
-        if isinstance(multi_seed, dict) and _multi_seed_manifest_satisfies_minimum(multi_seed):
-            return True
-    ablation_manifest = planner_snapshot.get("ablation_manifest")
-    return isinstance(ablation_manifest, dict) and bool(ablation_manifest.get("verified"))
+    del planner_snapshot, configured_multi_seed
+    verified_output = evidence_manifest.get("verified_ablation_output_manifest")
+    return bool(
+        evidence_manifest.get("verified_multi_seed_ablation") is True
+        and isinstance(verified_output, dict)
+        and _multi_seed_manifest_satisfies_minimum(verified_output)
+    )
 
 
 def _multi_seed_manifest_satisfies_minimum(manifest: dict[str, Any]) -> bool:
     seed_count = _count_from_manifest(manifest, "seed_count", "seeds")
-    ablation_count = _count_from_manifest(manifest, "ablation_count", "variants")
-    return seed_count >= 2 and ablation_count >= 1 and manifest.get("verified") is True
+    ablation_count = _count_from_manifest(manifest, "ablation_count", "ablation_variants")
+    provenance = manifest.get("seed_provenance")
+    source_artifacts = manifest.get("source_artifacts")
+    required_artifacts = {
+        "runs_csv",
+        "summary_csv",
+        "plan_json",
+        "manifest_json",
+        "evidence_bundle",
+    }
+    artifacts_bound = bool(
+        isinstance(source_artifacts, dict)
+        and required_artifacts.issubset(source_artifacts)
+        and all(
+            isinstance(source_artifacts.get(name), dict)
+            and source_artifacts[name].get("exists") is True
+            and bool(source_artifacts[name].get("sha256"))
+            for name in required_artifacts
+        )
+    )
+    return bool(
+        seed_count >= 2
+        and ablation_count >= 1
+        and manifest.get("schema_version") == 2
+        and manifest.get("source_type") == "ablation_output"
+        and manifest.get("verified") is True
+        and manifest.get("scientific_multi_seed_verified") is True
+        and manifest.get("workflow_shape_verified") is True
+        and manifest.get("artifact_integrity_verified") is True
+        and manifest.get("execution_mode") == "real"
+        and artifacts_bound
+        and isinstance(provenance, dict)
+        and provenance.get("seed_provenance_complete") is True
+        and provenance.get("scientific_random_dimension_varied") is True
+    )
 
 
 def _count_from_manifest(manifest: dict[str, Any], count_key: str, list_key: str) -> int:

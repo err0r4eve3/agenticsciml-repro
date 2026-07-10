@@ -39,7 +39,7 @@ NOVELTY_AXIS_TERMS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     (
         "data_or_sensor_processing",
         "Data, sensor, or field-processing strategy",
-        ("sensor", "lagged", "history", "filter", "bandlimit", "smooth", "denoise", "probe", "field"),
+        ("sensor", "lagged", "history", "filter", "bandlimit", "smooth", "denoise", "field"),
     ),
     (
         "algorithm_composition",
@@ -189,6 +189,10 @@ def build_mutation_effect_report(
         engineering_text=_read_text(workspace / "engineering_summary.md"),
         code_text=child_code,
     )
+    operator_implementation_verified = bool(operator_static_evidence) and any(
+        evidence.get("code_signal") is True
+        for evidence in operator_static_evidence.values()
+    )
     return {
         "schema_version": MUTATION_EFFECT_SCHEMA_VERSION,
         "solution_id": node.node_id,
@@ -198,6 +202,7 @@ def build_mutation_effect_report(
         "mutation_axis": assignment.get("mutation_axis"),
         "operator_expected_terms": operator_expected_terms,
         "operator_static_evidence": operator_static_evidence,
+        "operator_implementation_verified": operator_implementation_verified,
         "code_digest": child_digest,
         "parent_code_digest": parent_digest,
         "proposal_digest": _sha256_text(proposal_text) if proposal_text else None,
@@ -222,6 +227,7 @@ def build_evolution_health_report(nodes: list[SolutionNode], run_dir: Path) -> d
     missing_operator_assignment_nodes: list[str] = []
     operator_method_tag_mismatch_nodes: list[str] = []
     operator_assignment_warnings: list[dict[str, Any]] = []
+    operator_implementation_unverified_nodes: list[str] = []
     operator_assignment_count = 0
     best_improvement: float | None = None
 
@@ -253,6 +259,9 @@ def build_evolution_health_report(nodes: list[SolutionNode], run_dir: Path) -> d
                     )
             else:
                 missing_operator_assignment_nodes.append(node.node_id)
+        implementation_verified = _operator_implementation_verified(report)
+        if node.parent_id is not None and assignment and not implementation_verified:
+            operator_implementation_unverified_nodes.append(node.node_id)
         _update_operator_health(operator_health, node, report, workspace)
         if status == "changed_but_score_plateau":
             score_plateau_nodes.append(node.node_id)
@@ -278,6 +287,7 @@ def build_evolution_health_report(nodes: list[SolutionNode], run_dir: Path) -> d
         "operator_method_tag_mismatch_nodes": operator_method_tag_mismatch_nodes,
         "operator_assignment_warning_count": len(operator_assignment_warnings),
         "operator_assignment_warnings": operator_assignment_warnings,
+        "operator_implementation_unverified_nodes": operator_implementation_unverified_nodes,
         "operator_health": dict(sorted(operator_health.items())),
         "score_plateau_nodes": score_plateau_nodes,
         "max_plateau_length": max(plateau_lengths, default=0),
@@ -297,6 +307,11 @@ def build_evolution_health_report(nodes: list[SolutionNode], run_dir: Path) -> d
         report["warnings"].append("Operator assignment and solution method_tags are inconsistent.")
     if operator_assignment_warnings:
         report["warnings"].append("Operator scheduler warnings were recorded for one or more child nodes.")
+    if operator_implementation_unverified_nodes:
+        report["warnings"].append(
+            "Assigned operator implementation was not verified in solution code for one or more child nodes; "
+            "their score changes were not credited to operator health."
+        )
     return report
 
 
@@ -330,12 +345,21 @@ def _update_operator_health(
             "plateau": 0,
             "improved": 0,
             "best_improvement": None,
+            "implementation_verified": 0,
+            "implementation_unverified": 0,
             "axes": {},
         },
     )
     entry["assigned"] += 1
     if node.status == "evaluated":
         entry["evaluated"] += 1
+    implementation_verified = _operator_implementation_verified(mutation_report)
+    entry.setdefault("implementation_verified", 0)
+    entry.setdefault("implementation_unverified", 0)
+    if implementation_verified:
+        entry["implementation_verified"] += 1
+    else:
+        entry["implementation_unverified"] += 1
     status = mutation_report.get("status")
     if status == "duplicate_parent":
         entry["duplicate"] += 1
@@ -345,7 +369,7 @@ def _update_operator_health(
     if isinstance(axis, str) and axis:
         axes = entry["axes"]
         axes[axis] = int(axes.get(axis, 0)) + 1
-    if node.score and node.parent_id and node.score_delta_from_parent is not None:
+    if implementation_verified and node.score and node.parent_id and node.score_delta_from_parent is not None:
         improvement = (
             node.score_delta_from_parent
             if node.score.higher_is_better
@@ -359,6 +383,19 @@ def _update_operator_health(
                 if current_best is None
                 else max(float(current_best), improvement)
             )
+
+
+def _operator_implementation_verified(mutation_report: dict[str, Any]) -> bool:
+    explicit = mutation_report.get("operator_implementation_verified")
+    if isinstance(explicit, bool):
+        return explicit
+    evidence = mutation_report.get("operator_static_evidence")
+    if not isinstance(evidence, dict) or not evidence:
+        return False
+    return any(
+        isinstance(item, dict) and item.get("code_signal") is True
+        for item in evidence.values()
+    )
 
 
 def _operator_static_evidence(
@@ -682,7 +719,7 @@ def _minimum_next_validation(scientific_readiness: dict[str, Any], flags: list[s
     next_steps: list[str] = []
     blockers = scientific_readiness.get("blockers")
     if isinstance(blockers, list):
-        for blocker in blockers[:6]:
+        for blocker in blockers:
             if not isinstance(blocker, dict):
                 continue
             check_id = blocker.get("check_id")
@@ -738,8 +775,7 @@ def _solution_innovation_summary(
             _read_text(workspace / "engineering_summary.md"),
             _read_text(workspace / "analysis.md"),
             _read_text(workspace / "solution.py"),
-            " ".join(node.method_tags),
-            " ".join(strategy_seed_ids),
+            " ".join(_substantive_method_tags(node.method_tags)),
         ]
     )
     axis_ids = _novelty_axis_ids(text_blob, node.method_tags, strategy_seed_ids)
@@ -801,12 +837,39 @@ def _novelty_axis_ids(
     lowered = text.lower()
     axis_ids: list[str] = []
     for axis_id, _label, terms in NOVELTY_AXIS_TERMS:
-        if any(term in lowered for term in terms):
+        if axis_id == "algorithm_composition":
+            continue
+        if any(_novelty_term_present(lowered, term) for term in terms):
             axis_ids.append(axis_id)
-    if len({tag for tag in method_tags if tag}) >= 2 or len(strategy_seed_ids) >= 2:
+    substantive_tags = set(_substantive_method_tags(method_tags))
+    composition_terms = ("combine", "hybrid", "compose", "ensemble", "mixture", "stack")
+    if (
+        len(substantive_tags) >= 2 or len(set(strategy_seed_ids)) >= 2
+    ) and any(_novelty_term_present(lowered, term) for term in composition_terms):
         if "algorithm_composition" not in axis_ids:
             axis_ids.append("algorithm_composition")
     return axis_ids
+
+
+def _substantive_method_tags(method_tags: list[str]) -> list[str]:
+    bookkeeping_prefixes = ("operator:", "axis:", "branch:")
+    return [
+        tag
+        for tag in method_tags
+        if isinstance(tag, str)
+        and tag
+        and tag != "root_baseline"
+        and not tag.startswith(bookkeeping_prefixes)
+    ]
+
+
+def _novelty_term_present(text: str, term: str) -> bool:
+    normalized = term.lower().strip()
+    if not normalized:
+        return False
+    if re.fullmatch(r"[a-z0-9_]+", normalized):
+        return re.search(rf"(?<![a-z0-9_]){re.escape(normalized)}(?![a-z0-9_])", text) is not None
+    return normalized in text
 
 
 def _innovation_artifact_refs(workspace: Path, run_dir: Path) -> dict[str, str]:

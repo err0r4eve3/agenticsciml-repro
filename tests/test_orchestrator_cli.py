@@ -8,12 +8,13 @@ from typing import Any
 
 import pytest
 
-from agenticsciml.benchmarks import BenchmarkContractFactory
+from agenticsciml.benchmarks import BENCHMARKS, BenchmarkContractFactory
 from agenticsciml.config import AgentConfig, ExperimentConfig, EvolutionConfig
 from agenticsciml.evidence import (
     EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE,
     SCIENTIFIC_CLAIM_NOT_SUPPORTED,
 )
+from agenticsciml.execution.runner import RunResult
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.capabilities import ProviderCapabilities, capabilities_for_openai_compatible
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator, EvaluationApprovalRequired
@@ -379,6 +380,10 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert run_end["metadata"]["run_state"] == "exported"
     checkpoint = json.loads((run_dir / "checkpoint.json").read_text(encoding="utf-8"))
     assert checkpoint["phase"] == "completed"
+    assert checkpoint["checkpoint_schema_version"] == "orchestrator_checkpoint.v2"
+    assert checkpoint["completed_iterations"] == 1
+    assert checkpoint["target_iterations"] == 1
+    assert checkpoint["inflight_batch"] is None
     assert len(checkpoint["nodes"]) == len(tree["nodes"])
     child_emergence = json.loads(
         (run_dir / "solutions" / child_nodes[0]["node_id"] / "emergence_report.json").read_text(
@@ -704,7 +709,9 @@ def test_run_writes_domain_selector_paper_and_multiseed_readiness_artifacts(tmp_
     assert (run_dir / "reports" / "multi_seed_ablation_declared_manifest.json").exists()
     checks = {check["check_id"]: check for check in readiness["checks"]}
     assert checks["domain_review"]["passed"] is True
-    assert checks["multi_seed_ablation"]["passed"] is True
+    # A hand-authored declaration remains visible in the operational report,
+    # but cannot satisfy the scientific-readiness evidence gate.
+    assert checks["multi_seed_ablation"]["passed"] is False
     assert checks["paper_like_benchmark"]["passed"] is False
     assert readiness["scientific_claim_supported"] is False
     assert run_metadata["domain_approval"]["approved"] is True
@@ -841,6 +848,7 @@ def test_evaluation_approval_gate_pauses_before_root_generation(tmp_path: Path) 
     assert approval["status"] == "pending"
     assert approval["approval_required"] is True
     assert approval["contract_hash"]
+    assert all((run_dir / relative_path).exists() for relative_path in approval["review_files"])
     assert (run_dir / "evaluation_contract.json").exists()
     assert not (run_dir / "solutions" / "solution_000").exists()
     assert not (run_dir / "checkpoint.json").exists()
@@ -1658,6 +1666,17 @@ def test_non_resume_rejects_existing_run_directory(tmp_path: Path) -> None:
 def test_resume_rejects_stale_evaluation_contract(tmp_path: Path) -> None:
     benchmark_dir = tmp_path / "benchmarks" / "function_approx"
     shutil.copytree(Path("examples/function_approx").resolve(), benchmark_dir)
+    source_spec = BENCHMARKS["function_approx"]
+    (benchmark_dir / "Benchmark_spec.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                **source_spec.contract_digest_metadata(),
+                "name": benchmark_dir.name,
+            }
+        ),
+        encoding="utf-8",
+    )
     first_config = ExperimentConfig(
         experiment_id="stale-contract-run",
         benchmark_dir=benchmark_dir,
@@ -2212,3 +2231,164 @@ def test_engineer_patch_error_creates_failed_child_without_aborting_run(tmp_path
         )
     )
     assert method_record["failure_attribution"]["classification"] == "failure"
+
+
+def test_invalid_evaluator_payload_becomes_failed_node_without_champion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = ExperimentConfig(
+        experiment_id="invalid-eval-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+    )
+    orchestrator = AgenticSciMLOrchestrator(config, MockLLMClient())
+
+    def fake_evaluate(solution_id: str, workspace: Path, contract: object) -> RunResult:
+        (workspace / "eval.json").write_text(
+            json.dumps({"metric": "accuracy", "score": 0.99, "higher_is_better": True}),
+            encoding="utf-8",
+        )
+        return RunResult(["fake-evaluator"], 0, "", "", 0.0)
+
+    monkeypatch.setattr(orchestrator, "_inspect_then_train_and_evaluate", fake_evaluate)
+    run_dir = orchestrator.run()
+    tree = json.loads((run_dir / "tree.json").read_text(encoding="utf-8"))
+    metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    result_card = json.loads(
+        (run_dir / "reports" / "scientific_result_card.json").read_text(encoding="utf-8")
+    )
+
+    assert tree["nodes"][0]["status"] == "failed"
+    assert tree["nodes"][0]["failure_kind"] == "contract_error"
+    assert tree["nodes"][0]["score"] is None
+    assert metadata["champion"] is None
+    assert result_card["champion"] is None
+    assert (run_dir / "solutions" / "solution_000" / "eval.invalid.json").exists()
+    assert not (run_dir / "champion" / "solution.py").exists()
+
+
+def test_resume_rejects_ablation_condition_drift(tmp_path: Path) -> None:
+    first = ExperimentConfig(
+        experiment_id="resume-drift-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, use_kb=True),
+        use_mock=True,
+    )
+    run_dir = AgenticSciMLOrchestrator(first, MockLLMClient()).run()
+    original_config = (run_dir / "config.json").read_text(encoding="utf-8")
+    resumed = ExperimentConfig(
+        experiment_id="resume-drift-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=1, use_kb=False),
+        use_mock=True,
+        resume=True,
+    )
+
+    with pytest.raises(ValueError, match="Resume experiment conditions mismatch"):
+        AgenticSciMLOrchestrator(resumed, MockLLMClient()).run()
+
+    assert (run_dir / "config.json").read_text(encoding="utf-8") == original_config
+
+
+def test_incomplete_resume_does_not_repeat_completed_iteration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = ExperimentConfig(
+        experiment_id="resume-progress-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=1, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+    )
+    interrupted = AgenticSciMLOrchestrator(config, MockLLMClient())
+    monkeypatch.setattr(
+        interrupted,
+        "_write_reports",
+        lambda started: (_ for _ in ()).throw(RuntimeError("stop after iteration")),
+    )
+    with pytest.raises(RuntimeError, match="stop after iteration"):
+        interrupted.run()
+    checkpoint = json.loads(
+        (tmp_path / "resume-progress-run" / "checkpoint.json").read_text(encoding="utf-8")
+    )
+    assert checkpoint["phase"] == "iteration_completed"
+    assert checkpoint["completed_iterations"] == 1
+
+    resume_config = ExperimentConfig(
+        experiment_id="resume-progress-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=1, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+        resume=True,
+    )
+    resumed = AgenticSciMLOrchestrator(resume_config, MockLLMClient())
+    monkeypatch.setattr(
+        resumed,
+        "_create_children_for_parents",
+        lambda parents, contract: (_ for _ in ()).throw(AssertionError("iteration repeated")),
+    )
+    run_dir = resumed.run()
+    tree = json.loads((run_dir / "tree.json").read_text(encoding="utf-8"))
+
+    assert len(tree["nodes"]) == 2
+    assert json.loads((run_dir / "checkpoint.json").read_text(encoding="utf-8"))[
+        "completed_iterations"
+    ] == 1
+
+
+def test_resume_recovers_all_completed_parallel_children(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = ExperimentConfig(
+        experiment_id="resume-inflight-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=1, parallel_mutations=2, max_debug_retries=0),
+        use_mock=True,
+    )
+    interrupted = AgenticSciMLOrchestrator(config, MockLLMClient())
+    original_record = interrupted._record_inflight_child
+    did_interrupt = [False]
+
+    def interrupt_after_record(parent: SolutionNode, child: SolutionNode) -> None:
+        original_record(parent, child)
+        if not did_interrupt[0]:
+            did_interrupt[0] = True
+            raise KeyboardInterrupt("synthetic parallel interruption")
+
+    monkeypatch.setattr(interrupted, "_record_inflight_child", interrupt_after_record)
+    with pytest.raises(KeyboardInterrupt, match="synthetic parallel interruption"):
+        interrupted.run()
+    checkpoint_path = tmp_path / "resume-inflight-run" / "checkpoint.json"
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    assert len(checkpoint["inflight_batch"]["completed_children"]) == 2
+
+    resume_config = ExperimentConfig(
+        experiment_id="resume-inflight-run",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=1, parallel_mutations=2, max_debug_retries=0),
+        use_mock=True,
+        resume=True,
+    )
+    resumed = AgenticSciMLOrchestrator(resume_config, MockLLMClient())
+    monkeypatch.setattr(
+        resumed,
+        "_run_child_job",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("completed child rerun")),
+    )
+    run_dir = resumed.run()
+    tree = json.loads((run_dir / "tree.json").read_text(encoding="utf-8"))
+
+    assert len(tree["nodes"]) == 3
+    assert json.loads((run_dir / "checkpoint.json").read_text(encoding="utf-8"))[
+        "completed_iterations"
+    ] == 1

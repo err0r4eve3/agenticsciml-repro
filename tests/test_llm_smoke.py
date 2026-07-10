@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import json
 import shutil
 import subprocess
@@ -71,6 +72,10 @@ def _retarget_smoke_bundle(output_dir: Path) -> None:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         writer.writeheader()
         writer.writerows(rows)
+    manifest["runs_csv_sha256"] = hashlib.sha256(rows_path.read_bytes()).hexdigest()
+    report_path = output_dir / "real_llm_smoke_report.md"
+    manifest["report_sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _rewrite_parallel_child_max_workers(run_dir: Path, value: object) -> None:
@@ -420,6 +425,53 @@ def test_verify_llm_smoke_output_rejects_manifest_mode_mismatch(tmp_path: Path) 
 
     assert verification.passed is False
     assert any("manifest execution_mode must be real" in issue for issue in payload["issues"])
+
+
+def test_verify_llm_smoke_output_rejects_stale_run_config(tmp_path: Path) -> None:
+    _copy_real_smoke_bundle(tmp_path)
+    config_path = tmp_path / "runs" / "smoke-branch_context-seed-0" / "config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["evolution"]["random_seed"] = 999
+    config_path.write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("evolution.random_seed does not match plan" in issue for issue in payload["issues"])
+
+
+def test_verify_llm_smoke_output_binds_completed_report(tmp_path: Path) -> None:
+    _copy_real_smoke_bundle(tmp_path)
+    report_path = tmp_path / "real_llm_smoke_report.md"
+    report_path.write_text(report_path.read_text(encoding="utf-8") + "\nstale\n", encoding="utf-8")
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("report_sha256" in issue for issue in payload["issues"])
+
+
+def test_failed_smoke_rerun_preserves_previous_valid_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _copy_real_smoke_bundle(tmp_path)
+    original_plan = (tmp_path / "real_llm_smoke_plan.json").read_bytes()
+    monkeypatch.setenv("AGENTICSCIML_MAX_LLM_CALLS", "1")
+
+    with pytest.raises(RuntimeError, match="LLM call budget preflight failed"):
+        run_llm_smoke(
+            benchmark_dir=Path("examples/function_approx").resolve(),
+            output_dir=tmp_path,
+            variants=["branch_context", "no_branch_context"],
+            dry_run=False,
+            llm_client=MockLLMClient(),
+        )
+
+    assert (tmp_path / "real_llm_smoke_plan.json").read_bytes() == original_plan
+    assert verify_llm_smoke_output(tmp_path).passed is True
 
 
 def test_verify_llm_smoke_output_rejects_output_dir_mismatch(tmp_path: Path) -> None:

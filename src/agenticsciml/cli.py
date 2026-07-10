@@ -1,22 +1,32 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import math
 import os
 import shutil
 import sys
 import time
 import json
+import uuid
 from pathlib import Path
 
 from agenticsciml.ablation_evidence import build_multi_seed_ablation_verified_manifest
 from agenticsciml.ablation_collect import collect_ablation_batches
 from agenticsciml.ablation import DEFAULT_VARIANTS, run_ablation
-from agenticsciml.benchmarks import list_benchmarks
+from agenticsciml.algorithm_catalog import list_algorithms
+from agenticsciml.benchmarks import (
+    BenchmarkContractFactory,
+    ProblemBundle,
+    benchmark_for_path,
+    list_benchmarks,
+)
 from agenticsciml.config import (
     DEFAULT_AGENT_ROLE_MODEL_SETTINGS,
     EXPERT_BLUEPRINT_IDS,
     VISUAL_AUDIT_MODES,
     AgentConfig,
+    EvaluationContract,
     EvolutionConfig,
     ExperimentConfig,
 )
@@ -25,11 +35,24 @@ from agenticsciml.iteration_campaign import (
     write_iteration_campaign,
     write_iteration_campaign_verification,
 )
+from agenticsciml.evidence import CLAIM_LEVELS
+from agenticsciml.llm.budget import (
+    LLMBudget,
+    RecordingLLMClient,
+    estimate_orchestrator_llm_call_range,
+    load_llm_budget_usage,
+    llm_call_budget_preflight,
+    require_llm_call_budget_preflight,
+)
 from agenticsciml.llm_problem_context import write_llm_problem_context_pack
 from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.llm_smoke import DEFAULT_SMOKE_VARIANTS, run_llm_smoke, verify_llm_smoke_output
-from agenticsciml.orchestrator import AgenticSciMLOrchestrator
+from agenticsciml.orchestrator import (
+    CHECKPOINT_SCHEMA_VERSION,
+    INFLIGHT_BATCH_SCHEMA_VERSION,
+    AgenticSciMLOrchestrator,
+)
 from agenticsciml.paper_workflow_readiness import write_paper_workflow_readiness_bundle
 from agenticsciml.paper_gap_report import write_paper_gap_report
 from agenticsciml.paper_source_collect import DEFAULT_ARXIV_QUERY, DEFAULT_SOURCE_LIMIT, write_paper_source_collection
@@ -38,12 +61,13 @@ from agenticsciml.reference_capability_matrix import write_reference_capability_
 from agenticsciml.reporting import write_sdk_trace_export, write_trace_summary
 from agenticsciml.selector_evidence import write_selector_evidence_packet
 from agenticsciml.secret_hygiene import write_secret_hygiene_report
+from agenticsciml.state import validate_solution_tree_artifact_payload
 from agenticsciml.storage import _atomic_write_text
 
 
 def _default_experiment_id(mock: bool) -> str:
     prefix = "mock" if mock else "real"
-    return f"{prefix}-{time.strftime('%Y%m%d-%H%M%S')}"
+    return f"{prefix}-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:10]}"
 
 
 def cmd_init_example(args: argparse.Namespace) -> int:
@@ -60,53 +84,63 @@ def cmd_init_example(args: argparse.Namespace) -> int:
             shutil.copytree(item, destination, dirs_exist_ok=True)
         else:
             shutil.copy2(item, destination)
+    source_spec = benchmark_for_path(source)
+    if source_spec is None:  # pragma: no cover - checked-in source invariant.
+        raise RuntimeError(f"Cannot resolve source benchmark metadata: {source}")
+    spec_payload = {
+        "schema_version": 1,
+        **source_spec.contract_digest_metadata(),
+        "name": target.name,
+    }
+    _atomic_write_text(
+        target / "Benchmark_spec.json",
+        json.dumps(spec_payload, indent=2, sort_keys=True, allow_nan=False),
+    )
     print(target.resolve())
     return 0
 
 
 def cmd_run(args: argparse.Namespace) -> int:
     benchmark_dir = Path(args.benchmark_dir).resolve()
-    if args.dry_run:
-        roles = [
-            "data_analyst",
-            "evaluator",
-            "root_engineer",
-            "selector",
-            "retriever",
-            "proposer",
-            "critic",
-            "engineer",
-            "debugger",
-            "result_analyst",
-        ]
-        print("Planned agent calls:")
-        for role in roles:
-            print(f"- {role}")
-        return 0
-
+    _validate_run_arguments(args)
+    benchmark_snapshot = _validated_benchmark_snapshot(benchmark_dir)
     evolution = EvolutionConfig(
         max_iterations=args.max_iterations,
         parallel_mutations=args.parallel_mutations,
+        max_children_per_node=args.max_children_per_node,
+        max_debug_retries=args.max_debug_retries,
         timeout_s=args.timeout_s,
         use_kb=not args.no_kb,
         random_kb=args.random_kb,
         random_seed=args.random_seed,
+        use_critic=not args.no_critic,
+        use_debugger=not args.no_debugger,
         use_branch_context=not args.no_branch_context,
         selector_vote_count=args.selector_vote_count,
     )
+    agent_configs = _agent_configs_from_role_payloads(
+        _json_object_arg(args.agent_models_json, "--agent-models-json")
+    )
+    selector_panel = [
+        _agent_config_from_selector_payload(index, payload)
+        for index, payload in enumerate(_selector_panel_payloads(args), start=1)
+    ]
+    strategy_seed_ids = _strategy_seed_ids(args)
+    _validate_strategy_seed_ids(strategy_seed_ids)
     config = ExperimentConfig(
         experiment_id=args.experiment_id or _default_experiment_id(args.mock),
         benchmark_dir=benchmark_dir,
         output_dir=Path(args.output_dir).resolve(),
         evolution=evolution,
         use_mock=args.mock,
-        agents=_agent_configs_from_role_payloads(
-            _json_object_arg(args.agent_models_json, "--agent-models-json")
-        ),
-        selector_panel=[
-            _agent_config_from_selector_payload(index, payload)
-            for index, payload in enumerate(_selector_panel_payloads(args), start=1)
-        ],
+        agents=agent_configs,
+        selector_panel=selector_panel,
+        strategy_seed_ids=strategy_seed_ids,
+        claim_level=args.claim_level,
+        domain_evaluator_approved=args.domain_evaluator_approved,
+        domain_reviewer=args.domain_reviewer,
+        domain_review_notes=args.domain_review_notes,
+        paper_benchmark_approved=args.paper_benchmark_approved,
         visual_audit_mode=args.visual_audit_mode,
         resource_constraints=_json_object_arg(args.resource_constraints_json, "--resource-constraints-json"),
         expert_blueprint_id=args.expert_blueprint_id,
@@ -115,13 +149,75 @@ def cmd_run(args: argparse.Namespace) -> int:
         auto_approve_evaluation=not args.require_evaluation_approval,
         resume=args.resume,
     )
-    llm = (
-        MockLLMClient()
-        if args.mock
-        else OpenAIAdapter(timeout_s=args.llm_timeout_s, max_retries=args.llm_max_retries)
+    expected_call_range = estimate_orchestrator_llm_call_range(
+        max_iterations=args.max_iterations,
+        parallel_mutations=args.parallel_mutations,
     )
+    run_dir = config.output_dir / config.experiment_id
+    ledger_path = run_dir / "llm_call_ledger.jsonl"
+    if args.resume and not args.mock:
+        expected_call_range = _resume_expected_llm_call_range(
+            run_dir=run_dir,
+            experiment_id=config.experiment_id,
+            benchmark_dir=benchmark_dir,
+            requested_max_iterations=args.max_iterations,
+            parallel_mutations=args.parallel_mutations,
+        )
+    if args.dry_run:
+        plan = _build_run_plan(config, benchmark_snapshot, expected_call_range)
+        if not args.mock:
+            dry_budget = LLMBudget.from_env()
+            if args.resume:
+                _load_resume_llm_budget_usage(
+                    ledger_path,
+                    dry_budget,
+                    root_checkpoint_exists=(run_dir / "checkpoint.json").is_file(),
+                )
+            plan["llm_budget"] = dry_budget.to_dict()
+            plan["budget_preflight"] = llm_call_budget_preflight(
+                budget=dry_budget,
+                expected_llm_call_range=expected_call_range,
+            )
+        print(
+            json.dumps(
+                plan,
+                indent=2,
+                sort_keys=True,
+                allow_nan=False,
+            )
+        )
+        return 0
+
+    if args.mock:
+        llm = MockLLMClient()
+    else:
+        budget = LLMBudget.from_env()
+        if args.resume:
+            _load_resume_llm_budget_usage(
+                ledger_path,
+                budget,
+                root_checkpoint_exists=(run_dir / "checkpoint.json").is_file(),
+            )
+        require_llm_call_budget_preflight(
+            llm_call_budget_preflight(
+                budget=budget,
+                expected_llm_call_range=expected_call_range,
+            )
+        )
+        inner_llm = OpenAIAdapter(timeout_s=args.llm_timeout_s, max_retries=args.llm_max_retries)
+        llm = RecordingLLMClient(inner_llm, ledger_path, budget)
+        require_llm_call_budget_preflight(
+            llm_call_budget_preflight(
+                budget=budget,
+                expected_llm_call_range=expected_call_range,
+            )
+        )
     run_dir = AgenticSciMLOrchestrator(config, llm).run()
     print(run_dir.resolve())
+    issues = _completed_run_issues(run_dir)
+    if issues:
+        print("run completion gate failed: " + "; ".join(issues), file=sys.stderr)
+        return 1
     return 0
 
 
@@ -143,8 +239,9 @@ def cmd_export_tree(args: argparse.Namespace) -> int:
 
 def cmd_trace_summary(args: argparse.Namespace) -> int:
     path = write_trace_summary(Path(args.run_dir))
-    print(json.dumps(json.loads(path.read_text(encoding="utf-8")), indent=2, sort_keys=True))
-    return 0
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0 if payload.get("quality_gate", {}).get("passed") is True else 1
 
 
 def cmd_export_sdk_trace(args: argparse.Namespace) -> int:
@@ -557,9 +654,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = sub.add_parser("run")
     run.add_argument("benchmark_dir")
-    run.add_argument("--mock", action="store_true")
+    run_mode = run.add_mutually_exclusive_group()
+    run_mode.add_argument(
+        "--mock",
+        dest="mock",
+        action="store_true",
+        help="use the deterministic mock LLM (default)",
+    )
+    run_mode.add_argument(
+        "--real",
+        dest="mock",
+        action="store_false",
+        help="explicitly enable a real LLM provider",
+    )
+    run.set_defaults(mock=True)
     run.add_argument("--max-iterations", type=int, default=1)
     run.add_argument("--parallel-mutations", type=int, default=2)
+    run.add_argument("--max-children-per-node", type=int, default=10)
+    run.add_argument("--max-debug-retries", type=int, default=2)
     run.add_argument("--timeout-s", type=int, default=60)
     run.add_argument(
         "--llm-timeout-s",
@@ -584,8 +696,34 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--no-kb", action="store_true")
     run.add_argument("--random-kb", action="store_true")
     run.add_argument("--random-seed", type=int, default=0)
+    run.add_argument("--no-critic", action="store_true")
+    run.add_argument("--no-debugger", action="store_true")
     run.add_argument("--no-branch-context", action="store_true")
     run.add_argument("--selector-vote-count", type=int, default=3)
+    run.add_argument("--claim-level", choices=sorted(CLAIM_LEVELS), default="workflow_proxy")
+    run.add_argument(
+        "--domain-evaluator-approved",
+        action="store_true",
+        help="record explicit human domain-evaluator approval for the run claim gate",
+    )
+    run.add_argument("--domain-reviewer")
+    run.add_argument("--domain-review-notes")
+    run.add_argument(
+        "--paper-benchmark-approved",
+        action="store_true",
+        help="record explicit approval that this benchmark is paper-equivalent",
+    )
+    run.add_argument(
+        "--strategy-seed-id",
+        action="append",
+        default=[],
+        help="algorithm catalog strategy seed id; may be repeated",
+    )
+    run.add_argument(
+        "--strategy-seed-ids",
+        default="",
+        help="comma-separated algorithm catalog strategy seed ids",
+    )
     run.add_argument("--visual-audit-mode", choices=sorted(VISUAL_AUDIT_MODES), default="off")
     run.add_argument("--expert-blueprint-id", choices=sorted(EXPERT_BLUEPRINT_IDS))
     run.add_argument(
@@ -896,6 +1034,457 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _resume_expected_llm_call_range(
+    *,
+    run_dir: Path,
+    experiment_id: str,
+    benchmark_dir: Path,
+    requested_max_iterations: int,
+    parallel_mutations: int,
+) -> dict[str, int]:
+    """Return a fail-closed call range for only the work left by a v2 checkpoint."""
+
+    config_payload = _resume_json_object(run_dir / "config.json", "stored run config")
+    if config_payload.get("experiment_id") != experiment_id:
+        raise ValueError("Cannot preflight real resume: stored config experiment_id mismatch")
+    if config_payload.get("use_mock") is not False:
+        raise ValueError("Cannot preflight real resume: stored run is not a real-LLM run")
+    stored_evolution = config_payload.get("evolution")
+    if not isinstance(stored_evolution, dict):
+        raise ValueError("Cannot preflight real resume: stored evolution config is invalid")
+    if stored_evolution.get("parallel_mutations") != parallel_mutations:
+        raise ValueError(
+            "Cannot preflight real resume: stored parallel_mutations does not match the request"
+        )
+
+    checkpoint_path = run_dir / "checkpoint.json"
+    if not checkpoint_path.exists():
+        return _pre_root_resume_expected_llm_call_range(
+            run_dir=run_dir,
+            benchmark_dir=benchmark_dir,
+            requested_max_iterations=requested_max_iterations,
+            parallel_mutations=parallel_mutations,
+        )
+
+    checkpoint = _resume_json_object(checkpoint_path, "checkpoint")
+    if checkpoint.get("checkpoint_schema_version") != CHECKPOINT_SCHEMA_VERSION:
+        raise ValueError(
+            "Cannot preflight real resume: unsupported checkpoint schema_version; "
+            f"expected {CHECKPOINT_SCHEMA_VERSION}"
+        )
+    if checkpoint.get("experiment_id") != experiment_id:
+        raise ValueError("Cannot preflight real resume: checkpoint experiment_id mismatch")
+    tree_issues = validate_solution_tree_artifact_payload(
+        checkpoint,
+        context="resume checkpoint",
+    )
+    if tree_issues:
+        raise ValueError(
+            "Cannot preflight real resume: invalid checkpoint solution tree: "
+            + "; ".join(tree_issues)
+        )
+
+    completed_iterations = _resume_non_negative_int(
+        checkpoint.get("completed_iterations"),
+        "checkpoint completed_iterations",
+    )
+    target_iterations = _resume_non_negative_int(
+        checkpoint.get("target_iterations"),
+        "checkpoint target_iterations",
+    )
+    if target_iterations < completed_iterations:
+        raise ValueError(
+            "Cannot preflight real resume: checkpoint target_iterations is less than "
+            "completed_iterations"
+        )
+
+    phase = checkpoint.get("phase")
+    valid_phases = {"root_created", "children_inflight", "iteration_completed", "completed", "exported"}
+    if phase not in valid_phases:
+        raise ValueError(f"Cannot preflight real resume: invalid checkpoint phase {phase!r}")
+    if phase == "root_created" and completed_iterations != 0:
+        raise ValueError("Cannot preflight real resume: stale root_created checkpoint progress")
+    if phase == "iteration_completed" and completed_iterations == 0:
+        raise ValueError("Cannot preflight real resume: stale iteration_completed checkpoint progress")
+
+    inflight_batch = checkpoint.get("inflight_batch")
+    if phase == "children_inflight":
+        pending_current_slots = _resume_pending_inflight_slots(
+            inflight_batch,
+            completed_iterations=completed_iterations,
+            parallel_mutations=parallel_mutations,
+        )
+    else:
+        if inflight_batch is not None:
+            raise ValueError(
+                "Cannot preflight real resume: inflight_batch is only valid in children_inflight phase"
+            )
+        pending_current_slots = None
+
+    if phase in {"completed", "exported"}:
+        if target_iterations != completed_iterations:
+            raise ValueError(
+                "Cannot preflight real resume: completed checkpoint target does not match "
+                "completed_iterations"
+            )
+        remaining_mutation_slots = requested_max_iterations * parallel_mutations
+    else:
+        if requested_max_iterations != target_iterations:
+            raise ValueError(
+                "Cannot preflight real resume: requested max_iterations does not match the "
+                f"incomplete checkpoint target ({target_iterations})"
+            )
+        remaining_iterations = target_iterations - completed_iterations
+        if phase == "children_inflight":
+            if remaining_iterations < 1:
+                raise ValueError(
+                    "Cannot preflight real resume: children_inflight checkpoint has no remaining iteration"
+                )
+            assert pending_current_slots is not None
+            remaining_mutation_slots = (
+                pending_current_slots
+                + (remaining_iterations - 1) * parallel_mutations
+            )
+        else:
+            remaining_mutation_slots = remaining_iterations * parallel_mutations
+
+    return _mutation_slot_llm_call_range(remaining_mutation_slots)
+
+
+def _pre_root_resume_expected_llm_call_range(
+    *,
+    run_dir: Path,
+    benchmark_dir: Path,
+    requested_max_iterations: int,
+    parallel_mutations: int,
+) -> dict[str, int]:
+    approval = _resume_json_object(run_dir / "evaluation_approval.json", "evaluation approval")
+    if approval.get("schema_version") != 1:
+        raise ValueError("Cannot preflight real resume: evaluation approval schema is unsupported")
+    if approval.get("status") not in {"approved", "auto_approved"}:
+        raise ValueError("Cannot preflight real resume: evaluation approval is not approved")
+    if not isinstance(approval.get("approval_required"), bool):
+        raise ValueError("Cannot preflight real resume: evaluation approval metadata is invalid")
+
+    try:
+        contract = EvaluationContract.from_dict(
+            _resume_json_object(run_dir / "evaluation_contract.json", "evaluation contract")
+        )
+        BenchmarkContractFactory.verify_contract(ProblemBundle.load(benchmark_dir), contract)
+    except Exception as exc:
+        raise ValueError(
+            "Cannot preflight real resume: evaluation contract is stale or invalid"
+        ) from exc
+    if approval.get("benchmark_name") != contract.benchmark_name:
+        raise ValueError("Cannot preflight real resume: evaluation approval benchmark mismatch")
+    if approval.get("contract_hash") != contract.contract_hash:
+        raise ValueError("Cannot preflight real resume: evaluation approval contract mismatch")
+
+    conditions_payload = _resume_json_object(
+        run_dir / "experiment_conditions.json",
+        "experiment conditions",
+    )
+    if conditions_payload.get("schema_version") != 1:
+        raise ValueError("Cannot preflight real resume: experiment conditions schema is unsupported")
+    conditions = conditions_payload.get("conditions")
+    if not isinstance(conditions, dict):
+        raise ValueError("Cannot preflight real resume: experiment conditions payload is invalid")
+    try:
+        encoded_conditions = json.dumps(
+            conditions,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Cannot preflight real resume: experiment conditions are not canonical JSON") from exc
+    if conditions_payload.get("conditions_digest") != hashlib.sha256(encoded_conditions).hexdigest():
+        raise ValueError("Cannot preflight real resume: experiment conditions digest mismatch")
+    if conditions_payload.get("initial_target_iterations") != requested_max_iterations:
+        raise ValueError("Cannot preflight real resume: pre-root target iterations mismatch")
+    conditions_config = conditions.get("config")
+    if not isinstance(conditions_config, dict) or conditions_config.get("use_mock") is not False:
+        raise ValueError("Cannot preflight real resume: pre-root conditions are not for a real run")
+    if conditions_config.get("benchmark_dir") != str(benchmark_dir.resolve()):
+        raise ValueError("Cannot preflight real resume: pre-root benchmark path mismatch")
+    conditions_evolution = conditions_config.get("evolution")
+    if (
+        not isinstance(conditions_evolution, dict)
+        or conditions_evolution.get("parallel_mutations") != parallel_mutations
+    ):
+        raise ValueError("Cannot preflight real resume: pre-root evolution conditions mismatch")
+    if not isinstance(conditions.get("llm_runtime"), dict) or not isinstance(
+        conditions.get("source_revision"), dict
+    ):
+        raise ValueError("Cannot preflight real resume: pre-root provenance conditions are invalid")
+
+    full_range = estimate_orchestrator_llm_call_range(
+        max_iterations=requested_max_iterations,
+        parallel_mutations=parallel_mutations,
+    )
+    completed_pre_root_calls = 2  # data_analyst and evaluator
+    return {
+        "min": full_range["min"] - completed_pre_root_calls,
+        "max": full_range["max"] - completed_pre_root_calls,
+    }
+
+
+def _resume_json_object(path: Path, label: str) -> dict[str, object]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"Cannot preflight real resume: invalid or missing {label} at {path}: "
+            f"{type(exc).__name__}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"Cannot preflight real resume: {label} must be a JSON object")
+    return payload
+
+
+def _resume_non_negative_int(value: object, label: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(f"Cannot preflight real resume: {label} must be a non-negative integer")
+    return value
+
+
+def _resume_pending_inflight_slots(
+    payload: object,
+    *,
+    completed_iterations: int,
+    parallel_mutations: int,
+) -> int:
+    if not isinstance(payload, dict):
+        raise ValueError("Cannot preflight real resume: children_inflight requires inflight_batch")
+    if payload.get("schema_version") != INFLIGHT_BATCH_SCHEMA_VERSION:
+        raise ValueError("Cannot preflight real resume: unsupported inflight_batch schema_version")
+    if payload.get("iteration_index") != completed_iterations:
+        raise ValueError("Cannot preflight real resume: inflight_batch iteration_index mismatch")
+    jobs = payload.get("jobs")
+    if not isinstance(jobs, list) or not jobs or len(jobs) > parallel_mutations:
+        raise ValueError(
+            "Cannot preflight real resume: inflight_batch jobs must contain between one and "
+            "parallel_mutations entries"
+        )
+    job_parents: dict[str, str] = {}
+    for job in jobs:
+        if not isinstance(job, dict):
+            raise ValueError("Cannot preflight real resume: inflight_batch job must be an object")
+        solution_id = job.get("solution_id")
+        parent_id = job.get("parent_id")
+        if not isinstance(solution_id, str) or not solution_id:
+            raise ValueError("Cannot preflight real resume: inflight_batch solution_id is invalid")
+        if not isinstance(parent_id, str) or not parent_id:
+            raise ValueError("Cannot preflight real resume: inflight_batch parent_id is invalid")
+        if solution_id in job_parents:
+            raise ValueError("Cannot preflight real resume: duplicate inflight_batch solution_id")
+        job_parents[solution_id] = parent_id
+
+    completed_children = payload.get("completed_children")
+    if not isinstance(completed_children, list):
+        raise ValueError("Cannot preflight real resume: completed_children must be a list")
+    completed_ids: set[str] = set()
+    for entry in completed_children:
+        child = entry.get("child") if isinstance(entry, dict) else None
+        solution_id = child.get("node_id") if isinstance(child, dict) else None
+        if not isinstance(solution_id, str) or solution_id not in job_parents:
+            raise ValueError("Cannot preflight real resume: completed child does not match an inflight job")
+        if entry.get("parent_id") != job_parents[solution_id]:
+            raise ValueError("Cannot preflight real resume: completed child parent mismatch")
+        if solution_id in completed_ids:
+            raise ValueError("Cannot preflight real resume: duplicate completed inflight child")
+        completed_ids.add(solution_id)
+    return len(set(job_parents) - completed_ids)
+
+
+def _mutation_slot_llm_call_range(mutation_slots: int) -> dict[str, int]:
+    if mutation_slots == 0:
+        return {"min": 0, "max": 0}
+    root_range = estimate_orchestrator_llm_call_range(
+        max_iterations=0,
+        parallel_mutations=1,
+    )
+    with_root_range = estimate_orchestrator_llm_call_range(
+        max_iterations=1,
+        parallel_mutations=mutation_slots,
+    )
+    return {
+        "min": with_root_range["min"] - root_range["min"],
+        "max": with_root_range["max"] - root_range["max"],
+    }
+
+
+def _load_resume_llm_budget_usage(
+    ledger_path: Path,
+    budget: LLMBudget,
+    *,
+    root_checkpoint_exists: bool,
+) -> None:
+    if not ledger_path.is_file():
+        raise ValueError(
+            f"Cannot preflight real resume: missing LLM call ledger at {ledger_path}"
+        )
+    load_llm_budget_usage(ledger_path, budget)
+    minimum_calls = (
+        estimate_orchestrator_llm_call_range(
+            max_iterations=0,
+            parallel_mutations=1,
+        )["min"]
+        if root_checkpoint_exists
+        else 2
+    )
+    if budget.calls_used < minimum_calls:
+        raise ValueError(
+            "Cannot preflight real resume: LLM call ledger is stale for the saved progress; "
+            f"calls_used={budget.calls_used}, required_at_least={minimum_calls}"
+        )
+
+
+def _validate_run_arguments(args: argparse.Namespace) -> None:
+    if args.max_iterations < 0:
+        raise ValueError("--max-iterations must be >= 0")
+    if args.parallel_mutations < 1:
+        raise ValueError("--parallel-mutations must be >= 1")
+    if args.max_children_per_node < 1:
+        raise ValueError("--max-children-per-node must be >= 1")
+    if args.max_debug_retries < 0:
+        raise ValueError("--max-debug-retries must be >= 0")
+    if args.timeout_s <= 0:
+        raise ValueError("--timeout-s must be > 0")
+    if args.llm_timeout_s is not None and (
+        not math.isfinite(args.llm_timeout_s) or args.llm_timeout_s <= 0
+    ):
+        raise ValueError("--llm-timeout-s must be a finite number > 0")
+    if args.llm_max_retries is not None and args.llm_max_retries < 0:
+        raise ValueError("--llm-max-retries must be >= 0")
+    if args.selector_vote_count < 1:
+        raise ValueError("--selector-vote-count must be >= 1")
+    if args.no_kb and args.random_kb:
+        raise ValueError("--random-kb cannot be combined with --no-kb")
+    if args.resume and not args.experiment_id:
+        raise ValueError("--resume requires an explicit --experiment-id")
+    reviewer = (args.domain_reviewer or "").strip()
+    notes = (args.domain_review_notes or "").strip()
+    if args.domain_evaluator_approved and not (reviewer and notes):
+        raise ValueError(
+            "--domain-evaluator-approved requires --domain-reviewer and --domain-review-notes"
+        )
+    if not args.domain_evaluator_approved and (reviewer or notes):
+        raise ValueError(
+            "--domain-reviewer/--domain-review-notes require --domain-evaluator-approved"
+        )
+
+
+def _validated_benchmark_snapshot(benchmark_dir: Path) -> dict[str, object]:
+    bundle = ProblemBundle.load(benchmark_dir)
+    contract = BenchmarkContractFactory.create_contract(bundle)
+    return {
+        "name": bundle.benchmark_name,
+        "path": str(benchmark_dir),
+        "family": bundle.benchmark_spec.family,
+        "fidelity_level": bundle.benchmark_spec.fidelity_level,
+        "metric": bundle.benchmark_spec.metric,
+        "contract_hash": contract.contract_hash,
+        "benchmark_source_manifest_digest": contract.benchmark_source_manifest_digest,
+    }
+
+
+def _strategy_seed_ids(args: argparse.Namespace) -> list[str]:
+    values = [*args.strategy_seed_id, *_split_csv(args.strategy_seed_ids)]
+    return list(dict.fromkeys(item.strip() for item in values if item.strip()))
+
+
+def _validate_strategy_seed_ids(strategy_seed_ids: list[str]) -> None:
+    known = {algorithm.algorithm_id for algorithm in list_algorithms()}
+    unknown = sorted(set(strategy_seed_ids) - known)
+    if unknown:
+        raise ValueError("Unknown --strategy-seed-id value(s): " + ", ".join(unknown))
+
+
+def _build_run_plan(
+    config: ExperimentConfig,
+    benchmark_snapshot: dict[str, object],
+    expected_call_range: dict[str, int],
+) -> dict[str, object]:
+    deterministic_roles = ["data_analyst", "evaluator", "root_engineer", "result_analyst"]
+    mutation_roles: list[str] = []
+    conditional_roles: list[str] = []
+    if config.evolution.max_iterations > 0:
+        if config.evolution.use_kb:
+            mutation_roles.append("retriever")
+        mutation_roles.append("proposer")
+        if config.evolution.use_critic:
+            mutation_roles.append("critic")
+        mutation_roles.append("engineer")
+        if config.evolution.use_debugger and config.evolution.max_debug_retries > 0:
+            conditional_roles.append("debugger")
+        conditional_roles.append("selector")
+    return {
+        "schema_version": 1,
+        "execution_mode": "dry_run",
+        "llm_mode": "mock" if config.use_mock else "real",
+        "provider_calls": 0 if config.use_mock else "not_executed",
+        "benchmark": benchmark_snapshot,
+        "experiment_config": config.to_dict(),
+        "planned_agent_roles": deterministic_roles + mutation_roles,
+        "conditional_agent_roles": conditional_roles,
+        "expected_llm_call_range": (
+            {"min": 0, "max": 0}
+            if config.use_mock
+            else dict(expected_call_range)
+        ),
+        "planned_solution_upper_bound": (
+            1 + config.evolution.max_iterations * config.evolution.parallel_mutations
+        ),
+        "notes": [
+            "No provider calls or run artifacts were created.",
+            "selector is conditional on the deterministic parent policy requiring an LLM vote.",
+            "debugger is conditional on a generated-solution failure and the retry budget.",
+        ],
+    }
+
+
+def _completed_run_issues(run_dir: Path) -> list[str]:
+    issues: list[str] = []
+    try:
+        metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    except Exception as exc:
+        return [f"invalid or missing run_metadata.json: {type(exc).__name__}: {exc}"]
+    try:
+        tree = json.loads((run_dir / "tree.json").read_text(encoding="utf-8"))
+    except Exception as exc:
+        return [f"invalid or missing tree.json: {type(exc).__name__}: {exc}"]
+    try:
+        trace_summary = json.loads((run_dir / "trace_summary.json").read_text(encoding="utf-8"))
+    except Exception as exc:
+        return [f"invalid or missing trace_summary.json: {type(exc).__name__}: {exc}"]
+
+    if trace_summary.get("quality_gate", {}).get("passed") is not True:
+        issues.append("trace_summary quality_gate did not pass")
+    champion_id = metadata.get("champion")
+    if not isinstance(champion_id, str) or not champion_id:
+        issues.append("run_metadata champion is missing")
+        return issues
+    nodes = tree.get("nodes")
+    if not isinstance(nodes, list):
+        issues.append("tree.json nodes must be an array")
+        return issues
+    champion = next(
+        (node for node in nodes if isinstance(node, dict) and node.get("node_id") == champion_id),
+        None,
+    )
+    if champion is None:
+        issues.append(f"champion {champion_id} is not present in tree.json")
+        return issues
+    if champion.get("status") != "evaluated":
+        issues.append(f"champion {champion_id} is not evaluated")
+    score = champion.get("score")
+    value = score.get("value") if isinstance(score, dict) else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        issues.append(f"champion {champion_id} has no finite score")
+    return issues
 
 
 def _selector_panel_payloads(args: argparse.Namespace) -> list[dict[str, object]]:

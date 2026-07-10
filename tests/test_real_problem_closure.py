@@ -9,6 +9,7 @@ from agenticsciml.real_problem_closure import (
     build_real_problem_closure_plan,
     write_real_problem_closure_plan,
 )
+from agenticsciml.reporting.trace_summary import write_trace_summary
 
 
 def test_real_problem_closure_blocks_missing_real_assets() -> None:
@@ -94,7 +95,7 @@ def test_real_problem_closure_accepts_verified_completed_run_audit(tmp_path: Pat
     assert plan["multi_agent_real_problem_claim_supported"] is False
 
 
-def test_real_problem_closure_rejects_inconsistent_completed_run_claim(tmp_path: Path) -> None:
+def test_real_problem_closure_rejects_stale_completed_run_trace_summary(tmp_path: Path) -> None:
     completed_run_dir = _write_completed_run_audit(tmp_path / "completed-run")
     trace_path = completed_run_dir / "trace_summary.json"
     trace = json.loads(trace_path.read_text(encoding="utf-8"))
@@ -110,11 +111,66 @@ def test_real_problem_closure_rejects_inconsistent_completed_run_claim(tmp_path:
     blocked_module_ids = {item["module_id"] for item in plan["blocked_modules"]}
 
     assert plan["completed_run_audit"]["ready"] is False
-    assert (
-        "trace_summary claim_gate must not support scientific claims when readiness is blocked"
-        in plan["completed_run_audit"]["issues"]
-    )
+    assert plan["completed_run_audit"]["trace_summary_stale"] is True
+    assert any("trace_summary.json is stale" in issue for issue in plan["completed_run_audit"]["issues"])
     assert "completed_run_audit" in blocked_module_ids
+
+
+def test_real_problem_closure_recomputes_raw_trace_instead_of_trusting_passed_summary(
+    tmp_path: Path,
+) -> None:
+    completed_run_dir = _write_completed_run_audit(tmp_path / "completed-run")
+    trace_path = completed_run_dir / "trace.jsonl"
+    events = [
+        json.loads(line)
+        for line in trace_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    events.append(
+        {
+            "event_seq": len(events) + 1,
+            "event_type": "guardrail_span",
+            "name": "engineer:engineer:structured_output",
+            "metadata": {
+                "passed": False,
+                "attempt": 1,
+                "error": "Model did not return valid JSON for engineer",
+            },
+        }
+    )
+    trace_path.write_text(
+        "\n".join(json.dumps(event) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+    plan = build_real_problem_closure_plan(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        completed_run_dir=completed_run_dir,
+        env={},
+    )
+
+    audit = plan["completed_run_audit"]
+    assert audit["ready"] is False
+    assert audit["trace_quality_gate_passed"] is False
+    assert audit["trace_summary_stale"] is True
+
+
+def test_real_problem_closure_requires_checkpoint_for_completed_run_audit(
+    tmp_path: Path,
+) -> None:
+    completed_run_dir = _write_completed_run_audit(tmp_path / "completed-run")
+    (completed_run_dir / "checkpoint.json").unlink()
+
+    plan = build_real_problem_closure_plan(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        completed_run_dir=completed_run_dir,
+        env={},
+    )
+
+    audit = plan["completed_run_audit"]
+    assert audit["ready"] is False
+    assert any("checkpoint.json is missing" in issue for issue in audit["issues"])
+    assert audit["trace_quality_gate_passed"] is False
 
 
 def test_cli_plan_real_problem_closure_writes_blocked_plan(
@@ -206,24 +262,91 @@ def test_cli_plan_real_problem_closure_can_fail_on_blockers(
 def _write_completed_run_audit(run_dir: Path) -> Path:
     reports_dir = run_dir / "reports"
     reports_dir.mkdir(parents=True)
+    solution_dir = run_dir / "solutions" / "solution_000"
+    solution_dir.mkdir(parents=True)
+    contract_hash = "a" * 64
+    claim_gate = {
+        "schema_version": 1,
+        "claim_level": "workflow_proxy",
+        "status": "allowed",
+        "paper_level_claim_supported": False,
+        "scientific_claim_supported": False,
+    }
+    metadata = {
+        "run_state": "exported",
+        "benchmark_name": "function_approx",
+        "solution_count": 1,
+        "llm_mode": "real",
+        "benchmark_fidelity_level": "proxy",
+        "evidence_mode": "real_llm_proxy_benchmark",
+        "scientific_claim": "proxy_workflow_only",
+        "claim_gate": claim_gate,
+        "scientific_discovery_readiness": {
+            "status": "blocked",
+            "scientific_claim_supported": False,
+        },
+    }
     (run_dir / "run_metadata.json").write_text(
+        json.dumps(metadata),
+        encoding="utf-8",
+    )
+    (run_dir / "evaluation_contract.json").write_text(
         json.dumps(
             {
-                "run_state": "exported",
-                "llm_mode": "real",
+                "benchmark_name": "function_approx",
+                "contract_hash": contract_hash,
+                "benchmark_fidelity": {
+                    "fidelity_level": "proxy",
+                },
             }
         ),
         encoding="utf-8",
     )
-    (run_dir / "trace_summary.json").write_text(
+    node = {
+        "node_id": "solution_000",
+        "parent_id": None,
+        "workspace": str(solution_dir),
+        "score": {"metric": "validation_mse", "value": 0.1, "higher_is_better": False},
+        "children": [],
+        "status": "evaluated",
+        "proposal_path": None,
+        "analysis_path": None,
+        "error": None,
+        "benchmark_name": "function_approx",
+        "contract_hash": contract_hash,
+        "method_tags": ["root_baseline"],
+        "failure_kind": None,
+        "score_delta_from_parent": None,
+        "num_debug_attempts": 0,
+    }
+    (run_dir / "tree.json").write_text(
+        json.dumps({"schema_version": "solution_tree.v1", "nodes": [node]}),
+        encoding="utf-8",
+    )
+    (run_dir / "checkpoint.json").write_text(
         json.dumps(
             {
-                "quality_gate": {
-                    "passed": True,
-                },
-                "claim_gate": {
-                    "scientific_claim_supported": False,
-                },
+                "phase": "completed",
+                "schema_version": "solution_tree.v1",
+                "experiment_id": "completed-run-audit",
+                "benchmark_name": "function_approx",
+                "contract_hash": contract_hash,
+                "nodes": [node],
+                "analysis_node_ids": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "data_analysis_structured.json").write_text(
+        json.dumps(
+            {
+                "benchmark_name": "function_approx",
+                "benchmark_family": "regression",
+                "evaluation_metric": "validation_mse",
+                "training_array_keys": ["x_train", "y_train"],
+                "task_specific_observations": [
+                    "function_approx regression uses x_train and y_train with validation_mse"
+                ],
             }
         ),
         encoding="utf-8",
@@ -233,8 +356,41 @@ def _write_completed_run_audit(run_dir: Path) -> Path:
             {
                 "status": "blocked",
                 "scientific_claim_supported": False,
+                "blockers": [{"check_id": "paper_like_benchmark"}],
             }
         ),
         encoding="utf-8",
     )
+    events = [
+        {
+            "event_type": "workflow_span",
+            "name": "agenticsciml.run.start",
+            "metadata": {**metadata, "run_state": "partial"},
+        },
+        {"event_type": "agent_span", "name": "proposer", "metadata": {}},
+        {"event_type": "generation_span", "name": "proposer", "metadata": {}},
+        {
+            "event_type": "agent_span",
+            "name": "root_engineer",
+            "metadata": {"solution_id": "solution_000"},
+        },
+        {
+            "event_type": "tool_span",
+            "name": "train_and_evaluate",
+            "metadata": {"solution_id": "solution_000"},
+        },
+        {"event_type": "guardrail_span", "name": "guard", "metadata": {"passed": True}},
+        {
+            "event_type": "workflow_span",
+            "name": "agenticsciml.run.end",
+            "metadata": {"run_state": "exported"},
+        },
+    ]
+    for event_seq, event in enumerate(events, start=1):
+        event["event_seq"] = event_seq
+    (run_dir / "trace.jsonl").write_text(
+        "\n".join(json.dumps(event) for event in events) + "\n",
+        encoding="utf-8",
+    )
+    write_trace_summary(run_dir)
     return run_dir

@@ -5,10 +5,16 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from agenticsciml.evidence import (
+    CLAIM_GATE_ALLOWED,
+    CLAIM_GATE_BLOCKED,
+    CLAIM_GATE_DOWNGRADED,
+)
 from agenticsciml.paper_workflow_readiness import (
     build_paper_workflow_readiness_bundle,
     write_paper_workflow_readiness_bundle,
 )
+from agenticsciml.reporting.trace_summary import summarize_trace
 from agenticsciml.storage import _atomic_write_text
 
 
@@ -318,8 +324,30 @@ def _completed_run_audit_readiness(run_dir: Path | None) -> dict[str, Any]:
     path = Path(run_dir)
     issues: list[str] = []
     run_metadata = _read_json_artifact(path / "run_metadata.json", issues)
-    trace_summary = _read_json_artifact(path / "trace_summary.json", issues)
+    _read_json_artifact(path / "evaluation_contract.json", issues)
+    _read_json_artifact(path / "tree.json", issues)
+    _read_json_artifact(path / "checkpoint.json", issues)
+    stored_trace_summary = _read_json_artifact(path / "trace_summary.json", issues)
     readiness = _read_json_artifact(path / "reports" / "scientific_discovery_readiness.json", issues)
+    trace_path = path / "trace.jsonl"
+    if not trace_path.exists():
+        issues.append(f"trace.jsonl is missing at {trace_path}")
+        recomputed_trace_summary: dict[str, Any] = {}
+    else:
+        try:
+            recomputed_trace_summary = summarize_trace(path)
+        except (OSError, ValueError, TypeError) as exc:
+            issues.append(f"trace.jsonl could not be recomputed: {type(exc).__name__}: {exc}")
+            recomputed_trace_summary = {}
+    trace_summary_stale = bool(
+        stored_trace_summary
+        and recomputed_trace_summary
+        and stored_trace_summary != recomputed_trace_summary
+    )
+    if trace_summary_stale:
+        issues.append(
+            "trace_summary.json is stale or inconsistent with trace.jsonl and current run artifacts"
+        )
 
     run_state = run_metadata.get("run_state") if isinstance(run_metadata, dict) else None
     if run_state not in {"completed", "exported", "finalized"}:
@@ -327,23 +355,61 @@ def _completed_run_audit_readiness(run_dir: Path | None) -> dict[str, Any]:
     llm_mode = run_metadata.get("llm_mode") if isinstance(run_metadata, dict) else None
     if llm_mode != "real":
         issues.append("run_metadata.llm_mode must be real")
-    quality_gate = trace_summary.get("quality_gate") if isinstance(trace_summary, dict) else {}
+    quality_gate = (
+        recomputed_trace_summary.get("quality_gate")
+        if isinstance(recomputed_trace_summary, dict)
+        else {}
+    )
     if not isinstance(quality_gate, dict) or quality_gate.get("passed") is not True:
-        issues.append("trace_summary.quality_gate.passed must be true")
+        issues.append("recomputed trace_summary.quality_gate.passed must be true")
     readiness_status = readiness.get("status") if isinstance(readiness, dict) else None
     if readiness_status not in {"ready", "blocked"}:
         issues.append("scientific_discovery_readiness.status must be ready or blocked")
     readiness_claim = readiness.get("scientific_claim_supported") if isinstance(readiness, dict) else None
     if readiness_claim is not True and readiness_claim is not False:
         issues.append("scientific_discovery_readiness.scientific_claim_supported must be boolean")
-    trace_claim_gate = trace_summary.get("claim_gate") if isinstance(trace_summary, dict) else {}
+    elif (readiness_status == "ready") != readiness_claim:
+        issues.append(
+            "scientific_discovery_readiness.status must agree with scientific_claim_supported"
+        )
+    trace_claim_gate = (
+        recomputed_trace_summary.get("claim_gate")
+        if isinstance(recomputed_trace_summary, dict)
+        else {}
+    )
+    if not isinstance(trace_claim_gate, dict):
+        issues.append("recomputed trace_summary.claim_gate must be an object")
+        trace_claim_gate = {}
+    trace_claim_status = trace_claim_gate.get("status")
+    if trace_claim_status not in {
+        CLAIM_GATE_ALLOWED,
+        CLAIM_GATE_BLOCKED,
+        CLAIM_GATE_DOWNGRADED,
+    }:
+        issues.append("recomputed trace_summary.claim_gate.status is missing or invalid")
     trace_claim_supported = (
         trace_claim_gate.get("scientific_claim_supported")
         if isinstance(trace_claim_gate, dict)
         else None
     )
-    if readiness_claim is False and trace_claim_supported is True:
-        issues.append("trace_summary claim_gate must not support scientific claims when readiness is blocked")
+    if trace_claim_supported is not True and trace_claim_supported is not False:
+        issues.append(
+            "recomputed trace_summary.claim_gate.scientific_claim_supported must be boolean"
+        )
+    elif readiness_claim is True or readiness_claim is False:
+        if trace_claim_supported != readiness_claim:
+            issues.append(
+                "recomputed trace_summary claim_gate must agree with scientific discovery readiness"
+            )
+    metadata_claim_gate = run_metadata.get("claim_gate") if isinstance(run_metadata, dict) else None
+    if not isinstance(metadata_claim_gate, dict):
+        issues.append("run_metadata.claim_gate must be an object")
+    else:
+        for key in ("status", "scientific_claim_supported"):
+            if metadata_claim_gate.get(key) != trace_claim_gate.get(key):
+                issues.append(
+                    f"run_metadata.claim_gate.{key} must agree with recomputed trace_summary.claim_gate"
+                )
 
     return {
         "ready": not issues,
@@ -352,8 +418,11 @@ def _completed_run_audit_readiness(run_dir: Path | None) -> dict[str, Any]:
         "run_state": run_state,
         "llm_mode": llm_mode,
         "trace_quality_gate_passed": quality_gate.get("passed") if isinstance(quality_gate, dict) else None,
+        "trace_summary_recomputed": bool(recomputed_trace_summary),
+        "trace_summary_stale": trace_summary_stale,
         "scientific_readiness_status": readiness_status,
         "scientific_claim_supported": readiness_claim,
+        "claim_gate_status": trace_claim_status,
         "claim_gate_scientific_claim_supported": trace_claim_supported,
         "claim_boundary": (
             "Completed run audit proves the run artifacts are present and internally consistent. "

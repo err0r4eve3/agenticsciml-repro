@@ -7,6 +7,7 @@ from agenticsciml.evidence import (
     SCIENTIFIC_CLAIM_NOT_SUPPORTED,
     claim_gate_for_run,
 )
+from agenticsciml.reporting.sdk_trace_export import write_sdk_trace_export
 from agenticsciml.reporting.trace_summary import summarize_trace, write_trace_summary
 
 
@@ -133,6 +134,82 @@ def test_trace_summary_counts_recovered_provider_timeout(tmp_path: Path) -> None
     assert summary["quality_gate"]["structured_output_retry_count"] == 1
 
 
+def test_trace_summary_treats_unrecovered_structured_output_as_hard_failure(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    _write_events(
+        run_dir / "trace.jsonl",
+        [
+            {"event_type": "workflow_span", "name": "start", "metadata": {}},
+            {"event_type": "agent_span", "name": "engineer", "metadata": {}},
+            {"event_type": "generation_span", "name": "engineer", "metadata": {}},
+            {"event_type": "tool_span", "name": "train_and_evaluate", "metadata": {}},
+            {
+                "event_type": "guardrail_span",
+                "name": "engineer:engineer:structured_output",
+                "metadata": {
+                    "passed": False,
+                    "attempt": 1,
+                    "error": "Model did not return valid JSON for engineer",
+                },
+            },
+        ],
+    )
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["quality_gate"]["passed"] is False
+    assert summary["quality_gate"]["status"] == "failed_hard"
+    assert summary["recoverable_guardrail_failures"] == []
+    assert summary["hard_guardrail_failures"][0]["name"] == (
+        "engineer:engineer:structured_output"
+    )
+
+
+def test_trace_summary_requires_later_recovery_on_same_guardrail_boundary(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    failed_name = "engineer:engineer:structured_output"
+    _write_events(
+        run_dir / "trace.jsonl",
+        [
+            {"event_type": "workflow_span", "name": "start", "metadata": {}},
+            {"event_type": "agent_span", "name": "engineer", "metadata": {}},
+            {"event_type": "generation_span", "name": "engineer", "metadata": {}},
+            {"event_type": "tool_span", "name": "train_and_evaluate", "metadata": {}},
+            {
+                "event_type": "guardrail_span",
+                "name": failed_name,
+                "metadata": {"passed": True, "attempt": 2},
+            },
+            {
+                "event_type": "guardrail_span",
+                "name": failed_name,
+                "metadata": {
+                    "passed": False,
+                    "attempt": 1,
+                    "error": "Model did not return valid JSON for engineer",
+                },
+            },
+            {
+                "event_type": "guardrail_span",
+                "name": "critic:critic:structured_output",
+                "metadata": {"passed": True, "attempt": 2},
+            },
+        ],
+    )
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["quality_gate"]["passed"] is False
+    assert summary["quality_gate"]["status"] == "failed_hard"
+    assert summary["recoverable_guardrail_failures"] == []
+
+
 def test_write_trace_summary_creates_json_artifact(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -153,9 +230,44 @@ def test_write_trace_summary_creates_json_artifact(tmp_path: Path) -> None:
     assert json.loads(path.read_text(encoding="utf-8"))["quality_gate"]["passed"] is True
 
 
+def test_sdk_trace_export_preserves_numeric_token_counts_and_redacts_secrets(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    _write_events(
+        run_dir / "trace.jsonl",
+        [
+            {
+                "event_type": "generation_span",
+                "name": "engineer",
+                "metadata": {
+                    "prompt": "private prompt",
+                    "api_token": "private-token",
+                    "prompt_token_estimate": 17,
+                    "response_token_estimate": 9,
+                    "usage": {"input_tokens": 16, "output_tokens": 8},
+                    "token_budget": {"max_total_tokens": 100},
+                },
+            }
+        ],
+    )
+
+    payload = json.loads(write_sdk_trace_export(run_dir).read_text(encoding="utf-8"))
+    metadata = payload["spans"][0]["metadata"]
+
+    assert metadata["prompt"] == "<redacted>"
+    assert metadata["api_token"] == "<redacted>"
+    assert metadata["prompt_token_estimate"] == 17
+    assert metadata["response_token_estimate"] == 9
+    assert metadata["usage"] == {"input_tokens": 16, "output_tokens": 8}
+    assert metadata["token_budget"] == {"max_total_tokens": 100}
+
+
 def test_trace_summary_checks_run_artifact_evidence_consistency(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     run_dir.mkdir()
+    _write_valid_data_analysis(run_dir)
     metadata = {
         "llm_mode": "mock",
         "benchmark_fidelity_level": "proxy",
@@ -310,6 +422,55 @@ def test_trace_summary_fails_on_claim_gate_overclaim(tmp_path: Path) -> None:
     assert any("paper_level_claim_supported overclaims" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
+def test_trace_summary_detects_claim_gate_status_and_scientific_support_drift(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    _write_valid_data_analysis(run_dir)
+    claim_gate = claim_gate_for_run(
+        claim_level="workflow_proxy",
+        use_mock=True,
+        fidelity_level="proxy",
+    )
+    metadata = {
+        "llm_mode": LLM_MODE_MOCK,
+        "benchmark_fidelity_level": "proxy",
+        "evidence_mode": EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE,
+        "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
+        "claim_gate": claim_gate,
+    }
+    workflow_gate = dict(claim_gate)
+    workflow_gate["status"] = "blocked"
+    workflow_gate["scientific_claim_supported"] = True
+    (run_dir / "run_metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+    (run_dir / "evaluation_contract.json").write_text(
+        json.dumps({"benchmark_fidelity": {"fidelity_level": "proxy"}}),
+        encoding="utf-8",
+    )
+    _write_events(
+        run_dir / "trace.jsonl",
+        [
+            {
+                "event_type": "workflow_span",
+                "name": "agenticsciml.run.start",
+                "metadata": {**metadata, "claim_gate": workflow_gate},
+            },
+            {"event_type": "agent_span", "name": "proposer", "metadata": {}},
+            {"event_type": "generation_span", "name": "proposer", "metadata": {}},
+            {"event_type": "tool_span", "name": "train_and_evaluate", "metadata": {}},
+            {"event_type": "guardrail_span", "name": "guard", "metadata": {"passed": True}},
+        ],
+    )
+
+    summary = summarize_trace(run_dir)
+    issues = summary["artifact_consistency"]["issues"]
+
+    assert summary["quality_gate"]["passed"] is False
+    assert any("claim_gate status" in issue for issue in issues)
+    assert any("claim_gate scientific_claim_supported" in issue for issue in issues)
+
+
 def test_trace_summary_exposes_workflow_claim_gate_without_run_metadata(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -392,6 +553,9 @@ def test_trace_summary_reports_data_analysis_specificity_warnings(tmp_path: Path
     assert specificity["passed"] is False
     assert "training_array_keys is missing" in specificity["warnings"]
     assert "task_specific_observations is missing" in specificity["warnings"]
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any("data_analysis_specificity" in issue for issue in summary["artifact_consistency"]["issues"])
 
 
 def test_trace_summary_checks_tree_and_checkpoint_contract_consistency(tmp_path: Path) -> None:
@@ -402,6 +566,23 @@ def test_trace_summary_checks_tree_and_checkpoint_contract_consistency(tmp_path:
     assert summary["artifact_consistency"]["checked"] is True
     assert summary["artifact_consistency"]["passed"] is True
     assert summary["quality_gate"]["passed"] is True
+
+
+def test_trace_summary_fails_when_data_analysis_specificity_is_missing(
+    tmp_path: Path,
+) -> None:
+    run_dir = _write_consistent_run_artifacts(tmp_path / "run")
+    (run_dir / "reports" / "data_analysis_structured.json").unlink()
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert summary["artifact_consistency"]["data_analysis_specificity"]["checked"] is False
+    assert any(
+        "reports/data_analysis_structured.json is missing" in issue
+        for issue in summary["artifact_consistency"]["issues"]
+    )
 
 
 def test_trace_summary_fails_on_tree_contract_mismatch(tmp_path: Path) -> None:
@@ -1425,6 +1606,7 @@ def test_trace_summary_allows_partial_run_with_zero_solution_reference_events(tm
 
 def _write_consistent_run_artifacts(run_dir: Path) -> Path:
     run_dir.mkdir()
+    _write_valid_data_analysis(run_dir)
     contract_hash = "a" * 64
     benchmark_name = "function_approx"
     metadata = {
@@ -1512,3 +1694,23 @@ def _write_consistent_run_artifacts(run_dir: Path) -> Path:
         ],
     )
     return run_dir
+
+
+def _write_valid_data_analysis(run_dir: Path) -> None:
+    reports_dir = run_dir / "reports"
+    reports_dir.mkdir(exist_ok=True)
+    (reports_dir / "data_analysis_structured.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "benchmark_name": "function_approx",
+                "benchmark_family": "regression",
+                "evaluation_metric": "validation_mse",
+                "training_array_keys": ["x_train", "y_train"],
+                "task_specific_observations": [
+                    "function_approx regression uses x_train and y_train with validation_mse"
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )

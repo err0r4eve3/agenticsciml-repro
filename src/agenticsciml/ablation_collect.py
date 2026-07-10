@@ -6,7 +6,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agenticsciml.ablation import _aggregate, _render_report, _write_csv
+from agenticsciml.ablation import (
+    _aggregate,
+    _bind_run_rows_to_execution_artifacts,
+    _full_stage_plan_hash,
+    _hash_payload,
+    _render_report,
+    _write_ablation_evidence_bundle,
+    _write_csv,
+)
 from agenticsciml.evidence import EVIDENCE_MODE_REAL_LLM_ABLATION, SCIENTIFIC_CLAIM_NOT_SUPPORTED
 from agenticsciml.storage import _atomic_write_text
 
@@ -91,10 +99,48 @@ def collect_ablation_batches(
         raise AblationBatchCollectionError("planned experiment_id(s) missing: " + ", ".join(missing_ids))
 
     ordered_rows = [rows_by_experiment_id[experiment_id] for experiment_id in planned_ids if experiment_id in rows_by_experiment_id]
-    summary_rows = _aggregate(ordered_rows)
     collection_status = "partial" if missing_ids else "complete"
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    source_stage_plan_path = output_dir / "source_stage_plan.json"
+    source_stage_manifest_path = output_dir / "source_stage_manifest.json"
+    _atomic_write_text(
+        source_stage_plan_path,
+        json.dumps(stage["plan"], indent=2, sort_keys=True, allow_nan=False),
+    )
+    _atomic_write_text(
+        source_stage_manifest_path,
+        json.dumps(stage["manifest"], indent=2, sort_keys=True, allow_nan=False),
+    )
+    plan = _collection_execution_plan(
+        stage,
+        ordered_rows=ordered_rows,
+        output_dir=output_dir,
+    )
+    plan_path = output_dir / "real_llm_ablation_plan.json"
+    _atomic_write_text(
+        plan_path,
+        json.dumps(plan, indent=2, sort_keys=True, allow_nan=False),
+    )
+    execution_manifest = _collection_execution_manifest(
+        stage,
+        plan=plan,
+        collected_run_count=len(ordered_rows),
+        collection_status=collection_status,
+        output_dir=output_dir,
+    )
+    execution_manifest_path = output_dir / "real_llm_ablation_manifest.json"
+    _atomic_write_text(
+        execution_manifest_path,
+        json.dumps(execution_manifest, indent=2, sort_keys=True, allow_nan=False),
+    )
+    _bind_run_rows_to_execution_artifacts(
+        ordered_rows,
+        plan=plan,
+        plan_path=plan_path,
+        manifest_path=execution_manifest_path,
+    )
+    summary_rows = _aggregate(ordered_rows)
     runs_csv = output_dir / "ablation_runs.csv"
     summary_csv = output_dir / "ablation_summary.csv"
     report_md = output_dir / "ablation_report.md"
@@ -125,6 +171,11 @@ def collect_ablation_batches(
             "summary_csv": str(summary_csv),
             "report_md": str(report_md),
             "manifest_json": str(output_dir / "batch_collection_manifest.json"),
+            "plan_json": str(plan_path),
+            "execution_manifest_json": str(execution_manifest_path),
+            "evidence_bundle_json": str(output_dir / "ablation_evidence_bundle.json"),
+            "source_stage_plan_json": str(source_stage_plan_path),
+            "source_stage_manifest_json": str(source_stage_manifest_path),
         },
         "claim_boundary": (
             "This collector verifies batch identity and output shape only. It does not prove "
@@ -133,12 +184,88 @@ def collect_ablation_batches(
     }
     manifest_json = output_dir / "batch_collection_manifest.json"
     _atomic_write_text(manifest_json, json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False))
+    _write_ablation_evidence_bundle(
+        output_dir=output_dir,
+        plan=plan,
+        plan_path=plan_path,
+        manifest=execution_manifest,
+        manifest_path=execution_manifest_path,
+        runs_csv=runs_csv,
+        summary_csv=summary_csv,
+        report_md=report_md,
+        run_rows=ordered_rows,
+        source_type="ablation_batch_collection",
+        additional_artifacts={
+            "collection_manifest": manifest_json,
+            "source_stage_plan_json": source_stage_plan_path,
+            "source_stage_manifest_json": source_stage_manifest_path,
+        },
+    )
     return AblationBatchCollectionResult(
         manifest_json=manifest_json,
         runs_csv=runs_csv,
         summary_csv=summary_csv,
         passed=collection_status == "complete",
     )
+
+
+def _collection_execution_plan(
+    stage: dict[str, Any],
+    *,
+    ordered_rows: list[dict[str, Any]],
+    output_dir: Path,
+) -> dict[str, Any]:
+    canonical_plan = dict(stage["plan"])
+    entries_by_id = {
+        str(entry.get("experiment_id")): dict(entry)
+        for entry in canonical_plan.get("runs", [])
+        if isinstance(entry, dict)
+    }
+    experiment_ids = [_row_experiment_id(row) for row in ordered_rows]
+    canonical_plan.update(
+        {
+            "output_dir": str(output_dir.resolve()),
+            "execution_mode": "real",
+            "real_mode_explicit": True,
+            "provider_calls_enabled": True,
+            "runs": [entries_by_id[experiment_id] for experiment_id in experiment_ids],
+            "seeds": sorted({int(row["seed"]) for row in ordered_rows}),
+            "variants": sorted({str(row["variant"]) for row in ordered_rows}),
+            "selected_budget_batch_index": None,
+            "budget_batch_selection": None,
+        }
+    )
+    return canonical_plan
+
+
+def _collection_execution_manifest(
+    stage: dict[str, Any],
+    *,
+    plan: dict[str, Any],
+    collected_run_count: int,
+    collection_status: str,
+    output_dir: Path,
+) -> dict[str, Any]:
+    canonical_manifest = dict(stage["manifest"])
+    canonical_manifest.update(
+        {
+            "source_type": "ablation_batch_collection",
+            "collection_status": collection_status,
+            "execution_mode": "real",
+            "real_mode_explicit": True,
+            "provider_calls_enabled": True,
+            "output_dir": str(output_dir.resolve()),
+            "run_count": collected_run_count,
+            "full_stage_run_count": len(stage["plan"].get("runs", [])),
+            "full_stage_plan_hash": stage["full_stage_plan_hash"],
+            "plan_hash": _hash_payload(plan),
+            "selected_budget_batch_index": None,
+            "budget_batch_selection": None,
+            "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
+            "evidence_mode": EVIDENCE_MODE_REAL_LLM_ABLATION,
+        }
+    )
+    return canonical_manifest
 
 
 def _load_stage(stage_plan_dir: Path) -> dict[str, Any]:
@@ -151,10 +278,25 @@ def _load_stage(stage_plan_dir: Path) -> dict[str, Any]:
         raise AblationBatchCollectionError(f"stage manifest is missing: {manifest_path}")
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    full_stage_plan_hash = str(manifest.get("full_stage_plan_hash") or plan.get("full_stage_plan_hash") or "")
-    if not full_stage_plan_hash:
+    plan_hash = _hash_payload(plan)
+    if manifest.get("plan_hash") != plan_hash:
+        raise AblationBatchCollectionError("stage manifest plan_hash does not match stage plan")
+    plan_full_stage_hash = str(plan.get("full_stage_plan_hash") or "")
+    manifest_full_stage_hash = str(manifest.get("full_stage_plan_hash") or "")
+    if not plan_full_stage_hash or not manifest_full_stage_hash:
         raise AblationBatchCollectionError("stage plan missing full_stage_plan_hash")
-    return {"root": root, "plan": plan, "manifest": manifest, "full_stage_plan_hash": full_stage_plan_hash}
+    if plan_full_stage_hash != manifest_full_stage_hash:
+        raise AblationBatchCollectionError("stage plan and manifest full_stage_plan_hash mismatch")
+    if _full_stage_plan_hash(plan) != plan_full_stage_hash:
+        raise AblationBatchCollectionError("stage full_stage_plan_hash does not match canonical plan")
+    return {
+        "root": root,
+        "plan": plan,
+        "manifest": manifest,
+        "plan_path": plan_path,
+        "manifest_path": manifest_path,
+        "full_stage_plan_hash": plan_full_stage_hash,
+    }
 
 
 def _load_batch(batch_dir: Path) -> dict[str, Any]:

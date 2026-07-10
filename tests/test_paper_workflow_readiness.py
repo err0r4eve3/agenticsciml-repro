@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -36,7 +37,7 @@ def test_paper_workflow_readiness_blocks_missing_real_assets(tmp_path: Path) -> 
     assert "sk-test" not in json.dumps(bundle)
 
 
-def test_paper_workflow_readiness_accepts_available_non_paper_assets_but_keeps_benchmark_blocker(
+def test_paper_workflow_readiness_accepts_available_assets_but_blocks_mock_ablation_and_non_paper_benchmark(
     tmp_path: Path,
 ) -> None:
     domain_path = tmp_path / "domain_approval.json"
@@ -85,7 +86,8 @@ def test_paper_workflow_readiness_accepts_available_non_paper_assets_but_keeps_b
     assert bundle["provider_readiness"]["budget_configured"] is True
     assert bundle["selector_readiness"]["heterogeneous_selector_candidate"] is True
     assert bundle["domain_approval_readiness"]["approved"] is True
-    assert bundle["multi_seed_ablation_readiness"]["verified_multi_seed_ablation"] is True
+    assert bundle["multi_seed_ablation_readiness"]["verified_multi_seed_ablation"] is False
+    assert "multi_seed_ablation_output" in blockers
     assert "paper_like_benchmark" in blockers
     assert bundle["paper_benchmark_readiness"]["fidelity_level"] == "faithful-small"
     assert "redacted-test-key" not in json.dumps(bundle)
@@ -110,6 +112,82 @@ def test_paper_workflow_readiness_accepts_runtime_selector_evidence_packet(tmp_p
     assert bundle["selector_readiness"]["runtime_selector_evidence_ready"] is True
     assert bundle["selector_readiness"]["selector_evidence_packet"]["paper_workflow_selector_ready"] is True
     assert bundle["selector_readiness"]["heterogeneous_selector_candidate"] is False
+
+
+def test_paper_workflow_readiness_rejects_forged_selector_ready_flag(tmp_path: Path) -> None:
+    path = tmp_path / "selector_evidence_packet.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 99,
+                "status": "ready",
+                "paper_workflow_selector_ready": True,
+                "scientific_claim_supported": False,
+                "runtime_vote_summary": {},
+                "blockers": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    bundle = build_paper_workflow_readiness_bundle(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        selector_evidence_path=path,
+        env={},
+    )
+
+    packet = bundle["selector_readiness"]["selector_evidence_packet"]
+    assert packet["paper_workflow_selector_ready"] is False
+    assert packet["blockers"]
+    assert "heterogeneous_real_selector" in {item["check_id"] for item in bundle["blockers"]}
+
+
+def test_paper_workflow_readiness_validates_credentials_budgets_and_resources() -> None:
+    bundle = build_paper_workflow_readiness_bundle(
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        resource_constraints={
+            "cpu": "",
+            "gpu": "false",
+            "timeout_s": 0,
+            "dependency_limits": [],
+            "data_limits": None,
+        },
+        expert_blueprint_id="  ",
+        env={
+            "OPENAI_API_KEY": "   ",
+            "AGENTICSCIML_MAX_LLM_CALLS": "0",
+            "AGENTICSCIML_MAX_PROMPT_TOKENS": "1000",
+            "AGENTICSCIML_MAX_TOTAL_TOKENS": "not-a-number",
+            "AGENTICSCIML_MAX_COST_USD": "1",
+        },
+    )
+
+    provider = bundle["provider_readiness"]
+    assert provider["api_key_present"] is False
+    assert provider["budget_configured"] is False
+    assert provider["budget"]["AGENTICSCIML_MAX_LLM_CALLS"] == "invalid"
+    assert provider["budget"]["AGENTICSCIML_MAX_COST_USD"] == "invalid"
+    assert provider["budget_issues"]
+    assert bundle["resource_readiness"]["ready"] is False
+    assert len(bundle["resource_readiness"]["issues"]) == 6
+
+
+def test_paper_workflow_command_plan_quotes_paths_and_requires_real_mode(tmp_path: Path) -> None:
+    ablation_dir = tmp_path / "ablation evidence"
+    benchmark_dir = Path("examples/function_approx").resolve()
+
+    bundle = build_paper_workflow_readiness_bundle(
+        benchmark_dir=benchmark_dir,
+        selector_panel=[{"model": "model-with-'quote"}],
+        ablation_output_dir=ablation_dir,
+        env={},
+    )
+
+    run_command = bundle["command_plan"][2]
+    verify_command = bundle["command_plan"][3]
+    assert f"{shlex.quote(str(benchmark_dir))} --real" in run_command
+    assert "--selector-panel-json" in run_command
+    assert shlex.quote(str(ablation_dir)) in verify_command
 
 
 def test_paper_workflow_readiness_reports_reference_capability_matrix(tmp_path: Path) -> None:

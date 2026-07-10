@@ -144,6 +144,34 @@ def test_paper_gap_report_keeps_complete_ablation_bundle_fail_closed(tmp_path: P
     assert gap_items["multi_seed_ablation"]["status"] == "gap"
 
 
+def test_paper_gap_report_does_not_stitch_claim_readiness_across_runs(
+    tmp_path: Path,
+) -> None:
+    benchmark_name = "function_approx_faithful_small"
+    runs = [
+        _write_run_evidence(tmp_path / "completed", benchmark_name, completed=True),
+        _write_run_evidence(tmp_path / "trace", benchmark_name, trace_passed=True),
+        _write_run_evidence(tmp_path / "real", benchmark_name, real_llm=True),
+        _write_run_evidence(tmp_path / "readiness", benchmark_name, readiness_supported=True),
+        _write_run_evidence(tmp_path / "claim", benchmark_name, claim_supported=True),
+    ]
+
+    report = build_paper_gap_report(
+        benchmark_dirs=[Path("examples/function_approx_faithful_small")],
+        run_dirs=runs,
+    )
+
+    gap_items = {item["check_id"]: item for item in report["benchmarks"][0]["gap_items"]}
+    assert gap_items["completed_run_artifacts"]["status"] == "satisfied"
+    assert gap_items["trace_quality_gate"]["status"] == "satisfied"
+    assert gap_items["real_llm_execution"]["status"] == "satisfied"
+    assert gap_items["scientific_readiness"]["status"] == "satisfied"
+    assert gap_items["claim_gate_support"]["status"] == "satisfied"
+    assert gap_items["same_run_paper_claim_evidence"]["status"] == "gap"
+    assert all(run["same_run_paper_claim_evidence"] is False for run in report["run_evidence"])
+    assert report["status"] == "blocked"
+
+
 def test_cli_paper_gap_report_writes_json_and_markdown(
     tmp_path: Path,
     cli_env: dict[str, str],
@@ -171,3 +199,52 @@ def test_cli_paper_gap_report_writes_json_and_markdown(
     assert report_path == output_dir / "paper_gap_report.json"
     assert report["status"] == "blocked"
     assert (output_dir / "paper_gap_report.md").exists()
+
+
+def _write_run_evidence(
+    run_dir: Path,
+    benchmark_name: str,
+    *,
+    completed: bool = False,
+    trace_passed: bool = False,
+    real_llm: bool = False,
+    readiness_supported: bool = False,
+    claim_supported: bool = False,
+) -> Path:
+    reports_dir = run_dir / "reports"
+    reports_dir.mkdir(parents=True)
+    claim_gate = {
+        "status": "allowed",
+        "paper_level_claim_supported": claim_supported,
+        "scientific_claim_supported": claim_supported,
+    }
+    readiness = {
+        "status": "ready" if readiness_supported else "blocked",
+        "scientific_claim_supported": readiness_supported,
+    }
+    (run_dir / "run_metadata.json").write_text(
+        json.dumps(
+            {
+                "run_state": "exported" if completed else "partial",
+                "benchmark_name": benchmark_name,
+                "llm_mode": "real" if real_llm else "mock",
+                "claim_gate": claim_gate,
+                "scientific_discovery_readiness": readiness,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "trace_summary.json").write_text(
+        json.dumps(
+            {
+                "quality_gate": {"passed": trace_passed},
+                "claim_gate": claim_gate,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "scientific_discovery_readiness.json").write_text(
+        json.dumps(readiness),
+        encoding="utf-8",
+    )
+    return run_dir

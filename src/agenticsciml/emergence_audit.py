@@ -7,7 +7,7 @@ from typing import Any
 
 from agenticsciml.algorithm_catalog import AlgorithmSpec, list_algorithms
 from agenticsciml.retrieval.kb_store import KnowledgeBase, KnowledgeBaseEntry
-from agenticsciml.state import SolutionNode
+from agenticsciml.state import SolutionNode, SolutionScore
 
 
 AUDITOR_VERSION = "emergence_audit.v1"
@@ -253,8 +253,20 @@ def _score_evidence(
     score = node.score
     parent_score = parent_node.score if parent_node else None
     root_score = root_node.score if root_node else None
-    improved_over_parent = bool(score and parent_score and score.better_than(parent_score))
-    improved_over_root = bool(score and root_score and score.better_than(root_score))
+    parent_comparison = _score_comparison(score, parent_score, relationship="parent")
+    root_comparison = _score_comparison(score, root_score, relationship="root")
+    improved_over_parent = bool(
+        score
+        and parent_score
+        and parent_comparison["comparable"]
+        and score.better_than(parent_score)
+    )
+    improved_over_root = bool(
+        score
+        and root_score
+        and root_comparison["comparable"]
+        and score.better_than(root_score)
+    )
     return {
         "status": node.status,
         "metric": score.metric if score else None,
@@ -265,6 +277,44 @@ def _score_evidence(
         "score_delta_from_parent": node.score_delta_from_parent,
         "improved_over_parent": improved_over_parent,
         "improved_over_root": improved_over_root,
+        "parent_comparison": parent_comparison,
+        "root_comparison": root_comparison,
+        "comparison_issues": [
+            *parent_comparison["issues"],
+            *root_comparison["issues"],
+        ],
+    }
+
+
+def _score_comparison(
+    score: SolutionScore | None,
+    reference: SolutionScore | None,
+    *,
+    relationship: str,
+) -> dict[str, Any]:
+    if score is None or reference is None:
+        return {
+            "available": False,
+            "comparable": False,
+            "metric_matches": None,
+            "direction_matches": None,
+            "issues": [],
+        }
+    metric_matches = score.metric == reference.metric
+    direction_matches = score.higher_is_better == reference.higher_is_better
+    issues: list[str] = []
+    if not metric_matches:
+        issues.append(f"{relationship}_score_metric_mismatch")
+    if not direction_matches:
+        issues.append(f"{relationship}_score_direction_mismatch")
+    return {
+        "available": True,
+        "comparable": metric_matches and direction_matches,
+        "metric_matches": metric_matches,
+        "direction_matches": direction_matches,
+        "reference_metric": reference.metric,
+        "reference_higher_is_better": reference.higher_is_better,
+        "issues": issues,
     }
 
 
@@ -304,6 +354,7 @@ def _blocking_gaps(
         gaps.append("prior_result_evidence_missing")
     if not score_evidence["improved_over_parent"]:
         gaps.append("parent_improvement_missing")
+    gaps.extend(str(issue) for issue in score_evidence.get("comparison_issues", []))
     if not policy_fidelity_evidence["available"]:
         gaps.append("policy_fidelity_missing")
     elif not policy_fidelity_evidence["passing"]:
