@@ -2,6 +2,76 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-07-10 研究工作流完整性修复
+
+本次从研究人员实际使用路径出发，修复了 benchmark 科学定义、evaluation contract、
+resume/checkpoint、真实 LLM 启用与预算、multi-seed 证据、trace/claim gate、ChatUI 调度和
+干净环境 CI 中的一组跨层问题。目标是让错误、陈旧或不完整证据明确 fail closed，而不是
+把 mock、广播后的预测、手写声明或 CSV 汇总误读成科学结论。
+
+已实现：
+
+- 全部 12 个内置 evaluator 严格检查预测 shape 和 finite 数值，不再接受多输出广播、任意
+  reshape 或非标准 JSON 数值；L-shape wedge 与 faithful-small Burgers 方程、解析解和 PDE
+  residual 已对齐。
+- benchmark 输入会先冻结到 `run_inputs/` 并写全文件 digest manifest；自定义嵌套数据路径、
+  相对 symlink、移动 run bundle 和 private-label 隔离均有回归覆盖。
+- checkpoint 升级到完整实验条件、iteration 和 inflight child 语义；resume 不覆盖原始 config，
+  不重复已完成 iteration，并拒绝 stale contract、损坏节点、非法 parent 和不兼容配置。
+- `agenticsciml run` 默认 deterministic mock；真实 provider 必须显式 `--real`，并使用单一
+  run-scoped budget/ledger。并发完成可乱序落盘但恢复时必须保持 call id 唯一连续；provider
+  已返回后的预算超限仍会记录 billable usage。Resume preflight 只计算 checkpoint 剩余工作，
+  包括 pre-root 人工审批和 inflight child。CLI dry-run、失败退出码、唯一 experiment id 和
+  real smoke stale evidence gate 已收紧。
+- multi-seed evidence 绑定 data/model/provider/search 四类 seed provenance、canonical plan、
+  manifest、CSV/report、逐 run config/contract/trace/ledger 和内容 hash。mock、partial、旧 CSV、
+  只有 search seed 变化或 hand-authored declaration 都不能通过 scientific readiness。
+- trace summary 会重新核对 guardrail recovery、claim/readiness、node lifecycle、同一 run 来源和
+  completed-run artifacts；paper gap、real-problem closure、emergence audit 与 SDK trace export
+  使用相同的 fail-closed 证据边界。
+- ChatUI 的 ask/plan/agent 动作互斥；总结或否定指令不再误触发 run，resume 继承冻结配置，
+  plan 不物化 custom benchmark，重复 run id 返回 `409`，中文 SciML benchmark 路由和前端
+  run metadata 展示已补齐。
+- `dev` extra 现在包含 Web API 测试依赖；CI 通过 `python -m pytest` 实际收集 Web 测试，
+  避免旧 venv shebang 或缺少 optional dependency 造成假绿。
+
+已验证：
+
+```bash
+uv lock --check
+uv run --isolated --frozen --python 3.11 --extra dev python -m compileall -q src tests
+uv run --isolated --frozen --python 3.11 --extra dev python -m pytest -q
+# 691 passed
+
+cd frontend && npm run build
+node --check scripts/web_ui_dispatch_e2e.mjs
+# 在一个终端启动 Web 服务：
+PYTHONPATH=src uv run --isolated --frozen --python 3.11 --extra dev --extra web \
+  python -m agenticsciml.cli web --host 127.0.0.1 --port 8876
+# 在另一个终端执行浏览器 E2E：
+node scripts/web_ui_dispatch_e2e.mjs --base-url http://127.0.0.1:8876 --headless
+
+PYTHONPATH=src uv run --isolated --frozen --python 3.11 --extra dev \
+  python -m agenticsciml.cli run examples/function_approx --mock \
+  --max-iterations 1 --parallel-mutations 2 --output-dir /tmp/agenticsciml-final-smoke \
+  --experiment-id final-smoke
+PYTHONPATH=src uv run --isolated --frozen --python 3.11 --extra dev \
+  python -m agenticsciml.cli trace-summary /tmp/agenticsciml-final-smoke/final-smoke
+```
+
+已知边界与剩余风险：
+
+- 本次未调用真实 LLM、GPU 或 paper-scale 数据；mock run 仍只支持 workflow-shape 结论。
+- 当前 benchmark 尚无 untouched final holdout；validation 参与自适应搜索，不能据此声明无偏泛化、
+  paper parity 或 SOTA。
+- 真实 runner 仍未完整导出可审计的 `model_seed` / `provider_seed`，多数数据固定
+  `data_seed=0`；因此现有 real multi-seed 输出会被 scientific gate 阻断，直至这些 provenance
+  由运行时真实产生。
+- 浏览器 E2E 已验证 ChatUI/API/IDE iframe 调度，但未启动 code-server sidecar，因此没有验证
+  code-server WebSocket 持续连接。
+- 新 contract、run-input manifest、checkpoint 和 ablation evidence schema 对缺失字段的旧 artifact
+  默认 fail closed；本次没有加入静默迁移层。
+
 ## 2026-07-09 LLM Wiki OKF Graph
 
 本次新增 ChatUI 左侧功能栏 `Wiki` 页面和 `/api/llm-wiki/okf`，把项目结构、S1 task、

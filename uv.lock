@@ -13,6 +13,8 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "fastapi" },
+    { name = "httpx" },
     { name = "pytest" },
 ]
 real-llm = [
@@ -29,7 +31,9 @@ web = [
 
 [package.metadata]
 requires-dist = [
+    { name = "fastapi", marker = "extra == 'dev'", specifier = ">=0.115" },
     { name = "fastapi", marker = "extra == 'web'", specifier = ">=0.115" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'web'", specifier = ">=0.27" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "openai", marker = "extra == 'real-llm'", specifier = ">=1.0" },

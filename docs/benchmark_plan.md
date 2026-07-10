@@ -126,7 +126,9 @@ evaluator contracts, champion selection, or paper-score claim boundaries.
 真实 LLM 接入前，必须先验证 benchmark shape：
 
 ```bash
-uv run --python 3.11 --extra dev pytest tests/test_benchmark_catalog.py -q
+uv run --python 3.11 --extra dev python -m pytest -q \
+  tests/test_benchmark_catalog.py \
+  tests/test_scientific_benchmarks.py
 ```
 
 这个测试覆盖：
@@ -138,9 +140,19 @@ uv run --python 3.11 --extra dev pytest tests/test_benchmark_catalog.py -q
 - `BenchmarkContractFactory` 是否生成 hash-stable 的 benchmark-aware contract；
 - 数据生成是否 deterministic；
 - 每个 evaluator 是否接受 generic baseline；
+- 全部 12 个内置 evaluator 是否拒绝 broadcast/reshape、non-finite prediction、
+  non-standard JSON score 反例；
+- L-shape notch-edge 连续性、Poisson forcing 和 faithful-small Burgers PDE/residual
+  是否与文档口径一致；
 - solution train/validate workspace 是否不暴露验证集；
-- 每个 benchmark 是否能跑 root-only mock；
-- 每个 benchmark 是否能跑 1 轮 mock evolution。
+- 代表性 benchmark 是否能跑 root-only mock 和 1 轮 mock evolution。
+
+当前 catalog-wide 断言覆盖全部 12 个 benchmark 的 artifact、bundle、contract、
+deterministic generator 和 generic-baseline evaluator。orchestrator smoke 的 checked-in
+回归矩阵目前只覆盖 `function_approx`、`function_approx_faithful_small` 和
+`cylinder_wake_reconstruction_faithful_small` 三个代表项；它不能被表述为 12/12
+orchestrator coverage。其余 benchmark 在扩大参数化回归矩阵前仍应按下面的真实 LLM
+实验顺序逐项运行和保留 artifact。
 
 验证集泄漏是 P0 约束：`solution.py` 训练/验证阶段的 cwd 下不能存在
 `val_data.npz` 或 evaluator-private 目录；predict 阶段只能读取
@@ -167,9 +179,9 @@ traversal、`.evaluator` / `private_eval` 字符串引用仍会被 static guardr
 示例：
 
 ```bash
-uv run --python 3.11 --extra real-llm agenticsciml run examples/poisson_lshape --max-iterations 0 --experiment-id poisson-root
-uv run --python 3.11 --extra real-llm agenticsciml run examples/poisson_lshape --max-iterations 1 --parallel-mutations 1 --experiment-id poisson-one-iter
-uv run --python 3.11 --extra real-llm agenticsciml run examples/poisson_lshape_faithful_small --max-iterations 1 --parallel-mutations 1 --experiment-id poisson-faithful-small
+uv run --python 3.11 --extra real-llm agenticsciml run examples/poisson_lshape --real --max-iterations 0 --experiment-id poisson-root
+uv run --python 3.11 --extra real-llm agenticsciml run examples/poisson_lshape --real --max-iterations 1 --parallel-mutations 1 --experiment-id poisson-one-iter
+uv run --python 3.11 --extra real-llm agenticsciml run examples/poisson_lshape_faithful_small --real --max-iterations 1 --parallel-mutations 1 --experiment-id poisson-faithful-small
 ```
 
 ## 边界

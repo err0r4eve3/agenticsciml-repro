@@ -33,12 +33,14 @@ available, so this project implements a source-grounded approximation:
 ## Quick Start
 
 ```bash
-uv run --python 3.11 --extra dev pytest -q
+uv run --python 3.11 --extra dev python -m pytest -q
 uv run --python 3.11 --extra dev agenticsciml benchmarks
 uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --mock --max-iterations 1
 uv run --python 3.11 --extra dev agenticsciml run examples/function_approx --mock --max-iterations 1 --random-kb --random-seed 11
 ```
 
+The `dev` extra includes the FastAPI/httpx test dependencies, so this command
+collects the Web API tests as part of the full suite in a clean environment.
 If an editable install is being used from a checkout path with spaces and the
 console script cannot import `agenticsciml`, use the module form:
 
@@ -46,6 +48,15 @@ console script cannot import `agenticsciml`, use the module form:
 PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli run examples/function_approx --mock --max-iterations 1
 PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli smoke-llm examples/function_approx --variants branch_context,no_branch_context --dry-run --max-iterations 1 --parallel-mutations 2 --output-dir "runs/real llm smoke"
 PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli verify-smoke-llm "runs/real llm smoke"
+```
+
+If the checkout was moved and an existing `.venv` script still contains the
+old absolute path, rebuild the environment instead of editing shebangs by hand:
+
+```bash
+uv venv --clear --python 3.11
+uv sync --python 3.11 --extra dev
+uv run --python 3.11 --extra dev python -m pytest -q
 ```
 
 The dry-run `verify-smoke-llm` command is an expected negative check and should
@@ -158,20 +169,31 @@ optional and requires an adapter dependency and API credentials:
 ```bash
 export OPENAI_API_KEY=...
 export OPENAI_MODEL=gpt-5-mini
-uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx --max-iterations 1
+uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx --real --max-iterations 1
 ```
 
 OpenAI-native runs use Responses structured outputs when `OPENAI_BASE_URL` is
 unset. OpenAI-compatible providers keep the chat/JSON fallback and record their
-capability matrix in run artifacts. Optional real-LLM budget gates:
+capability matrix in run artifacts. The main `run` command never selects a real
+provider implicitly: `--real` is required for every provider-backed run.
+Optional real-LLM budget gates:
 
 ```bash
 export AGENTICSCIML_MAX_LLM_CALLS=80
 export AGENTICSCIML_MAX_PROMPT_TOKENS=200000
 export AGENTICSCIML_MAX_OUTPUT_TOKENS=80000
+export AGENTICSCIML_MAX_TOTAL_TOKENS=280000
 export AGENTICSCIML_MAX_COST_USD=5
 export AGENTICSCIML_COST_PER_1K_TOKENS_USD=0.01
 ```
+
+For the main real run, the call-count preflight blocks before provider access
+when the estimated maximum exceeds `AGENTICSCIML_MAX_LLM_CALLS`. The runtime
+ledger reserves call/prompt budget before each request and checks output/total/
+estimated-cost limits when response usage is available. Output and cost limits
+are accounting gates, not provider-side response-length controls; one response
+can cross a limit and then fail the run. Inspect `llm_call_ledger.jsonl` and
+`run_metadata.json` before making cost or completeness claims.
 
 The benchmark catalog now includes all six paper task families as lightweight
 offline examples, plus six `faithful-small` upgrades for S1.1 function

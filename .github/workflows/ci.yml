@@ -36,8 +36,9 @@ jobs:
 
       - name: Run fast evidence gates
         run: >
-          uv run --frozen --python 3.11 --extra dev pytest -q
+          uv run --frozen --python 3.11 --extra dev python -m pytest -q
           tests/test_benchmark_catalog.py
+          tests/test_scientific_benchmarks.py
           tests/test_execution.py
           tests/test_evidence.py
           tests/test_ablation_evidence.py
@@ -64,5 +65,11 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
-      - name: Run full test suite
-        run: uv run --frozen --python 3.11 --extra dev pytest -q
+      - name: Verify Web test dependencies
+        run: uv run --frozen --python 3.11 --extra dev --extra web python -c "import fastapi, httpx"
+
+      - name: Run Web API tests
+        run: uv run --frozen --python 3.11 --extra dev --extra web python -m pytest -q tests/test_web_api.py
+
+      - name: Run remaining test suite
+        run: uv run --frozen --python 3.11 --extra dev --extra web python -m pytest -q --ignore=tests/test_web_api.py

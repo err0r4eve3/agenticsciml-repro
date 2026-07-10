@@ -15,12 +15,42 @@ List available benchmarks:
 uv run --python 3.11 --extra dev agenticsciml benchmarks
 ```
 
+Run the full local suite through the Python module entry point. The `dev` extra
+includes FastAPI and httpx, so Web API tests are collected in a clean test
+environment:
+
+```bash
+uv run --python 3.11 --extra dev python -m pytest -q
+```
+
+After moving a checkout, an existing `.venv/bin/pytest` or console-script
+shebang may still point at the old absolute path. Recreate the environment;
+do not edit the generated shebang in place:
+
+```bash
+uv venv --clear --python 3.11
+uv sync --python 3.11 --extra dev
+uv run --python 3.11 --extra dev python -m pytest -q
+```
+
 Real mode requires credentials and the optional adapter dependency:
 
 ```bash
 export OPENAI_API_KEY=...
 export OPENAI_MODEL=gpt-5-mini
-uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx --max-iterations 1
+uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx --real --max-iterations 1
+```
+
+The main `run` command requires the explicit `--real` confirmation before it
+constructs a provider client. Omitting both `--mock` and `--real` keeps the
+deterministic mock default; installing the `real-llm` extra alone never
+authorizes provider calls.
+
+If an editable console script cannot import the checkout, use the module form
+without changing the scientific mode or confirmation gate:
+
+```bash
+PYTHONPATH=src uv run --python 3.11 --extra real-llm python -m agenticsciml.cli run examples/function_approx --real --max-iterations 1
 ```
 
 For OpenAI-compatible providers, set `OPENAI_BASE_URL` as well. For example,
@@ -32,7 +62,7 @@ export OPENAI_API_KEY=...
 export OPENAI_MODEL=deepseek-v4-pro
 export OPENAI_TIMEOUT_S=120
 export OPENAI_MAX_RETRIES=0
-uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx --max-iterations 0
+uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx --real --max-iterations 0
 ```
 
 Use the provider's exact model id. For example, if the provider rejects
@@ -54,6 +84,7 @@ SDK retries. The same provider-call budget can be supplied per run:
 
 ```bash
 uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx \
+  --real \
   --llm-timeout-s 45 \
   --llm-max-retries 0
 ```
@@ -66,6 +97,7 @@ Latency-sensitive runs can enable run-level fast mode:
 
 ```bash
 uv run --python 3.11 --extra real-llm agenticsciml run examples/poisson_lshape \
+  --real \
   --llm-fast-mode \
   --llm-timeout-s 75 \
   --llm-max-retries 0
@@ -91,6 +123,22 @@ export AGENTICSCIML_COST_PER_1K_TOKENS_USD=0.01
 `AGENTICSCIML_COST_PER_1K_TOKENS_USD`, because provider pricing is not inferred
 from the model name.
 
+The main real run applies two distinct gates:
+
+- before constructing the provider client, call-count preflight compares the
+  planned `expected_llm_call_range.max` with `AGENTICSCIML_MAX_LLM_CALLS` and
+  fails before provider access if the configured ceiling is too small;
+- during execution, one run-scoped `llm_call_ledger.jsonl` reserves calls and
+  prompt-token estimates before each request, then records response usage and
+  enforces output-token, total-token, and estimated-cost ceilings.
+
+Output-token and cost limits are not provider-side `max_output_tokens`
+settings. A provider response can cross one of those accounting limits; the
+ledger then raises a budget error and the run fails closed. Token counts use
+provider usage when available and otherwise remain estimates. Review the
+ledger plus `run_metadata.json` `llm_budget` before reporting cost or run
+completeness.
+
 Role-level model policy can be set from CLI with `--agent-models-json`. The
 payload is a JSON object keyed by role; each role value supports `model`,
 `base_url`, `temperature`, and `reasoning_effort`. If `temperature` or
@@ -98,6 +146,7 @@ payload is a JSON object keyed by role; each role value supports `model`,
 
 ```bash
 uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx \
+  --real \
   --agent-models-json '{"root_engineer":{"model":"gpt-5.5","reasoning_effort":"xhigh"},"retriever":{"model":"gpt-5.4-mini","reasoning_effort":"medium"}}'
 ```
 
@@ -127,7 +176,7 @@ voting is actually exercised:
 For first real runs, prefer root-only smoke before mutation:
 
 ```bash
-uv run --python 3.11 --extra real-llm agenticsciml run examples/burgers_pinn --max-iterations 0 --experiment-id burgers-root
+uv run --python 3.11 --extra real-llm agenticsciml run examples/burgers_pinn --real --max-iterations 0 --experiment-id burgers-root
 ```
 
 Use `--dry-run` to print the planned role calls without making API requests.
@@ -259,8 +308,8 @@ the source of truth.
 Resume uses the existing run directory and checkpoint:
 
 ```bash
-uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx --max-iterations 0 --experiment-id first-real-run
-uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx --resume --max-iterations 1 --experiment-id first-real-run
+uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx --real --max-iterations 0 --experiment-id first-real-run
+uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx --real --resume --max-iterations 1 --experiment-id first-real-run
 ```
 
 The real adapter is intentionally thin. It asks for structured JSON when an

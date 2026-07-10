@@ -32,6 +32,46 @@ readiness 展示证据缺口，不提升 benchmark 等级。
 - 只有 real LLM + `faithful-small` 或 `paper-like` 才能进入科学结果讨论，但仍需要多 seed、ablation 和失败样本审查。
 - 分数必须来自固定 evaluator，不允许 LLM judge 生成科学分数。
 
+## Multi-seed provenance
+
+`--seeds` 列表本身不是独立重复实验的证据。每个 run 必须在机器可读 artifact
+中记录并可回查以下四类 provenance：
+
+- `data_seed`：数据生成或样本划分 seed，以及生成数据 digest；
+- `model_seed`：训练初始化和训练侧随机算子 seed；
+- `provider_seed`：provider/model/sampling 设置和 provider 是否真正支持该 seed；
+- `search_seed`：parent selection、KB retrieval、branch/fanout 等搜索侧随机性。
+
+还必须绑定 benchmark、evaluation contract、run config、provider/model 设置、
+plan/manifest 和输出 evidence bundle 的内容 hash。provider 不保证确定性时，必须显式
+记录该限制以及可审计的请求/响应 provenance；不能把相同 seed 当作 bitwise replay
+保证。
+
+只有 `search_seed` 变化、而数据、模型初始化和 provider sampling 都固定的重复运行，
+最多支持 workflow/search robustness，不支持 scientific multi-seed 结论。科学级
+multi-seed gate 必须 fail closed：四类 provenance 完整，并且数据、模型或 provider
+至少一个科学随机维度在 seed 间实际变化。mock、旧格式 CSV、只有 seed 标签而没有
+可回查 artifact/hash、或固定全部科学随机维度的输出均不能升级 fidelity/claim。
+
+## Final holdout 与选择偏差
+
+本项目的 evolutionary search 会反复使用 validation score 选择 parent、调试失败节点
+并导出 champion。因此该 validation 集已参与自适应模型选择，leaderboard 上的最佳
+分数是优化证据，不是无偏的最终泛化估计。
+
+支持泛化或 paper comparison 前，benchmark 必须增加独立、evaluator-only 的 final
+holdout，并满足：
+
+- 在 champion、超参数、prompt、搜索策略和停止条件冻结前不可见；
+- 不进入 prompt、retrieval、debug、parent/champion selection 或中间报告；
+- 冻结后只执行预先声明的一次最终评估，并保存独立 contract/digest；
+- 如果查看结果后继续选择或修改方案，该集合即变成 validation，必须换用新的 untouched
+  holdout。
+
+当前 benchmark contract 只有 train/validation，没有上述 final holdout。因此现有
+分数只能支持 workflow、evaluator 和候选选择层面的结论；即使是 real LLM、
+faithful-small 或 multi-seed run，也不能据此单独声明无偏泛化、paper parity 或 SOTA。
+
 ## Claim Gate
 
 运行请求默认使用 `claim_level=workflow_proxy`。该级别允许当前 mock、proxy、
