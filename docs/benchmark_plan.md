@@ -145,14 +145,18 @@ uv run --python 3.11 --extra dev python -m pytest -q \
 - L-shape notch-edge 连续性、Poisson forcing 和 faithful-small Burgers PDE/residual
   是否与文档口径一致；
 - solution train/validate workspace 是否不暴露验证集；
-- 代表性 benchmark 是否能跑 root-only mock 和 1 轮 mock evolution。
+- 全部 12 个 benchmark 是否都能运行 deterministic root-only mock，以及 1 轮
+  `max_iterations=1, parallel_mutations=2` 的 mock evolution。
 
 当前 catalog-wide 断言覆盖全部 12 个 benchmark 的 artifact、bundle、contract、
-deterministic generator 和 generic-baseline evaluator。orchestrator smoke 的 checked-in
-回归矩阵目前只覆盖 `function_approx`、`function_approx_faithful_small` 和
-`cylinder_wake_reconstruction_faithful_small` 三个代表项；它不能被表述为 12/12
-orchestrator coverage。其余 benchmark 在扩大参数化回归矩阵前仍应按下面的真实 LLM
-实验顺序逐项运行和保留 artifact。
+deterministic generator 和 generic-baseline evaluator。checked-in orchestrator smoke
+回归矩阵也覆盖全部 12 个 benchmark：每项运行一个 root-only deterministic mock 和一个
+`max_iterations=1, parallel_mutations=2` deterministic mock，共 24 个 run 场景。每个场景
+都要求节点成功评估、`trace_summary.json` quality gate 通过，同时
+`scientific_discovery_readiness` 保持 `status=blocked`、
+`scientific_claim_supported=false`。该 `12/12` 只表示本地 mock workflow coverage；它不支持
+真实 LLM、paper parity、SOTA 或科学发现声明。真实实验仍须按下文顺序逐项运行并保留
+artifact。
 
 验证集泄漏是 P0 约束：`solution.py` 训练/验证阶段的 cwd 下不能存在
 `val_data.npz` 或 evaluator-private 目录；predict 阶段只能读取

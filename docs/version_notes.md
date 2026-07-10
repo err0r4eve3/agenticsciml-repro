@@ -34,6 +34,12 @@ resume/checkpoint、真实 LLM 启用与预算、multi-seed 证据、trace/claim
   run metadata 展示已补齐。
 - `dev` extra 现在包含 Web API 测试依赖；CI 通过 `python -m pytest` 实际收集 Web 测试，
   避免旧 venv shebang 或缺少 optional dependency 造成假绿。
+- deterministic mock orchestrator smoke 从 3 个代表 benchmark 扩到 catalog 全部 12 项；
+  每项覆盖 root-only 与 `max_iterations=1, parallel_mutations=2`，并断言所有节点均已评估、
+  trace quality gate 通过且 scientific readiness 保持 blocked。该扩展只增加 workflow
+  回归广度，不提升 benchmark fidelity 或 scientific claim。
+- code-server repo workspace 测试改为比较当前 checkout 的 resolved root，不再硬编码本机
+  目录名；Git worktree 和 CI clone 现在能验证相同的 API 语义。
 
 已验证：
 
@@ -41,7 +47,7 @@ resume/checkpoint、真实 LLM 启用与预算、multi-seed 证据、trace/claim
 uv lock --check
 uv run --isolated --frozen --python 3.11 --extra dev python -m compileall -q src tests
 uv run --isolated --frozen --python 3.11 --extra dev python -m pytest -q
-# 691 passed
+# 713 passed
 
 cd frontend && npm run build
 node --check scripts/web_ui_dispatch_e2e.mjs
@@ -62,6 +68,8 @@ PYTHONPATH=src uv run --isolated --frozen --python 3.11 --extra dev \
 已知边界与剩余风险：
 
 - 本次未调用真实 LLM、GPU 或 paper-scale 数据；mock run 仍只支持 workflow-shape 结论。
+- `12/12` 只表示 deterministic mock orchestrator 的 root/one-iteration 回归广度，不能解释为
+  科学 benchmark 复现或真实模型性能验证。
 - 当前 benchmark 尚无 untouched final holdout；validation 参与自适应搜索，不能据此声明无偏泛化、
   paper parity 或 SOTA。
 - 真实 runner 仍未完整导出可审计的 `model_seed` / `provider_seed`，多数数据固定
