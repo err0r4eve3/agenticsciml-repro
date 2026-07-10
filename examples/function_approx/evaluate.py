@@ -16,14 +16,12 @@ def _to_numpy(value):
 
 def _align_predictions(preds: np.ndarray, target: np.ndarray) -> np.ndarray:
     preds = _to_numpy(preds)
+    if not np.all(np.isfinite(preds)):
+        raise ValueError("Predictions must contain only finite values.")
     if preds.shape == target.shape:
         return preds
-    if preds.ndim == 1 and preds.shape[0] == target.shape[0]:
-        return preds.reshape(-1, 1)
-    if preds.ndim == 2 and preds.shape[0] == target.shape[0] and preds.shape[1] == 1:
-        return np.repeat(preds, target.shape[1], axis=1)
-    if preds.size == target.size:
-        return preds.reshape(target.shape)
+    if target.ndim == 2 and target.shape[1] == 1 and preds.shape == (target.shape[0],):
+        return preds[:, None]
     raise ValueError(f"Prediction shape {preds.shape} cannot align with target {target.shape}.")
 
 
@@ -32,6 +30,14 @@ def _load_predictions(path: Path) -> np.ndarray:
     if "predictions" not in data:
         raise ValueError("predictions.npz must contain a 'predictions' array.")
     return _to_numpy(data["predictions"])
+
+
+def _write_payload(payload: dict) -> None:
+    if not np.isfinite(float(payload["score"])):
+        raise ValueError("Evaluation score must be finite.")
+    rendered = json.dumps(payload, indent=2, sort_keys=True, allow_nan=False)
+    Path("eval.json").write_text(rendered, encoding="utf-8")
+    print(json.dumps(payload, sort_keys=True, allow_nan=False))
 
 
 def main() -> None:
@@ -52,8 +58,7 @@ def main() -> None:
         "score": score,
         "higher_is_better": False,
     }
-    Path("eval.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    print(json.dumps(payload, sort_keys=True))
+    _write_payload(payload)
 
 
 if __name__ == "__main__":

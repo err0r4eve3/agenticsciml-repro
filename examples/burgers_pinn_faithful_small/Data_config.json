@@ -1,5 +1,5 @@
 {
   "train_path": "train_data.npz",
   "validation_path": "val_data.npz",
-  "description": "Faithful-small Burgers-style task with supervised anchors, IC/BC data, and unlabeled collocation coordinates."
+  "description": "Faithful-small unforced viscous Burgers task (nu=0.04) with an exact Cole-Hopf reference, supervised anchors, IC/periodic-BC data, unlabeled collocation coordinates, and prediction-only finite-difference residual scoring."
 }

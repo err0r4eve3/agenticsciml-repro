@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from agenticsciml.custom_benchmarks import (
     CUSTOM_BENCHMARK_SPEC,
     CUSTOM_EDA_SCRIPT,
@@ -199,8 +201,18 @@ class BenchmarkContractFactory:
     @staticmethod
     def create_contract(problem_bundle: ProblemBundle) -> EvaluationContract:
         data_config = problem_bundle.data_config
-        train_path = data_config.train_path or "train_data.npz"
-        validation_path = data_config.validation_path or "val_data.npz"
+        train_path = _normalized_data_artifact_path(
+            data_config.train_path,
+            default="train_data.npz",
+            field_name="train_path",
+        )
+        validation_path = _normalized_data_artifact_path(
+            data_config.validation_path,
+            default="val_data.npz",
+            field_name="validation_path",
+        )
+        if train_path == validation_path:
+            raise ValueError("Data_config train_path and validation_path must be different")
         manifest = _benchmark_source_manifest(problem_bundle, train_path, validation_path)
         contract = EvaluationContract(
             metric_name=problem_bundle.benchmark_spec.metric,
@@ -224,7 +236,6 @@ class BenchmarkContractFactory:
                 "Requirements.md",
                 "Evaluation.md",
                 "Data_config.json",
-                "generate_data.py",
                 "guidelines.md",
                 train_path,
             ],
@@ -269,8 +280,27 @@ class BenchmarkContractFactory:
 
     @staticmethod
     def verify_contract(problem_bundle: ProblemBundle, contract: EvaluationContract) -> None:
-        fresh_bundle = ProblemBundle.load(problem_bundle.benchmark_dir)
-        expected = BenchmarkContractFactory.create_contract(fresh_bundle)
+        benchmark_dir = problem_bundle.benchmark_dir.resolve()
+        current_spec = benchmark_for_path(benchmark_dir) or problem_bundle.benchmark_spec
+        data_config_path = benchmark_dir / "Data_config.json"
+        fresh_bundle = ProblemBundle(
+            benchmark_name=current_spec.name,
+            benchmark_spec=current_spec,
+            problem_md=(benchmark_dir / "Problem.md").read_text(encoding="utf-8"),
+            requirements_md=(benchmark_dir / "Requirements.md").read_text(encoding="utf-8"),
+            evaluation_md=(benchmark_dir / "Evaluation.md").read_text(encoding="utf-8"),
+            data_config=DataConfig.from_dict(
+                json.loads(data_config_path.read_text(encoding="utf-8"))
+            ),
+            benchmark_dir=benchmark_dir,
+        )
+        try:
+            expected = BenchmarkContractFactory.create_contract(fresh_bundle)
+        except (RuntimeError, ValueError) as exc:
+            raise ValueError(
+                "EvaluationContract is stale because current benchmark artifacts are invalid: "
+                f"{exc}"
+            ) from exc
         if contract.contract_hash != expected.contract_hash:
             raise ValueError(
                 "EvaluationContract is stale for current benchmark files: "
@@ -470,9 +500,6 @@ def benchmark_for_path(path: Path) -> BenchmarkSpec | None:
     for spec in BENCHMARKS.values():
         if resolved == spec.path.resolve():
             return spec
-    static_spec = BENCHMARKS.get(path.name)
-    if static_spec is not None:
-        return static_spec
     return _custom_benchmark_for_path(resolved)
 
 
@@ -534,8 +561,76 @@ def _required_bool(payload: dict[str, Any], key: str, spec_path: Path) -> bool:
 _GENERATED_DATA_DIGEST_CACHE: dict[tuple[str, str, str, str, str], dict[str, str]] = {}
 
 
+def _normalized_data_artifact_path(
+    value: str | None,
+    *,
+    default: str,
+    field_name: str,
+) -> str:
+    candidate = default if value is None else value
+    if not isinstance(candidate, str) or not candidate.strip():
+        raise ValueError(f"Data_config {field_name} must be a non-empty relative path")
+    path = Path(candidate)
+    if path.is_absolute() or path == Path(".") or ".." in path.parts:
+        raise ValueError(f"Data_config {field_name} must stay inside the benchmark directory: {candidate}")
+    normalized = path.as_posix()
+    if Path(normalized).suffix != ".npz":
+        raise ValueError(f"Data_config {field_name} must reference an .npz artifact: {candidate}")
+    return normalized
+
+
+def _validate_training_npz(path: Path) -> None:
+    data: Any = None
+    try:
+        data = np.load(path, allow_pickle=False)
+        files = getattr(data, "files", None)
+        if not isinstance(files, list):
+            raise ValueError("artifact is not an NPZ archive")
+        leaked_keys = sorted(
+            key
+            for key in files
+            if {part for part in key.lower().replace("-", "_").split("_") if part}
+            & {"val", "validation"}
+        )
+    except (EOFError, OSError, TypeError, ValueError) as exc:
+        raise ValueError(f"Training data artifact is not a readable NPZ file: {path}") from exc
+    finally:
+        close = getattr(data, "close", None)
+        if callable(close):
+            close()
+    if leaked_keys:
+        raise ValueError(
+            "Training data artifact must not contain validation arrays or labels: "
+            + ", ".join(leaked_keys)
+        )
+
+
 def _file_digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _record_data_artifact_digest(
+    artifacts: dict[str, str],
+    relative_path: str,
+    digest: str,
+) -> None:
+    artifact_names = {relative_path, Path(relative_path).name}
+    for name in artifact_names:
+        existing = artifacts.get(name)
+        if existing is not None and existing != digest:
+            raise ValueError(f"Ambiguous benchmark data artifact name in manifest: {name}")
+        artifacts[name] = digest
+
+
+def _benchmark_data_artifact_path(benchmark_dir: Path, relative_path: str) -> Path:
+    benchmark_root = benchmark_dir.resolve()
+    candidate = benchmark_dir / relative_path
+    if not candidate.resolve(strict=False).is_relative_to(benchmark_root):
+        raise ValueError(
+            "Data_config artifact resolves outside the benchmark directory: "
+            f"{relative_path}"
+        )
+    return candidate
 
 
 def _text_digest(text: str) -> str:
@@ -580,11 +675,12 @@ def _benchmark_source_manifest(
         if artifact_path.exists():
             artifacts[relative_path] = _file_digest(artifact_path)
 
-    train_file = benchmark_dir / train_path
-    validation_file = benchmark_dir / validation_path
+    train_file = _benchmark_data_artifact_path(benchmark_dir, train_path)
+    validation_file = _benchmark_data_artifact_path(benchmark_dir, validation_path)
     if train_file.exists() and validation_file.exists():
-        artifacts[train_path] = _file_digest(train_file)
-        artifacts[validation_path] = _file_digest(validation_file)
+        _validate_training_npz(train_file)
+        _record_data_artifact_digest(artifacts, train_path, _file_digest(train_file))
+        _record_data_artifact_digest(artifacts, validation_path, _file_digest(validation_file))
         return BenchmarkSourceManifest(
             artifacts=artifacts,
             data_source_mode="repo_existing",
@@ -644,16 +740,16 @@ def _generated_data_digests(
                 "Failed to generate deterministic benchmark data for contract manifest: "
                 f"{result.stderr or result.stdout}"
             )
-        train_file = tmp_path / train_path
-        validation_file = tmp_path / validation_path
+        train_file = _benchmark_data_artifact_path(tmp_path, train_path)
+        validation_file = _benchmark_data_artifact_path(tmp_path, validation_path)
         if not train_file.exists() or not validation_file.exists():
             raise RuntimeError(
                 "Benchmark data generator did not produce expected files: "
                 f"{train_path}, {validation_path}"
             )
-        digests = {
-            train_path: _file_digest(train_file),
-            validation_path: _file_digest(validation_file),
-        }
+        _validate_training_npz(train_file)
+        digests: dict[str, str] = {}
+        _record_data_artifact_digest(digests, train_path, _file_digest(train_file))
+        _record_data_artifact_digest(digests, validation_path, _file_digest(validation_file))
         _GENERATED_DATA_DIGEST_CACHE[cache_key] = digests
         return dict(digests)

@@ -13,8 +13,11 @@ def _in_lshape(points: np.ndarray) -> np.ndarray:
 def target_solution(xy: np.ndarray) -> np.ndarray:
     x = xy[:, 0]
     y = xy[:, 1]
-    theta = np.mod(np.arctan2(y, x), 2.0 * np.pi)
-    r = np.sqrt(x * x + y * y) + 1e-6
+    # Measure angle inside the 3*pi/2 wedge from the positive-y notch edge.
+    # This puts the other notch edge (positive x approached from below) at
+    # theta=3*pi/2, so the singular basis vanishes continuously on both edges.
+    theta = np.mod(np.arctan2(y, x) - 0.5 * np.pi, 2.0 * np.pi)
+    r = np.sqrt(x * x + y * y)
     singular = np.power(r, 2.0 / 3.0) * np.sin(2.0 * theta / 3.0)
     smooth = 0.15 * np.sin(np.pi * x) * np.sin(np.pi * y)
     return (singular + smooth).reshape(-1, 1)

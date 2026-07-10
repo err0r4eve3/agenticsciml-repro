@@ -9,7 +9,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from agenticsciml.benchmarks import BENCHMARKS, BenchmarkContractFactory, BenchmarkSpec, ProblemBundle
+from agenticsciml.benchmarks import (
+    BENCHMARKS,
+    BenchmarkContractFactory,
+    BenchmarkSpec,
+    ProblemBundle,
+    benchmark_for_path,
+)
 from agenticsciml.config import DataConfig, EvaluationContract, EvolutionConfig, ExperimentConfig
 from agenticsciml.execution.sandbox import prepare_solution_workspace, train_and_evaluate
 from agenticsciml.llm.mock import MockLLMClient
@@ -395,6 +401,7 @@ def test_problem_bundle_and_contract_are_benchmark_aware() -> None:
         assert manifest["artifacts"]["train_data.npz"]
         assert manifest["artifacts"]["val_data.npz"]
         assert "train_data.npz" in contract.allowed_train_files
+        assert "generate_data.py" not in contract.allowed_train_files
         assert any(path.endswith("val_data.npz") for path in contract.evaluator_only_files)
         assert contract.contract_hash == BenchmarkContractFactory.create_contract(bundle).contract_hash
         hashes.add(contract.contract_hash)
@@ -787,13 +794,15 @@ def test_contract_manifest_supports_custom_data_config_paths(tmp_path: Path) -> 
     module = _load_generate_module(benchmark_dir / "generate_data.py")
     generated_dir = tmp_path / "generated"
     module.generate(seed=0, output_dir=generated_dir)
-    shutil.copy2(generated_dir / "train_data.npz", benchmark_dir / "custom_train.npz")
-    shutil.copy2(generated_dir / "val_data.npz", benchmark_dir / "custom_val.npz")
+    custom_data_dir = benchmark_dir / "custom_data"
+    custom_data_dir.mkdir()
+    shutil.copy2(generated_dir / "train_data.npz", custom_data_dir / "custom_train.npz")
+    shutil.copy2(generated_dir / "val_data.npz", custom_data_dir / "custom_val.npz")
     (benchmark_dir / "Data_config.json").write_text(
         json.dumps(
             {
-                "train_path": "custom_train.npz",
-                "validation_path": "custom_val.npz",
+                "train_path": "custom_data/custom_train.npz",
+                "validation_path": "custom_data/custom_val.npz",
                 "description": "custom test paths",
             },
             indent=2,
@@ -805,8 +814,51 @@ def test_contract_manifest_supports_custom_data_config_paths(tmp_path: Path) -> 
     contract = BenchmarkContractFactory.create_contract(_problem_bundle_from_dir(benchmark_dir, spec))
     restored = EvaluationContract.from_dict(contract.to_dict())
 
-    assert "custom_train.npz" in restored.benchmark_source_manifest["artifacts"]
-    assert "custom_val.npz" in restored.benchmark_source_manifest["artifacts"]
+    assert "custom_data/custom_train.npz" in restored.benchmark_source_manifest["artifacts"]
+    assert "custom_data/custom_val.npz" in restored.benchmark_source_manifest["artifacts"]
+
+
+def test_static_catalog_fidelity_requires_the_registered_catalog_path(tmp_path: Path) -> None:
+    copied_catalog_name = tmp_path / "function_approx"
+    shutil.copytree(BENCHMARKS["function_approx"].path, copied_catalog_name)
+
+    assert benchmark_for_path(copied_catalog_name) is None
+    with pytest.raises(ValueError, match="Unknown benchmark"):
+        ProblemBundle.load(copied_catalog_name)
+
+
+@pytest.mark.parametrize("leaked_key", ["x_val", "u_val", "validation_labels"])
+def test_contract_rejects_validation_arrays_in_training_npz(
+    tmp_path: Path,
+    leaked_key: str,
+) -> None:
+    spec = BENCHMARKS["function_approx"]
+    benchmark_dir = tmp_path / f"custom-{leaked_key}"
+    shutil.copytree(spec.path, benchmark_dir)
+    np.savez(
+        benchmark_dir / "custom_train.npz",
+        x_train=np.array([[0.0], [1.0]]),
+        u_train=np.array([[0.0], [1.0]]),
+        **{leaked_key: np.array([[7.0]])},
+    )
+    np.savez(
+        benchmark_dir / "custom_val.npz",
+        x_val=np.array([[0.0], [1.0]]),
+        u_val=np.array([[0.0], [1.0]]),
+    )
+    (benchmark_dir / "Data_config.json").write_text(
+        json.dumps(
+            {
+                "train_path": "custom_train.npz",
+                "validation_path": "custom_val.npz",
+                "description": "validation-leak fixture",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="must not contain validation"):
+        BenchmarkContractFactory.create_contract(_problem_bundle_from_dir(benchmark_dir, spec))
 
 
 def test_unknown_benchmark_bundle_fails_clearly(tmp_path: Path) -> None:

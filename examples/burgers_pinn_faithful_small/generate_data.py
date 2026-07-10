@@ -13,15 +13,31 @@ VAL_X_POINTS = 83
 VAL_T_POINTS = 40
 VAL_INITIAL = 120
 VAL_BOUNDARY = 160
+VISCOSITY = 0.04
+COLE_HOPF_AMPLITUDE = 0.9
 
 
 def target_solution(xt: np.ndarray) -> np.ndarray:
+    """Exact periodic solution of u_t + u*u_x - nu*u_xx = 0.
+
+    The Cole-Hopf potential
+    ``phi = 1 + a*exp(-nu*pi**2*t)*cos(pi*x)`` solves the heat equation,
+    and ``u = -2*nu*partial_x(log(phi))`` solves viscous Burgers.
+    """
     x = xt[:, 0]
     t = xt[:, 1]
-    base = -np.sin(np.pi * x) * np.exp(-0.04 * np.pi**2 * t)
-    steepener = 1.0 + 0.45 * t * np.cos(np.pi * x) ** 2
-    harmonic = 0.06 * np.sin(2.0 * np.pi * (x - 0.2 * t)) * np.exp(-1.5 * t)
-    return (base / steepener + harmonic).reshape(-1, 1)
+    decay = np.exp(-VISCOSITY * np.pi**2 * t)
+    potential = 1.0 + COLE_HOPF_AMPLITUDE * decay * np.cos(np.pi * x)
+    solution = (
+        2.0
+        * VISCOSITY
+        * COLE_HOPF_AMPLITUDE
+        * np.pi
+        * decay
+        * np.sin(np.pi * x)
+        / potential
+    )
+    return solution.reshape(-1, 1)
 
 
 def _random_xt(rng: np.random.Generator, n: int) -> np.ndarray:
@@ -77,6 +93,7 @@ def generate(seed: int, output_dir: Path) -> None:
         x_boundary=x_boundary,
         u_boundary=u_boundary,
         x_collocation=x_collocation,
+        viscosity=np.array([VISCOSITY], dtype=float),
     )
     np.savez(
         output_dir / "val_data.npz",
@@ -85,6 +102,11 @@ def generate(seed: int, output_dir: Path) -> None:
         n_solution=np.array([len(x_solution)], dtype=np.int64),
         n_initial=np.array([len(x_initial_val)], dtype=np.int64),
         n_boundary=np.array([len(x_boundary_val)], dtype=np.int64),
+        n_x=np.array([VAL_X_POINTS], dtype=np.int64),
+        n_t=np.array([VAL_T_POINTS], dtype=np.int64),
+        finite_difference_dx=np.array([xs[1] - xs[0]], dtype=float),
+        finite_difference_dt=np.array([ts[1] - ts[0]], dtype=float),
+        viscosity=np.array([VISCOSITY], dtype=float),
     )
 
 

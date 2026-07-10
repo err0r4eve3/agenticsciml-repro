@@ -129,6 +129,19 @@ def create_custom_benchmark_bundle(
         "generate_data.py": _generate_data_py(digest),
         "evaluate.py": _evaluate_py(),
     }
+    existing_files = [path for path in benchmark_dir.rglob("*") if path.is_file()]
+    if existing_files:
+        _validate_existing_custom_bundle(
+            benchmark_dir,
+            expected_paths=sorted(files),
+            source_digest=digest,
+        )
+        return CustomBenchmarkBundle(
+            benchmark=benchmark,
+            benchmark_dir=benchmark_dir,
+            files=sorted(files),
+            claim_boundary=CUSTOM_BENCHMARK_CLAIM_BOUNDARY,
+        )
     for relative_path, text in files.items():
         _atomic_write_text(benchmark_dir / relative_path, text)
     return CustomBenchmarkBundle(
@@ -137,6 +150,32 @@ def create_custom_benchmark_bundle(
         files=sorted(files),
         claim_boundary=CUSTOM_BENCHMARK_CLAIM_BOUNDARY,
     )
+
+
+def _validate_existing_custom_bundle(
+    benchmark_dir: Path,
+    *,
+    expected_paths: list[str],
+    source_digest: str,
+) -> None:
+    spec_path = benchmark_dir / CUSTOM_BENCHMARK_SPEC
+    try:
+        spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"Existing custom benchmark is not a valid reusable bundle: {benchmark_dir}"
+        ) from exc
+    if not isinstance(spec, dict) or spec.get("source_digest") != source_digest:
+        raise RuntimeError(
+            "Existing custom benchmark source digest does not match the requested problem: "
+            f"{benchmark_dir}"
+        )
+    missing = [relative_path for relative_path in expected_paths if not (benchmark_dir / relative_path).is_file()]
+    if missing:
+        raise RuntimeError(
+            "Existing custom benchmark is incomplete; refusing to overwrite reviewed files: "
+            + ", ".join(missing)
+        )
 
 
 def _slugify(text: str) -> str:

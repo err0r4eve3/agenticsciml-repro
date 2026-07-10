@@ -22,13 +22,16 @@ MODEL_CHECKPOINT = "model.pkl"
 
 class MODEL:
     def __init__(self):
-        self.mean = 0.0
+        self.mean = np.zeros((1, 1), dtype=float)
 
     def fit(self, x, y):
-        self.mean = float(np.mean(y))
+        y = np.asarray(y, dtype=float)
+        if y.ndim == 1:
+            y = y.reshape(-1, 1)
+        self.mean = np.mean(y, axis=0, keepdims=True)
 
     def predict(self, x):
-        return np.full((len(x), 1), self.mean, dtype=float)
+        return np.repeat(self.mean, len(x), axis=0)
 
 
 def main():
@@ -40,7 +43,7 @@ def main():
     if args.mode == "validate":
         model = MODEL()
         probe = model.predict(np.zeros((3, 1)))
-        assert probe.shape == (3, 1)
+        assert probe.ndim == 2 and probe.shape[0] == 3
         return
     if args.mode == "predict":
         with open(MODEL_CHECKPOINT, "rb") as f:
@@ -271,7 +274,7 @@ class MockLLMClient(LLMClient):
             return {
                 "summary": "No deterministic patch produced in mock mode.",
                 "failure_kind": "runtime_error",
-                "minimal_fix": True,
+                "minimal_fix": "No safe deterministic repair is available in mock mode.",
                 "parent_digest": parent_digest,
                 "patch": "",
                 "files_changed": ["solution.py"],

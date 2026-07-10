@@ -1,12 +1,20 @@
 import json
+import os
+import shutil
+import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from agenticsciml.config import EvaluationContract
 from agenticsciml.execution.runner import run_command
 from agenticsciml.execution import sandbox as sandbox_module
-from agenticsciml.execution.sandbox import prepare_solution_workspace, train_and_evaluate
+from agenticsciml.execution.sandbox import (
+    prepare_run_inputs,
+    prepare_solution_workspace,
+    train_and_evaluate,
+)
 
 
 TRIVIAL_SOLUTION = '''
@@ -317,7 +325,7 @@ if __name__ == "__main__":
 
 
 def test_run_command_captures_exit_code_and_logs(tmp_path: Path) -> None:
-    result = run_command(tmp_path, ["python", "-c", "print('ok')"], timeout_s=5)
+    result = run_command(tmp_path, [sys.executable, "-c", "print('ok')"], timeout_s=5)
 
     assert result.exit_code == 0
     assert result.stdout.strip() == "ok"
@@ -328,7 +336,7 @@ def test_run_command_uses_clean_environment_by_default(tmp_path: Path, monkeypat
 
     result = run_command(
         tmp_path,
-        ["python", "-c", "import os; raise SystemExit(1 if os.environ.get('OPENAI_API_KEY') else 0)"],
+        [sys.executable, "-c", "import os; raise SystemExit(1 if os.environ.get('OPENAI_API_KEY') else 0)"],
         timeout_s=5,
     )
 
@@ -388,6 +396,21 @@ def test_run_level_inputs_deduplicate_public_data_and_keep_private_eval_out_of_s
     assert json.loads((first_workspace / "eval.json").read_text(encoding="utf-8"))["metric"] == "validation_mse"
 
 
+def test_prepare_run_inputs_materializes_reviewable_frozen_snapshot(tmp_path: Path) -> None:
+    benchmark = Path("examples/function_approx").resolve()
+    run_inputs_dir = tmp_path / "run" / "run_inputs"
+
+    manifest = prepare_run_inputs(benchmark, run_inputs_dir)
+    verified_again = prepare_run_inputs(benchmark, run_inputs_dir)
+
+    assert manifest == verified_again
+    assert len(manifest["manifest_digest"]) == 64
+    assert (run_inputs_dir / "public" / "Problem.md").is_file()
+    assert (run_inputs_dir / "public" / "train_data.npz").is_file()
+    assert (run_inputs_dir / "private_eval" / "evaluate.py").is_file()
+    assert (run_inputs_dir / "private_eval" / "val_data.npz").is_file()
+
+
 def test_private_eval_dir_is_only_passed_explicitly_to_train_and_evaluate(tmp_path: Path) -> None:
     benchmark = Path("examples/function_approx").resolve()
     run_inputs_dir = tmp_path / "run" / "run_inputs"
@@ -435,13 +458,188 @@ def test_public_input_copy_fallback_preserves_deduplication_contract_when_symlin
     assert layout["layout"] == "run_level_inputs_v1"
     assert layout["solution_public_input_mode"] == "copy"
     assert layout["storage_dedup_fallback"] == "copy"
-    assert manifest["storage_dedup_fallback"] == "copy"
+    assert manifest["storage_dedup_fallback"] == "symlink"
     assert (run_inputs_dir / "public" / "train_data.npz").exists()
     assert (run_inputs_dir / "private_eval" / "val_data.npz").exists()
     assert (workspace / "train_data.npz").exists()
     assert not (workspace / "train_data.npz").is_symlink()
     assert not (workspace / "private_eval").exists()
     assert not (workspace / "val_data.npz").exists()
+
+
+def test_custom_data_config_paths_drive_workspace_and_private_evaluation(tmp_path: Path) -> None:
+    benchmark = tmp_path / "custom_data_paths"
+    shutil.copytree(Path("examples/function_approx").resolve(), benchmark)
+    custom_data_dir = benchmark / "custom_data"
+    custom_data_dir.mkdir()
+    np.savez(
+        custom_data_dir / "custom_train.npz",
+        x_train=np.array([[0.0], [1.0], [2.0]]),
+        u_train=np.array([[42.0], [42.0], [42.0]]),
+    )
+    np.savez(
+        custom_data_dir / "custom_validation.npz",
+        x_val=np.array([[3.0], [4.0]]),
+        u_val=np.array([[42.0], [42.0]]),
+    )
+    (benchmark / "Data_config.json").write_text(
+        json.dumps(
+            {
+                "train_path": "custom_data/custom_train.npz",
+                "validation_path": "custom_data/custom_validation.npz",
+                "description": "custom execution paths",
+            }
+        ),
+        encoding="utf-8",
+    )
+    run_dir = tmp_path / "run"
+    run_inputs_dir = run_dir / "run_inputs"
+    workspace = run_dir / "solutions" / "solution_000"
+
+    layout = prepare_solution_workspace(benchmark, workspace, run_inputs_dir=run_inputs_dir)
+    manifest = json.loads((run_inputs_dir / "manifest.json").read_text(encoding="utf-8"))
+    (workspace / "solution.py").write_text(
+        TRIVIAL_SOLUTION.replace(
+            'np.load("train_data.npz")',
+            'np.load("custom_data/custom_train.npz")',
+        ),
+        encoding="utf-8",
+    )
+    contract = EvaluationContract.default_function_approx()
+    contract.evaluator_only_files = [
+        "run_inputs/private_eval/evaluate.py",
+        "run_inputs/private_eval/custom_data/custom_validation.npz",
+    ]
+
+    result = train_and_evaluate(
+        workspace,
+        contract,
+        timeout_s=20,
+        private_eval_dir=run_inputs_dir / "private_eval",
+    )
+
+    assert result.exit_code == 0
+    assert layout["train_path"] == "custom_data/custom_train.npz"
+    assert layout["validation_path"] == "custom_data/custom_validation.npz"
+    assert manifest["train_path"] == "custom_data/custom_train.npz"
+    assert manifest["validation_path"] == "custom_data/custom_validation.npz"
+    assert "public/custom_data/custom_train.npz" in manifest["file_digests"]
+    assert "private_eval/custom_data/custom_validation.npz" in manifest["file_digests"]
+    assert (workspace / "custom_data" / "custom_train.npz").exists()
+    assert not (workspace / "train_data.npz").exists()
+    assert not (workspace / "custom_data" / "custom_validation.npz").exists()
+    assert json.loads((workspace / "eval.json").read_text(encoding="utf-8"))["score"] == 0.0
+
+
+def test_run_inputs_freeze_after_first_solution_and_verify_digests(tmp_path: Path) -> None:
+    benchmark = tmp_path / "frozen_benchmark"
+    shutil.copytree(Path("examples/function_approx").resolve(), benchmark)
+    np.savez(
+        benchmark / "train_data.npz",
+        x_train=np.array([[0.0], [1.0]]),
+        u_train=np.array([[3.0], [3.0]]),
+    )
+    np.savez(
+        benchmark / "val_data.npz",
+        x_val=np.array([[0.0], [1.0]]),
+        u_val=np.array([[3.0], [3.0]]),
+    )
+    run_dir = tmp_path / "run"
+    run_inputs_dir = run_dir / "run_inputs"
+    first_workspace = run_dir / "solutions" / "solution_000"
+    second_workspace = run_dir / "solutions" / "solution_001"
+
+    prepare_solution_workspace(benchmark, first_workspace, run_inputs_dir=run_inputs_dir)
+    manifest_before = (run_inputs_dir / "manifest.json").read_bytes()
+    snapshot_digest = json.loads(manifest_before)["file_digests"]["public/train_data.npz"]
+    np.savez(
+        benchmark / "train_data.npz",
+        x_train=np.array([[0.0], [1.0]]),
+        u_train=np.array([[999.0], [999.0]]),
+    )
+    (benchmark / "Evaluation.md").write_text("changed after run start", encoding="utf-8")
+
+    prepare_solution_workspace(benchmark, second_workspace, run_inputs_dir=run_inputs_dir)
+
+    assert (run_inputs_dir / "manifest.json").read_bytes() == manifest_before
+    assert float(np.load(second_workspace / "train_data.npz")["u_train"].mean()) == 3.0
+    assert json.loads(manifest_before)["file_digests"]["public/train_data.npz"] == snapshot_digest
+
+    manifest_path = run_inputs_dir / "manifest.json"
+    tampered_manifest = json.loads(manifest_before)
+    tampered_manifest["private_label_boundary"] = "tampered"
+    manifest_path.write_text(json.dumps(tampered_manifest), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="manifest digest mismatch"):
+        prepare_run_inputs(benchmark, run_inputs_dir)
+    manifest_path.write_bytes(manifest_before)
+
+    frozen_train = run_inputs_dir / "public" / "train_data.npz"
+    frozen_train.chmod(0o644)
+    np.savez(
+        frozen_train,
+        x_train=np.array([[0.0]]),
+        u_train=np.array([[8.0]]),
+    )
+    with pytest.raises(RuntimeError, match="digest mismatch"):
+        prepare_solution_workspace(
+            benchmark,
+            run_dir / "solutions" / "solution_002",
+            run_inputs_dir=run_inputs_dir,
+        )
+
+
+def test_public_input_symlinks_are_relative_and_survive_run_bundle_move(tmp_path: Path) -> None:
+    benchmark = Path("examples/function_approx").resolve()
+    run_dir = tmp_path / "original_run"
+    workspace = run_dir / "solutions" / "solution_000"
+    layout = prepare_solution_workspace(
+        benchmark,
+        workspace,
+        run_inputs_dir=run_dir / "run_inputs",
+    )
+    if layout["solution_public_input_mode"] != "symlink":
+        pytest.skip("platform does not support solution input symlinks")
+
+    link_target = os.readlink(workspace / "train_data.npz")
+    assert not Path(link_target).is_absolute()
+    moved_run = tmp_path / "moved_run"
+    shutil.move(run_dir, moved_run)
+
+    moved_train = moved_run / "solutions" / "solution_000" / "train_data.npz"
+    assert moved_train.is_symlink()
+    assert "x_train" in np.load(moved_train).files
+    prepare_solution_workspace(
+        benchmark,
+        moved_run / "solutions" / "solution_001",
+        run_inputs_dir=moved_run / "run_inputs",
+    )
+
+
+@pytest.mark.parametrize("leaked_key", ["x_val", "u_val", "validation_labels"])
+def test_run_inputs_reject_validation_arrays_in_training_npz(
+    tmp_path: Path,
+    leaked_key: str,
+) -> None:
+    benchmark = tmp_path / f"leaked-{leaked_key}"
+    shutil.copytree(Path("examples/function_approx").resolve(), benchmark)
+    np.savez(
+        benchmark / "train_data.npz",
+        x_train=np.array([[0.0]]),
+        u_train=np.array([[0.0]]),
+        **{leaked_key: np.array([[1.0]])},
+    )
+    np.savez(
+        benchmark / "val_data.npz",
+        x_val=np.array([[0.0]]),
+        u_val=np.array([[0.0]]),
+    )
+
+    with pytest.raises(RuntimeError, match="must not contain validation"):
+        prepare_solution_workspace(
+            benchmark,
+            tmp_path / "run" / "solutions" / "solution_000",
+            run_inputs_dir=tmp_path / "run" / "run_inputs",
+        )
 
 
 def test_solution_cannot_load_validation_data_during_train(tmp_path: Path) -> None:
