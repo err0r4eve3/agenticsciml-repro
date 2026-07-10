@@ -42,6 +42,9 @@ try {
   await sendChatMessage(page, "打开当前账号代码工作区");
   await expectVisibleText(page, "[data-testid='chat-transcript']", "open_code_server", "Plan mode did not expose proposed code action");
   await expectVisible(page, "[data-testid='page-chat']", "Plan mode should not navigate away from Chat page");
+  await sendChatMessage(page, "请总结并分析当前 run 的 benchmark 和实验结果，不要启动或恢复实验");
+  await expectNotVisibleText(page, "[data-testid='chat-transcript']", "start_run", "Plan summary incorrectly proposed start_run");
+  await expectNotVisibleText(page, "[data-testid='chat-transcript']", "resume_run", "Plan summary incorrectly proposed resume_run");
 
   await page.locator("[data-testid='assistant-mode-agent']").first().click();
   const codeServerWebsocketPromise = options.expectCodeServerWebsocket
@@ -88,6 +91,7 @@ try {
           "chat_page_copy_boundary",
           "ask_no_actions",
           "plan_no_dispatch",
+          "plan_summary_no_run_control",
           "agent_open_code_server_dispatch",
           ...(options.expectCodeServerWebsocket ? ["code_server_websocket_stable"] : []),
           "ide_agent_panel_resize",

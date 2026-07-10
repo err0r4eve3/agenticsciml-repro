@@ -429,6 +429,52 @@ def test_problem_intake_prefers_fno_operator_path_for_fourier_neural_operator_pr
     assert "fno_lite_operator" in payload["selected_algorithm_ids"]
 
 
+@pytest.mark.parametrize(
+    ("problem_statement", "expected_benchmark"),
+    [
+        (
+            "请从多时间步稀疏噪声传感器重建二维圆柱尾流涡量场，并保持空间结构平滑。",
+            "cylinder_wake_reconstruction_faithful_small",
+        ),
+        (
+            "请用 PINN 求解 L 形区域 Poisson 方程，满足边界条件并降低偏微分方程残差。",
+            "poisson_lshape_faithful_small",
+        ),
+        (
+            "请用物理信息神经网络求解黏性 Burgers 方程的初值和边界条件问题。",
+            "burgers_pinn_faithful_small",
+        ),
+        (
+            "请学习反应扩散参数化偏微分方程的傅里叶神经算子，完成函数到函数预测。",
+            "reaction_diffusion_operator_faithful_small",
+        ),
+        (
+            "请用 DeepONet 学习输入函数到反导数函数的积分算子，并做私有验证。",
+            "antiderivative_operator_faithful_small",
+        ),
+    ],
+)
+def test_problem_intake_matches_chinese_sciml_catalog(
+    problem_statement: str,
+    expected_benchmark: str,
+) -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/problem-intake/plan",
+        json={
+            "problem_statement": problem_statement,
+            "requirements": "保持本地、确定性，并且不泄漏私有验证标签。",
+            "evaluation_criteria": "使用目录中对应任务的私有评估指标。",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "catalog_benchmark_planned"
+    assert payload["recommended_benchmark"]["name"] == expected_benchmark
+
+
 def test_problem_intake_custom_benchmark_generates_runnable_evaluator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENTICSCIML_ACCOUNTS_ROOT", str(tmp_path / "accounts"))
     client = TestClient(create_app())
@@ -971,7 +1017,6 @@ def test_web_resume_preserves_seed_models_and_problem_context(tmp_path: Path) ->
             "experiment_id": "resume-preserve",
             "output_dir": str(tmp_path),
             "max_iterations": 1,
-            "parallel_mutations": 1,
         },
     )
 
@@ -985,6 +1030,85 @@ def test_web_resume_preserves_seed_models_and_problem_context(tmp_path: Path) ->
     assert config["planner_snapshot"]["selected_algorithm_ids"] == ["piecewise_local_basis"]
     assert metadata["strategy_seed_ids"] == ["piecewise_local_basis"]
     assert metadata["problem_intake"] == problem_intake
+
+
+def test_web_resume_inherits_frozen_evolution_and_rejects_drift(tmp_path: Path) -> None:
+    client = TestClient(create_app())
+    first = client.post(
+        "/api/runs",
+        json={
+            "benchmark": "function_approx",
+            "mode": "mock",
+            "target_solution_count": 1,
+            "parallel_mutations": 3,
+            "selector_vote_count": 5,
+            "selector_panel": [
+                {
+                    "model": "selector-model-a",
+                    "temperature": 0.15,
+                    "reasoning_effort": "high",
+                }
+            ],
+            "max_children_per_node": 4,
+            "timeout_s": 23,
+            "max_debug_retries": 0,
+            "random_seed": 17,
+            "no_kb": True,
+            "random_kb": True,
+            "no_critic": True,
+            "no_debugger": True,
+            "no_branch_context": True,
+            "llm_fast_mode": True,
+            "experiment_id": "resume-frozen",
+            "output_dir": str(tmp_path),
+        },
+    )
+    assert first.status_code == 200
+
+    resumed = client.post(
+        "/api/runs/resume-frozen/resume",
+        json={"output_dir": str(tmp_path), "background": False},
+    )
+    assert resumed.status_code == 200
+    config = json.loads((tmp_path / "resume-frozen" / "config.json").read_text(encoding="utf-8"))
+    evolution = config["evolution"]
+    assert evolution == {
+        "max_iterations": 0,
+        "parallel_mutations": 3,
+        "max_children_per_node": 4,
+        "max_debug_retries": 0,
+        "timeout_s": 23,
+        "use_kb": False,
+        "random_kb": True,
+        "random_seed": 17,
+        "use_critic": False,
+        "use_debugger": False,
+        "use_branch_context": False,
+        "selector_vote_count": 5,
+    }
+    assert config["llm_fast_mode"] is True
+    assert config["selector_panel"][0]["model"] == "selector-model-a"
+
+    drift = client.post(
+        "/api/runs/resume-frozen/resume",
+        json={
+            "output_dir": str(tmp_path),
+            "parallel_mutations": 1,
+            "random_seed": 99,
+        },
+    )
+    assert drift.status_code == 409
+    assert "Resume cannot change frozen run setting" in drift.json()["detail"]
+
+    selector_drift = client.post(
+        "/api/runs/resume-frozen/resume",
+        json={
+            "output_dir": str(tmp_path),
+            "selector_panel": [{"model": "different-selector"}],
+        },
+    )
+    assert selector_drift.status_code == 409
+    assert "selector_panel" in selector_drift.json()["detail"]
 
 
 def test_web_run_rejects_unknown_agent_role(tmp_path: Path) -> None:
@@ -1058,6 +1182,47 @@ def test_web_run_budget_fields_are_applied(tmp_path: Path) -> None:
     assert config["evolution"]["parallel_mutations"] == 2
     assert config["evolution"]["selector_vote_count"] == 4
     assert config["evolution"]["max_children_per_node"] == 3
+
+
+def test_web_run_rejects_target_that_fixed_fanout_would_overshoot(tmp_path: Path) -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/runs",
+        json={
+            "benchmark": "function_approx",
+            "mode": "dry_run",
+            "target_solution_count": 4,
+            "parallel_mutations": 2,
+            "experiment_id": "non-exact-budget",
+            "output_dir": str(tmp_path),
+        },
+    )
+
+    assert response.status_code == 400
+    assert "cannot be represented exactly" in response.json()["detail"]
+    assert not (tmp_path / "non-exact-budget").exists()
+
+
+def test_web_run_rejects_duplicate_id_without_mutating_existing_metadata(tmp_path: Path) -> None:
+    client = TestClient(create_app())
+    request = {
+        "benchmark": "function_approx",
+        "mode": "mock",
+        "target_solution_count": 1,
+        "experiment_id": "duplicate-run",
+        "output_dir": str(tmp_path),
+    }
+    first = client.post("/api/runs", json=request)
+    assert first.status_code == 200
+    metadata_path = tmp_path / "duplicate-run" / "run_metadata.json"
+    before = metadata_path.read_bytes()
+
+    duplicate = client.post("/api/runs", json={**request, "benchmark": "poisson_lshape"})
+
+    assert duplicate.status_code == 409
+    assert "Run id already exists" in duplicate.json()["detail"]
+    assert metadata_path.read_bytes() == before
 
 
 def test_selector_votes_and_solutions_are_read_only_evidence(tmp_path: Path) -> None:
@@ -1755,6 +1920,65 @@ def test_solver_chat_plan_and_agent_modes_return_structured_actions(tmp_path: Pa
     assert start_payload["actions"][0]["payload"]["background"] is True
 
 
+@pytest.mark.parametrize("assistant_mode", ["plan", "agent"])
+def test_solver_chat_summary_analysis_never_proposes_run_control(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    assistant_mode: str,
+) -> None:
+    monkeypatch.setenv("AGENTICSCIML_ACCOUNTS_ROOT", str(tmp_path / "accounts"))
+    run_dir = tmp_path / "accounts" / "alice" / "runs" / "summary-run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "trace_summary.json").write_text(
+        json.dumps({"event_count": 3, "quality_gate": {"passed": True}}),
+        encoding="utf-8",
+    )
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/solver/chat",
+        json={
+            "message": "请总结并分析这个 run 的 benchmark、解法和实验 trace，不要启动新实验。",
+            "active_run_id": "summary-run",
+            "selected_benchmark": "function_approx",
+            "mode": "mock",
+            "assistant_mode": assistant_mode,
+            "account_id": "alice",
+            "workspace_scope": "account",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["actions"] == []
+    assert payload["trace_refs"][0]["run_id"] == "summary-run"
+    assert any("negation suppressed" in warning for warning in payload["warnings"])
+
+
+def test_solver_chat_run_control_actions_are_mutually_exclusive(tmp_path: Path) -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/solver/chat",
+        json={
+            "message": "恢复当前 run 并继续运行，然后再启动一个 mock 实验。",
+            "active_run_id": "partial-run",
+            "selected_benchmark": "function_approx",
+            "mode": "mock",
+            "assistant_mode": "plan",
+            "account_id": "alice",
+            "workspace_scope": "account",
+            "output_dir": str(tmp_path),
+        },
+    )
+
+    assert response.status_code == 200
+    actions = response.json()["actions"]
+    assert len(actions) == 1
+    assert actions[0]["type"] == "resume_run"
+    assert actions[0]["run_id"] == "partial-run"
+
+
 def test_solver_chat_agent_can_plan_benchmark_and_seeded_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1824,14 +2048,35 @@ def test_solver_chat_agent_can_scaffold_custom_proxy_for_unlisted_problem(
     monkeypatch.setenv("AGENTICSCIML_ACCOUNTS_ROOT", str(tmp_path / "accounts"))
     client = TestClient(create_app())
 
+    message = (
+        "请用 Agent 模式求解一个新问题：coupled electrochemical dendrite morphology prediction "
+        "from impedance spectra and phase-field image descriptors. This is not in the catalog; "
+        "please create a custom proxy benchmark only."
+    )
+    plan_response = client.post(
+        "/api/solver/chat",
+        json={
+            "message": message,
+            "selected_benchmark": "function_approx",
+            "mode": "mock",
+            "assistant_mode": "plan",
+            "account_id": "alice",
+            "workspace_scope": "account",
+            "target_solution_count": 2,
+            "parallel_mutations": 1,
+        },
+    )
+    assert plan_response.status_code == 200
+    plan_payload = plan_response.json()
+    assert plan_payload["actions"] == []
+    assert plan_payload["artifacts"][0]["status"] == "custom_proxy_benchmark_deferred"
+    custom_root = tmp_path / "accounts" / "alice" / "benchmarks"
+    assert not custom_root.exists() or list(custom_root.iterdir()) == []
+
     response = client.post(
         "/api/solver/chat",
         json={
-            "message": (
-                "请用 Agent 模式求解一个新问题：coupled electrochemical dendrite morphology prediction "
-                "from impedance spectra and phase-field image descriptors. This is not in the catalog; "
-                "please create a custom proxy benchmark only."
-            ),
+            "message": message,
             "selected_benchmark": "function_approx",
             "mode": "mock",
             "assistant_mode": "agent",

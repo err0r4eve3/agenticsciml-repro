@@ -50,6 +50,9 @@ type RunSummary = {
   run_dir: string;
   metadata: null | {
     run_state?: string;
+    benchmark_name?: string;
+    benchmark_fidelity_level?: string;
+    llm_mode?: string;
     champion_node_id?: string;
     solution_count?: number;
     evidence_mode?: string;
@@ -715,7 +718,7 @@ const api = {
     background?: boolean;
     real_confirmed?: boolean;
   }): Promise<RunSummary> {
-    const id = body.experiment_id ?? `web-${new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14)}`;
+    const id = body.experiment_id ?? `web-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
     await postJson<unknown>("/api/runs", {
       benchmark: body.benchmark,
       mode: body.mode,
@@ -744,17 +747,12 @@ const api = {
   },
   async resumeRun(
     runId: string,
-    benchmark: string,
-    mode: RunMode,
     accountId: string,
     realConfirmed = false
   ): Promise<RunSummary> {
     await postJson<unknown>(`/api/runs/${encodeURIComponent(runId)}/resume`, {
-      mode,
       account_id: accountId,
       experiment_id: runId,
-      max_iterations: 1,
-      parallel_mutations: 1,
       background: true,
       real_confirmed: realConfirmed
     });
@@ -1319,11 +1317,13 @@ export function App() {
       }
       if (action.type === "resume_run" && action.run_id) {
         if (!actionBelongsToActiveAccount(action)) continue;
-        if (mode === "real") {
+        const activeRunMode = asRunMode(activeRun?.metadata?.llm_mode, mode);
+        const resumeMode = asRunMode(action.payload?.mode, activeRunMode);
+        if (resumeMode === "real") {
           setPendingRealAction(action);
           continue;
         }
-        const run = await api.resumeRun(action.run_id, selectedBenchmark, mode, activeAccountId);
+        const run = await api.resumeRun(action.run_id, activeAccountId);
         setActiveRun(run);
         setActiveRunId(run.run_id);
         await refreshRuns();
@@ -1363,7 +1363,7 @@ export function App() {
       setBusy(true);
       setError(null);
       try {
-        const run = await api.resumeRun(action.run_id, selectedBenchmark, "real", activeAccountId, true);
+        const run = await api.resumeRun(action.run_id, activeAccountId, true);
         setActiveRun(run);
         setActiveRunId(run.run_id);
         await refreshRuns();
@@ -3578,6 +3578,12 @@ function DashboardView({
 }) {
   const metadata = activeRun?.metadata;
   const qualityGate = activeRun?.trace_summary?.quality_gate?.passed;
+  const benchmarkName = activeRun
+    ? metadata?.benchmark_name ?? "未知"
+    : selected?.name ?? "未知";
+  const fidelityLevel = activeRun
+    ? metadata?.benchmark_fidelity_level ?? "未知"
+    : selected?.fidelity_level ?? "未知";
   return (
     <div className="view-stack">
       <section className="section-head">
@@ -3599,9 +3605,12 @@ function DashboardView({
       <div className="metric-grid">
         <Metric label="状态" value={displayRunState(activeRun?.status ?? "idle")} />
         <Metric label="运行阶段" value={displayRunState(metadata?.run_state ?? "pending")} />
-        <Metric label="基准任务" value={selected?.name ?? "未知"} />
-        <Metric label="保真度" value={selected?.fidelity_level ?? "未知"} />
-        <Metric label="科学声明" value={metadata?.scientific_claim ?? selected?.scientific_claim ?? "未知"} />
+        <Metric label="基准任务" value={benchmarkName} />
+        <Metric label="保真度" value={fidelityLevel} />
+        <Metric
+          label="科学声明"
+          value={activeRun ? metadata?.scientific_claim ?? "未知" : selected?.scientific_claim ?? "未知"}
+        />
         <Metric label="声明门禁" value={displayRunState(metadata?.claim_gate?.status ?? "unknown")} />
         <Metric label="声明等级" value={metadata?.claim_gate?.claim_level ?? "workflow_proxy"} />
         <Metric label="知识库" value={metadata?.kb_manifest?.coverage_status ?? "未知"} />

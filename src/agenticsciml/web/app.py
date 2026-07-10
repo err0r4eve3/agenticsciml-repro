@@ -327,11 +327,14 @@ class RunStartRequest(BaseModel):
     max_iterations: int = Field(default=1, ge=0)
     parallel_mutations: int = Field(default=2, ge=1)
     timeout_s: int = Field(default=60, ge=1)
+    max_debug_retries: int = Field(default=2, ge=0)
     output_dir: str = "runs"
     experiment_id: str | None = None
     no_kb: bool = False
     random_kb: bool = False
     random_seed: int = 0
+    no_critic: bool = False
+    no_debugger: bool = False
     no_branch_context: bool = False
     target_solution_count: int | None = Field(default=None, ge=1)
     selector_vote_count: int = Field(default=3, ge=1)
@@ -579,7 +582,7 @@ def create_app() -> FastAPI:
                 started_at=time.time(),
                 ended_at=time.time(),
             )
-            _store_record(record)
+            _store_new_record(record, allow_existing=request.resume)
             return {
                 "run_id": run_id,
                 "status": "dry_run",
@@ -607,7 +610,7 @@ def create_app() -> FastAPI:
             status="running",
             started_at=time.time(),
         )
-        _store_record(record)
+        _store_new_record(record, allow_existing=request.resume)
 
         if request.background:
             thread = threading.Thread(
@@ -769,10 +772,13 @@ def _run_orchestrator(
             max_iterations=int(run_budget["max_iterations"]),
             parallel_mutations=int(run_budget["parallel_mutations"]),
             max_children_per_node=request.max_children_per_node,
+            max_debug_retries=request.max_debug_retries,
             timeout_s=request.timeout_s,
             use_kb=not request.no_kb,
             random_kb=request.random_kb,
             random_seed=request.random_seed,
+            use_critic=not request.no_critic,
+            use_debugger=not request.no_debugger,
             use_branch_context=not request.no_branch_context,
             selector_vote_count=request.selector_vote_count,
         )
@@ -864,7 +870,11 @@ def _readiness_report_for_request(
     )
 
 
-def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, object]:
+def _problem_intake_plan_payload(
+    request: ProblemIntakeRequest,
+    *,
+    materialize_custom_benchmark: bool = True,
+) -> dict[str, object]:
     text = _intake_text(request)
     benchmark_candidates = _rank_benchmarks_for_problem(text)
     recommended = benchmark_candidates[0]["benchmark"]
@@ -951,7 +961,27 @@ def _problem_intake_plan_payload(request: ProblemIntakeRequest) -> dict[str, obj
     if request.account_id:
         action_payload["account_id"] = _resolve_account_id(request.account_id)
     run_allowed = status != "needs_manual_benchmark"
-    if request.allow_custom_benchmark:
+    if request.allow_custom_benchmark and not materialize_custom_benchmark:
+        custom_problem_package = _deferred_custom_problem_package(
+            request,
+            benchmark_candidates=benchmark_candidates,
+            algorithm_rankings=algorithm_rankings,
+        )
+        status = str(custom_problem_package["status"])
+        synthesis_level = str(custom_problem_package["synthesis_level"])
+        run_allowed = False
+        planner_snapshot["planned_custom_benchmark"] = {
+            "status": custom_problem_package["status"],
+            "materialization_deferred": True,
+            "fidelity_level": "proxy",
+            "synthesis_level": custom_problem_package["synthesis_level"],
+            "evidence_level": custom_problem_package["evidence_level"],
+        }
+        warnings.append(
+            "Plan mode is side-effect free: no custom benchmark files were created. "
+            "Switch to Agent mode to materialize the workflow-proxy bundle and launch it."
+        )
+    elif request.allow_custom_benchmark:
         custom_problem_package = _custom_problem_package(
             request,
             benchmark_candidates=benchmark_candidates,
@@ -1150,6 +1180,33 @@ def _custom_problem_package(
     }
 
 
+def _deferred_custom_problem_package(
+    request: ProblemIntakeRequest,
+    *,
+    benchmark_candidates: list[dict[str, object]],
+    algorithm_rankings: list[dict[str, object]],
+) -> dict[str, object]:
+    selected_algorithms = [
+        item["algorithm"]
+        for item in algorithm_rankings
+        if item.get("selected")
+    ][:6]
+    return {
+        "schema_version": 1,
+        "status": "custom_proxy_benchmark_deferred",
+        "synthesis_level": CUSTOM_SYNTHESIS_LEVEL,
+        "evidence_level": CUSTOM_EVIDENCE_LEVEL,
+        "approval_scope": CUSTOM_APPROVAL_SCOPE,
+        "evaluator_trust_level": CUSTOM_EVALUATOR_TRUST_LEVEL,
+        "materialization_deferred": True,
+        "run_allowed": False,
+        "problem_summary": _compact_summary(request.problem_statement),
+        "nearest_catalog_candidates": benchmark_candidates[:3],
+        "strategy_seed_suggestions": selected_algorithms,
+        "claim_boundary": CUSTOM_BENCHMARK_CLAIM_BOUNDARY,
+    }
+
+
 def _algorithm_seed_snapshot(algorithm_ids: list[str]) -> list[dict[str, object]]:
     algorithms_by_id = {algorithm.algorithm_id: algorithm for algorithm in list_algorithms()}
     snapshots: list[dict[str, object]] = []
@@ -1291,6 +1348,9 @@ def _rank_algorithms_for_problem(
                 algorithm.description,
                 " ".join(algorithm.compatible_benchmark_families),
                 " ".join(algorithm.benchmark_examples),
+                str(payload.get("description_zh") or ""),
+                " ".join(str(item) for item in payload.get("features_zh", [])),
+                " ".join(str(item) for item in payload.get("problem_fit_zh", [])),
             ]
         ).lower()
         overlap = _token_overlap_score(text, haystack, weight=3)
@@ -1322,52 +1382,89 @@ def _benchmark_keywords(benchmark_name: str) -> tuple[tuple[str, int], ...]:
     if "cylinder" in benchmark_name:
         return (
             ("cylinder", 18),
+            ("圆柱", 22),
             ("wake", 18),
+            ("尾流", 22),
             ("sensor", 14),
+            ("传感器", 16),
+            ("稀疏传感器", 20),
             ("sparse", 10),
             ("vorticity", 14),
+            ("涡量", 18),
             ("reconstruction", 12),
+            ("重建", 14),
             ("shred", 10),
         )
     if "reaction_diffusion" in benchmark_name:
         return (
             ("reaction", 16),
             ("diffusion", 16),
+            ("反应扩散", 28),
+            ("反应-扩散", 28),
             ("spatiotemporal", 12),
+            ("时空", 10),
             ("source", 8),
             ("operator", 8),
+            ("神经算子", 18),
+            ("算子学习", 14),
             ("fno", 18),
             ("fourier neural operator", 24),
+            ("傅里叶神经算子", 30),
             ("fourier", 10),
             ("parametric pde", 18),
             ("parametric partial differential", 18),
+            ("参数化偏微分方程", 22),
             ("darcy", 8),
             ("navier-stokes", 8),
         )
     if "antiderivative" in benchmark_name:
         return (
             ("antiderivative", 18),
+            ("反导数", 24),
             ("integral", 14),
+            ("积分算子", 20),
             ("operator", 10),
+            ("算子学习", 12),
             ("deeponet", 8),
+            ("深度算子网络", 18),
             ("function-to-function", 8),
+            ("函数到函数", 16),
         )
     if "burgers" in benchmark_name:
         return (
             ("burgers", 20),
+            ("伯格斯", 24),
             ("viscous", 10),
+            ("黏性", 14),
+            ("粘性", 14),
             ("pinn", 10),
+            ("物理信息神经网络", 14),
+            ("物理约束神经网络", 14),
             ("initial condition", 8),
+            ("初始条件", 10),
+            ("初值", 10),
             ("boundary condition", 8),
+            ("边界条件", 10),
         )
     if "poisson" in benchmark_name:
         return (
             ("poisson", 20),
+            ("泊松", 24),
             ("l-shaped", 16),
+            ("l shape", 16),
+            ("l 形", 24),
+            ("l形", 24),
+            ("l 型", 24),
+            ("l型", 24),
             ("laplace", 8),
+            ("拉普拉斯", 10),
             ("boundary", 8),
+            ("边界", 10),
             ("pinn", 8),
+            ("物理信息神经网络", 12),
             ("residual", 8),
+            ("残差", 10),
+            ("不规则区域", 12),
         )
     return (
         ("function", 8),
@@ -1394,9 +1491,35 @@ def _store_record(record: RunRecord) -> None:
         _RUNS[_record_key(record.run_dir)] = record
 
 
+def _store_new_record(record: RunRecord, *, allow_existing: bool) -> None:
+    run_dir = Path(record.run_dir)
+    key = _record_key(run_dir)
+    with _RUNS_LOCK:
+        if not allow_existing and (run_dir.exists() or key in _RUNS):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Run id already exists: {record.run_id}. "
+                    "Choose a new experiment_id or use the resume endpoint."
+                ),
+            )
+        _RUNS[key] = record
+
+
 def _validate_run_start_request(request: RunStartRequest) -> None:
     _validate_agent_model_roles(request.agent_models)
     _validate_algorithm_ids(request.selected_algorithm_ids)
+    if request.target_solution_count is not None:
+        target_children = request.target_solution_count - 1
+        if target_children % request.parallel_mutations != 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "target_solution_count cannot be represented exactly by the fixed "
+                    "parallel_mutations fanout; choose a target where "
+                    "(target_solution_count - 1) is divisible by parallel_mutations"
+                ),
+            )
     if request.mode == "real":
         if not request.real_confirmed:
             raise HTTPException(
@@ -1473,7 +1596,50 @@ def _merge_resume_request(run_id: str, request: RunStartRequest) -> RunStartRequ
     updates: dict[str, Any] = {"experiment_id": run_id, "resume": True}
     explicitly_set = set(request.model_fields_set)
 
+    if existing_config is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Run cannot be resumed without a valid config.json: {run_id}",
+        )
+
     if existing_config is not None:
+        evolution = existing_config.evolution
+        frozen_updates: dict[str, Any] = {
+            "mode": "mock" if existing_config.use_mock else "real",
+            "parallel_mutations": evolution.parallel_mutations,
+            "timeout_s": evolution.timeout_s,
+            "max_debug_retries": evolution.max_debug_retries,
+            "no_kb": not evolution.use_kb,
+            "random_kb": evolution.random_kb,
+            "random_seed": evolution.random_seed,
+            "no_critic": not evolution.use_critic,
+            "no_debugger": not evolution.use_debugger,
+            "no_branch_context": not evolution.use_branch_context,
+            "selector_vote_count": evolution.selector_vote_count,
+            "max_children_per_node": evolution.max_children_per_node,
+            "llm_fast_mode": existing_config.llm_fast_mode,
+        }
+        for field_name, existing_value in frozen_updates.items():
+            if field_name in explicitly_set and getattr(request, field_name) != existing_value:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Resume cannot change frozen run setting {field_name}: "
+                        f"existing={existing_value!r}, requested={getattr(request, field_name)!r}"
+                    ),
+                )
+            updates[field_name] = existing_value
+
+        if "max_iterations" not in explicitly_set and "target_solution_count" not in explicitly_set:
+            updates["max_iterations"] = evolution.max_iterations
+            run_budget = existing_config.readiness_report.get("run_budget", {})
+            stored_target = run_budget.get("target_solution_count") if isinstance(run_budget, dict) else None
+            if isinstance(stored_target, int) and not isinstance(stored_target, bool) and stored_target >= 1:
+                updates["target_solution_count"] = stored_target
+            else:
+                updates["target_solution_count"] = 1 + (
+                    evolution.max_iterations * evolution.parallel_mutations
+                )
         if "benchmark" not in explicitly_set and "benchmark_dir" not in explicitly_set:
             if existing_config.benchmark_dir is not None:
                 benchmark_spec = benchmark_for_path(existing_config.benchmark_dir)
@@ -1482,16 +1648,46 @@ def _merge_resume_request(run_id: str, request: RunStartRequest) -> RunStartRequ
                     updates["benchmark_dir"] = None
                 elif request.account_id is None:
                     updates["benchmark_dir"] = str(existing_config.benchmark_dir)
-        if "selected_algorithm_ids" not in explicitly_set:
-            updates["selected_algorithm_ids"] = list(existing_config.strategy_seed_ids)
-        if "agent_models" not in explicitly_set:
-            updates["agent_models"] = _agent_requests_from_configs(existing_config.agents)
-        if "selector_panel" not in explicitly_set:
-            updates["selector_panel"] = _agent_requests_from_config_list(existing_config.selector_panel)
+        existing_algorithm_ids = list(existing_config.strategy_seed_ids)
+        if (
+            "selected_algorithm_ids" in explicitly_set
+            and _normalized_algorithm_ids(request.selected_algorithm_ids) != existing_algorithm_ids
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Resume cannot change frozen run setting selected_algorithm_ids",
+            )
+        updates["selected_algorithm_ids"] = existing_algorithm_ids
+
+        existing_agent_models = _agent_requests_from_configs(existing_config.agents)
+        if "agent_models" in explicitly_set and request.agent_models != existing_agent_models:
+            raise HTTPException(
+                status_code=409,
+                detail="Resume cannot change frozen run setting agent_models",
+            )
+        updates["agent_models"] = existing_agent_models
+
+        existing_selector_panel = _agent_requests_from_config_list(existing_config.selector_panel)
+        if "selector_panel" in explicitly_set and request.selector_panel != existing_selector_panel:
+            raise HTTPException(
+                status_code=409,
+                detail="Resume cannot change frozen run setting selector_panel",
+            )
+        updates["selector_panel"] = existing_selector_panel
         if "problem_intake" not in explicitly_set:
             updates["problem_intake"] = dict(existing_config.problem_intake)
         if "planner_snapshot" not in explicitly_set:
             updates["planner_snapshot"] = dict(existing_config.planner_snapshot)
+        if "manual_strategy_locks" not in explicitly_set:
+            locks = existing_config.readiness_report.get("manual_strategy_locks", [])
+            if isinstance(locks, list):
+                updates["manual_strategy_locks"] = [
+                    dict(item) for item in locks if isinstance(item, dict)
+                ]
+        if "branch_context" not in explicitly_set:
+            branch_context = existing_config.readiness_report.get("branch_context", {})
+            if isinstance(branch_context, dict):
+                updates["branch_context"] = dict(branch_context)
         if "claim_level" not in explicitly_set:
             updates["claim_level"] = existing_config.claim_level
         if "domain_evaluator_approved" not in explicitly_set:
@@ -2632,12 +2828,32 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
             agent_scope_allowed = False
             warnings.append("Agent mode cannot operate the shared repo workspace; use account, run, or solution scope.")
 
-    if any(token in text for token in ("跑", "run", "start", "mock", "实验", "求解", "benchmark", "解法")):
+    run_control_intent = _run_control_intent(request.message)
+    summary_requested = _has_artifact_summary_intent(text)
+    open_code_requested = _should_open_code_server_from_chat(request.message)
+    if _run_control_is_negated(text):
+        warnings.append("Explicit negation suppressed start/resume run-control actions.")
+
+    if run_control_intent == "resume":
+        if request.active_run_id:
+            proposed_actions.append(
+                {
+                    "type": "resume_run",
+                    "run_id": request.active_run_id,
+                    "payload": {"account_id": resolved_account_id},
+                }
+            )
+        else:
+            warnings.append("Select an active run before asking to resume it.")
+    elif run_control_intent == "start":
         if request.assistant_mode in {"plan", "agent"} and _should_plan_problem_from_chat(request.message):
             try:
                 _validate_agent_model_roles(request.agent_models)
                 _validate_algorithm_ids(request.selected_algorithm_ids)
-                plan = _problem_intake_plan_payload(_problem_intake_request_from_chat(request))
+                plan = _problem_intake_plan_payload(
+                    _problem_intake_request_from_chat(request),
+                    materialize_custom_benchmark=request.assistant_mode == "agent",
+                )
                 plan_actions = plan.get("actions", [])
                 if plan_actions:
                     action = dict(plan_actions[0])
@@ -2679,9 +2895,7 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
                     },
                 }
             )
-    if any(token in text for token in ("resume", "恢复", "继续")) and request.active_run_id:
-        proposed_actions.append({"type": "resume_run", "run_id": request.active_run_id})
-    if agent_scope_allowed and _should_open_code_server_from_chat(request.message):
+    elif agent_scope_allowed and open_code_requested:
         try:
             proposed_actions.append(
                 {
@@ -2697,10 +2911,7 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
             )
         except HTTPException as exc:
             warnings.append(str(exc.detail))
-    if any(
-        token in text
-        for token in ("trace", "解释", "summary", "总结", "leaderboard", "artifact", "创新", "novel", "innovation")
-    ):
+    if summary_requested:
         if not request.active_run_id:
             warnings.append("Select an active run before asking for artifact or trace summaries.")
         else:
@@ -2723,9 +2934,6 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
                 artifacts.append({"path": "leaderboard.csv", "top_row": leaderboard[0]})
     if "compare" in text or "比较" in text:
         warnings.append("Run comparison needs two explicit run ids; this MVP returns a prompt to choose the second run.")
-
-    if not proposed_actions and not artifacts and not trace_refs and request.assistant_mode != "ask":
-        proposed_actions.append({"type": "summarize_artifact", "payload": {"benchmark": request.selected_benchmark}})
 
     if request.assistant_mode == "ask":
         actions: list[dict[str, object]] = []
@@ -2750,6 +2958,145 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
         "warnings": warnings,
         "trace_refs": trace_refs,
     }
+
+
+def _run_control_intent(message: str) -> Literal["start", "resume"] | None:
+    text = message.lower()
+    if _run_control_is_negated(text):
+        return None
+    if _has_resume_run_intent(text):
+        return "resume"
+    if _has_start_run_intent(text):
+        return "start"
+    return None
+
+
+def _run_control_is_negated(text: str) -> bool:
+    return _contains_any(
+        text,
+        (
+            "不要启动",
+            "不启动",
+            "无需启动",
+            "别启动",
+            "不要运行",
+            "不运行",
+            "无需运行",
+            "别运行",
+            "不要跑",
+            "别跑",
+            "不要恢复",
+            "不恢复",
+            "无需恢复",
+            "别恢复",
+            "不要继续",
+            "do not start",
+            "don't start",
+            "without starting",
+            "do not run",
+            "don't run",
+            "without running",
+            "do not resume",
+            "don't resume",
+        ),
+    )
+
+
+def _has_artifact_summary_intent(text: str) -> bool:
+    return _contains_any(
+        text,
+        (
+            "trace",
+            "解释",
+            "分析",
+            "查看",
+            "状态",
+            "summary",
+            "summarize",
+            "总结",
+            "leaderboard",
+            "artifact",
+            "创新",
+            "novel",
+            "innovation",
+            "analyze",
+            "analysis",
+            "explain",
+            "inspect",
+            "review",
+            "报告",
+        ),
+    )
+
+
+def _has_resume_run_intent(text: str) -> bool:
+    direct_resume = _contains_any(
+        text,
+        (
+            "继续运行",
+            "继续实验",
+            "继续这个 run",
+            "继续该 run",
+            "继续当前 run",
+            "恢复运行",
+            "恢复实验",
+            "恢复这个 run",
+            "恢复该 run",
+            "恢复当前 run",
+            "resume this run",
+            "resume the run",
+            "resume run",
+        ),
+    )
+    if direct_resume:
+        return True
+    if _has_artifact_summary_intent(text):
+        return False
+    return bool(re.search(r"\bresume\b", text)) or "恢复" in text
+
+
+def _has_start_run_intent(text: str) -> bool:
+    imperative_start = _contains_any(
+        text,
+        (
+            "启动一个",
+            "启动这个",
+            "启动该",
+            "启动实验",
+            "启动工作流",
+            "开始运行",
+            "开始实验",
+            "运行一个",
+            "运行这个",
+            "运行该",
+            "运行 mock",
+            "运行 real",
+            "跑一个",
+            "跑这个",
+            "跑该",
+            "执行实验",
+            "请启动",
+            "请运行",
+            "立即启动",
+            "直接启动",
+            "帮我启动",
+            "start a run",
+            "start the run",
+            "start this run",
+            "start an experiment",
+            "run an experiment",
+            "run this experiment",
+            "launch a run",
+            "launch the run",
+        ),
+    )
+    if imperative_start:
+        return True
+    if _has_artifact_summary_intent(text):
+        return False
+    if re.search(r"(?:请|自主|自动|帮我).{0,30}求解", text):
+        return True
+    return bool(re.search(r"\b(?:start|launch|execute)\b", text))
 
 
 def _should_plan_problem_from_chat(message: str) -> bool:
@@ -3209,6 +3556,8 @@ def _solver_reply(
 ) -> str:
     if assistant_mode == "plan" and actions:
         return "Plan 模式：已生成建议动作，但不会自动执行。确认后可切到 Agent 执行。"
+    if assistant_mode == "plan" and artifacts:
+        return "Plan 模式：已生成无副作用的分析预览；不会启动、恢复或写入实验文件。"
     if actions and actions[0].get("type") == "start_run":
         return "Agent 模式：已准备启动实验；ChatUI 应调用 start_run action，并继续监听 run events。"
     if trace_refs:
