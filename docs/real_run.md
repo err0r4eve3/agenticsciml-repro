@@ -233,6 +233,14 @@ request-side prompt-delivery evidence for branch context, and verifies that
 `no_branch_context` request prompts do not leak branch fields. If the gate
 fails, the CLI returns non-zero and points at the report.
 
+Budget, adapter, provider/orchestrator, post-run artifact, and paired-gate
+failures finalize the manifest with `status=failed`, `report_status=failed`,
+`failure_kind`, `error_type`, the failure-report digest, and the final
+token-budget ledger. `verify-smoke-llm` must still reject that bundle as
+incomplete real-smoke evidence, and it validates manifest/plan schema versions
+plus the final call/token/cost ledger and configured limits against recomputed
+run evidence.
+
 Before any real provider call, smoke tooling writes the manifest and runs a
 shared LLM call-budget preflight. If `expected_llm_call_range.max` exceeds
 `AGENTICSCIML_MAX_LLM_CALLS`, the command exits before provider calls with

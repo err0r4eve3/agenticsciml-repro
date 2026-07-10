@@ -21,6 +21,7 @@ from agenticsciml.evidence import EVIDENCE_MODE_REAL_LLM_SMOKE, SCIENTIFIC_CLAIM
 from agenticsciml.llm.base import LLMClient
 from agenticsciml.llm.budget import (
     LLMBudget,
+    LLMBudgetPreflightError,
     RecordingLLMClient,
     combine_llm_call_ranges,
     estimate_orchestrator_llm_call_range,
@@ -146,7 +147,10 @@ def _run_llm_smoke_once(
     plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True), encoding="utf-8")
     manifest = _build_manifest(plan, llm_client=llm_client, budget=budget)
     manifest_path = output_dir / "real_llm_smoke_manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False),
+        encoding="utf-8",
+    )
 
     if dry_run:
         report_path = output_dir / "real_llm_smoke_report.md"
@@ -156,6 +160,14 @@ def _run_llm_smoke_once(
     if isinstance(preflight, dict) and preflight.get("passed") is not True:
         report_path = output_dir / "real_llm_smoke_report.md"
         report_path.write_text(_render_budget_blocked_report(plan, preflight), encoding="utf-8")
+        _finalize_failed_manifest(
+            manifest_path,
+            manifest,
+            report_path,
+            budget,
+            failure_kind="blocked_by_budget",
+            error_type=LLMBudgetPreflightError.__name__,
+        )
         require_llm_call_budget_preflight(preflight)
 
     try:
@@ -163,6 +175,14 @@ def _run_llm_smoke_once(
     except Exception as exc:
         report_path = output_dir / "real_llm_smoke_report.md"
         report_path.write_text(_render_failure_report(plan, "adapter_init_error", exc), encoding="utf-8")
+        _finalize_failed_manifest(
+            manifest_path,
+            manifest,
+            report_path,
+            budget,
+            failure_kind="adapter_init_error",
+            error_type=type(exc).__name__,
+        )
         raise
 
     rows: list[dict[str, Any]] = []
@@ -193,8 +213,29 @@ def _run_llm_smoke_once(
         except Exception as exc:
             report_path = output_dir / "real_llm_smoke_report.md"
             report_path.write_text(_render_failure_report(plan, "orchestrator_error", exc), encoding="utf-8")
+            _finalize_failed_manifest(
+                manifest_path,
+                manifest,
+                report_path,
+                budget,
+                failure_kind="orchestrator_error",
+                error_type=type(exc).__name__,
+            )
             raise
-        row = _smoke_row(run_dir, variant, seed)
+        try:
+            row = _smoke_row(run_dir, variant, seed)
+        except Exception as exc:
+            report_path = output_dir / "real_llm_smoke_report.md"
+            report_path.write_text(_render_failure_report(plan, "run_artifact_error", exc), encoding="utf-8")
+            _finalize_failed_manifest(
+                manifest_path,
+                manifest,
+                report_path,
+                budget,
+                failure_kind="run_artifact_error",
+                error_type=type(exc).__name__,
+            )
+            raise
         rows.append(row)
         if not _truthy(row["smoke_gate_passed"]):
             gate_issues.append(f"{variant}: {row['smoke_gate_issues']}")
@@ -207,13 +248,25 @@ def _run_llm_smoke_once(
     report_path = output_dir / "real_llm_smoke_report.md"
     report_path.write_text(_render_real_report(plan, rows, paired_gate), encoding="utf-8")
     if gate_issues:
-        raise RuntimeError(f"Real LLM smoke gate failed; see {report_path}: {'; '.join(gate_issues)}")
+        error = RuntimeError(f"Real LLM smoke gate failed; see {report_path}: {'; '.join(gate_issues)}")
+        _finalize_failed_manifest(
+            manifest_path,
+            manifest,
+            report_path,
+            budget,
+            failure_kind="smoke_gate_failed",
+            error_type=type(error).__name__,
+        )
+        raise error
     manifest["status"] = "completed"
     manifest["report_status"] = "passed"
     manifest["report_sha256"] = _file_sha256(report_path)
     manifest["runs_csv_sha256"] = _file_sha256(runs_csv)
     manifest["token_budget_final"] = budget.to_dict()
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False),
+        encoding="utf-8",
+    )
     return LLMSmokeResult(plan_json=plan_path, report_md=report_path, manifest_json=manifest_path, runs_csv=runs_csv)
 
 
@@ -425,6 +478,31 @@ def _render_dry_run_report(plan: dict[str, Any]) -> str:
     )
 
 
+def _finalize_failed_manifest(
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    report_path: Path,
+    budget: LLMBudget,
+    *,
+    failure_kind: str,
+    error_type: str,
+) -> None:
+    manifest.update(
+        {
+            "status": "failed",
+            "report_status": "failed",
+            "failure_kind": failure_kind,
+            "error_type": error_type,
+            "report_sha256": _file_sha256(report_path),
+            "token_budget_final": budget.to_dict(),
+        }
+    )
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False),
+        encoding="utf-8",
+    )
+
+
 def _render_real_report(plan: dict[str, Any], rows: list[dict[str, Any]], paired_gate: dict[str, Any]) -> str:
     row_lines = "\n".join(
         f"- `{row['variant']}`: branch_context={row['branch_context_enabled']}, "
@@ -535,6 +613,8 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
         if runs_csv.exists() and manifest.get("runs_csv_sha256") != _file_sha256(runs_csv):
             issues.append("manifest runs_csv_sha256 does not match real_llm_smoke_runs.csv")
     if plan:
+        if plan.get("schema_version") != 1:
+            issues.append("plan schema_version must be 1")
         expected_hash = _hash_payload(plan)
         if manifest and manifest.get("plan_hash") != expected_hash:
             issues.append("manifest plan_hash does not match plan payload")
@@ -626,14 +706,119 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
         issues.append(f"paired contrast gate failed: {'; '.join(paired_gate['issues'])}")
     if manifest and recomputed_rows:
         call_count = 0
+        prompt_tokens = 0
+        output_tokens = 0
         for row in recomputed_rows:
             row_variant = str(row.get("variant", "unknown"))
             row_call_count = _parse_strict_int(row.get("llm_calls"), f"{row_variant}: recomputed llm_calls", issues)
             if row_call_count is not None:
                 call_count += row_call_count
             _verify_row_ledger(row, manifest, issues)
+            ledger_entries, _ = _read_llm_call_ledger(Path(str(row.get("run_dir", ""))), row_variant)
+            for entry in ledger_entries:
+                prompt_value = _parse_strict_int(
+                    entry.get("prompt_token_estimate"),
+                    f"{row_variant}: ledger prompt_token_estimate",
+                    issues,
+                )
+                output_value = _parse_strict_int(
+                    entry.get("response_token_estimate"),
+                    f"{row_variant}: ledger response_token_estimate",
+                    issues,
+                )
+                if prompt_value is not None:
+                    prompt_tokens += prompt_value
+                if output_value is not None:
+                    output_tokens += output_value
         if call_count <= 0:
             issues.append("recomputed LLM call count must be positive")
+        initial_budget = manifest.get("token_budget")
+        final_budget = manifest.get("token_budget_final")
+        if isinstance(initial_budget, dict) and isinstance(final_budget, dict):
+            for field in (
+                "max_prompt_tokens",
+                "max_output_tokens",
+                "max_total_tokens",
+                "max_calls",
+                "max_cost_usd",
+                "cost_per_1k_tokens_usd",
+            ):
+                if final_budget.get(field) != initial_budget.get(field):
+                    issues.append(f"manifest token_budget_final.{field} does not match token_budget")
+            final_calls = _parse_strict_int(
+                final_budget.get("calls_used"),
+                "manifest token_budget_final.calls_used",
+                issues,
+            )
+            if final_calls is not None and final_calls != call_count:
+                issues.append(
+                    "manifest token_budget_final.calls_used does not match recomputed LLM call count"
+                )
+            final_prompt = _parse_strict_int(
+                final_budget.get("prompt_tokens_used"),
+                "manifest token_budget_final.prompt_tokens_used",
+                issues,
+            )
+            final_output = _parse_strict_int(
+                final_budget.get("output_tokens_used"),
+                "manifest token_budget_final.output_tokens_used",
+                issues,
+            )
+            if final_prompt is not None and final_prompt != prompt_tokens:
+                issues.append("manifest token_budget_final.prompt_tokens_used does not match LLM ledger")
+            if final_output is not None and final_output != output_tokens:
+                issues.append("manifest token_budget_final.output_tokens_used does not match LLM ledger")
+            cost_rate = (
+                _parse_finite_number(
+                    final_budget.get("cost_per_1k_tokens_usd"),
+                    "manifest token_budget_final.cost_per_1k_tokens_usd",
+                    issues,
+                )
+                if final_budget.get("cost_per_1k_tokens_usd") is not None
+                else None
+            )
+            final_cost = _parse_finite_number(
+                final_budget.get("estimated_cost_usd"),
+                "manifest token_budget_final.estimated_cost_usd",
+                issues,
+            )
+            expected_cost = (prompt_tokens + output_tokens) / 1000.0 * cost_rate if cost_rate else 0.0
+            if final_cost is not None and not math.isclose(
+                final_cost,
+                expected_cost,
+                rel_tol=1e-9,
+                abs_tol=1e-12,
+            ):
+                issues.append("manifest token_budget_final.estimated_cost_usd does not match LLM ledger")
+            for field, used in (
+                ("max_calls", call_count),
+                ("max_prompt_tokens", prompt_tokens),
+                ("max_output_tokens", output_tokens),
+                ("max_total_tokens", prompt_tokens + output_tokens),
+            ):
+                limit_value = final_budget.get(field)
+                limit = (
+                    _parse_strict_int(
+                        limit_value,
+                        f"manifest token_budget_final.{field}",
+                        issues,
+                    )
+                    if limit_value is not None
+                    else None
+                )
+                if limit is not None and used > limit:
+                    issues.append(f"manifest token_budget_final exceeds {field}")
+            max_cost = (
+                _parse_finite_number(
+                    final_budget.get("max_cost_usd"),
+                    "manifest token_budget_final.max_cost_usd",
+                    issues,
+                )
+                if final_budget.get("max_cost_usd") is not None
+                else None
+            )
+            if max_cost is not None and expected_cost > max_cost:
+                issues.append("manifest token_budget_final exceeds max_cost_usd")
         if manifest_call_range is not None:
             min_calls, max_calls = manifest_call_range
         if manifest_call_range is not None and not (min_calls <= call_count <= max_calls):
@@ -1008,6 +1193,8 @@ def _verify_row_ledger(row: dict[str, Any], manifest: dict[str, Any], issues: li
 def _manifest_schema_issues(manifest: dict[str, Any], output_dir: Path) -> tuple[list[str], tuple[int, int] | None]:
     issues: list[str] = []
     call_range_bounds: tuple[int, int] | None = None
+    if manifest.get("schema_version") != 1:
+        issues.append("manifest schema_version must be 1")
     if manifest.get("execution_mode") != "real":
         issues.append("manifest execution_mode must be real for smoke verification")
     if Path(str(manifest.get("output_dir", ""))).resolve() != output_dir.resolve():
@@ -1019,6 +1206,16 @@ def _manifest_schema_issues(manifest: dict[str, Any], output_dir: Path) -> tuple
         issues.append("manifest status must be completed for smoke verification")
     if manifest.get("report_status") != "passed":
         issues.append("manifest report_status must be passed for smoke verification")
+    if manifest.get("status") == "completed":
+        if "failure_kind" in manifest or "error_type" in manifest:
+            issues.append("completed manifest must not contain failure fields")
+        preflight = manifest.get("budget_preflight")
+        if (
+            not isinstance(preflight, dict)
+            or preflight.get("passed") is not True
+            or preflight.get("status") != "ready"
+        ):
+            issues.append("completed manifest budget_preflight must be ready and passed")
     for field in ("report_sha256", "runs_csv_sha256"):
         _validate_sha256_hex(manifest.get(field), f"manifest {field}", issues)
     _required_non_empty_string(manifest.get("provider"), "manifest provider", issues)
@@ -1026,6 +1223,7 @@ def _manifest_schema_issues(manifest: dict[str, Any], output_dir: Path) -> tuple
     _required_non_empty_string(manifest.get("adapter_type"), "manifest adapter_type", issues)
     _validate_provider_capabilities(manifest.get("provider_capabilities"), "manifest provider_capabilities", issues)
     _validate_budget_schema(manifest.get("token_budget"), "manifest token_budget", issues)
+    _validate_budget_schema(manifest.get("token_budget_final"), "manifest token_budget_final", issues)
 
     call_range = manifest.get("expected_llm_call_range", {})
     if not isinstance(call_range, dict):
@@ -1509,7 +1707,9 @@ def _validate_budget_schema(value: Any, label: str, issues: list[str]) -> None:
         if item is not None:
             _validate_non_negative_finite_number(item, f"{label}.{field}", issues)
     for field in ("calls_used", "prompt_tokens_used", "output_tokens_used"):
-        _parse_strict_int(value.get(field), f"{label}.{field}", issues)
+        parsed = _parse_strict_int(value.get(field), f"{label}.{field}", issues)
+        if parsed is not None and parsed < 0:
+            issues.append(f"{label}.{field} must be non-negative")
 
 
 def _package_versions() -> dict[str, str]:

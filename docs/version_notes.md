@@ -40,6 +40,10 @@ resume/checkpoint、真实 LLM 启用与预算、multi-seed 证据、trace/claim
   回归广度，不提升 benchmark fidelity 或 scientific claim。
 - code-server repo workspace 测试改为比较当前 checkout 的 resolved root，不再硬编码本机
   目录名；Git worktree 和 CI clone 现在能验证相同的 API 语义。
+- real LLM smoke 在预算、adapter、provider/orchestrator、post-run artifact 或 paired gate
+  失败时会把 manifest 收口为 `failed`，记录 failure kind、error type、报告摘要和最终预算
+  账本；verifier 同时校验 manifest/plan schema version、终态互斥和最终 call/token/cost
+  对账，不再接受悬空状态、非有限预算或被篡改的完成证据。
 
 已验证：
 
@@ -47,7 +51,7 @@ resume/checkpoint、真实 LLM 启用与预算、multi-seed 证据、trace/claim
 uv lock --check
 uv run --isolated --frozen --python 3.11 --extra dev python -m compileall -q src tests
 uv run --isolated --frozen --python 3.11 --extra dev python -m pytest -q
-# 713 passed
+# 717 passed
 
 cd frontend && npm run build
 node --check scripts/web_ui_dispatch_e2e.mjs

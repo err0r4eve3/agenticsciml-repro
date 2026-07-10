@@ -321,8 +321,76 @@ def test_llm_smoke_real_mode_enforces_llm_call_budget(
     manifest = json.loads((tmp_path / "real_llm_smoke_manifest.json").read_text(encoding="utf-8"))
     assert "blocked_by_budget" in report
     assert manifest["run_count"] == 2
+    assert manifest["status"] == "failed"
+    assert manifest["report_status"] == "failed"
+    assert manifest["failure_kind"] == "blocked_by_budget"
+    assert manifest["error_type"] == "LLMBudgetPreflightError"
     assert manifest["budget_preflight"]["status"] == "blocked_by_budget"
     assert manifest["budget_preflight"]["expected_max_llm_calls"] == 80
+
+
+def test_llm_budget_rejects_nonfinite_cost_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for field in ("AGENTICSCIML_MAX_COST_USD", "AGENTICSCIML_COST_PER_1K_TOKENS_USD"):
+        monkeypatch.setenv("AGENTICSCIML_MAX_COST_USD", "1")
+        monkeypatch.setenv("AGENTICSCIML_COST_PER_1K_TOKENS_USD", "0.01")
+        monkeypatch.setenv(field, "nan")
+        with pytest.raises(RuntimeError, match="finite positive number"):
+            LLMBudget.from_env()
+
+
+def test_llm_smoke_marks_manifest_failed_when_orchestrator_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_run(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr("agenticsciml.llm_smoke.AgenticSciMLOrchestrator.run", fail_run)
+
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        run_llm_smoke(
+            benchmark_dir=Path("examples/function_approx").resolve(),
+            output_dir=tmp_path,
+            variants=["branch_context", "no_branch_context"],
+            dry_run=False,
+            llm_client=MockLLMClient(),
+        )
+
+    manifest = json.loads((tmp_path / "real_llm_smoke_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "failed"
+    assert manifest["report_status"] == "failed"
+    assert manifest["failure_kind"] == "orchestrator_error"
+    assert manifest["error_type"] == "RuntimeError"
+    assert manifest["report_sha256"] == hashlib.sha256(
+        (tmp_path / "real_llm_smoke_report.md").read_bytes()
+    ).hexdigest()
+
+
+def test_llm_smoke_marks_manifest_failed_when_run_artifacts_are_invalid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "agenticsciml.llm_smoke.AgenticSciMLOrchestrator.run",
+        lambda *_args, **_kwargs: tmp_path / "missing-run",
+    )
+
+    with pytest.raises(FileNotFoundError):
+        run_llm_smoke(
+            benchmark_dir=Path("examples/function_approx").resolve(),
+            output_dir=tmp_path,
+            variants=["branch_context", "no_branch_context"],
+            dry_run=False,
+            llm_client=MockLLMClient(),
+        )
+
+    manifest = json.loads((tmp_path / "real_llm_smoke_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "failed"
+    assert manifest["report_status"] == "failed"
+    assert manifest["failure_kind"] == "run_artifact_error"
+    assert manifest["error_type"] == "FileNotFoundError"
 
 
 def test_recording_llm_reserves_call_budget_across_parallel_calls(tmp_path: Path) -> None:
@@ -425,6 +493,46 @@ def test_verify_llm_smoke_output_rejects_manifest_mode_mismatch(tmp_path: Path) 
 
     assert verification.passed is False
     assert any("manifest execution_mode must be real" in issue for issue in payload["issues"])
+
+
+def test_verify_llm_smoke_output_rejects_schema_and_final_budget_drift(tmp_path: Path) -> None:
+    _copy_real_smoke_bundle(tmp_path)
+    plan_path = tmp_path / "real_llm_smoke_plan.json"
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    plan["schema_version"] = 999
+    plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_path = tmp_path / "real_llm_smoke_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["schema_version"] = 999
+    manifest["plan_hash"] = _hash_payload(plan)
+    manifest["config_hash"] = manifest["plan_hash"]
+    manifest["failure_kind"] = "orchestrator_error"
+    manifest["error_type"] = "RuntimeError"
+    manifest["budget_preflight"]["passed"] = False
+    manifest["budget_preflight"]["status"] = "blocked_by_budget"
+    manifest["token_budget"]["max_calls"] = "1"
+    manifest["token_budget_final"]["max_calls"] = "1"
+    manifest["token_budget_final"]["calls_used"] = 0
+    manifest["token_budget_final"]["prompt_tokens_used"] = -1
+    manifest["token_budget_final"]["output_tokens_used"] = -1
+    manifest["token_budget_final"]["estimated_cost_usd"] = 123.0
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert "plan schema_version must be 1" in payload["issues"]
+    assert "manifest schema_version must be 1" in payload["issues"]
+    assert "completed manifest must not contain failure fields" in payload["issues"]
+    assert "completed manifest budget_preflight must be ready and passed" in payload["issues"]
+    assert any("token_budget_final.calls_used does not match" in issue for issue in payload["issues"])
+    assert "manifest token_budget_final.prompt_tokens_used must be non-negative" in payload["issues"]
+    assert "manifest token_budget_final.output_tokens_used must be non-negative" in payload["issues"]
+    assert any("prompt_tokens_used does not match LLM ledger" in issue for issue in payload["issues"])
+    assert any("output_tokens_used does not match LLM ledger" in issue for issue in payload["issues"])
+    assert any("estimated_cost_usd does not match LLM ledger" in issue for issue in payload["issues"])
+    assert "manifest token_budget_final exceeds max_calls" in payload["issues"]
 
 
 def test_verify_llm_smoke_output_rejects_stale_run_config(tmp_path: Path) -> None:

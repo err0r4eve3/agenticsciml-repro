@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import threading
@@ -234,8 +235,8 @@ def _optional_float_env(name: str) -> float | None:
         value = float(raw)
     except ValueError as exc:
         raise RuntimeError(f"{name} must be numeric, got {raw!r}.") from exc
-    if value <= 0:
-        raise RuntimeError(f"{name} must be positive, got {raw!r}.")
+    if not math.isfinite(value) or value <= 0:
+        raise RuntimeError(f"{name} must be a finite positive number, got {raw!r}.")
     return value
 
 
