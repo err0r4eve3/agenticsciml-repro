@@ -69,6 +69,19 @@ PLANNED_AGENT_CALLS = (
     "visual_audit",
 )
 
+
+class FrontendStaticFiles(StaticFiles):
+    """Cache fingerprinted assets aggressively while always revalidating the SPA entrypoint."""
+
+    async def get_response(self, path: str, scope: Any):
+        response = await super().get_response(path, scope)
+        if path in {"", ".", "index.html"}:
+            response.headers["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
+        elif path.startswith("assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
 def _agent_role(role: str, label: str, kind: str) -> dict[str, object]:
     return {
         "role": role,
@@ -755,7 +768,7 @@ def create_app() -> FastAPI:
 
     frontend_dist = REPO_ROOT / "frontend" / "dist"
     if frontend_dist.exists():
-        app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
+        app.mount("/", FrontendStaticFiles(directory=frontend_dist, html=True), name="frontend")
     return app
 
 def _run_orchestrator(

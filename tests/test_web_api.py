@@ -12,10 +12,30 @@ pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
 
+from agenticsciml.web import app as web_app
 from agenticsciml.web.app import create_app
 
 
 TEST_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_web_frontend_cache_policy_revalidates_entrypoint(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    frontend_dist = tmp_path / "frontend" / "dist"
+    assets = frontend_dist / "assets"
+    assets.mkdir(parents=True)
+    (frontend_dist / "index.html").write_text('<script src="/assets/app.js"></script>', encoding="utf-8")
+    (assets / "app.js").write_text("console.log('ok');", encoding="utf-8")
+    monkeypatch.setattr(web_app, "REPO_ROOT", tmp_path)
+
+    client = TestClient(web_app.create_app())
+
+    entrypoint = client.get("/")
+    asset = client.get("/assets/app.js")
+
+    assert entrypoint.status_code == 200
+    assert entrypoint.headers["cache-control"] == "no-cache, max-age=0, must-revalidate"
+    assert asset.status_code == 200
+    assert asset.headers["cache-control"] == "public, max-age=31536000, immutable"
 
 
 def test_web_benchmarks_match_catalog() -> None:
