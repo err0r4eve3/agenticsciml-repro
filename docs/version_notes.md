@@ -12,6 +12,9 @@
   prompt delivery，不因单次 mutation score 好坏而通过或失败。
 - 报告明确标记 `performance_comparison_supported=false`。配对两侧 root 由 LLM 独立生成，
   跨 variant 分数不能隔离 branch context 的因果效果，也不能支持科学性能声明。
+- 真实 DeepSeek smoke 暴露 root baseline 在 validate 阶段提前读取 `model.pkl`；RootEngineer
+  prompt 和 `function_approx/Requirements.md` 现在明确 `validate` 先于训练执行，且不得依赖
+  checkpoint 或训练副作用。catalog 回归保证所有 benchmark 都保留该生命周期契约。
 
 ## 2026-07-10 研究工作流完整性修复
 

@@ -60,7 +60,9 @@ class RootEngineerAgent(AgentBase):
             "Contract reminder: solution.py must define class MODEL and support "
             "--mode=validate / --mode=train / --mode=predict. Predict mode receives "
             "only `--input predict_input.npz` with x_val and must write `--output "
-            "predictions.npz` containing a `predictions` array."
+            "predictions.npz` containing a `predictions` array. Lifecycle reminder: "
+            "`--mode=validate` runs before training and must not require `model.pkl`, "
+            "a previous checkpoint, or any other training side effect."
         )
         response = self.complete_json_checked(
             prompt,

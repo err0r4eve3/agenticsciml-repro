@@ -84,6 +84,8 @@ def test_root_engineer_prompt_includes_problem_contract_guidelines_and_data_repo
     assert contract.contract_hash in prompt
     assert "Data report: discontinuity" in prompt
     assert "solution.py must define class MODEL" in prompt
+    assert "--mode=validate` runs before training" in prompt
+    assert "must not require `model.pkl`" in prompt
 
 
 def test_engineer_prompt_includes_context_and_applies_patch(tmp_path: Path) -> None:

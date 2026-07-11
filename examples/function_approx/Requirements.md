@@ -2,7 +2,7 @@
 
 - Implement `solution.py`.
 - Define a class named `MODEL`.
-- Support `python solution.py --mode=validate`.
+- `python solution.py --mode=validate` must run without training.
 - Support `python solution.py --mode=train`.
 - Support `python solution.py --mode=predict --input predict_input.npz --output predictions.npz`.
 - Training must write `model.pkl`.

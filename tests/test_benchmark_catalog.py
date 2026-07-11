@@ -612,6 +612,13 @@ def test_contract_from_dict_rejects_invalid_manifest_semantics() -> None:
         raise AssertionError("Expected inconsistent manifest data_generated flag to fail.")
 
 
+def test_catalog_requires_pretraining_safe_validation() -> None:
+    for name, spec in BENCHMARKS.items():
+        requirements = (spec.path / "Requirements.md").read_text(encoding="utf-8")
+        assert "--mode=validate" in requirements, name
+        assert "must run without training" in requirements, name
+
+
 def test_contract_from_dict_rejects_invalid_generated_command() -> None:
     bundle = ProblemBundle.load(BENCHMARKS["function_approx"].path)
     payload = BenchmarkContractFactory.create_contract(bundle).to_dict()
