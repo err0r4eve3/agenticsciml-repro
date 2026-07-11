@@ -194,6 +194,10 @@ estimated-cost limits when response usage is available. Output and cost limits
 are accounting gates, not provider-side response-length controls; one response
 can cross a limit and then fail the run. Inspect `llm_call_ledger.jsonl` and
 `run_metadata.json` before making cost or completeness claims.
+Text, structured JSON, and `--visual-audit-mode real` multimodal requests all
+use the same run-scoped ledger and budget. `LLMBudgetExceeded` is a hard
+workflow stop: agent schema retries, visual-audit retries, and parallel-child
+error recovery must not reclassify it as an ordinary failed solution.
 
 The benchmark catalog now includes all six paper task families as lightweight
 offline examples, plus six `faithful-small` upgrades for S1.1 function

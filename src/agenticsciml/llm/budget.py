@@ -127,6 +127,33 @@ class RecordingLLMClient(LLMClient):
             ),
         )
 
+    def complete_json_with_images(
+        self,
+        prompt: str,
+        schema_name: str,
+        image_paths: list[Path],
+        system: str | None = None,
+        temperature: float = 0.0,
+        reasoning_effort: str | None = None,
+    ) -> dict[str, Any]:
+        return self._record_call(
+            method="complete_json_with_images",
+            schema_name=schema_name,
+            prompt=prompt,
+            system=system,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+            call=lambda: _call_inner_complete_json_with_images(
+                self.inner,
+                prompt,
+                schema_name,
+                image_paths,
+                system=system,
+                temperature=temperature,
+                reasoning_effort=reasoning_effort,
+            ),
+        )
+
     def _record_call(
         self,
         *,
@@ -138,6 +165,12 @@ class RecordingLLMClient(LLMClient):
         reasoning_effort: str | None,
         call: Any,
     ) -> Any:
+        # A pre-provider budget rejection has no call identity or usage of its
+        # own. Clear the previous thread-local call before reserve_call() so an
+        # outer failure trace cannot inherit stale provider evidence.
+        self._local.last_call_metadata = None
+        inner_metadata_before = getattr(self.inner, "last_call_metadata", None)
+        inner_metadata_reset = _reset_inner_call_metadata(self.inner)
         prompt_tokens = _estimate_tokens(prompt)
         with self._state.lock:
             self.budget.reserve_call(prompt_tokens)
@@ -169,7 +202,11 @@ class RecordingLLMClient(LLMClient):
         try:
             response = call()
         except Exception as exc:
-            inner_metadata = getattr(self.inner, "last_call_metadata", None)
+            inner_metadata = _current_inner_call_metadata(
+                self.inner,
+                previous=inner_metadata_before,
+                reset_succeeded=inner_metadata_reset,
+            )
             provider_prompt_tokens = _usage_token_count(
                 inner_metadata,
                 "prompt_tokens",
@@ -231,7 +268,11 @@ class RecordingLLMClient(LLMClient):
             if budget_error is not None:
                 raise budget_error from exc
             raise
-        inner_metadata = getattr(self.inner, "last_call_metadata", None)
+        inner_metadata = _current_inner_call_metadata(
+            self.inner,
+            previous=inner_metadata_before,
+            reset_succeeded=inner_metadata_reset,
+        )
         provider_prompt_tokens = _usage_token_count(
             inner_metadata,
             "prompt_tokens",
@@ -794,7 +835,42 @@ def _trace_call_metadata(record: dict[str, Any], inner_metadata: Any = None) -> 
             usage["total_tokens"] = usage["prompt_tokens"] + usage["completion_tokens"]
         if usage:
             metadata["usage"] = usage
+    if isinstance(inner_metadata, dict):
+        image_input_count = inner_metadata.get("image_input_count")
+        if (
+            isinstance(image_input_count, int)
+            and not isinstance(image_input_count, bool)
+            and image_input_count >= 0
+        ):
+            metadata["image_input_count"] = image_input_count
+        image_input_filenames = inner_metadata.get("image_input_filenames")
+        if isinstance(image_input_filenames, list) and all(
+            isinstance(item, str) for item in image_input_filenames
+        ):
+            metadata["image_input_filenames"] = [
+                Path(item).name for item in image_input_filenames
+            ]
     return metadata
+
+
+def _reset_inner_call_metadata(inner: LLMClient) -> bool:
+    try:
+        setattr(inner, "last_call_metadata", None)
+    except (AttributeError, TypeError):
+        return False
+    return True
+
+
+def _current_inner_call_metadata(
+    inner: LLMClient,
+    *,
+    previous: Any,
+    reset_succeeded: bool,
+) -> Any:
+    current = getattr(inner, "last_call_metadata", None)
+    if not reset_succeeded and current is previous:
+        return None
+    return current
 
 
 def _call_inner_complete_text(
@@ -824,6 +900,29 @@ def _call_inner_complete_json(
     if reasoning_effort is not None and _accepts_reasoning_effort(inner.complete_json):
         kwargs["reasoning_effort"] = reasoning_effort
     return inner.complete_json(prompt, schema_name, **kwargs)
+
+
+def _call_inner_complete_json_with_images(
+    inner: LLMClient,
+    prompt: str,
+    schema_name: str,
+    image_paths: list[Path],
+    *,
+    system: str | None,
+    temperature: float,
+    reasoning_effort: str | None,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {"system": system, "temperature": temperature}
+    if reasoning_effort is not None and _accepts_reasoning_effort(
+        inner.complete_json_with_images
+    ):
+        kwargs["reasoning_effort"] = reasoning_effort
+    return inner.complete_json_with_images(
+        prompt,
+        schema_name,
+        image_paths,
+        **kwargs,
+    )
 
 
 def _accepts_reasoning_effort(method: Any) -> bool:

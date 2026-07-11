@@ -6,6 +6,7 @@ from inspect import Parameter, signature
 from typing import Any
 
 from agenticsciml.llm.base import LLMClient
+from agenticsciml.llm.budget import LLMBudgetExceeded
 from agenticsciml.state import AgentMessage
 from agenticsciml.storage import ExperimentStorage
 from agenticsciml.agents.specs import AGENT_SPECS, AgentSpec
@@ -188,7 +189,9 @@ class AgentBase:
                         "error": last_error,
                     },
                 )
-                if _is_non_retryable_llm_api_error(exc):
+                if isinstance(exc, LLMBudgetExceeded):
+                    raise
+                if is_non_retryable_llm_api_error(exc):
                     raise StructuredOutputError(last_error) from exc
                 current_prompt = (
                     f"{prompt}\n\nPrevious output failed schema validation: {last_error}. "
@@ -375,7 +378,7 @@ def _accepts_reasoning_effort(method: Any) -> bool:
     return any(parameter.kind == Parameter.VAR_KEYWORD for parameter in parameters.values())
 
 
-def _is_non_retryable_llm_api_error(exc: Exception) -> bool:
+def is_non_retryable_llm_api_error(exc: Exception) -> bool:
     name = type(exc).__name__
     if "Timeout" in name:
         return True

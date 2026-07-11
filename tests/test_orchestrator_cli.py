@@ -16,8 +16,10 @@ from agenticsciml.evidence import (
 )
 from agenticsciml.execution.runner import RunResult
 from agenticsciml.llm.mock import MockLLMClient
+from agenticsciml.llm.budget import LLMBudget, LLMBudgetExceeded, RecordingLLMClient
 from agenticsciml.llm.capabilities import ProviderCapabilities, capabilities_for_openai_compatible
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator, EvaluationApprovalRequired
+from agenticsciml.reporting import write_sdk_trace_export as write_sdk_trace_export_file
 from agenticsciml.reporting.trace_summary import summarize_trace
 from agenticsciml.state import AnalysisReport, SolutionNode, SolutionScore
 
@@ -263,6 +265,74 @@ class AlwaysInvalidVisionAuditLLM(FlakyVisionAuditLLM):
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
         }
         raise ValueError("visual_audit output failed typed schema validation: summary field required")
+
+
+class APITimeoutError(RuntimeError):
+    pass
+
+
+class TimeoutVisionAuditLLM(VisionAuditLLM):
+    def complete_json_with_images(
+        self,
+        prompt: str,
+        schema_name: str,
+        image_paths: list[Path],
+        system: str | None = None,
+        temperature: float = 0.0,
+        reasoning_effort: str | None = None,
+    ) -> dict[str, Any]:
+        self.image_calls.append(list(image_paths))
+        self.last_call_metadata = {
+            "provider": self.provider_name,
+            "model": self.model,
+            "method": "complete_json_with_images",
+            "schema_name": schema_name,
+            "adapter_type": self.adapter_type,
+            "provider_capabilities": self.provider_capabilities.to_dict(),
+            "reasoning_effort": reasoning_effort,
+            "image_input_count": len(image_paths),
+            "usage": {},
+        }
+        raise APITimeoutError("visual provider timed out")
+
+
+class RoutedVisionAuditLLM(VisionAuditLLM):
+    called_models: list[str] = []
+
+    def __init__(
+        self,
+        model: str = "base-vision-model",
+        api_key: str = "test-key",
+        base_url: str | None = "https://api.deepseek.com",
+        timeout_s: float = 60.0,
+    ) -> None:
+        super().__init__()
+        self.model = model
+        self.api_key = api_key
+        self.base_url = base_url
+        self.timeout_s = timeout_s
+        self.provider_capabilities = capabilities_for_openai_compatible(base_url)
+        self.provider_name = self.provider_capabilities.provider
+        self.adapter_type = self.provider_capabilities.adapter_type
+
+    def complete_json_with_images(
+        self,
+        prompt: str,
+        schema_name: str,
+        image_paths: list[Path],
+        system: str | None = None,
+        temperature: float = 0.0,
+        reasoning_effort: str | None = None,
+    ) -> dict[str, Any]:
+        type(self).called_models.append(self.model)
+        return super().complete_json_with_images(
+            prompt,
+            schema_name,
+            image_paths,
+            system=system,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+        )
 
 
 class ProviderAwareMockLLM(MockLLMClient):
@@ -624,6 +694,114 @@ def test_real_visual_audit_records_actual_image_input_with_capable_provider(tmp_
     )
 
 
+def test_real_visual_audit_uses_recording_budget_and_ledger(tmp_path: Path) -> None:
+    llm = VisionAuditLLM()
+    experiment_id = "real-visual-audit-recorded"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+        visual_audit_mode="real",
+    )
+    recording = RecordingLLMClient(
+        llm,
+        tmp_path / experiment_id / "llm_call_ledger.jsonl",
+        LLMBudget(max_calls=10),
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, recording).run()
+
+    visual_report = json.loads(
+        (run_dir / "solutions" / "solution_000" / "visual_audit_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    ledger_rows = [
+        json.loads(line)
+        for line in recording.ledger_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    visual_rows = [
+        row for row in ledger_rows if row["method"] == "complete_json_with_images"
+    ]
+    run_metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert visual_report["actual_image_inputs_used"] is True
+    assert len(llm.image_calls) == 1
+    assert len(visual_rows) == 1
+    assert visual_rows[0]["schema_name"] == "visual_audit"
+    assert visual_rows[0]["prompt_token_source"] == "provider_usage"
+    assert visual_rows[0]["response_token_source"] == "provider_usage"
+    assert recording.budget.calls_used == len(ledger_rows)
+    assert run_metadata["llm_calls"]["total"] == len(ledger_rows)
+    assert run_metadata["llm_calls"]["by_role"]["visual_audit"] == 1
+    assert run_metadata["llm_calls"]["provider_usage"]["call_count"] == 1
+    assert any(
+        event["name"] == "visual_audit"
+        and event["event_type"] == "generation_span"
+        and event["metadata"].get("llm_call_id") == visual_rows[0]["call_id"]
+        for event in trace_events
+    )
+
+
+def test_real_visual_audit_routes_role_override_through_shared_recording_budget(
+    tmp_path: Path,
+) -> None:
+    RoutedVisionAuditLLM.called_models = []
+    experiment_id = "real-visual-audit-routed"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+        agents={
+            "visual_audit": AgentConfig(
+                role="visual_audit",
+                model="vision-specialist",
+                base_url="https://api.gatexflow.com/v1",
+                reasoning_effort="high",
+            )
+        },
+        visual_audit_mode="real",
+    )
+    recording = RecordingLLMClient(
+        RoutedVisionAuditLLM(),
+        tmp_path / experiment_id / "llm_call_ledger.jsonl",
+        LLMBudget(max_calls=10),
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, recording).run()
+
+    ledger_rows = [
+        json.loads(line)
+        for line in recording.ledger_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    visual_row = next(
+        row for row in ledger_rows if row["method"] == "complete_json_with_images"
+    )
+    run_metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    visual_report = json.loads(
+        (run_dir / "solutions" / "solution_000" / "visual_audit_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert RoutedVisionAuditLLM.called_models == ["vision-specialist"]
+    assert visual_row["model"] == "vision-specialist"
+    assert recording.budget.calls_used == len(ledger_rows)
+    assert run_metadata["agent_models"]["visual_audit"]["actual_model"] == "vision-specialist"
+    assert visual_report["provider_capabilities"]["provider"] == "api.gatexflow.com"
+    assert visual_report["provider_capabilities"]["supports_image_inputs"] is True
+
+
 def test_real_visual_audit_retries_schema_failure_without_final_guardrail_failure(
     tmp_path: Path,
 ) -> None:
@@ -703,6 +881,332 @@ def test_real_visual_audit_fails_closed_after_schema_retry_budget(tmp_path: Path
     assert visual_report["analysis_mode"] == "real_visual_provider_failed"
     assert summary["quality_gate"]["passed"] is False
     assert any(failure["name"] == "visual_audit:image_input" for failure in summary["guardrail_failures"])
+
+
+def test_real_visual_audit_does_not_retry_provider_timeout(tmp_path: Path) -> None:
+    llm = TimeoutVisionAuditLLM()
+    config = ExperimentConfig(
+        experiment_id="real-visual-audit-timeout",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+        visual_audit_mode="real",
+    )
+
+    run_dir = AgenticSciMLOrchestrator(config, llm).run()
+
+    visual_report = json.loads(
+        (run_dir / "solutions" / "solution_000" / "visual_audit_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    summary = summarize_trace(run_dir)
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(llm.image_calls) == 1
+    assert visual_report["analysis_mode"] == "real_visual_provider_failed"
+    assert any(
+        failure["name"] == "visual_audit:image_input"
+        and failure["metadata"]["error_type"] == "APITimeoutError"
+        for failure in summary["guardrail_failures"]
+    )
+    timeout_event = next(
+        event
+        for event in trace_events
+        if event["event_type"] == "generation_span"
+        and event["name"] == "visual_audit"
+        and event["metadata"].get("error_type") == "APITimeoutError"
+    )
+    assert timeout_event["metadata"]["retryable"] is False
+    assert timeout_event["metadata"]["status"] == "provider_error"
+
+
+def test_real_visual_audit_propagates_run_budget_excess_without_retry(tmp_path: Path) -> None:
+    llm = VisionAuditLLM()
+    experiment_id = "real-visual-audit-budget-exceeded"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+        visual_audit_mode="real",
+    )
+    recording = RecordingLLMClient(
+        llm,
+        tmp_path / experiment_id / "llm_call_ledger.jsonl",
+        LLMBudget(max_calls=4),
+    )
+
+    with pytest.raises(LLMBudgetExceeded, match="LLM call budget exceeded"):
+        AgenticSciMLOrchestrator(config, recording).run()
+
+    assert llm.image_calls == []
+    ledger_rows = [
+        json.loads(line)
+        for line in recording.ledger_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(ledger_rows) == 4
+    invocation_history = json.loads(
+        (tmp_path / experiment_id / "invocation_history.json").read_text(encoding="utf-8")
+    )
+    invocation = invocation_history["invocations"][-1]
+    assert invocation["status"] == "failed"
+    assert invocation["error_type"] == "LLMBudgetExceeded"
+    assert invocation["completed_at"] is not None
+    trace_events = [
+        json.loads(line)
+        for line in (tmp_path / experiment_id / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    visual_failure = next(
+        event
+        for event in trace_events
+        if event["event_type"] == "generation_span"
+        and event["name"] == "visual_audit"
+        and event["metadata"].get("error_type") == "LLMBudgetExceeded"
+    )
+    assert visual_failure["metadata"]["retryable"] is False
+    assert visual_failure["metadata"]["status"] == "budget_exceeded"
+
+
+def test_parallel_child_workflow_propagates_run_budget_excess(tmp_path: Path) -> None:
+    experiment_id = "parallel-child-budget-exceeded"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(
+            max_iterations=1,
+            parallel_mutations=2,
+            max_children_per_node=2,
+            max_debug_retries=0,
+        ),
+        use_mock=False,
+    )
+    recording = RecordingLLMClient(
+        MockLLMClient(),
+        tmp_path / experiment_id / "llm_call_ledger.jsonl",
+        LLMBudget(max_calls=4),
+    )
+
+    with pytest.raises(LLMBudgetExceeded, match="LLM call budget exceeded"):
+        AgenticSciMLOrchestrator(config, recording).run()
+
+    ledger_rows = [
+        json.loads(line)
+        for line in recording.ledger_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(ledger_rows) == 4
+    assert recording.budget.calls_used == 4
+    invocation_history = json.loads(
+        (tmp_path / experiment_id / "invocation_history.json").read_text(encoding="utf-8")
+    )
+    invocation = invocation_history["invocations"][-1]
+    assert invocation["status"] == "failed"
+    assert invocation["error_type"] == "LLMBudgetExceeded"
+
+
+def test_post_run_finalization_failure_downgrades_exported_metadata_and_trace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment_id = "post-run-finalization-failure"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+    )
+
+    def fail_sdk_export(_run_dir: Path) -> None:
+        raise RuntimeError("sdk export failed")
+
+    monkeypatch.setattr(
+        "agenticsciml.orchestrator.write_sdk_trace_export",
+        fail_sdk_export,
+    )
+
+    with pytest.raises(RuntimeError, match="sdk export failed"):
+        AgenticSciMLOrchestrator(config, MockLLMClient()).run()
+
+    run_dir = tmp_path / experiment_id
+    run_metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    invocation_history = json.loads(
+        (run_dir / "invocation_history.json").read_text(encoding="utf-8")
+    )
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    trace_summary = json.loads((run_dir / "trace_summary.json").read_text(encoding="utf-8"))
+
+    assert run_metadata["run_state"] == "partial"
+    assert run_metadata["finalization_status"] == "failed"
+    assert run_metadata["finalization_error_type"] == "RuntimeError"
+    invocation = invocation_history["invocations"][-1]
+    assert invocation["status"] == "failed"
+    assert invocation["error_type"] == "RuntimeError"
+    assert any(event["name"] == "agenticsciml.run.end" for event in trace_events)
+    assert any(event["name"] == "agenticsciml.run.failed" for event in trace_events)
+    assert trace_summary["quality_gate"]["passed"] is False
+    assert any(
+        "run_state mismatch: run_metadata.json='partial', trace workflow end='exported'" in issue
+        for issue in trace_summary["artifact_consistency"]["issues"]
+    )
+
+
+def test_invocation_cleanup_failure_preserves_primary_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = ExperimentConfig(
+        experiment_id="cleanup-failure-preserves-primary",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+    )
+    orchestrator = AgenticSciMLOrchestrator(config, MockLLMClient())
+
+    def fail_run(_started: float) -> Path:
+        raise ValueError("primary failure")
+
+    def fail_cleanup(_exc: Exception) -> None:
+        raise OSError("cleanup failure")
+
+    monkeypatch.setattr(orchestrator, "_run_invocation", fail_run)
+    monkeypatch.setattr(orchestrator, "_close_failed_invocation", fail_cleanup)
+
+    with pytest.raises(ValueError, match="primary failure") as exc_info:
+        orchestrator.run()
+
+    assert any("cleanup also failed with OSError" in note for note in exc_info.value.__notes__)
+
+
+def test_invocation_completion_failure_rebuilds_existing_sdk_trace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment_id = "invocation-completion-failure"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+    )
+    orchestrator = AgenticSciMLOrchestrator(config, MockLLMClient())
+    original_finish = orchestrator._finish_invocation_record
+
+    def fail_completed_invocation(
+        invocation_id: str | None,
+        *,
+        wall_time_s: float,
+        status: str,
+        error_type: str | None = None,
+    ) -> None:
+        if status == "completed":
+            raise OSError("invocation completion write failed")
+        original_finish(
+            invocation_id,
+            wall_time_s=wall_time_s,
+            status=status,
+            error_type=error_type,
+        )
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_finish_invocation_record",
+        fail_completed_invocation,
+    )
+
+    with pytest.raises(OSError, match="invocation completion write failed"):
+        orchestrator.run()
+
+    run_dir = tmp_path / experiment_id
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    sdk_trace = json.loads(
+        (run_dir / "openai_sdk_trace.json").read_text(encoding="utf-8")
+    )
+    invocation_history = json.loads(
+        (run_dir / "invocation_history.json").read_text(encoding="utf-8")
+    )
+
+    assert sdk_trace["span_count"] == len(trace_events)
+    assert sdk_trace["spans"][-1]["name"] == "agenticsciml.run.failed"
+    assert sdk_trace["spans"][-1]["metadata"]["status"] == "failed"
+    assert invocation_history["invocations"][-1]["status"] == "failed"
+
+
+def test_failed_sdk_trace_rebuild_removes_stale_export_and_preserves_primary_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment_id = "failed-sdk-rebuild"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=True,
+    )
+    orchestrator = AgenticSciMLOrchestrator(config, MockLLMClient())
+    original_finish = orchestrator._finish_invocation_record
+    sdk_call_count = 0
+
+    def fail_completed_invocation(
+        invocation_id: str | None,
+        *,
+        wall_time_s: float,
+        status: str,
+        error_type: str | None = None,
+    ) -> None:
+        if status == "completed":
+            raise OSError("invocation completion write failed")
+        original_finish(
+            invocation_id,
+            wall_time_s=wall_time_s,
+            status=status,
+            error_type=error_type,
+        )
+
+    def fail_sdk_rebuild(run_dir: Path) -> Path:
+        nonlocal sdk_call_count
+        sdk_call_count += 1
+        if sdk_call_count == 1:
+            return write_sdk_trace_export_file(run_dir)
+        raise RuntimeError("sdk rebuild failed")
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_finish_invocation_record",
+        fail_completed_invocation,
+    )
+    monkeypatch.setattr(
+        "agenticsciml.orchestrator.write_sdk_trace_export",
+        fail_sdk_rebuild,
+    )
+
+    with pytest.raises(OSError, match="invocation completion write failed") as exc_info:
+        orchestrator.run()
+
+    run_dir = tmp_path / experiment_id
+    assert sdk_call_count == 2
+    assert not (run_dir / "openai_sdk_trace.json").exists()
+    assert any("cleanup also failed with RuntimeError" in note for note in exc_info.value.__notes__)
+    invocation_history = json.loads(
+        (run_dir / "invocation_history.json").read_text(encoding="utf-8")
+    )
+    assert invocation_history["invocations"][-1]["status"] == "failed"
 
 
 def test_run_writes_domain_selector_paper_and_multiseed_readiness_artifacts(tmp_path: Path) -> None:

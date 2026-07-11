@@ -9,6 +9,7 @@ from agenticsciml.agents.proposer import ProposerAgent
 from agenticsciml.config import EvaluationContract
 from agenticsciml.execution.sandbox import prepare_solution_workspace, train_and_evaluate
 from agenticsciml.llm.base import LLMClient
+from agenticsciml.llm.budget import LLMBudget, LLMBudgetExceeded, RecordingLLMClient
 from agenticsciml.reporting import write_sdk_trace_export
 from agenticsciml.storage import ExperimentStorage
 
@@ -93,6 +94,18 @@ class TimeoutThenValidJsonLLM(FlakyJsonLLM):
             "expected_effect": "Lower validation MSE.",
             "risks": ["May overfit."],
         }
+
+
+class BudgetExceededJsonLLM(FlakyJsonLLM):
+    def complete_json(
+        self,
+        prompt: str,
+        schema_name: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+    ) -> dict[str, Any]:
+        self.calls += 1
+        raise LLMBudgetExceeded("LLM prompt token budget exceeded")
 
 
 class ExtraFieldProposalLLM(FlakyJsonLLM):
@@ -320,6 +333,51 @@ def test_agent_json_timeout_is_not_schema_retried(tmp_path: Path) -> None:
         and event["metadata"].get("error_type") == "APITimeoutError"
     ]
     assert len(failed_generations) == 1
+
+
+def test_agent_json_budget_excess_is_not_retried_or_reclassified(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    llm = BudgetExceededJsonLLM()
+    agent = ProposerAgent(llm, storage)
+
+    with pytest.raises(LLMBudgetExceeded, match="prompt token budget exceeded"):
+        agent.complete_json_checked(
+            prompt="return a proposal",
+            schema_name="proposal",
+            retries=1,
+        )
+
+    assert llm.calls == 1
+
+
+def test_agent_budget_rejection_trace_does_not_reuse_previous_llm_call_id(
+    tmp_path: Path,
+) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    recording = RecordingLLMClient(
+        FlakyJsonLLM(),
+        storage.run_dir / "llm_call_ledger.jsonl",
+        LLMBudget(max_calls=1),
+    )
+    agent = ProposerAgent(recording, storage)
+
+    assert agent.complete_text("first call") == "text"
+    with pytest.raises(LLMBudgetExceeded, match="LLM call budget exceeded"):
+        agent.complete_json_checked(
+            prompt="return a proposal",
+            schema_name="proposal",
+            retries=1,
+        )
+
+    generation_events = [
+        json.loads(line)
+        for line in (storage.run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if json.loads(line)["event_type"] == "generation_span"
+    ]
+    assert generation_events[0]["metadata"]["llm_call_id"] == "llm_call_000001"
+    assert generation_events[-1]["metadata"]["error_type"] == "LLMBudgetExceeded"
+    assert "llm_call_id" not in generation_events[-1]["metadata"]
+    assert "usage" not in generation_events[-1]["metadata"]
 
 
 def test_proposer_final_round_uses_critic_feedback(tmp_path: Path) -> None:

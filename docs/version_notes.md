@@ -38,6 +38,30 @@
   保留受控原始异常类型。Resume 拒绝半套或自相矛盾的新 accounting fields，real-smoke verifier
   逐 `llm_call_id` 绑定 ledger 与 generation trace usage；legacy 全缺字段的 ledger 仅在对应旧 trace
   同样没有 provider usage 时兼容，不能通过删除字段把当前证据降级为本地估算。
+- run-scoped recording/budget 现在覆盖 `complete_json_with_images`，真实 visual audit 不再绕过
+  ledger；`visual_audit` 的独立 model/base URL override 通过 `_llm_for_role` 生效并继续共享预算。
+  `LLMBudgetExceeded` 作为硬停止穿透 agent schema retry、visual retry 和并行 child 容错边界，
+  不能被重分类成普通 schema failure、warning 或 failed solution 后继续导出 completed run。
+- provider 前预算拒绝会先清空当前线程上一调用的 metadata；对应失败 trace 不再复用旧
+  `llm_call_id` 或 usage，避免把未发生的 provider 调用伪装成重复 generation evidence。
+- 每次 provider 调用前也会清空 inner adapter 的 per-call metadata；本地图像读取或 request
+  construction 在 provider 前失败时，不再重复计入上一轮 multimodal usage/filename。
+- 真实 DeepSeek 预算负测 `runs/deepseek-budget-stop-final-20260711/budget-stop-root` 只完成首个
+  provider call（prompt/output usage `377/950`），第二次请求在 provider 前因 prompt 总预算
+  `500` 被拒绝；失败 trace 无 `llm_call_id`/usage，且没有导出 `tree.json` 或
+  `run_metadata.json`，invocation 收口为 `failed/LLMBudgetExceeded`。该证据只验证运行时
+  预算门禁，不支持科学结论。
+- orchestrator 未捕获异常现在会把当前 `invocation_history.json` 行收口为 `failed`，记录
+  受控 `error_type`、完成时间和本次 wall time，再原样抛出；人工 evaluation approval 的
+  paused/rejected 状态不会被覆盖，失败 CLI 不再留下永久 `running` 的伪状态。
+- 若强制 post-run finalization 在 exported marker 后失败，`run_metadata` 会降级为 `partial`，
+  记录 finalization failure，追加 `run.failed` 并重建失败的 trace summary；cleanup 自身异常只
+  作为受控 note 附加，不覆盖原始业务异常。已有 `openai_sdk_trace.json` 会同步重建；重建失败
+  时删除陈旧 SDK export，不保留与最终 trace 少一个 `run.failed` span 的旧证据。
+- real visual audit 只对 JSON/schema correction 重试；预算错误标为非重试 `budget_exceeded`
+  并中止 run，timeout/auth/rate-limit 等 provider error 只调用一次后写 guardrail failure。
+  Visual report 与真实请求统一使用 role-specific provider capabilities，避免 base/override
+  provenance 自相矛盾。
 
 ## 2026-07-10 研究工作流完整性修复
 

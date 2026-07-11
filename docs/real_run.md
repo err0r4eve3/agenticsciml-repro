@@ -328,6 +328,41 @@ usage, so deleting the new fields cannot downgrade current evidence. Local
 estimates and provider usage must not be presented as interchangeable billing
 records.
 
+The recording wrapper covers `complete_text`, `complete_json`, and
+`complete_json_with_images`. A real visual audit therefore shares the same call,
+prompt, output, total-token, and estimated-cost budget as every other agent role,
+and its ledger row remains linked to the visual generation trace. The
+`visual_audit` role uses its configured model/base URL through the same shared
+recording state. `LLMBudgetExceeded` is never treated as a schema retry, visual
+warning, or recoverable failed child; it propagates to the CLI/smoke boundary so
+the run cannot be exported as completed after crossing its hard budget.
+If a request is rejected before provider access, its failure trace intentionally
+has no `llm_call_id` or provider usage. The wrapper clears the previous
+thread-local call metadata before reserving budget so stale evidence cannot be
+attached to the blocked attempt. It also resets the inner adapter's per-call
+metadata before every request; a local image-read or request-construction error
+therefore cannot reuse and rebill the preceding multimodal usage.
+Any uncaught orchestrator failure also closes the current
+`invocation_history.json` row as `status=failed`, with a controlled
+`error_type`, completion timestamp, and invocation wall time. Deliberate
+evaluation-approval pauses keep their existing paused/rejected statuses. A
+failed CLI process must not leave an invocation looking indefinitely `running`.
+If mandatory post-run finalization fails after an exported marker was written,
+`run_metadata.run_state` is downgraded to `partial`, finalization failure fields
+are recorded, a `run.failed` trace is appended, and `trace_summary.json` is
+regenerated to fail the artifact-consistency gate. An existing
+`openai_sdk_trace.json` is regenerated from the same final trace; if that rebuild
+fails, the stale SDK export is removed. Cleanup failures are attached as a
+controlled exception note and never replace the original run error.
+
+Real visual audit retry is limited to output/schema correction. Budget excess is
+recorded as non-retryable `budget_exceeded` and aborts the run; provider boundary
+errors such as timeout/auth/rate-limit are recorded once as `provider_error` and
+produce the visual guardrail failure without another provider request. The
+visual report and request both use the role-specific provider capability record,
+so a text-only base model plus image-capable visual override cannot produce
+contradictory provenance.
+
 After a real run, scan run artifacts for accidental secret leakage before
 sharing or attaching them:
 

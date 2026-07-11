@@ -22,7 +22,7 @@ from agenticsciml.agents import (
     RootEngineerAgent,
     SelectorAgent,
 )
-from agenticsciml.agents.base import StructuredOutputError
+from agenticsciml.agents.base import StructuredOutputError, is_non_retryable_llm_api_error
 from agenticsciml.agents.selector import (
     CONFIGURED_PANEL_CLAIM_BOUNDARY,
     SINGLE_SELECTOR_CLAIM_BOUNDARY,
@@ -61,6 +61,7 @@ from agenticsciml.execution.sandbox import (
     train_and_evaluate,
 )
 from agenticsciml.llm.base import LLMClient
+from agenticsciml.llm.budget import LLMBudgetExceeded
 from agenticsciml.method_experience import (
     build_method_experience_record,
     method_experience_context,
@@ -299,6 +300,19 @@ class AgenticSciMLOrchestrator:
         started = time.monotonic()
         self._invocation_started_monotonic = started
         self._invocation_id = self._start_invocation_record()
+        try:
+            return self._run_invocation(started)
+        except Exception as exc:
+            try:
+                self._close_failed_invocation(exc)
+            except Exception as cleanup_exc:
+                exc.add_note(
+                    "AgenticSciML invocation cleanup also failed with "
+                    f"{type(cleanup_exc).__name__}."
+                )
+            raise
+
+    def _run_invocation(self, started: float) -> Path:
         self.storage.record_trace(
             "workflow_span",
             "agenticsciml.run.start",
@@ -518,6 +532,7 @@ class AgenticSciMLOrchestrator:
         *,
         wall_time_s: float,
         status: str,
+        error_type: str | None = None,
     ) -> None:
         if invocation_id is None:
             return
@@ -531,6 +546,8 @@ class AgenticSciMLOrchestrator:
                 entry["wall_time_s"] = wall_time_s
                 entry["completed_iterations"] = self._completed_iterations
                 entry["target_iterations"] = self._target_iterations
+                if error_type is not None:
+                    entry["error_type"] = error_type
                 self.storage.save_json("invocation_history.json", payload)
                 return
         raise ValueError(f"Invocation record is missing: {invocation_id}")
@@ -556,6 +573,63 @@ class AgenticSciMLOrchestrator:
             wall_time_s=time.monotonic() - self._invocation_started_monotonic,
             status=status,
         )
+
+    def _close_failed_invocation(self, exc: Exception) -> None:
+        if self._invocation_id is None or self._invocation_started_monotonic is None:
+            return
+        payload = self.storage.load_json("invocation_history.json")
+        if not isinstance(payload, dict) or not isinstance(payload.get("invocations"), list):
+            raise ValueError("invocation_history.json is invalid")
+        current = next(
+            (
+                entry
+                for entry in payload["invocations"]
+                if isinstance(entry, dict)
+                and entry.get("invocation_id") == self._invocation_id
+            ),
+            None,
+        )
+        if current is None:
+            raise ValueError(f"Invocation record is missing: {self._invocation_id}")
+        if current.get("status") != "running":
+            return
+        error_type = type(exc).__name__
+        wall_time_s = time.monotonic() - self._invocation_started_monotonic
+        self._finish_invocation_record(
+            self._invocation_id,
+            wall_time_s=wall_time_s,
+            status="failed",
+            error_type=error_type,
+        )
+        run_metadata_path = self.storage.run_dir / "run_metadata.json"
+        if run_metadata_path.exists():
+            run_metadata = self.storage.load_json("run_metadata.json")
+            if not isinstance(run_metadata, dict):
+                raise ValueError("run_metadata.json is invalid")
+            run_metadata["run_state"] = "partial"
+            run_metadata["finalization_status"] = "failed"
+            run_metadata["finalization_error_type"] = error_type
+            self.storage.save_json("run_metadata.json", run_metadata)
+        self.storage.record_trace(
+            "workflow_span",
+            "agenticsciml.run.failed",
+            {
+                "experiment_id": self.config.experiment_id,
+                "invocation_id": self._invocation_id,
+                "run_state": "partial",
+                "status": "failed",
+                "error_type": error_type,
+                "wall_time_s": wall_time_s,
+            },
+        )
+        write_trace_summary(self.storage.run_dir)
+        sdk_trace_path = self.storage.run_dir / "openai_sdk_trace.json"
+        if sdk_trace_path.exists():
+            try:
+                write_sdk_trace_export(self.storage.run_dir)
+            except Exception:
+                sdk_trace_path.unlink(missing_ok=True)
+                raise
 
     def _load_stored_experiment_conditions(
         self,
@@ -1437,6 +1511,8 @@ class AgenticSciMLOrchestrator:
                 for (parent, solution_id), future in zip(jobs, futures):
                     try:
                         child = future.result()
+                    except LLMBudgetExceeded:
+                        raise
                     except Exception as exc:  # pragma: no cover - defensive guard for real LLM/tool failures.
                         child = self._failed_child_from_exception(
                             parent,
@@ -1567,6 +1643,8 @@ class AgenticSciMLOrchestrator:
                 branch_context=branch_context,
                 operator_assignment=operator_assignment,
             )
+        except LLMBudgetExceeded:
+            raise
         except Exception as exc:  # pragma: no cover - defensive guard for real LLM/tool failures.
             child = self._failed_child_from_exception(
                 parent,
@@ -2846,12 +2924,17 @@ class AgenticSciMLOrchestrator:
         )
 
     def _write_visual_audit_report(self, node: SolutionNode, workspace: Path) -> None:
+        visual_llm = (
+            self._llm_for_role("visual_audit")
+            if self.config.visual_audit_mode == "real"
+            else self.llm
+        )
         report, plots, image_plots = build_visual_audit_package(
             node.node_id,
             workspace,
             run_dir=self.storage.run_dir,
             mode=self.config.visual_audit_mode,
-            provider_capabilities=self._provider_capabilities_dict(self.llm),
+            provider_capabilities=self._provider_capabilities_dict(visual_llm),
         )
         saved_plot_paths: list[Path] = []
         for filename, svg in plots.items():
@@ -2884,7 +2967,8 @@ class AgenticSciMLOrchestrator:
     ) -> None:
         if self.config.visual_audit_mode != "real":
             return
-        capabilities = self._provider_capabilities_dict(self.llm)
+        visual_llm = self._llm_for_role("visual_audit")
+        capabilities = self._provider_capabilities_dict(visual_llm)
         if capabilities.get("supports_image_inputs") is not True:
             return
         image_paths = _provider_supported_image_paths(image_paths)
@@ -2911,7 +2995,7 @@ class AgenticSciMLOrchestrator:
         current_prompt = prompt
         for attempt in range(1, max_attempts + 1):
             try:
-                response = self.llm.complete_json_with_images(
+                response = visual_llm.complete_json_with_images(
                     current_prompt,
                     "visual_audit",
                     image_paths,
@@ -2922,13 +3006,28 @@ class AgenticSciMLOrchestrator:
                 break
             except Exception as exc:
                 last_error = exc
-                metadata = getattr(self.llm, "last_call_metadata", None)
+                metadata = getattr(visual_llm, "last_call_metadata", None)
+                budget_exceeded = isinstance(exc, LLMBudgetExceeded)
+                non_retryable_provider_error = is_non_retryable_llm_api_error(exc)
+                retryable = (
+                    attempt < max_attempts
+                    and not budget_exceeded
+                    and not non_retryable_provider_error
+                )
                 trace_metadata = {
                     "solution_id": node.node_id,
                     "attempt": attempt,
                     "max_attempts": max_attempts,
-                    "retryable": attempt < max_attempts,
-                    "status": "retryable_schema_failure" if attempt < max_attempts else "failed",
+                    "retryable": retryable,
+                    "status": (
+                        "budget_exceeded"
+                        if budget_exceeded
+                        else "provider_error"
+                        if non_retryable_provider_error
+                        else "retryable_schema_failure"
+                        if retryable
+                        else "failed"
+                    ),
                     "image_input_count": len(image_paths),
                     "error_type": type(exc).__name__,
                     "error": str(exc),
@@ -2936,7 +3035,11 @@ class AgenticSciMLOrchestrator:
                 if isinstance(metadata, dict):
                     trace_metadata.update(metadata)
                 self.storage.record_trace("generation_span", "visual_audit", trace_metadata)
-                if attempt < max_attempts:
+                if budget_exceeded:
+                    raise
+                if non_retryable_provider_error:
+                    break
+                if retryable:
                     current_prompt = (
                         f"{prompt}\n\nPrevious visual_audit JSON failed validation: "
                         f"{type(exc).__name__}: {exc}. Return corrected JSON only with exactly these "
@@ -2983,7 +3086,7 @@ class AgenticSciMLOrchestrator:
             ]
             if isinstance(response_warnings, list):
                 warnings.extend(str(item) for item in response_warnings)
-        metadata = getattr(self.llm, "last_call_metadata", None)
+        metadata = getattr(visual_llm, "last_call_metadata", None)
         trace_metadata = {
             "solution_id": node.node_id,
             "passed": True,

@@ -1162,14 +1162,21 @@ def _validate_llm_call_ledger_entry(
     _required_non_empty_string(entry.get("adapter_type"), f"{prefix} adapter_type", issues)
     _validate_provider_capabilities(entry.get("provider_capabilities"), f"{prefix} provider_capabilities", issues)
     method = _required_non_empty_string(entry.get("method"), f"{prefix} method", issues)
-    if method and method not in {"complete_text", "complete_json"}:
-        issues.append(f"{prefix} method must be complete_text or complete_json")
+    if method and method not in {
+        "complete_text",
+        "complete_json",
+        "complete_json_with_images",
+    }:
+        issues.append(
+            f"{prefix} method must be complete_text, complete_json, "
+            "or complete_json_with_images"
+        )
     if entry.get("span_kind") != "generation_span":
         issues.append(f"{prefix} span_kind must be generation_span")
     schema_name = entry.get("schema_name")
     if method == "complete_text" and schema_name is not None:
         issues.append(f"{prefix} schema_name must be null for complete_text")
-    if method == "complete_json":
+    if method in {"complete_json", "complete_json_with_images"}:
         _required_non_empty_string(schema_name, f"{prefix} schema_name", issues)
     for field in ("prompt_hash", "system_hash"):
         _validate_sha256_hex(entry.get(field), f"{prefix} {field}", issues)

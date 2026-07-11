@@ -199,6 +199,23 @@ def test_recording_llm_progress_callback_reports_provider_failure(tmp_path: Path
     assert "private provider detail" not in json.dumps(events, sort_keys=True)
 
 
+def test_pre_provider_budget_rejection_clears_previous_call_metadata(tmp_path: Path) -> None:
+    recording = RecordingLLMClient(
+        _TextLLM(lambda _prompt: "ok"),
+        tmp_path / "llm_call_ledger.jsonl",
+        LLMBudget(max_calls=1),
+    )
+
+    assert recording.complete_text("first") == "ok"
+    assert recording.last_call_metadata is not None
+
+    with pytest.raises(LLMBudgetExceeded, match="LLM call budget exceeded"):
+        recording.complete_text("second")
+
+    assert recording.last_call_metadata is None
+    assert len(_ledger_rows(recording.ledger_path)) == 1
+
+
 def test_recording_llm_progress_callback_failure_does_not_break_call(tmp_path: Path) -> None:
     def broken_progress(_event: dict[str, Any]) -> None:
         raise OSError("closed stderr")
@@ -257,6 +274,116 @@ def test_recording_llm_trace_metadata_preserves_numeric_provider_usage(tmp_path:
     load_llm_budget_usage(recording.ledger_path, resumed_budget)
     assert resumed_budget.prompt_tokens_used == 7
     assert resumed_budget.output_tokens_used == 11
+
+
+def test_recording_llm_supports_budgeted_multimodal_json_calls(tmp_path: Path) -> None:
+    class ImageUsageLLM(_TextLLM):
+        def complete_json_with_images(
+            self,
+            prompt: str,
+            schema_name: str,
+            image_paths: list[Path],
+            system: str | None = None,
+            temperature: float = 0.0,
+            reasoning_effort: str | None = None,
+        ) -> dict[str, Any]:
+            self.last_call_metadata = {
+                "image_input_count": len(image_paths),
+                "image_input_filenames": [path.name for path in image_paths],
+                "usage": {
+                    "prompt_tokens": 13,
+                    "completion_tokens": 7,
+                    "total_tokens": 20,
+                },
+            }
+            return {"summary": "reviewed"}
+
+    image_path = tmp_path / "diagnostic.png"
+    image_path.write_bytes(b"not-read-by-fixture")
+    recording = RecordingLLMClient(
+        ImageUsageLLM(lambda _prompt: "unused"),
+        tmp_path / "llm_call_ledger.jsonl",
+        LLMBudget(),
+    )
+
+    payload = recording.complete_json_with_images(
+        "audit",
+        "visual_audit",
+        [image_path],
+        reasoning_effort="high",
+    )
+
+    assert payload == {"summary": "reviewed"}
+    assert recording.budget.prompt_tokens_used == 13
+    assert recording.budget.output_tokens_used == 7
+    assert recording.last_call_metadata is not None
+    assert recording.last_call_metadata["image_input_count"] == 1
+    assert recording.last_call_metadata["image_input_filenames"] == ["diagnostic.png"]
+    row = _ledger_rows(recording.ledger_path)[0]
+    assert row["method"] == "complete_json_with_images"
+    assert row["prompt_token_source"] == "provider_usage"
+    assert row["response_token_source"] == "provider_usage"
+
+
+def test_multimodal_pre_provider_failure_does_not_reuse_inner_usage(tmp_path: Path) -> None:
+    class StaleOnFailureImageLLM(_TextLLM):
+        def complete_json_with_images(
+            self,
+            prompt: str,
+            schema_name: str,
+            image_paths: list[Path],
+            system: str | None = None,
+            temperature: float = 0.0,
+            reasoning_effort: str | None = None,
+        ) -> dict[str, Any]:
+            if not image_paths[0].exists():
+                raise FileNotFoundError(image_paths[0].name)
+            self.last_call_metadata = {
+                "image_input_count": 1,
+                "image_input_filenames": [image_paths[0].name],
+                "usage": {
+                    "prompt_tokens": 13,
+                    "completion_tokens": 7,
+                    "total_tokens": 20,
+                },
+            }
+            return {"summary": "reviewed"}
+
+    first_image = tmp_path / "first.png"
+    first_image.write_bytes(b"fixture")
+    missing_image = tmp_path / "missing.png"
+    recording = RecordingLLMClient(
+        StaleOnFailureImageLLM(lambda _prompt: "unused"),
+        tmp_path / "llm_call_ledger.jsonl",
+        LLMBudget(),
+    )
+
+    recording.complete_json_with_images(
+        "first audit",
+        "visual_audit",
+        [first_image],
+    )
+    with pytest.raises(FileNotFoundError, match="missing.png"):
+        recording.complete_json_with_images(
+            "second audit",
+            "visual_audit",
+            [missing_image],
+        )
+
+    rows = _ledger_rows(recording.ledger_path)
+    assert rows[0]["prompt_tokens_accounted"] == 13
+    assert rows[0]["response_token_estimate"] == 7
+    assert rows[1]["success"] is False
+    assert rows[1]["error_type"] == "FileNotFoundError"
+    assert rows[1]["prompt_token_source"] == "local_estimate"
+    assert "response_token_estimate" not in rows[1]
+    assert recording.budget.output_tokens_used == 7
+    assert recording.budget.prompt_tokens_used == (
+        rows[0]["prompt_tokens_accounted"] + rows[1]["prompt_tokens_accounted"]
+    )
+    assert recording.last_call_metadata is not None
+    assert "usage" not in recording.last_call_metadata
+    assert "image_input_filenames" not in recording.last_call_metadata
 
 
 def test_provider_prompt_usage_can_fail_budget_after_response(tmp_path: Path) -> None:
