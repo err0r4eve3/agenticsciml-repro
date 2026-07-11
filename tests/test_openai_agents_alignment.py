@@ -108,6 +108,16 @@ class BudgetExceededJsonLLM(FlakyJsonLLM):
         raise LLMBudgetExceeded("LLM prompt token budget exceeded")
 
 
+class RaisingTextLLM(FlakyJsonLLM):
+    def complete_text(
+        self,
+        prompt: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+    ) -> str:
+        raise RuntimeError("provider text failure")
+
+
 class ExtraFieldProposalLLM(FlakyJsonLLM):
     def complete_json(
         self,
@@ -249,6 +259,38 @@ def test_agent_base_routes_default_reasoning_effort_to_llm(tmp_path: Path) -> No
         {"method": "complete_text", "temperature": 0.3, "reasoning_effort": "xhigh"},
         {"method": "complete_json", "temperature": 0.3, "reasoning_effort": "xhigh"},
     ]
+
+
+def test_agent_text_failure_keeps_ledger_and_generation_trace_bound(tmp_path: Path) -> None:
+    storage = ExperimentStorage.create(tmp_path, "demo")
+    ledger_path = storage.run_dir / "llm_call_ledger.jsonl"
+    llm = RecordingLLMClient(
+        RaisingTextLLM(),
+        ledger_path,
+        LLMBudget(max_calls=2),
+    )
+    agent = AgentBase(llm, storage)
+
+    with pytest.raises(RuntimeError, match="provider text failure"):
+        agent.complete_text(prompt="analyze the training data")
+
+    ledger = [
+        json.loads(line)
+        for line in ledger_path.read_text(encoding="utf-8").splitlines()
+    ]
+    traces = [
+        json.loads(line)
+        for line in (storage.run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    generation = [
+        event
+        for event in traces
+        if event.get("event_type") == "generation_span"
+    ]
+    assert len(ledger) == len(generation) == 1
+    assert ledger[0]["success"] is False
+    assert generation[0]["metadata"]["llm_call_id"] == ledger[0]["call_id"]
+    assert generation[0]["metadata"]["error_type"] == "RuntimeError"
 
 
 def test_agent_json_output_fails_closed_after_retry_budget(tmp_path: Path) -> None:

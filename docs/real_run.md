@@ -421,6 +421,33 @@ resume fails before it can append invocation, ledger, or trace records.
 After acquiring the lock, a recording client reloads its shared call counter
 and usage from the latest ledger. A client object constructed from an older
 snapshot therefore cannot reuse a call ID after another invocation completes.
+For checkpoint resumes, the refreshed ledger must also bind one-to-one to every
+generation trace carrying an `llm_call_id`; call IDs are contiguous and the
+method/schema/provider/model/adapter metadata must be present and agree. Failed
+text calls are traced as failed generation spans too, so a billable provider
+failure remains resumable without creating an orphan ledger row. Exported/root
+checkpoints require at least the four deterministic root calls. This minimum
+prevents a jointly truncated ledger and trace from looking internally
+consistent merely because both sides lost the same final call.
+
+The same ledger/trace check is part of `trace-summary` for current real-run
+artifacts. It compares ledger counts with `run_metadata.llm_calls.total` and
+`llm_ledger_usage.calls_used`, so deleting a ledger after export invalidates the
+artifact quality gate even before another resume is attempted. These checks
+validate evidence integrity only; they do not raise benchmark fidelity or
+support a scientific performance claim.
+
+New real-run artifacts carry `llm_evidence_schema_version=1` in both workflow
+start trace metadata and `run_metadata.json`. Under this schema, `llm_calls`
+and the complete `llm_ledger_usage` object are mandatory and validated rather
+than silently skipped. Legacy real bundles without this marker continue to use
+their ledger, generation traces, and mandatory `llm_calls.total`; they do not
+fall back to the aggregate paired-smoke budget for per-run reconciliation.
+
+`llm_budget` remains the enforced aggregate budget and may include earlier
+variants in a paired smoke. `llm_ledger_usage` is the usage attributable to the
+current run ledger, with an explicit aggregate offset. Keeping both prevents a
+shared budget from being confused with per-run evidence accounting.
 
 Run-level LLM ceilings may be increased for recovery, including changing a
 finite ceiling to unlimited. They may not be decreased, and the cost rate,

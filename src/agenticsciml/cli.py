@@ -65,9 +65,11 @@ from agenticsciml.real_problem_closure import write_real_problem_closure_plan
 from agenticsciml.reference_capability_matrix import write_reference_capability_matrix
 from agenticsciml.reporting import write_sdk_trace_export, write_trace_summary
 from agenticsciml.resume import (
+    MIN_ROOT_REAL_LLM_CALLS,
     inspect_pre_root_resume_state,
     read_source_revision,
     validate_pre_root_real_llm_evidence,
+    validate_real_llm_ledger_trace_consistency,
     validate_resume_conditions_compatible,
 )
 from agenticsciml.selector_evidence import write_selector_evidence_packet
@@ -1106,6 +1108,15 @@ def _resume_expected_llm_call_range(
             requested_max_iterations=requested_max_iterations,
             parallel_mutations=parallel_mutations,
         )
+    try:
+        validate_real_llm_ledger_trace_consistency(
+            run_dir,
+            minimum_calls=MIN_ROOT_REAL_LLM_CALLS,
+        )
+    except ValueError as exc:
+        raise ValueError(
+            "Cannot preflight real resume: invalid ledger/trace evidence"
+        ) from exc
 
     checkpoint = _resume_json_object(checkpoint_path, "checkpoint")
     if checkpoint.get("checkpoint_schema_version") != CHECKPOINT_SCHEMA_VERSION:

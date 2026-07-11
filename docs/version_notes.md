@@ -4,6 +4,21 @@
 
 ## 2026-07-11 Real LLM smoke 研究诊断补强
 
+- post-root real resume 现在在 CLI preflight 与 orchestrator 取得 run lock、刷新 ledger 后都执行
+  全局 ledger↔generation trace 绑定：call id 必须唯一连续且集合完全相等，method/schema/provider/
+  model/adapter metadata 必须一致。删除 ledger、只删除一侧证据，或同时截断 ledger 与对应 trace
+  到少于 root 合同的 4 次调用都会 fail closed，不能用旧 checkpoint 重新导出正常外观的 run。
+- `trace-summary` 对当前 real run 复用同一检查，并核对 `run_metadata.llm_calls.total`、
+  `llm_ledger_usage.calls_used` 与 ledger 行数。缺失/截断 ledger 不再保留通过的 artifact quality gate；
+  新产物在 workflow trace 与 run metadata 同时写入 `llm_evidence_schema_version=1`，该 schema 下
+  `llm_calls` 和完整 `llm_ledger_usage` 都是必需字段；legacy real bundle 仍以 ledger、generation trace
+  和 `llm_calls.total` 对账，不回退使用 paired smoke 的 aggregate budget。
+- Recording metadata 现在区分 `llm_budget` 的共享 aggregate 用量和 `llm_ledger_usage` 的当前
+  run 用量；paired smoke 第二个 variant 可继续看到两侧累计预算，同时 trace gate 按本 variant
+  ledger 对账，不再把合法的 `aggregate=44 / local=22` 误判为证据损坏。
+- 文本型 LLM 调用发生 provider 或响应后预算错误时，也会写入带 `error_type` 与 `llm_call_id` 的
+  failed generation span；因此 ledger 中的失败付费调用不再成为无法通过一致性门禁的孤立证据，
+  initialized pre-root run 可在保留失败审计记录的前提下安全恢复。
 - checkpoint 前的真实运行现在按 `initialized`、`data_ready`、`contract_ready` 三个阶段恢复：
   Data Analyst 已完成但 evaluator 因预算或 provider 错误中断时，`--resume` 会复用已落盘的数据
   分析，不再重复付费调用；CLI 的剩余调用区间和 ledger 最小调用数也按同一共享状态机计算。

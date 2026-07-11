@@ -79,10 +79,12 @@ from agenticsciml.readiness import readiness_summary
 from agenticsciml.retrieval.kb_store import KnowledgeBase, kb_manifest_for_dir
 from agenticsciml.retrieval.query_builder import RetrievalQueryBuilder
 from agenticsciml.resume import (
+    MIN_ROOT_REAL_LLM_CALLS,
     PreRootResumeState,
     inspect_pre_root_resume_state,
     read_source_revision,
     validate_pre_root_real_llm_evidence,
+    validate_real_llm_ledger_trace_consistency,
     validate_resume_conditions_compatible,
 )
 from agenticsciml.reporting import (
@@ -743,6 +745,11 @@ class AgenticSciMLOrchestrator:
                 },
             )
             return True
+        if not self.config.use_mock:
+            validate_real_llm_ledger_trace_consistency(
+                self.storage.run_dir,
+                minimum_calls=MIN_ROOT_REAL_LLM_CALLS,
+            )
         payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
         if payload.get("checkpoint_schema_version") != CHECKPOINT_SCHEMA_VERSION:
             raise ValueError(
@@ -3733,6 +3740,9 @@ class AgenticSciMLOrchestrator:
             metadata["llm_budget"] = budget.to_dict()
         elif isinstance(budget, dict):
             metadata["llm_budget"] = budget
+        ledger_usage = getattr(self.llm, "ledger_usage", None)
+        if callable(ledger_usage):
+            metadata["llm_ledger_usage"] = ledger_usage()
         role_models: dict[str, object] = {}
         roles = sorted(set(DEFAULT_AGENT_ROLE_MODEL_SETTINGS) | set(self.config.agents))
         for role in roles:

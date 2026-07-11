@@ -85,6 +85,23 @@ class MalformedDebuggerLLM(MockLLMClient):
         return super().complete_json(prompt, schema_name, system=system, temperature=temperature)
 
 
+class FailOnceTextMockLLM(MockLLMClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.failed = False
+
+    def complete_text(
+        self,
+        prompt: str,
+        system: str | None = None,
+        temperature: float = 0.0,
+    ) -> str:
+        if not self.failed:
+            self.failed = True
+            raise RuntimeError("transient provider text failure")
+        return super().complete_text(prompt, system=system, temperature=temperature)
+
+
 class MalformedEngineerLLM(MockLLMClient):
     def complete_json(
         self,
@@ -862,7 +879,14 @@ def test_real_visual_audit_retries_schema_failure_without_final_guardrail_failur
         visual_audit_mode="real",
     )
 
-    run_dir = AgenticSciMLOrchestrator(config, llm).run()
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(
+            llm,
+            tmp_path / config.experiment_id / "llm_call_ledger.jsonl",
+            LLMBudget(max_calls=10),
+        ),
+    ).run()
 
     visual_report = json.loads(
         (run_dir / "solutions" / "solution_000" / "visual_audit_report.json").read_text(
@@ -1541,6 +1565,58 @@ def test_data_ready_real_run_resumes_without_repeating_paid_analysis(tmp_path: P
     assert summary["quality_gate"]["passed"] is True
 
 
+def test_initialized_real_run_resumes_after_billable_text_failure(tmp_path: Path) -> None:
+    experiment_id = "initialized-provider-failure-resume"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    run_dir = tmp_path / experiment_id
+    ledger_path = run_dir / "llm_call_ledger.jsonl"
+    inner = FailOnceTextMockLLM()
+
+    with pytest.raises(RuntimeError, match="transient provider text failure"):
+        AgenticSciMLOrchestrator(
+            config,
+            RecordingLLMClient(inner, ledger_path, LLMBudget(max_calls=10)),
+        ).run()
+
+    resume_config = ExperimentConfig.from_dict({**config.to_dict(), "resume": True})
+    resumed_run_dir = AgenticSciMLOrchestrator(
+        resume_config,
+        RecordingLLMClient(inner, ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+
+    ledger_rows = [
+        json.loads(line)
+        for line in ledger_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    trace_rows = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    generation_rows = [
+        event
+        for event in trace_rows
+        if event.get("event_type") == "generation_span"
+        and isinstance(event.get("metadata", {}).get("llm_call_id"), str)
+    ]
+    run_metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    summary = summarize_trace(run_dir)
+    assert resumed_run_dir == run_dir
+    assert len(ledger_rows) == len(generation_rows) == 5
+    assert ledger_rows[0]["success"] is False
+    assert run_metadata["llm_calls"]["total"] == 5
+    assert run_metadata["llm_ledger_usage"]["calls_used"] == 5
+    assert summary["artifact_consistency"]["real_llm_ledger_trace"]["passed"] is True
+    assert summary["quality_gate"]["passed"] is True
+
+
 def test_run_lock_rejects_concurrent_resume_before_invocation_write(tmp_path: Path) -> None:
     experiment_id = "concurrent-resume-lock"
     initial_config = ExperimentConfig(
@@ -1564,6 +1640,69 @@ def test_run_lock_rejects_concurrent_resume_before_invocation_write(tmp_path: Pa
         first._release_run_lock()
 
     assert not (tmp_path / experiment_id / "invocation_history.json").exists()
+
+
+def test_checkpoint_resume_rejects_missing_real_llm_ledger(tmp_path: Path) -> None:
+    experiment_id = "missing-checkpoint-ledger"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    ledger_path.unlink()
+    resume_config = ExperimentConfig.from_dict({**config.to_dict(), "resume": True})
+
+    with pytest.raises(ValueError, match="ledger.*trace|trace.*ledger"):
+        AgenticSciMLOrchestrator(
+            resume_config,
+            RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+        ).run()
+
+
+def test_checkpoint_resume_rejects_jointly_truncated_ledger_and_trace(tmp_path: Path) -> None:
+    experiment_id = "truncated-checkpoint-evidence"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    run_dir = tmp_path / experiment_id
+    ledger_path = run_dir / "llm_call_ledger.jsonl"
+    AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    ledger_rows = ledger_path.read_text(encoding="utf-8").splitlines()
+    ledger_path.write_text("\n".join(ledger_rows[:3]) + "\n", encoding="utf-8")
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    (run_dir / "trace.jsonl").write_text(
+        "\n".join(
+            json.dumps(event)
+            for event in trace_events
+            if event.get("metadata", {}).get("llm_call_id") != "llm_call_000004"
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    resume_config = ExperimentConfig.from_dict({**config.to_dict(), "resume": True})
+
+    with pytest.raises(ValueError, match="at least 4"):
+        AgenticSciMLOrchestrator(
+            resume_config,
+            RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+        ).run()
 
 
 def test_parallel_mutations_run_as_parallel_child_jobs(tmp_path: Path) -> None:

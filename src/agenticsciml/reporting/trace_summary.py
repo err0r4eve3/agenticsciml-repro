@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -13,10 +14,15 @@ from agenticsciml.state import (
 )
 from agenticsciml.storage import atomic_write_text
 from agenticsciml.trace_contracts import FanoutTraceMetadata, fanout_trace_references
+from agenticsciml.resume import (
+    MIN_ROOT_REAL_LLM_CALLS,
+    validate_real_llm_ledger_trace_consistency,
+)
 from agenticsciml.evidence import (
     CLAIM_GATE_ALLOWED,
     CLAIM_GATE_BLOCKED,
     CLAIM_GATE_DOWNGRADED,
+    REAL_LLM_EVIDENCE_SCHEMA_VERSION,
 )
 
 
@@ -33,6 +39,7 @@ EVIDENCE_METADATA_KEYS = (
     "benchmark_fidelity_level",
     "evidence_mode",
     "scientific_claim",
+    "llm_evidence_schema_version",
 )
 
 RUN_STATES = {"partial", "completed", "exported", "finalized"}
@@ -345,6 +352,13 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
     _check_workflow_lifecycle_sequence(issues, events)
     _check_run_state_consistency(issues, run_metadata, workflow_metadata, workflow_end_metadata)
     _check_claim_gate_consistency(issues, run_metadata, workflow_metadata)
+    llm_ledger_trace = _check_real_llm_ledger_trace_consistency(
+        issues,
+        run_dir,
+        run_metadata,
+        workflow_metadata,
+        events,
+    )
     scientific_readiness = _check_scientific_discovery_readiness_consistency(issues, run_dir, run_metadata)
     trace_node_reference_counts = _check_solution_artifact_consistency(
         issues,
@@ -369,6 +383,7 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
         "issues": issues,
         "scientific_discovery_readiness": scientific_readiness,
         "data_analysis_specificity": data_analysis_specificity,
+        "real_llm_ledger_trace": llm_ledger_trace,
         "trace_node_reference_events_checked": trace_node_reference_counts["checked"],
         "trace_node_reference_events_skipped": trace_node_reference_counts["skipped"],
         "trace_node_reference_events_checked_by_name": trace_node_reference_counts["checked_by_name"],
@@ -381,6 +396,154 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
         "trace_node_reference_node_coverage": trace_node_reference_counts["node_coverage"],
         "trace_node_lifecycle_stage_coverage": trace_node_reference_counts["lifecycle_stage_coverage"],
     }
+
+
+def _check_real_llm_ledger_trace_consistency(
+    issues: list[str],
+    run_dir: Path,
+    run_metadata: dict[str, Any] | None,
+    workflow_metadata: dict[str, Any] | None,
+    events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    llm_mode = None
+    if isinstance(run_metadata, dict):
+        llm_mode = run_metadata.get("llm_mode")
+    if llm_mode is None and isinstance(workflow_metadata, dict):
+        llm_mode = workflow_metadata.get("llm_mode")
+    current_real_evidence = (
+        llm_mode == "real"
+        and (
+            (run_dir / "llm_call_ledger.jsonl").exists()
+            or (
+                isinstance(run_metadata, dict)
+                and (
+                    isinstance(run_metadata.get("llm_calls"), dict)
+                    or isinstance(run_metadata.get("llm_ledger_usage"), dict)
+                )
+            )
+            or any(
+                event.get("event_type") == "generation_span"
+                and isinstance(event.get("metadata"), dict)
+                and isinstance(event["metadata"].get("llm_call_id"), str)
+                for event in events
+            )
+        )
+    )
+    if not current_real_evidence:
+        return {"checked": False, "passed": True}
+    minimum_calls = (
+        MIN_ROOT_REAL_LLM_CALLS if _requires_solution_artifacts(run_metadata) else 0
+    )
+    try:
+        counts = validate_real_llm_ledger_trace_consistency(
+            run_dir,
+            minimum_calls=minimum_calls,
+        )
+    except ValueError as exc:
+        issues.append(f"real_llm_ledger_trace: {exc}")
+        return {"checked": True, "passed": False, "error": str(exc)}
+
+    ledger_count = counts["ledger_call_count"]
+    if not isinstance(run_metadata, dict):
+        issues.append("real_llm_ledger_trace: run_metadata.json is missing or invalid")
+    else:
+        llm_calls = run_metadata.get("llm_calls")
+        if not isinstance(llm_calls, dict):
+            issues.append("real_llm_ledger_trace: run_metadata.llm_calls is missing or invalid")
+        else:
+            total = llm_calls.get("total")
+            if not _is_non_negative_int(total):
+                issues.append("real_llm_ledger_trace: run_metadata.llm_calls.total is invalid")
+            elif total != ledger_count:
+                issues.append(
+                    "real_llm_ledger_trace: run_metadata.llm_calls.total does not match ledger"
+                )
+
+        schema_version = run_metadata.get("llm_evidence_schema_version")
+        workflow_schema_version = (
+            workflow_metadata.get("llm_evidence_schema_version")
+            if isinstance(workflow_metadata, dict)
+            else None
+        )
+        current_schema = (
+            schema_version is not None or workflow_schema_version is not None
+        )
+        if current_schema and (
+            schema_version != REAL_LLM_EVIDENCE_SCHEMA_VERSION
+            or workflow_schema_version != REAL_LLM_EVIDENCE_SCHEMA_VERSION
+        ):
+            issues.append(
+                "real_llm_ledger_trace: real LLM evidence schema version is missing or unsupported"
+            )
+        llm_ledger_usage = run_metadata.get("llm_ledger_usage")
+        if current_schema and not isinstance(llm_ledger_usage, dict):
+            issues.append(
+                "real_llm_ledger_trace: run_metadata.llm_ledger_usage is missing or invalid"
+            )
+        elif isinstance(llm_ledger_usage, dict):
+            _check_llm_ledger_usage_metadata(
+                issues,
+                llm_ledger_usage,
+                ledger_count=ledger_count,
+            )
+    passed = not any(issue.startswith("real_llm_ledger_trace:") for issue in issues)
+    return {"checked": True, "passed": passed, **counts}
+
+
+def _check_llm_ledger_usage_metadata(
+    issues: list[str],
+    usage: dict[str, Any],
+    *,
+    ledger_count: int,
+) -> None:
+    if usage.get("schema_version") != REAL_LLM_EVIDENCE_SCHEMA_VERSION:
+        issues.append(
+            "real_llm_ledger_trace: run_metadata.llm_ledger_usage schema version is invalid"
+        )
+    integer_fields = (
+        "calls_used",
+        "prompt_tokens_used",
+        "output_tokens_used",
+        "total_tokens_used",
+    )
+    for field in integer_fields:
+        if not _is_non_negative_int(usage.get(field)):
+            issues.append(
+                f"real_llm_ledger_trace: run_metadata.llm_ledger_usage.{field} is invalid"
+            )
+    if _is_non_negative_int(usage.get("calls_used")) and usage["calls_used"] != ledger_count:
+        issues.append(
+            "real_llm_ledger_trace: run_metadata.llm_ledger_usage.calls_used does not match ledger"
+        )
+    if all(_is_non_negative_int(usage.get(field)) for field in integer_fields[1:]):
+        if usage["total_tokens_used"] != (
+            usage["prompt_tokens_used"] + usage["output_tokens_used"]
+        ):
+            issues.append(
+                "real_llm_ledger_trace: run_metadata.llm_ledger_usage token totals are inconsistent"
+            )
+    estimated_cost = usage.get("estimated_cost_usd")
+    if (
+        not isinstance(estimated_cost, (int, float))
+        or isinstance(estimated_cost, bool)
+        or not math.isfinite(float(estimated_cost))
+        or estimated_cost < 0
+    ):
+        issues.append(
+            "real_llm_ledger_trace: run_metadata.llm_ledger_usage.estimated_cost_usd is invalid"
+        )
+    offsets = usage.get("aggregate_offset")
+    if not isinstance(offsets, dict) or any(
+        not _is_non_negative_int(offsets.get(field))
+        for field in ("calls_used", "prompt_tokens_used", "output_tokens_used")
+    ):
+        issues.append(
+            "real_llm_ledger_trace: run_metadata.llm_ledger_usage.aggregate_offset is invalid"
+        )
+
+
+def _is_non_negative_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 def _check_data_analysis_specificity(run_dir: Path) -> dict[str, Any]:

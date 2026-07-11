@@ -11,6 +11,7 @@ from agenticsciml.resume import (
     inspect_pre_root_resume_state,
     read_source_revision,
     validate_pre_root_real_llm_evidence,
+    validate_real_llm_ledger_trace_consistency,
     validate_resume_conditions_compatible,
 )
 from agenticsciml.observations import render_structured_data_analysis
@@ -141,7 +142,11 @@ def test_pre_root_real_evidence_requires_role_bound_success(tmp_path: Path) -> N
         json.dumps(
             {
                 "call_id": "llm_call_000001",
+                "method": "complete_json",
                 "schema_name": "evaluator",
+                "provider": "test-provider",
+                "model": "test-model",
+                "adapter_type": "TestAdapter",
                 "success": True,
             }
         )
@@ -153,15 +158,55 @@ def test_pre_root_real_evidence_requires_role_bound_success(tmp_path: Path) -> N
             {
                 "event_type": "generation_span",
                 "name": "data_analyst",
-                "metadata": {"llm_call_id": "llm_call_000001"},
+                "metadata": {
+                    "llm_call_id": "llm_call_000001",
+                    "method": "complete_json",
+                    "schema_name": "data_analyst",
+                    "provider": "test-provider",
+                    "model": "test-model",
+                    "adapter_type": "TestAdapter",
+                },
             }
         )
         + "\n",
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="not bound to a successful"):
+    with pytest.raises(ValueError, match="schema_name mismatch"):
         validate_pre_root_real_llm_evidence(tmp_path, state)
+
+
+def test_real_llm_ledger_trace_rejects_joint_metadata_downgrade(tmp_path: Path) -> None:
+    common = {
+        "method": "complete_text",
+        "schema_name": None,
+        "provider": "test-provider",
+        "model": "test-model",
+        "adapter_type": "TestAdapter",
+    }
+    ledger_row = {
+        "call_id": "llm_call_000001",
+        "success": False,
+        **common,
+    }
+    trace_event = {
+        "event_type": "generation_span",
+        "name": "data_analyst",
+        "metadata": {"llm_call_id": "llm_call_000001", **common},
+    }
+    ledger_row.pop("provider")
+    trace_event["metadata"].pop("provider")
+    (tmp_path / "llm_call_ledger.jsonl").write_text(
+        json.dumps(ledger_row) + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "trace.jsonl").write_text(
+        json.dumps(trace_event) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="provider metadata"):
+        validate_real_llm_ledger_trace_consistency(tmp_path, minimum_calls=1)
 
 
 def test_source_revision_digest_changes_with_uncommitted_runtime_source(tmp_path: Path) -> None:

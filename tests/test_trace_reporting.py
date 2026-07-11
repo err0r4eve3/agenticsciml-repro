@@ -1,12 +1,18 @@
 import json
 from pathlib import Path
 
+import pytest
+
+from agenticsciml.config import ExperimentConfig, EvolutionConfig
 from agenticsciml.evidence import (
     EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE,
     LLM_MODE_MOCK,
     SCIENTIFIC_CLAIM_NOT_SUPPORTED,
     claim_gate_for_run,
 )
+from agenticsciml.llm.budget import LLMBudget, RecordingLLMClient
+from agenticsciml.llm.mock import MockLLMClient
+from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 from agenticsciml.reporting.sdk_trace_export import write_sdk_trace_export
 from agenticsciml.reporting.trace_summary import summarize_trace, write_trace_summary
 
@@ -97,7 +103,95 @@ def test_trace_summary_marks_recovered_structured_output_as_degraded(tmp_path: P
     assert summary["quality_gate"]["structured_output_retry_count"] == 1
     assert summary["quality_gate"]["hard_guardrail_failure_count"] == 0
     assert summary["recoverable_guardrail_failures"][0]["name"] == "engineer:engineer:structured_output"
+
+
+def test_trace_summary_fails_when_exported_real_run_ledger_is_missing(tmp_path: Path) -> None:
+    experiment_id = "trace-missing-real-ledger"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    ledger_path.unlink()
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any(
+        "ledger" in issue and "trace" in issue
+        for issue in summary["artifact_consistency"]["issues"]
+    )
+
+
+def test_trace_summary_rejects_ledger_and_metadata_downgrade(tmp_path: Path) -> None:
+    experiment_id = "trace-ledger-metadata-downgrade"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    ledger_path.unlink()
+    metadata_path = run_dir / "run_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata.pop("llm_calls")
+    metadata.pop("llm_ledger_usage")
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["real_llm_ledger_trace"]["checked"] is True
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
     assert summary["hard_guardrail_failures"] == []
+
+
+@pytest.mark.parametrize("missing_field", ["llm_calls", "llm_ledger_usage"])
+def test_trace_summary_rejects_current_real_metadata_field_removal(
+    tmp_path: Path,
+    missing_field: str,
+) -> None:
+    experiment_id = f"trace-real-metadata-missing-{missing_field}"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    metadata_path = run_dir / "run_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata.pop(missing_field)
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["real_llm_ledger_trace"]["checked"] is True
+    assert summary["artifact_consistency"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any(
+        missing_field in issue
+        for issue in summary["artifact_consistency"]["issues"]
+    )
 
 
 def test_trace_summary_counts_recovered_provider_timeout(tmp_path: Path) -> None:

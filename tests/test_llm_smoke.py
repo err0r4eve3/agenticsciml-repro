@@ -334,6 +334,9 @@ def test_llm_smoke_real_gate_with_scripted_llm(tmp_path: Path) -> None:
     )
     assert run_metadata["llm_provider_capabilities"]["provider"] == "MockLLMClient"
     assert run_metadata["llm_budget"]["calls_used"] > 0
+    assert run_metadata["llm_ledger_usage"]["calls_used"] == int(
+        next(row["llm_calls"] for row in rows if row["variant"] == "branch_context")
+    )
 
 
 def test_real_report_surfaces_failure_diagnostics() -> None:

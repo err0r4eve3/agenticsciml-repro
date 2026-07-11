@@ -99,12 +99,32 @@ class AgentBase:
         call_temperature = self.default_temperature if temperature is None else temperature
         call_reasoning_effort = self._call_reasoning_effort(reasoning_effort)
         started = time.monotonic()
-        response = self._llm_complete_text(
-            prompt,
-            system=system,
-            temperature=call_temperature,
-            reasoning_effort=call_reasoning_effort,
-        )
+        try:
+            response = self._llm_complete_text(
+                prompt,
+                system=system,
+                temperature=call_temperature,
+                reasoning_effort=call_reasoning_effort,
+            )
+        except Exception as exc:
+            self.storage.record_trace(
+                "generation_span",
+                self.role,
+                {
+                    "mode": "text",
+                    **self._spec_metadata(),
+                    "prompt_chars": len(prompt),
+                    "response_chars": 0,
+                    "prompt_token_estimate": self._estimate_tokens(prompt),
+                    "response_token_estimate": 0,
+                    "duration_s": time.monotonic() - started,
+                    "error_type": type(exc).__name__,
+                    "temperature": call_temperature,
+                    **self._reasoning_trace_metadata(call_reasoning_effort),
+                    **self._llm_call_metadata(),
+                },
+            )
+            raise
         self.storage.record_trace(
             "generation_span",
             self.role,

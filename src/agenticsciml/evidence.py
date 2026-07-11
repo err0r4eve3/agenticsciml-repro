@@ -5,6 +5,7 @@ from typing import Any
 
 LLM_MODE_MOCK = "mock"
 LLM_MODE_REAL = "real"
+REAL_LLM_EVIDENCE_SCHEMA_VERSION = 1
 
 EVIDENCE_MODE_MOCK_WORKFLOW_SHAPE = "mock_workflow_shape"
 EVIDENCE_MODE_REAL_LLM_SMOKE = "real_llm_smoke"
@@ -55,6 +56,7 @@ def evidence_metadata_for_run(*, use_mock: bool, fidelity_level: str) -> dict[st
         }
     return {
         "llm_mode": LLM_MODE_REAL,
+        "llm_evidence_schema_version": REAL_LLM_EVIDENCE_SCHEMA_VERSION,
         "benchmark_fidelity_level": fidelity_level,
         "evidence_mode": f"real_llm_{fidelity_level}_benchmark",
         "scientific_claim": (

@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,11 +14,19 @@ from typing import Literal
 
 from agenticsciml.benchmarks import BenchmarkContractFactory, ProblemBundle
 from agenticsciml.config import EvaluationContract
-from agenticsciml.llm.budget import _hash_payload, _hash_text
+from agenticsciml.llm.budget import (
+    _hash_payload,
+    _hash_text,
+    estimate_orchestrator_llm_call_range,
+)
 from agenticsciml.observations import render_structured_data_analysis
 
 
 PreRootResumeStage = Literal["initialized", "data_ready", "contract_ready"]
+MIN_ROOT_REAL_LLM_CALLS = estimate_orchestrator_llm_call_range(
+    max_iterations=0,
+    parallel_mutations=1,
+)["min"]
 
 _BUDGET_LIMIT_FIELDS = (
     "max_prompt_tokens",
@@ -153,6 +162,11 @@ def validate_pre_root_real_llm_evidence(
 ) -> None:
     """Bind completed pre-root stages to successful ledger and generation evidence."""
 
+    validate_real_llm_ledger_trace_consistency(
+        run_dir,
+        minimum_calls=state.completed_llm_calls,
+    )
+
     required = []
     if state.completed_llm_calls >= 1:
         required.append(("data_analyst", None))
@@ -206,6 +220,121 @@ def validate_pre_root_real_llm_evidence(
             raise ValueError(
                 f"Pre-root {role} artifacts are not bound to a successful ledger/trace call"
             )
+
+
+def validate_real_llm_ledger_trace_consistency(
+    run_dir: Path,
+    *,
+    minimum_calls: int,
+) -> dict[str, int]:
+    """Require a one-to-one binding between billable ledger rows and generation traces."""
+
+    ledger_path = run_dir / "llm_call_ledger.jsonl"
+    trace_path = run_dir / "trace.jsonl"
+    ledger = (
+        _load_jsonl_objects(ledger_path, "LLM call ledger")
+        if ledger_path.is_file()
+        else []
+    )
+    traces = _load_jsonl_objects(trace_path, "trace") if trace_path.is_file() else []
+
+    ledger_by_id: dict[str, dict[str, object]] = {}
+    for row in ledger:
+        call_id = row.get("call_id")
+        if (
+            not isinstance(call_id, str)
+            or re.fullmatch(r"llm_call_(\d{6})", call_id) is None
+            or call_id in ledger_by_id
+        ):
+            raise ValueError("Real LLM ledger has an invalid or duplicate call_id")
+        if not isinstance(row.get("success"), bool):
+            raise ValueError(f"Real LLM ledger row {call_id} has invalid success metadata")
+        _validate_real_llm_call_metadata(row, call_id, source="ledger")
+        ledger_by_id[call_id] = row
+
+    expected_ids = {f"llm_call_{index:06d}" for index in range(1, len(ledger_by_id) + 1)}
+    if set(ledger_by_id) != expected_ids:
+        raise ValueError("Real LLM ledger call IDs are not contiguous from llm_call_000001")
+
+    trace_by_id: dict[str, dict[str, object]] = {}
+    for event in traces:
+        if event.get("event_type") != "generation_span":
+            continue
+        metadata = event.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        call_id = metadata.get("llm_call_id")
+        if call_id is None:
+            continue
+        if (
+            not isinstance(call_id, str)
+            or re.fullmatch(r"llm_call_(\d{6})", call_id) is None
+            or call_id in trace_by_id
+        ):
+            raise ValueError("Real LLM trace has an invalid or duplicate llm_call_id")
+        _validate_real_llm_call_metadata(metadata, call_id, source="trace")
+        trace_by_id[call_id] = metadata
+
+    ledger_ids = set(ledger_by_id)
+    trace_ids = set(trace_by_id)
+    if ledger_ids != trace_ids:
+        raise ValueError(
+            "Real LLM ledger/trace call IDs mismatch: "
+            f"ledger_only={sorted(ledger_ids - trace_ids)}, "
+            f"trace_only={sorted(trace_ids - ledger_ids)}"
+        )
+    if len(ledger_ids) < minimum_calls:
+        raise ValueError(
+            "Real LLM ledger/trace evidence requires at least "
+            f"{minimum_calls} bound calls; found {len(ledger_ids)}"
+        )
+
+    for call_id in sorted(ledger_ids):
+        ledger_row = ledger_by_id[call_id]
+        trace_metadata = trace_by_id[call_id]
+        for field in ("method", "schema_name", "provider", "model", "adapter_type"):
+            if ledger_row.get(field) != trace_metadata.get(field):
+                raise ValueError(
+                    f"Real LLM ledger/trace {field} mismatch for {call_id}"
+                )
+    return {
+        "ledger_call_count": len(ledger_ids),
+        "trace_call_count": len(trace_ids),
+    }
+
+
+def _validate_real_llm_call_metadata(
+    metadata: dict[str, object],
+    call_id: str,
+    *,
+    source: str,
+) -> None:
+    method = metadata.get("method")
+    allowed_methods = {
+        "complete_text",
+        "complete_json",
+        "complete_json_with_images",
+    }
+    if method not in allowed_methods:
+        raise ValueError(
+            f"Real LLM {source} row {call_id} has invalid method metadata"
+        )
+    for field in ("provider", "model", "adapter_type"):
+        value = metadata.get(field)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(
+                f"Real LLM {source} row {call_id} has invalid {field} metadata"
+            )
+    schema_name = metadata.get("schema_name")
+    if method == "complete_text":
+        if schema_name is not None:
+            raise ValueError(
+                f"Real LLM {source} row {call_id} has invalid schema_name metadata"
+            )
+    elif not isinstance(schema_name, str) or not schema_name.strip():
+        raise ValueError(
+            f"Real LLM {source} row {call_id} has invalid schema_name metadata"
+        )
 
 
 def validate_resume_conditions_compatible(

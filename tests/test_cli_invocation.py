@@ -295,19 +295,45 @@ def _write_real_resume_preflight_run(tmp_path: Path, experiment_id: str) -> Path
         ),
         encoding="utf-8",
     )
+    calls = (
+        ("data_analyst", "complete_text", None),
+        ("evaluator", "complete_json", "evaluator"),
+        ("root_engineer", "complete_json", "root_engineer"),
+        ("result_analyst", "complete_json", "analysis"),
+    )
+    ledger_rows = []
+    trace_events = []
+    for index, (role, method, schema_name) in enumerate(calls, start=1):
+        call_id = f"llm_call_{index:06d}"
+        shared = {
+            "call_id": call_id,
+            "method": method,
+            "schema_name": schema_name,
+            "provider": "test-provider",
+            "model": "test-model",
+            "adapter_type": "test-adapter",
+        }
+        ledger_rows.append(
+            {
+                **shared,
+                "success": True,
+                "prompt_token_estimate": 1,
+                "response_token_estimate": 1,
+            }
+        )
+        trace_events.append(
+            {
+                "event_seq": index,
+                "event_type": "generation_span",
+                "name": role,
+                "metadata": {**shared, "llm_call_id": call_id},
+            }
+        )
     (run_dir / "llm_call_ledger.jsonl").write_text(
-        "".join(
-            json.dumps(
-                {
-                    "call_id": f"llm_call_{index:06d}",
-                    "prompt_token_estimate": 1,
-                    "response_token_estimate": 1,
-                }
-            )
-            + "\n"
-            for index in range(1, 5)
-        ),
-        encoding="utf-8",
+        "".join(json.dumps(row) + "\n" for row in ledger_rows), encoding="utf-8"
+    )
+    (run_dir / "trace.jsonl").write_text(
+        "".join(json.dumps(event) + "\n" for event in trace_events), encoding="utf-8"
     )
     return run_dir
 
@@ -540,6 +566,9 @@ def _write_pre_root_real_evidence(run_dir: Path, roles: tuple[str, ...]) -> None
                 "call_id": call_id,
                 "method": "complete_text" if schema_name is None else "complete_json",
                 "schema_name": schema_name,
+                "provider": "test-provider",
+                "model": "test-model",
+                "adapter_type": "TestAdapter",
                 "success": True,
                 "prompt_hash": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
                 "response_hash": hashlib.sha256(response.encode("utf-8")).hexdigest(),
@@ -552,7 +581,14 @@ def _write_pre_root_real_evidence(run_dir: Path, roles: tuple[str, ...]) -> None
                 "event_seq": index,
                 "event_type": "generation_span",
                 "name": role,
-                "metadata": {"llm_call_id": call_id},
+                "metadata": {
+                    "llm_call_id": call_id,
+                    "method": "complete_text" if schema_name is None else "complete_json",
+                    "schema_name": schema_name,
+                    "provider": "test-provider",
+                    "model": "test-model",
+                    "adapter_type": "TestAdapter",
+                },
             }
         )
     (run_dir / "llm_call_ledger.jsonl").write_text(
@@ -587,6 +623,7 @@ def test_real_initialized_pre_root_resume_allows_zero_call_ledger(tmp_path: Path
     run_dir = _write_real_resume_preflight_run(tmp_path, experiment_id)
     (run_dir / "checkpoint.json").unlink()
     (run_dir / "llm_call_ledger.jsonl").unlink()
+    (run_dir / "trace.jsonl").unlink()
     _write_pre_root_resume_conditions(run_dir)
 
     expected = _resume_expected_llm_call_range(
@@ -616,6 +653,7 @@ def test_real_resume_dry_run_rejects_model_drift(
     run_dir = _write_real_resume_preflight_run(tmp_path, experiment_id)
     (run_dir / "checkpoint.json").unlink()
     (run_dir / "llm_call_ledger.jsonl").unlink()
+    (run_dir / "trace.jsonl").unlink()
     monkeypatch.setenv("AGENTICSCIML_MAX_LLM_CALLS", "22")
     monkeypatch.setenv("OPENAI_MODEL", "model-before")
     _write_pre_root_resume_conditions(run_dir)

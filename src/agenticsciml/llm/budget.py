@@ -111,6 +111,36 @@ class RecordingLLMClient(LLMClient):
                 )
             self._state.call_count = loaded.call_count
 
+    def ledger_usage(self) -> dict[str, Any]:
+        """Return usage attributable to this wrapper's ledger, excluding shared offsets."""
+
+        with self._state.lock:
+            calls = self._state.call_count
+            prompt_tokens = (
+                self.budget.prompt_tokens_used - self._state.budget_prompt_tokens_offset
+            )
+            output_tokens = (
+                self.budget.output_tokens_used - self._state.budget_output_tokens_offset
+            )
+            cost_rate = self.budget.cost_per_1k_tokens_usd
+            return {
+                "schema_version": 1,
+                "calls_used": calls,
+                "prompt_tokens_used": prompt_tokens,
+                "output_tokens_used": output_tokens,
+                "total_tokens_used": prompt_tokens + output_tokens,
+                "estimated_cost_usd": (
+                    (prompt_tokens + output_tokens) / 1000.0 * cost_rate
+                    if cost_rate is not None
+                    else 0.0
+                ),
+                "aggregate_offset": {
+                    "calls_used": self._state.budget_calls_offset,
+                    "prompt_tokens_used": self._state.budget_prompt_tokens_offset,
+                    "output_tokens_used": self._state.budget_output_tokens_offset,
+                },
+            }
+
     def complete_text(
         self,
         prompt: str,
