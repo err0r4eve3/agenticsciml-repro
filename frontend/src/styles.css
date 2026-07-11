@@ -1928,6 +1928,44 @@ ul {
   flex: 0 0 auto;
 }
 
+@media (min-width: 981px) and (max-width: 1120px) {
+  .topbar {
+    grid-template-columns: 120px minmax(0, 1fr) 90px;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .topbar-title span {
+    display: block;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  .topbar-controls,
+  .topbar-run-settings,
+  .topbar-statuses {
+    flex-wrap: nowrap;
+  }
+
+  .topbar-controls {
+    gap: 6px;
+  }
+
+  .topbar-run-settings,
+  .topbar-statuses {
+    gap: 6px;
+  }
+
+  .compact-field {
+    width: clamp(164px, 20vw, 220px);
+    min-width: 0;
+  }
+
+  .topbar-run-settings .segmented {
+    width: clamp(198px, 21vw, 220px);
+  }
+}
+
 .assistant-mode-wrap {
   display: inline-flex;
   align-items: center;
