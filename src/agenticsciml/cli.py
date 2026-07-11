@@ -26,7 +26,6 @@ from agenticsciml.config import (
     EXPERT_BLUEPRINT_IDS,
     VISUAL_AUDIT_MODES,
     AgentConfig,
-    EvaluationContract,
     EvolutionConfig,
     ExperimentConfig,
 )
@@ -46,7 +45,13 @@ from agenticsciml.llm.budget import (
 )
 from agenticsciml.llm_problem_context import write_llm_problem_context_pack
 from agenticsciml.llm.mock import MockLLMClient
-from agenticsciml.llm.openai_adapter import OpenAIAdapter
+from agenticsciml.llm.openai_adapter import (
+    OpenAIAdapter,
+    _max_retries_from_env,
+    _normalize_model_name,
+    _timeout_from_env,
+)
+from agenticsciml.llm.capabilities import capabilities_for_openai_compatible
 from agenticsciml.llm_smoke import DEFAULT_SMOKE_VARIANTS, run_llm_smoke, verify_llm_smoke_output
 from agenticsciml.orchestrator import (
     CHECKPOINT_SCHEMA_VERSION,
@@ -59,6 +64,12 @@ from agenticsciml.paper_source_collect import DEFAULT_ARXIV_QUERY, DEFAULT_SOURC
 from agenticsciml.real_problem_closure import write_real_problem_closure_plan
 from agenticsciml.reference_capability_matrix import write_reference_capability_matrix
 from agenticsciml.reporting import write_sdk_trace_export, write_trace_summary
+from agenticsciml.resume import (
+    inspect_pre_root_resume_state,
+    read_source_revision,
+    validate_pre_root_real_llm_evidence,
+    validate_resume_conditions_compatible,
+)
 from agenticsciml.selector_evidence import write_selector_evidence_packet
 from agenticsciml.secret_hygiene import write_secret_hygiene_report
 from agenticsciml.state import validate_solution_tree_artifact_payload
@@ -163,6 +174,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
     run_dir = config.output_dir / config.experiment_id
     ledger_path = run_dir / "llm_call_ledger.jsonl"
+    resume_minimum_calls: int | None = None
     if args.resume and not args.mock:
         expected_call_range = _resume_expected_llm_call_range(
             run_dir=run_dir,
@@ -171,15 +183,28 @@ def cmd_run(args: argparse.Namespace) -> int:
             requested_max_iterations=args.max_iterations,
             parallel_mutations=args.parallel_mutations,
         )
+        resume_minimum_calls = _resume_minimum_ledger_calls(run_dir, benchmark_dir)
     if args.dry_run:
         plan = _build_run_plan(config, benchmark_snapshot, expected_call_range)
         if not args.mock:
+            source_revision = read_source_revision(benchmark_dir)
+            if any(value == "unknown" for value in source_revision.values()):
+                raise ValueError(
+                    "Cannot preflight real run: Git source provenance is unavailable"
+                )
+            plan["source_revision"] = source_revision
             dry_budget = LLMBudget.from_env()
             if args.resume:
                 _load_resume_llm_budget_usage(
                     ledger_path,
                     dry_budget,
-                    root_checkpoint_exists=(run_dir / "checkpoint.json").is_file(),
+                    minimum_calls=resume_minimum_calls or 0,
+                )
+                _validate_resume_dry_run_conditions(
+                    run_dir=run_dir,
+                    config=config,
+                    args=args,
+                    budget=dry_budget,
                 )
             plan["llm_budget"] = dry_budget.to_dict()
             plan["budget_preflight"] = llm_call_budget_preflight(
@@ -204,7 +229,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             _load_resume_llm_budget_usage(
                 ledger_path,
                 budget,
-                root_checkpoint_exists=(run_dir / "checkpoint.json").is_file(),
+                minimum_calls=resume_minimum_calls or 0,
             )
         require_llm_call_budget_preflight(
             llm_call_budget_preflight(
@@ -1174,28 +1199,6 @@ def _pre_root_resume_expected_llm_call_range(
     requested_max_iterations: int,
     parallel_mutations: int,
 ) -> dict[str, int]:
-    approval = _resume_json_object(run_dir / "evaluation_approval.json", "evaluation approval")
-    if approval.get("schema_version") != 1:
-        raise ValueError("Cannot preflight real resume: evaluation approval schema is unsupported")
-    if approval.get("status") not in {"approved", "auto_approved"}:
-        raise ValueError("Cannot preflight real resume: evaluation approval is not approved")
-    if not isinstance(approval.get("approval_required"), bool):
-        raise ValueError("Cannot preflight real resume: evaluation approval metadata is invalid")
-
-    try:
-        contract = EvaluationContract.from_dict(
-            _resume_json_object(run_dir / "evaluation_contract.json", "evaluation contract")
-        )
-        BenchmarkContractFactory.verify_contract(ProblemBundle.load(benchmark_dir), contract)
-    except Exception as exc:
-        raise ValueError(
-            "Cannot preflight real resume: evaluation contract is stale or invalid"
-        ) from exc
-    if approval.get("benchmark_name") != contract.benchmark_name:
-        raise ValueError("Cannot preflight real resume: evaluation approval benchmark mismatch")
-    if approval.get("contract_hash") != contract.contract_hash:
-        raise ValueError("Cannot preflight real resume: evaluation approval contract mismatch")
-
     conditions_payload = _resume_json_object(
         run_dir / "experiment_conditions.json",
         "experiment conditions",
@@ -1234,14 +1237,19 @@ def _pre_root_resume_expected_llm_call_range(
     ):
         raise ValueError("Cannot preflight real resume: pre-root provenance conditions are invalid")
 
+    try:
+        state = inspect_pre_root_resume_state(run_dir, ProblemBundle.load(benchmark_dir))
+        validate_pre_root_real_llm_evidence(run_dir, state)
+    except Exception as exc:
+        raise ValueError("Cannot preflight real resume: invalid pre-root artifacts") from exc
+
     full_range = estimate_orchestrator_llm_call_range(
         max_iterations=requested_max_iterations,
         parallel_mutations=parallel_mutations,
     )
-    completed_pre_root_calls = 2  # data_analyst and evaluator
     return {
-        "min": full_range["min"] - completed_pre_root_calls,
-        "max": full_range["max"] - completed_pre_root_calls,
+        "min": full_range["min"] - state.completed_llm_calls,
+        "max": full_range["max"] - state.completed_llm_calls,
     }
 
 
@@ -1334,26 +1342,121 @@ def _load_resume_llm_budget_usage(
     ledger_path: Path,
     budget: LLMBudget,
     *,
-    root_checkpoint_exists: bool,
+    minimum_calls: int,
 ) -> None:
     if not ledger_path.is_file():
+        if minimum_calls == 0:
+            return
         raise ValueError(
             f"Cannot preflight real resume: missing LLM call ledger at {ledger_path}"
         )
     load_llm_budget_usage(ledger_path, budget)
-    minimum_calls = (
-        estimate_orchestrator_llm_call_range(
-            max_iterations=0,
-            parallel_mutations=1,
-        )["min"]
-        if root_checkpoint_exists
-        else 2
-    )
     if budget.calls_used < minimum_calls:
         raise ValueError(
             "Cannot preflight real resume: LLM call ledger is stale for the saved progress; "
             f"calls_used={budget.calls_used}, required_at_least={minimum_calls}"
         )
+
+
+def _resume_minimum_ledger_calls(run_dir: Path, benchmark_dir: Path) -> int:
+    if (run_dir / "checkpoint.json").is_file():
+        return estimate_orchestrator_llm_call_range(
+            max_iterations=0,
+            parallel_mutations=1,
+        )["min"]
+    return inspect_pre_root_resume_state(
+        run_dir,
+        ProblemBundle.load(benchmark_dir),
+    ).completed_llm_calls
+
+
+def _validate_resume_dry_run_conditions(
+    *,
+    run_dir: Path,
+    config: ExperimentConfig,
+    args: argparse.Namespace,
+    budget: LLMBudget,
+) -> None:
+    payload = _resume_json_object(run_dir / "experiment_conditions.json", "experiment conditions")
+    if payload.get("schema_version") != 1 or not isinstance(payload.get("conditions"), dict):
+        raise ValueError("Cannot preflight real resume: experiment conditions are invalid")
+    stored_conditions = payload["conditions"]
+    assert isinstance(stored_conditions, dict)
+    encoded = json.dumps(
+        stored_conditions,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    if payload.get("conditions_digest") != hashlib.sha256(encoded).hexdigest():
+        raise ValueError("Cannot preflight real resume: experiment conditions digest mismatch")
+
+    config_payload = config.to_dict()
+    config_payload.pop("experiment_id", None)
+    config_payload.pop("output_dir", None)
+    config_payload.pop("resume", None)
+    config_payload["benchmark_dir"] = str(config.benchmark_dir.resolve())
+    evolution = config_payload.get("evolution")
+    if isinstance(evolution, dict):
+        evolution = dict(evolution)
+        evolution.pop("max_iterations", None)
+        config_payload["evolution"] = evolution
+    source_revision = read_source_revision(config.benchmark_dir)
+    if any(value == "unknown" for value in source_revision.values()):
+        raise ValueError("Cannot preflight real resume: Git source provenance is unavailable")
+    current_conditions = {
+        "config": config_payload,
+        "llm_runtime": _dry_run_real_llm_runtime_identity(args, budget),
+        "source_revision": source_revision,
+    }
+    try:
+        validate_resume_conditions_compatible(stored_conditions, current_conditions)
+    except ValueError as exc:
+        raise ValueError(f"Cannot preflight real resume: incompatible conditions: {exc}") from exc
+
+
+def _dry_run_real_llm_runtime_identity(
+    args: argparse.Namespace,
+    budget: LLMBudget,
+) -> dict[str, object]:
+    base_url = os.environ.get("OPENAI_BASE_URL")
+    model = _normalize_model_name(os.environ.get("OPENAI_MODEL", "gpt-5-mini"), base_url)
+    timeout_s = args.llm_timeout_s if args.llm_timeout_s is not None else _timeout_from_env()
+    max_retries = (
+        args.llm_max_retries
+        if args.llm_max_retries is not None
+        else _max_retries_from_env()
+    )
+    capabilities = capabilities_for_openai_compatible(base_url)
+    inner = {
+        "adapter_class": f"{OpenAIAdapter.__module__}.{OpenAIAdapter.__qualname__}",
+        "model": model,
+        "provider": None,
+        "provider_name": capabilities.provider,
+        "adapter_type": capabilities.adapter_type,
+        "timeout_s": timeout_s,
+        "max_retries": max_retries,
+    }
+    return {
+        "adapter_class": (
+            f"{RecordingLLMClient.__module__}.{RecordingLLMClient.__qualname__}"
+        ),
+        "model": model,
+        "provider": capabilities.provider,
+        "provider_name": capabilities.provider,
+        "adapter_type": capabilities.adapter_type,
+        "timeout_s": None,
+        "max_retries": None,
+        "inner": inner,
+        "budget_limits": {
+            "max_prompt_tokens": budget.max_prompt_tokens,
+            "max_output_tokens": budget.max_output_tokens,
+            "max_total_tokens": budget.max_total_tokens,
+            "max_calls": budget.max_calls,
+            "max_cost_usd": budget.max_cost_usd,
+            "cost_per_1k_tokens_usd": budget.cost_per_1k_tokens_usd,
+        },
+    }
 
 
 def _validate_run_arguments(args: argparse.Namespace) -> None:

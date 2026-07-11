@@ -348,6 +348,15 @@ def test_agent_json_budget_excess_is_not_retried_or_reclassified(tmp_path: Path)
         )
 
     assert llm.calls == 1
+    guardrail_events = [
+        json.loads(line)
+        for line in (storage.run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if json.loads(line)["event_type"] == "guardrail_span"
+    ]
+    assert not any(
+        event["name"] == "proposer:proposal:structured_output"
+        for event in guardrail_events
+    )
 
 
 def test_agent_budget_rejection_trace_does_not_reuse_previous_llm_call_id(

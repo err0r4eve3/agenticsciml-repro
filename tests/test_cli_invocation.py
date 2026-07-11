@@ -18,7 +18,9 @@ from agenticsciml.cli import (
     _resume_expected_llm_call_range,
     build_parser,
 )
+from agenticsciml.config import ExperimentConfig, EvolutionConfig
 from agenticsciml.llm.mock import MockLLMClient
+from agenticsciml.observations import render_structured_data_analysis
 
 
 def test_run_cli_defaults_to_mock_and_requires_explicit_real() -> None:
@@ -212,6 +214,42 @@ def test_real_run_budget_preflight_blocks_before_adapter_initialization(
     assert not list(tmp_path.glob("*/llm_call_ledger.jsonl"))
 
 
+def test_real_dry_run_rejects_unknown_source_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("AGENTICSCIML_MAX_LLM_CALLS", "4")
+    monkeypatch.setattr(
+        cli_module,
+        "read_source_revision",
+        lambda _path: {
+            "commit": "unknown",
+            "dirty": "unknown",
+            "runtime_source_digest": "unknown",
+            "runtime_source_file_count": "unknown",
+        },
+    )
+
+    exit_code = cli_module.main(
+        [
+            "run",
+            "examples/function_approx",
+            "--real",
+            "--dry-run",
+            "--max-iterations",
+            "0",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Git source provenance is unavailable" in captured.err
+    assert captured.out == ""
+
+
 def _write_real_resume_preflight_run(tmp_path: Path, experiment_id: str) -> Path:
     run_dir = tmp_path / experiment_id
     run_dir.mkdir()
@@ -280,8 +318,9 @@ def test_real_resume_budget_preflight_counts_only_remaining_work(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     experiment_id = "resume-budget-run"
-    _write_real_resume_preflight_run(tmp_path, experiment_id)
+    run_dir = _write_real_resume_preflight_run(tmp_path, experiment_id)
     monkeypatch.setenv("AGENTICSCIML_MAX_LLM_CALLS", "22")
+    _write_pre_root_resume_conditions(run_dir)
 
     exit_code = cli_module.main(
         [
@@ -317,6 +356,7 @@ def test_real_pre_root_approval_resume_keeps_conservative_root_budget(
     experiment_id = "resume-pre-root-budget-run"
     run_dir = _write_real_resume_preflight_run(tmp_path, experiment_id)
     (run_dir / "checkpoint.json").unlink()
+    _write_pre_root_data_analysis(run_dir)
     ledger_rows = (run_dir / "llm_call_ledger.jsonl").read_text(encoding="utf-8").splitlines()
     (run_dir / "llm_call_ledger.jsonl").write_text(
         "\n".join(ledger_rows[:2]) + "\n",
@@ -329,6 +369,19 @@ def test_real_pre_root_approval_resume_keeps_conservative_root_budget(
         json.dumps(contract.to_dict()),
         encoding="utf-8",
     )
+    (run_dir / "reports" / "evaluation_contract.md").write_text(
+        BenchmarkContractFactory.create_guidelines(
+            ProblemBundle.load(benchmark_dir), contract
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "transcripts" / "evaluator.json").write_text(
+        json.dumps(
+            [{"role": "evaluator", "prompt": "contract", "response": "{}", "metadata": {}}]
+        ),
+        encoding="utf-8",
+    )
+    _write_pre_root_real_evidence(run_dir, ("data_analyst", "evaluator"))
     (run_dir / "evaluation_approval.json").write_text(
         json.dumps(
             {
@@ -341,35 +394,8 @@ def test_real_pre_root_approval_resume_keeps_conservative_root_budget(
         ),
         encoding="utf-8",
     )
-    conditions = {
-        "config": {
-            "benchmark_dir": str(benchmark_dir),
-            "use_mock": False,
-            "evolution": {"parallel_mutations": 1},
-        },
-        "llm_runtime": {"adapter_class": "recording.openai"},
-        "source_revision": {"commit": "test", "dirty": False},
-    }
-    conditions_digest = hashlib.sha256(
-        json.dumps(
-            conditions,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
-    (run_dir / "experiment_conditions.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "conditions": conditions,
-                "conditions_digest": conditions_digest,
-                "initial_target_iterations": 1,
-            }
-        ),
-        encoding="utf-8",
-    )
     monkeypatch.setenv("AGENTICSCIML_MAX_LLM_CALLS", "22")
+    _write_pre_root_resume_conditions(run_dir)
 
     exit_code = cli_module.main(
         [
@@ -395,6 +421,228 @@ def test_real_pre_root_approval_resume_keeps_conservative_root_budget(
     assert plan["llm_budget"]["calls_used"] == 2
     assert plan["budget_preflight"]["projected_max_llm_calls"] == 22
     assert plan["budget_preflight"]["passed"] is True
+
+
+def _write_pre_root_resume_conditions(
+    run_dir: Path,
+    *,
+    requested_max_iterations: int = 1,
+) -> None:
+    benchmark_dir = Path("examples/function_approx").resolve()
+    config = ExperimentConfig(
+        experiment_id=run_dir.name,
+        benchmark_dir=benchmark_dir,
+        output_dir=run_dir.parent,
+        evolution=EvolutionConfig(
+            max_iterations=requested_max_iterations,
+            parallel_mutations=1,
+        ),
+        use_mock=False,
+    )
+    config_payload = config.to_dict()
+    config_payload.pop("experiment_id")
+    config_payload.pop("output_dir")
+    config_payload.pop("resume")
+    assert isinstance(config_payload["evolution"], dict)
+    config_payload["evolution"].pop("max_iterations")
+    parser_args = build_parser().parse_args(
+        [
+            "run",
+            str(benchmark_dir),
+            "--real",
+            "--resume",
+            "--dry-run",
+            "--max-iterations",
+            str(requested_max_iterations),
+            "--parallel-mutations",
+            "1",
+            "--experiment-id",
+            run_dir.name,
+            "--output-dir",
+            str(run_dir.parent),
+        ]
+    )
+    budget = cli_module.LLMBudget.from_env()
+    conditions = {
+        "config": config_payload,
+        "llm_runtime": cli_module._dry_run_real_llm_runtime_identity(parser_args, budget),
+        "source_revision": cli_module.read_source_revision(benchmark_dir),
+    }
+    conditions_digest = hashlib.sha256(
+        json.dumps(
+            conditions,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    (run_dir / "experiment_conditions.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "conditions": conditions,
+                "conditions_digest": conditions_digest,
+                "initial_target_iterations": requested_max_iterations,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_pre_root_data_analysis(run_dir: Path) -> None:
+    reports_dir = run_dir / "reports"
+    reports_dir.mkdir(exist_ok=True)
+    structured = {
+        "schema_version": 1,
+        "benchmark_name": "function_approx",
+        "training_array_keys": ["x_train", "u_train"],
+        "task_specific_observations": ["function approximation training data"],
+        "private_label_boundary": "training_data_only_no_validation_labels",
+        "llm_report_summary": "function_approx training arrays inspected",
+    }
+    (reports_dir / "data_analysis.md").write_text(
+        render_structured_data_analysis(structured), encoding="utf-8"
+    )
+    (reports_dir / "data_analysis_structured.json").write_text(
+        json.dumps(structured), encoding="utf-8"
+    )
+    transcripts_dir = run_dir / "transcripts"
+    transcripts_dir.mkdir(exist_ok=True)
+    (transcripts_dir / "data_analyst.json").write_text(
+        json.dumps(
+            [
+                {
+                    "role": "data_analyst",
+                    "prompt": "analyze",
+                    "response": structured["llm_report_summary"],
+                    "metadata": {},
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_pre_root_real_evidence(run_dir: Path, roles: tuple[str, ...]) -> None:
+    rows = []
+    trace_events = []
+    for index, role in enumerate(roles, start=1):
+        call_id = f"llm_call_{index:06d}"
+        schema_name = None if role == "data_analyst" else role
+        prompt = "analyze" if role == "data_analyst" else "contract"
+        response = (
+            "function_approx training arrays inspected"
+            if role == "data_analyst"
+            else "{}"
+        )
+        rows.append(
+            {
+                "call_id": call_id,
+                "method": "complete_text" if schema_name is None else "complete_json",
+                "schema_name": schema_name,
+                "success": True,
+                "prompt_hash": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+                "response_hash": hashlib.sha256(response.encode("utf-8")).hexdigest(),
+                "prompt_token_estimate": 1,
+                "response_token_estimate": 1,
+            }
+        )
+        trace_events.append(
+            {
+                "event_seq": index,
+                "event_type": "generation_span",
+                "name": role,
+                "metadata": {"llm_call_id": call_id},
+            }
+        )
+    (run_dir / "llm_call_ledger.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+    )
+    (run_dir / "trace.jsonl").write_text(
+        "".join(json.dumps(event) + "\n" for event in trace_events), encoding="utf-8"
+    )
+
+
+def test_real_data_ready_pre_root_resume_counts_one_completed_call(tmp_path: Path) -> None:
+    experiment_id = "resume-data-ready"
+    run_dir = _write_real_resume_preflight_run(tmp_path, experiment_id)
+    (run_dir / "checkpoint.json").unlink()
+    _write_pre_root_resume_conditions(run_dir)
+    _write_pre_root_data_analysis(run_dir)
+    _write_pre_root_real_evidence(run_dir, ("data_analyst",))
+
+    expected = _resume_expected_llm_call_range(
+        run_dir=run_dir,
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        requested_max_iterations=1,
+        parallel_mutations=1,
+    )
+
+    assert expected == {"min": 9, "max": 21}
+
+
+def test_real_initialized_pre_root_resume_allows_zero_call_ledger(tmp_path: Path) -> None:
+    experiment_id = "resume-initialized"
+    run_dir = _write_real_resume_preflight_run(tmp_path, experiment_id)
+    (run_dir / "checkpoint.json").unlink()
+    (run_dir / "llm_call_ledger.jsonl").unlink()
+    _write_pre_root_resume_conditions(run_dir)
+
+    expected = _resume_expected_llm_call_range(
+        run_dir=run_dir,
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        requested_max_iterations=1,
+        parallel_mutations=1,
+    )
+    budget = cli_module.LLMBudget(max_calls=22)
+    cli_module._load_resume_llm_budget_usage(
+        run_dir / "llm_call_ledger.jsonl",
+        budget,
+        minimum_calls=0,
+    )
+
+    assert expected == {"min": 10, "max": 22}
+    assert budget.calls_used == 0
+
+
+def test_real_resume_dry_run_rejects_model_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    experiment_id = "resume-model-drift"
+    run_dir = _write_real_resume_preflight_run(tmp_path, experiment_id)
+    (run_dir / "checkpoint.json").unlink()
+    (run_dir / "llm_call_ledger.jsonl").unlink()
+    monkeypatch.setenv("AGENTICSCIML_MAX_LLM_CALLS", "22")
+    monkeypatch.setenv("OPENAI_MODEL", "model-before")
+    _write_pre_root_resume_conditions(run_dir)
+    monkeypatch.setenv("OPENAI_MODEL", "model-after")
+
+    exit_code = cli_module.main(
+        [
+            "run",
+            "examples/function_approx",
+            "--real",
+            "--resume",
+            "--dry-run",
+            "--max-iterations",
+            "1",
+            "--parallel-mutations",
+            "1",
+            "--experiment-id",
+            experiment_id,
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "incompatible conditions" in captured.err
+    assert captured.out == ""
 
 
 def test_real_resume_call_range_counts_pending_inflight_and_future_slots(tmp_path: Path) -> None:

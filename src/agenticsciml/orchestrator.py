@@ -3,8 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import fcntl
 import shutil
-import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -78,6 +78,13 @@ from agenticsciml.patching import PatchApplicationError
 from agenticsciml.readiness import readiness_summary
 from agenticsciml.retrieval.kb_store import KnowledgeBase, kb_manifest_for_dir
 from agenticsciml.retrieval.query_builder import RetrievalQueryBuilder
+from agenticsciml.resume import (
+    PreRootResumeState,
+    inspect_pre_root_resume_state,
+    read_source_revision,
+    validate_pre_root_real_llm_evidence,
+    validate_resume_conditions_compatible,
+)
 from agenticsciml.reporting import (
     write_leaderboard,
     write_sdk_trace_export,
@@ -204,14 +211,21 @@ class AgenticSciMLOrchestrator:
         self.problem_bundle = ProblemBundle.load(config.benchmark_dir)
         self.contract: EvaluationContract | None = None
         self.loaded_checkpoint: dict[str, object] | None = None
+        self._pre_root_resume_state: PreRootResumeState | None = None
+        self._stored_experiment_conditions_digest: str | None = None
         self._next_solution_index: int | None = None
         self._completed_iterations = 0
         self._target_iterations = config.evolution.max_iterations
         self._active_iteration_index: int | None = None
         self._inflight_batch: dict[str, object] | None = None
         self._source_revision = self._read_source_revision()
+        if not config.use_mock and any(
+            value == "unknown" for value in self._source_revision.values()
+        ):
+            raise RuntimeError("Real LLM runs require readable Git source provenance")
         self._invocation_id: str | None = None
         self._invocation_started_monotonic: float | None = None
+        self._run_lock_handle: Any | None = None
         self._strategy_seed_context_cache: str | None = None
         self._problem_intake_context_cache: str | None = None
 
@@ -297,20 +311,49 @@ class AgenticSciMLOrchestrator:
         return cloned_inner
 
     def run(self) -> Path:
-        started = time.monotonic()
-        self._invocation_started_monotonic = started
-        self._invocation_id = self._start_invocation_record()
+        self._acquire_run_lock()
         try:
-            return self._run_invocation(started)
-        except Exception as exc:
+            refresh_from_ledger = getattr(self.llm, "refresh_from_ledger", None)
+            if callable(refresh_from_ledger):
+                refresh_from_ledger()
+            started = time.monotonic()
+            self._invocation_started_monotonic = started
+            self._invocation_id = self._start_invocation_record()
             try:
-                self._close_failed_invocation(exc)
-            except Exception as cleanup_exc:
-                exc.add_note(
-                    "AgenticSciML invocation cleanup also failed with "
-                    f"{type(cleanup_exc).__name__}."
-                )
-            raise
+                return self._run_invocation(started)
+            except Exception as exc:
+                try:
+                    self._close_failed_invocation(exc)
+                except Exception as cleanup_exc:
+                    exc.add_note(
+                        "AgenticSciML invocation cleanup also failed with "
+                        f"{type(cleanup_exc).__name__}."
+                    )
+                raise
+        finally:
+            self._release_run_lock()
+
+    def _acquire_run_lock(self) -> None:
+        lock_path = self.storage.run_dir / ".invocation.lock"
+        handle = lock_path.open("a+", encoding="utf-8")
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            handle.close()
+            raise RuntimeError(
+                f"Run already has an active invocation: {self.storage.run_dir}"
+            ) from exc
+        self._run_lock_handle = handle
+
+    def _release_run_lock(self) -> None:
+        handle = self._run_lock_handle
+        if handle is None:
+            return
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+            self._run_lock_handle = None
 
     def _run_invocation(self, started: float) -> Path:
         self.storage.record_trace(
@@ -335,10 +378,21 @@ class AgenticSciMLOrchestrator:
             self._write_planning_artifacts()
         resumed = self._load_checkpoint_if_requested()
         if resumed:
-            contract = self._load_or_create_contract()
-            self.contract = contract
             if self.loaded_checkpoint is not None:
+                contract = self._load_or_create_contract()
+                self.contract = contract
                 self._validate_loaded_checkpoint(contract)
+            else:
+                state = self._pre_root_resume_state
+                if state is None:
+                    raise RuntimeError("Pre-root resume state was not initialized")
+                data_report = state.data_report
+                if data_report is None:
+                    data_report = self.data_analyst.analyze(self.config.benchmark_dir)
+                contract = state.contract
+                if contract is None:
+                    contract = self.evaluator.create_contract(self.problem_bundle, data_report)
+                self.contract = contract
             self._write_planning_artifacts()
             if not self.nodes:
                 data_report = self._read_data_report()
@@ -470,30 +524,7 @@ class AgenticSciMLOrchestrator:
         )
 
     def _read_source_revision(self) -> dict[str, object]:
-        cwd = self.config.benchmark_dir.resolve()
-        try:
-            commit_result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=cwd,
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            status_result = subprocess.run(
-                ["git", "status", "--porcelain", "--untracked-files=normal"],
-                cwd=cwd,
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return {"commit": "unknown", "dirty": "unknown"}
-        commit = commit_result.stdout.strip()
-        if not commit:
-            return {"commit": "unknown", "dirty": "unknown"}
-        return {"commit": commit, "dirty": bool(status_result.stdout.strip())}
+        return read_source_revision(self.config.benchmark_dir)
 
     def _start_invocation_record(self) -> str:
         path = self.storage.run_dir / "invocation_history.json"
@@ -518,6 +549,7 @@ class AgenticSciMLOrchestrator:
                 "resume": self.config.resume,
                 "requested_max_iterations": self.config.evolution.max_iterations,
                 "conditions_digest": self._conditions_digest(conditions),
+                "llm_runtime": conditions.get("llm_runtime"),
                 "source_revision": dict(self._source_revision),
                 "wall_time_s": None,
                 "wall_time_semantics": "this invocation only",
@@ -665,12 +697,18 @@ class AgenticSciMLOrchestrator:
                 f"stored {initial_target}, requested {self.config.evolution.max_iterations}"
             )
         if validate_current:
-            current_digest = self._conditions_digest(self._experiment_conditions())
-            if current_digest != stored_digest:
+            try:
+                validate_resume_conditions_compatible(
+                    conditions,
+                    self._experiment_conditions(),
+                )
+            except ValueError as exc:
+                current_digest = self._conditions_digest(self._experiment_conditions())
                 raise ValueError(
                     "Resume experiment conditions mismatch: "
-                    f"stored {stored_digest}, current {current_digest}"
-                )
+                    f"stored {stored_digest}, current {current_digest}: {exc}"
+                ) from exc
+        self._stored_experiment_conditions_digest = stored_digest
         return payload
 
     def _load_checkpoint_if_requested(self) -> bool:
@@ -679,19 +717,32 @@ class AgenticSciMLOrchestrator:
         conditions_payload = self._load_stored_experiment_conditions(validate_current=False)
         checkpoint_path = self.storage.run_dir / "checkpoint.json"
         if not checkpoint_path.exists():
-            if (self.storage.run_dir / "evaluation_approval.json").exists():
-                self._load_stored_experiment_conditions(
-                    validate_current=True,
-                    require_target_match=True,
+            self._load_stored_experiment_conditions(
+                validate_current=True,
+                require_target_match=True,
+            )
+            self._pre_root_resume_state = inspect_pre_root_resume_state(
+                self.storage.run_dir,
+                self.problem_bundle,
+            )
+            if not self.config.use_mock:
+                validate_pre_root_real_llm_evidence(
+                    self.storage.run_dir,
+                    self._pre_root_resume_state,
                 )
-                self._target_iterations = int(conditions_payload["initial_target_iterations"])
-                self.storage.record_trace(
-                    "workflow_span",
-                    "agenticsciml.resume.pre_root_loaded",
-                    {"checkpoint_phase": "evaluation_pending", "node_count": 0},
-                )
-                return True
-            raise FileNotFoundError(f"Cannot resume without checkpoint: {checkpoint_path}")
+            self._target_iterations = int(conditions_payload["initial_target_iterations"])
+            self.storage.record_trace(
+                "workflow_span",
+                "agenticsciml.resume.pre_root_loaded",
+                {
+                    "checkpoint_phase": self._pre_root_resume_state.stage,
+                    "completed_pre_root_llm_calls": (
+                        self._pre_root_resume_state.completed_llm_calls
+                    ),
+                    "node_count": 0,
+                },
+            )
+            return True
         payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
         if payload.get("checkpoint_schema_version") != CHECKPOINT_SCHEMA_VERSION:
             raise ValueError(
@@ -773,6 +824,10 @@ class AgenticSciMLOrchestrator:
     def _save_checkpoint(self, phase: str) -> None:
         selector_policy = self._selector_policy_snapshot()
         conditions = self._experiment_conditions()
+        conditions_digest = (
+            self._stored_experiment_conditions_digest
+            or self._conditions_digest(conditions)
+        )
         with self._analysis_lock:
             analysis_node_ids = sorted(self.analysis_by_node)
         self.storage.save_json(
@@ -784,7 +839,7 @@ class AgenticSciMLOrchestrator:
                 "experiment_id": self.config.experiment_id,
                 "benchmark_name": self.problem_bundle.benchmark_name,
                 "contract_hash": self.contract.contract_hash if self.contract else "",
-                "experiment_conditions_digest": self._conditions_digest(conditions),
+                "experiment_conditions_digest": conditions_digest,
                 "completed_iterations": self._completed_iterations,
                 "target_iterations": self._target_iterations,
                 "inflight_batch": self._inflight_batch,
@@ -3519,6 +3574,10 @@ class AgenticSciMLOrchestrator:
         prompt_token_estimate = 0
         response_token_estimate = 0
         duration_s = 0.0
+        generation_attempt_count = 0
+        generation_attempt_duration_s = 0.0
+        unbound_generation_attempt_count = 0
+        pre_provider_rejection_count = 0
         provider_usage_call_count = 0
         provider_prompt_tokens = 0
         provider_completion_tokens = 0
@@ -3527,6 +3586,10 @@ class AgenticSciMLOrchestrator:
             return {
                 "total": total,
                 "by_role": by_role,
+                "generation_attempt_count": generation_attempt_count,
+                "generation_attempt_duration_s": generation_attempt_duration_s,
+                "unbound_generation_attempt_count": unbound_generation_attempt_count,
+                "pre_provider_rejection_count": pre_provider_rejection_count,
                 "prompt_token_estimate": prompt_token_estimate,
                 "response_token_estimate": response_token_estimate,
                 "provider_usage": {
@@ -3543,12 +3606,22 @@ class AgenticSciMLOrchestrator:
             if event.get("event_type") != "generation_span":
                 continue
             metadata = event.get("metadata", {})
+            if not isinstance(metadata, dict):
+                continue
+            generation_attempt_count += 1
+            attempt_duration_s = float(metadata.get("duration_s", 0.0))
+            generation_attempt_duration_s += attempt_duration_s
+            if not self.config.use_mock and not isinstance(metadata.get("llm_call_id"), str):
+                unbound_generation_attempt_count += 1
+                if metadata.get("error_type") == "LLMBudgetExceeded":
+                    pre_provider_rejection_count += 1
+                continue
             role = str(metadata.get("spec_role") or event.get("name") or "unknown")
             by_role[role] = by_role.get(role, 0) + 1
             total += 1
             prompt_token_estimate += int(metadata.get("prompt_token_estimate", 0))
             response_token_estimate += int(metadata.get("response_token_estimate", 0))
-            duration_s += float(metadata.get("duration_s", 0.0))
+            duration_s += attempt_duration_s
             usage = metadata.get("usage")
             if isinstance(usage, dict) and all(
                 isinstance(usage.get(field), int) and not isinstance(usage.get(field), bool)
@@ -3562,6 +3635,10 @@ class AgenticSciMLOrchestrator:
         return {
             "total": total,
             "by_role": dict(sorted(by_role.items())),
+            "generation_attempt_count": generation_attempt_count,
+            "generation_attempt_duration_s": generation_attempt_duration_s,
+            "unbound_generation_attempt_count": unbound_generation_attempt_count,
+            "pre_provider_rejection_count": pre_provider_rejection_count,
             "prompt_token_estimate": prompt_token_estimate,
             "response_token_estimate": response_token_estimate,
             "provider_usage": {

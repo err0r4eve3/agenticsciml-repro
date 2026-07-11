@@ -93,6 +93,28 @@ def test_recording_budget_resume_accepts_out_of_order_parallel_ledger_rows(tmp_p
     assert _ledger_rows(ledger_path)[-1]["call_id"] == "llm_call_000003"
 
 
+def test_recording_client_refreshes_stale_preconstructed_ledger_state(tmp_path: Path) -> None:
+    ledger_path = tmp_path / "llm_call_ledger.jsonl"
+    stale = RecordingLLMClient(
+        _TextLLM(lambda prompt: f"stale {prompt}"),
+        ledger_path,
+        LLMBudget(max_calls=4),
+    )
+    active = RecordingLLMClient(
+        _TextLLM(lambda prompt: f"active {prompt}"),
+        ledger_path,
+        LLMBudget(max_calls=4),
+    )
+
+    assert active.complete_text("first") == "active first"
+    stale.refresh_from_ledger()
+    assert stale.complete_text("second") == "stale second"
+
+    rows = _ledger_rows(ledger_path)
+    assert [row["call_id"] for row in rows] == ["llm_call_000001", "llm_call_000002"]
+    assert stale.budget.calls_used == 2
+
+
 def test_post_response_budget_failure_is_ledgered_and_reloaded_as_billable_usage(tmp_path: Path) -> None:
     ledger_path = tmp_path / "llm_call_ledger.jsonl"
     response = "billable provider response"

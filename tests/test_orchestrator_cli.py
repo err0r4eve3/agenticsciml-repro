@@ -418,6 +418,46 @@ def test_llm_call_summary_separates_provider_usage_from_text_estimates(tmp_path:
     }
 
 
+def test_real_llm_call_summary_excludes_pre_provider_budget_rejection(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="provider-rejection-summary",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        use_mock=False,
+    )
+    orchestrator = AgenticSciMLOrchestrator(config, MockLLMClient())
+    orchestrator.storage.record_trace(
+        "generation_span",
+        "data_analyst",
+        {
+            "llm_call_id": "llm_call_000001",
+            "prompt_token_estimate": 10,
+            "response_token_estimate": 20,
+            "duration_s": 1.0,
+            "usage": {"prompt_tokens": 11, "completion_tokens": 21, "total_tokens": 32},
+        },
+    )
+    orchestrator.storage.record_trace(
+        "generation_span",
+        "evaluator",
+        {
+            "error_type": "LLMBudgetExceeded",
+            "prompt_token_estimate": 30,
+            "response_token_estimate": 0,
+            "duration_s": 0.01,
+        },
+    )
+
+    summary = orchestrator._llm_call_summary()
+
+    assert summary["total"] == 1
+    assert summary["generation_attempt_count"] == 2
+    assert summary["pre_provider_rejection_count"] == 1
+    assert summary["by_role"] == {"data_analyst": 1}
+    assert summary["prompt_token_estimate"] == 10
+    assert summary["provider_usage"]["complete"] is True
+
+
 def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     config = ExperimentConfig(
         experiment_id="mock-run",
@@ -1437,6 +1477,93 @@ def test_evaluation_approval_resume_creates_root_after_manual_approval(tmp_path:
     assert tree["nodes"][0]["node_id"] == "solution_000"
     assert checkpoint["phase"] == "completed"
     assert checkpoint["nodes"][0]["node_id"] == "solution_000"
+
+
+def test_data_ready_real_run_resumes_without_repeating_paid_analysis(tmp_path: Path) -> None:
+    experiment_id = "data-ready-budget-resume"
+    initial_config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    initial = RecordingLLMClient(
+        MockLLMClient(),
+        tmp_path / experiment_id / "llm_call_ledger.jsonl",
+        LLMBudget(max_calls=1),
+    )
+
+    with pytest.raises(LLMBudgetExceeded, match="LLM call budget exceeded"):
+        AgenticSciMLOrchestrator(initial_config, initial).run()
+
+    run_dir = tmp_path / experiment_id
+    assert (run_dir / "reports" / "data_analysis.md").exists()
+    assert (run_dir / "reports" / "data_analysis_structured.json").exists()
+    assert not (run_dir / "evaluation_contract.json").exists()
+    assert not (run_dir / "checkpoint.json").exists()
+
+    resumed = RecordingLLMClient(
+        MockLLMClient(),
+        run_dir / "llm_call_ledger.jsonl",
+        LLMBudget(max_calls=10),
+    )
+    resumed_config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=initial_config.benchmark_dir,
+        output_dir=tmp_path,
+        evolution=initial_config.evolution,
+        use_mock=False,
+        resume=True,
+    )
+
+    resumed_run_dir = AgenticSciMLOrchestrator(resumed_config, resumed).run()
+
+    ledger_rows = [
+        json.loads(line)
+        for line in (run_dir / "llm_call_ledger.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    data_calls = [row for row in ledger_rows if row.get("schema_name") is None]
+    history = json.loads((run_dir / "invocation_history.json").read_text(encoding="utf-8"))
+    run_metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
+    summary = summarize_trace(run_dir)
+    assert resumed_run_dir == run_dir
+    assert len(ledger_rows) == 4
+    assert len(data_calls) == 1
+    assert [entry["status"] for entry in history["invocations"]] == ["failed", "completed"]
+    assert history["invocations"][0]["llm_runtime"]["budget_limits"]["max_calls"] == 1
+    assert history["invocations"][1]["llm_runtime"]["budget_limits"]["max_calls"] == 10
+    assert run_metadata["llm_calls"]["total"] == 4
+    assert run_metadata["llm_calls"]["generation_attempt_count"] == 5
+    assert run_metadata["llm_calls"]["pre_provider_rejection_count"] == 1
+    assert run_metadata["llm_calls"]["provider_usage"]["complete"] is False
+    assert summary["quality_gate"]["passed"] is True
+
+
+def test_run_lock_rejects_concurrent_resume_before_invocation_write(tmp_path: Path) -> None:
+    experiment_id = "concurrent-resume-lock"
+    initial_config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0),
+        use_mock=True,
+    )
+    first = AgenticSciMLOrchestrator(initial_config, MockLLMClient())
+    resumed_config = ExperimentConfig.from_dict(
+        {**initial_config.to_dict(), "resume": True}
+    )
+    second = AgenticSciMLOrchestrator(resumed_config, MockLLMClient())
+
+    first._acquire_run_lock()
+    try:
+        with pytest.raises(RuntimeError, match="active invocation"):
+            second.run()
+    finally:
+        first._release_run_lock()
+
+    assert not (tmp_path / experiment_id / "invocation_history.json").exists()
 
 
 def test_parallel_mutations_run_as_parallel_child_jobs(tmp_path: Path) -> None:

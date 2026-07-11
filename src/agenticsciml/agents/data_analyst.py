@@ -53,7 +53,8 @@ class DataAnalystAgent(AgentBase):
             eda_output,
             llm_report=response,
         )
+        rendered_report = render_structured_data_analysis(structured)
         self.storage.save_json("reports/data_analysis_structured.json", structured)
-        self.storage.save_text("reports/data_analysis.md", render_structured_data_analysis(structured))
+        self.storage.save_text("reports/data_analysis.md", rendered_report)
         self._save_messages(None, [AgentMessage(self.role, prompt, response)])
-        return response
+        return rendered_report

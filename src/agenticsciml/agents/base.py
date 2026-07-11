@@ -178,6 +178,8 @@ class AgentBase:
                         **self._llm_call_metadata(),
                     },
                 )
+                if isinstance(exc, LLMBudgetExceeded):
+                    raise
                 self.storage.record_trace(
                     "guardrail_span",
                     f"{self.role}:{schema_name}:structured_output",
@@ -189,8 +191,6 @@ class AgentBase:
                         "error": last_error,
                     },
                 )
-                if isinstance(exc, LLMBudgetExceeded):
-                    raise
                 if is_non_retryable_llm_api_error(exc):
                     raise StructuredOutputError(last_error) from exc
                 current_prompt = (

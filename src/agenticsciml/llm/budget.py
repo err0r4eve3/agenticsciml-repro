@@ -30,6 +30,9 @@ class _RecordingState:
     lock: threading.RLock
     progress_callback: Callable[[dict[str, Any]], None] | None = None
     call_count: int = 0
+    budget_calls_offset: int = 0
+    budget_prompt_tokens_offset: int = 0
+    budget_output_tokens_offset: int = 0
 
 
 class RecordingLLMClient(LLMClient):
@@ -78,6 +81,35 @@ class RecordingLLMClient(LLMClient):
             self.budget,
             _state=self._state,
         )
+
+    def refresh_from_ledger(self) -> None:
+        """Reload shared counters after the orchestrator acquires its run lock."""
+
+        current = self._state.budget
+        refreshed = LLMBudget(
+            max_prompt_tokens=current.max_prompt_tokens,
+            max_output_tokens=current.max_output_tokens,
+            max_total_tokens=current.max_total_tokens,
+            max_calls=current.max_calls,
+            max_cost_usd=current.max_cost_usd,
+            cost_per_1k_tokens_usd=current.cost_per_1k_tokens_usd,
+        )
+        loaded = _load_recording_state(self.ledger_path, refreshed)
+        with self._state.lock:
+            current.calls_used = self._state.budget_calls_offset + refreshed.calls_used
+            current.prompt_tokens_used = (
+                self._state.budget_prompt_tokens_offset + refreshed.prompt_tokens_used
+            )
+            current.output_tokens_used = (
+                self._state.budget_output_tokens_offset + refreshed.output_tokens_used
+            )
+            current._check_after_response()
+            if current.max_calls is not None and current.calls_used > current.max_calls:
+                raise LLMBudgetExceeded(
+                    "Existing aggregate LLM ledger usage exceeds call budget: "
+                    f"used={current.calls_used}, max={current.max_calls}"
+                )
+            self._state.call_count = loaded.call_count
 
     def complete_text(
         self,
@@ -628,6 +660,9 @@ def _load_recording_state(
         progress_callback=progress_callback,
     )
     if not ledger_path.exists():
+        state.budget_calls_offset = budget.calls_used
+        state.budget_prompt_tokens_offset = budget.prompt_tokens_used
+        state.budget_output_tokens_offset = budget.output_tokens_used
         return state
 
     records_by_call_number: dict[int, tuple[int, dict[str, Any]]] = {}

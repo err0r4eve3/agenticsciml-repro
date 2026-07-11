@@ -347,6 +347,12 @@ Any uncaught orchestrator failure also closes the current
 `error_type`, completion timestamp, and invocation wall time. Deliberate
 evaluation-approval pauses keep their existing paused/rejected statuses. A
 failed CLI process must not leave an invocation looking indefinitely `running`.
+For real runs, `run_metadata.llm_calls.total`, role counts, and call token
+estimates count only generation events bound to an `llm_call_id`. A request
+blocked before provider access remains visible in `generation_attempt_count`,
+`unbound_generation_attempt_count`, and `pre_provider_rejection_count`, but is
+not mislabeled as a provider call. This keeps ledger totals and provider usage
+coverage interpretable after a failed invocation is successfully resumed.
 If mandatory post-run finalization fails after an exported marker was written,
 `run_metadata.run_state` is downgraded to `partial`, finalization failure fields
 are recorded, a `run.failed` trace is appended, and `trace_summary.json` is
@@ -395,6 +401,47 @@ Resume uses the existing run directory and checkpoint:
 uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx --real --max-iterations 0 --experiment-id first-real-run
 uv run --python 3.11 --extra real-llm agenticsciml run examples/function_approx --real --resume --max-iterations 1 --experiment-id first-real-run
 ```
+
+Checkpoint-free failures before root creation are also resumable when their
+artifacts are internally consistent. The resume preflight classifies the run as
+`initialized`, `data_ready`, or `contract_ready`. A `data_ready` run reuses the
+completed Data Analyst artifacts and resumes at evaluator creation, so an
+already billed analysis call is not repeated. A `contract_ready` run reuses the
+verified evaluation contract and continues at the approval/root boundary.
+Partial or contradictory artifact sets fail closed instead of guessing which
+work completed.
+
+Consistency includes exact reconstruction of `data_analysis.md` from its
+structured JSON, complete stage transcripts, and—for real runs—a successful
+role/schema ledger row linked to a generation trace by the same `llm_call_id`.
+A missing checkpoint cannot downgrade a directory that already contains a
+tree, solution, champion, or run metadata into a pre-root run. An exclusive
+`.invocation.lock` also covers the full orchestrator invocation; a concurrent
+resume fails before it can append invocation, ledger, or trace records.
+After acquiring the lock, a recording client reloads its shared call counter
+and usage from the latest ledger. A client object constructed from an older
+snapshot therefore cannot reuse a call ID after another invocation completes.
+
+Run-level LLM ceilings may be increased for recovery, including changing a
+finite ceiling to unlimited. They may not be decreased, and the cost rate,
+provider/model identity, experiment configuration, benchmark, and source
+revision remain frozen. `invocation_history.json` records the secret-free LLM
+runtime and effective budget limits for every attempt; the checkpoint remains
+bound to the original experiment-conditions digest. This recovery behavior is
+operational evidence only and does not upgrade benchmark fidelity or support a
+scientific claim.
+
+Real resume dry-run reconstructs the current secret-free runtime identity and
+applies the same compatibility rule without requiring an API key or making a
+provider call. Model/config/source drift, a tighter ceiling, or a changed cost
+rate therefore fails during dry-run preflight.
+
+Source provenance includes a content digest of the effective local runtime
+tree under `src/` plus `pyproject.toml` and `uv.lock`, including untracked files
+that would affect an editable checkout. It excludes `.env`, run directories,
+and unrelated local outputs. Legacy clean runs remain compatible when their
+commit matches; legacy dirty runs without this digest fail closed because a
+boolean `dirty=true` cannot identify the code that actually ran.
 
 The real adapter is intentionally thin. It asks for structured JSON when an
 agent expects structured output, but the orchestrator still validates generated

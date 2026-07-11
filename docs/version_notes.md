@@ -4,6 +4,39 @@
 
 ## 2026-07-11 Real LLM smoke 研究诊断补强
 
+- checkpoint 前的真实运行现在按 `initialized`、`data_ready`、`contract_ready` 三个阶段恢复：
+  Data Analyst 已完成但 evaluator 因预算或 provider 错误中断时，`--resume` 会复用已落盘的数据
+  分析，不再重复付费调用；CLI 的剩余调用区间和 ledger 最小调用数也按同一共享状态机计算。
+  数据报告/结构化报告只存在一半、approval 无 contract、contract 无数据分析或 benchmark/hash
+  不一致仍会 fail closed。
+- pre-root state 不再只按文件存在推断进度：规范化 Markdown 必须能由 structured JSON 精确重建，
+  对应 agent transcript 必须完整，真实阶段还必须绑定成功的 role/schema ledger row 与相同
+  `llm_call_id` generation trace。缺 checkpoint 却已有 tree、solution、champion 或 run metadata
+  会按 post-root corruption 拒绝，不能回退成 pre-root 重跑覆盖证据。
+- 每个 run 使用 `.invocation.lock` 的非阻塞进程锁覆盖整个 orchestrator invocation；并发 resume
+  在写 invocation history、ledger 或 trace 之前失败，避免重复付费、call id 冲突和 checkpoint 竞争。
+  成功拿锁后 Recording client 会从最新 ledger 重载共享 counter/usage，避免“先构造旧客户端、
+  等另一 invocation 完成后再运行”的 stale snapshot 重新分配旧 call id。
+- Data Analyst 现在把已落盘的规范化 `data_analysis.md` 作为后续 agent 输入；正常运行与
+  pre-root resume 不再分别使用原始短回复和渲染报告，避免中断本身改变 evaluator/root prompt。
+- 恢复允许扩大已有 run 的 LLM call/token/cost 上限，但禁止收紧上限、修改计费率或改变模型、
+  provider、实验配置、源码版本等冻结条件。每次 invocation 保存当次 secret-free `llm_runtime`，
+  checkpoint 继续绑定原始 experiment conditions digest，使预算放宽既可执行又可审计。
+  real resume dry-run 也会无 key、无 provider call 地重建当前 config/runtime/source 条件并执行相同
+  兼容检查；模型漂移或预算收紧不再先显示可运行、到真实执行时才失败。
+- source revision 除 commit/dirty 外新增 `runtime_source_digest`，内容绑定 `src/`、
+  `pyproject.toml` 与 `uv.lock` 的 tracked/untracked 有效文件，不读取 `.env` 或 run artifacts。
+  旧 clean run 可继续由相同 commit 兼容；缺少 digest 的旧 dirty run 不再把任意两个
+  `dirty=true` 工作树误当成相同源码。普通 real dry-run、resume dry-run 与真实执行无法读取
+  Git/source manifest 时都直接 fail closed；dry-run plan 同时导出该 secret-free source revision。
+- provider 前的 `LLMBudgetExceeded` 仍写 generation failure 并中断运行，但不再伪装成
+  structured-output guardrail failure；成功恢复后，历史预算停机仍由 `run.failed` 和
+  `invocation_history` 保留，而不会污染最终 schema quality gate。
+- `run_metadata.llm_calls.total` / `by_role` / token estimates 现在只统计真实运行中带
+  `llm_call_id` 的 provider 调用；provider 前被预算拒绝的 generation 只计入独立的
+  `generation_attempt_count`、`unbound_generation_attempt_count` 和
+  `pre_provider_rejection_count`。恢复后的 ledger 为 4 行时不再错误报告 5 次 LLM call，
+  也不会仅因一次未访问 provider 的预算拒绝把 provider usage coverage 标成不完整。
 - `real_llm_smoke_runs.csv` 与 Markdown 报告现在保留 metric direction、evaluated/failed
   solution count、root score、best child score、方向归一化 improvement 和
   `mutation_improved`，避免 trace/smoke gate 通过时掩盖实际变异退化。报告同时显示

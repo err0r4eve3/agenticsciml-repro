@@ -125,7 +125,7 @@ def test_data_analyst_writes_training_observation_artifacts(tmp_path: Path) -> N
     storage = ExperimentStorage.create(tmp_path, "demo")
     llm = RecordingLLM()
 
-    DataAnalystAgent(llm, storage).analyze(Path("examples/function_approx"))
+    report = DataAnalystAgent(llm, storage).analyze(Path("examples/function_approx"))
 
     manifest_path = storage.run_dir / "reports" / "data_observations.json"
     svg_path = storage.run_dir / "reports" / "data_overview.svg"
@@ -136,6 +136,9 @@ def test_data_analyst_writes_training_observation_artifacts(tmp_path: Path) -> N
     eda_output = json.loads(eda_output_path.read_text(encoding="utf-8"))
     structured = json.loads(structured_path.read_text(encoding="utf-8"))
 
+    assert report == (storage.run_dir / "reports" / "data_analysis.md").read_text(
+        encoding="utf-8"
+    )
     assert manifest["benchmark_name"] == "function_approx"
     assert manifest["source_mode"] in {"generated_seed0", "repo_existing"}
     assert manifest["plots"][0]["path"] == "reports/data_overview.svg"
