@@ -68,6 +68,7 @@ from agenticsciml.resume import (
     MIN_ROOT_REAL_LLM_CALLS,
     inspect_pre_root_resume_state,
     read_source_revision,
+    real_llm_checkpoint_call_floor,
     validate_pre_root_real_llm_evidence,
     validate_real_llm_ledger_trace_consistency,
     validate_resume_conditions_compatible,
@@ -1135,6 +1136,17 @@ def _resume_expected_llm_call_range(
             "Cannot preflight real resume: invalid checkpoint solution tree: "
             + "; ".join(tree_issues)
         )
+    try:
+        historical_floor = real_llm_checkpoint_call_floor(run_dir, checkpoint)
+        validate_real_llm_ledger_trace_consistency(
+            run_dir,
+            minimum_calls=int(historical_floor["minimum_calls"]),
+            minimum_calls_by_role=dict(historical_floor["minimum_calls_by_role"]),
+        )
+    except ValueError as exc:
+        raise ValueError(
+            "Cannot preflight real resume: checkpoint history exceeds ledger/trace evidence"
+        ) from exc
 
     completed_iterations = _resume_non_negative_int(
         checkpoint.get("completed_iterations"),

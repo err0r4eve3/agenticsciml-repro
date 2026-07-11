@@ -16,6 +16,7 @@ from agenticsciml.storage import atomic_write_text
 from agenticsciml.trace_contracts import FanoutTraceMetadata, fanout_trace_references
 from agenticsciml.resume import (
     MIN_ROOT_REAL_LLM_CALLS,
+    real_llm_checkpoint_call_floor,
     validate_real_llm_ledger_trace_consistency,
 )
 from agenticsciml.evidence import (
@@ -357,6 +358,7 @@ def _check_artifact_consistency(run_dir: Path, events: list[dict[str, Any]]) -> 
         run_dir,
         run_metadata,
         workflow_metadata,
+        checkpoint,
         events,
     )
     scientific_readiness = _check_scientific_discovery_readiness_consistency(issues, run_dir, run_metadata)
@@ -403,6 +405,7 @@ def _check_real_llm_ledger_trace_consistency(
     run_dir: Path,
     run_metadata: dict[str, Any] | None,
     workflow_metadata: dict[str, Any] | None,
+    checkpoint: dict[str, Any] | None,
     events: list[dict[str, Any]],
 ) -> dict[str, Any]:
     llm_mode = None
@@ -431,17 +434,36 @@ def _check_real_llm_ledger_trace_consistency(
     )
     if not current_real_evidence:
         return {"checked": False, "passed": True}
-    minimum_calls = (
-        MIN_ROOT_REAL_LLM_CALLS if _requires_solution_artifacts(run_metadata) else 0
-    )
+    minimum_calls = MIN_ROOT_REAL_LLM_CALLS if _requires_solution_artifacts(run_metadata) else 0
+    historical_floor: dict[str, object] | None = None
+    if isinstance(checkpoint, dict):
+        try:
+            historical_floor = real_llm_checkpoint_call_floor(run_dir, checkpoint)
+        except ValueError as exc:
+            issues.append(f"real_llm_ledger_trace: {exc}")
+        else:
+            minimum_calls = max(
+                minimum_calls,
+                int(historical_floor["minimum_calls"]),
+            )
     try:
         counts = validate_real_llm_ledger_trace_consistency(
             run_dir,
             minimum_calls=minimum_calls,
+            minimum_calls_by_role=(
+                dict(historical_floor["minimum_calls_by_role"])
+                if historical_floor is not None
+                else None
+            ),
         )
     except ValueError as exc:
         issues.append(f"real_llm_ledger_trace: {exc}")
-        return {"checked": True, "passed": False, "error": str(exc)}
+        return {
+            "checked": True,
+            "passed": False,
+            "error": str(exc),
+            "historical_call_floor": historical_floor,
+        }
 
     ledger_count = counts["ledger_call_count"]
     if not isinstance(run_metadata, dict):
@@ -486,8 +508,45 @@ def _check_real_llm_ledger_trace_consistency(
                 llm_ledger_usage,
                 ledger_count=ledger_count,
             )
+        stored_floor = run_metadata.get("llm_historical_call_floor")
+        if run_metadata.get("llm_evidence_schema_version") is not None:
+            if not isinstance(stored_floor, dict):
+                issues.append(
+                    "real_llm_ledger_trace: run_metadata.llm_historical_call_floor "
+                    "is missing or invalid"
+                )
+            elif historical_floor is not None and not _historical_call_floor_matches(
+                stored_floor,
+                historical_floor,
+            ):
+                issues.append(
+                    "real_llm_ledger_trace: run_metadata.llm_historical_call_floor "
+                    "does not match checkpoint history"
+                )
     passed = not any(issue.startswith("real_llm_ledger_trace:") for issue in issues)
-    return {"checked": True, "passed": passed, **counts}
+    return {
+        "checked": True,
+        "passed": passed,
+        "historical_call_floor": historical_floor,
+        **counts,
+    }
+
+
+def _historical_call_floor_matches(
+    stored: dict[str, Any],
+    current: dict[str, object],
+) -> bool:
+    schema_version = stored.get("schema_version")
+    if not isinstance(schema_version, int) or isinstance(schema_version, bool):
+        return False
+    if schema_version == 2:
+        return stored == current
+    if schema_version != 1:
+        return False
+    legacy_current = dict(current)
+    legacy_current["schema_version"] = 1
+    legacy_current.pop("minimum_calls_by_role", None)
+    return stored == legacy_current
 
 
 def _check_llm_ledger_usage_metadata(

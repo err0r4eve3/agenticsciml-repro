@@ -1705,6 +1705,57 @@ def test_checkpoint_resume_rejects_jointly_truncated_ledger_and_trace(tmp_path: 
         ).run()
 
 
+def test_completed_child_checkpoint_rejects_root_only_llm_evidence(tmp_path: Path) -> None:
+    experiment_id = "truncated-completed-child-evidence"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=1, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    run_dir = tmp_path / experiment_id
+    ledger_path = run_dir / "llm_call_ledger.jsonl"
+    AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=30)),
+    ).run()
+    checkpoint = json.loads((run_dir / "checkpoint.json").read_text(encoding="utf-8"))
+    assert checkpoint["phase"] == "completed"
+    assert len(checkpoint["nodes"]) == 2
+
+    ledger_rows = ledger_path.read_text(encoding="utf-8").splitlines()
+    ledger_path.write_text("\n".join(ledger_rows[:4]) + "\n", encoding="utf-8")
+    trace_events = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    retained_call_ids = {f"llm_call_{index:06d}" for index in range(1, 5)}
+    (run_dir / "trace.jsonl").write_text(
+        "\n".join(
+            json.dumps(event)
+            for event in trace_events
+            if not (
+                event.get("event_type") == "generation_span"
+                and isinstance(event.get("metadata", {}).get("llm_call_id"), str)
+                and event["metadata"]["llm_call_id"] not in retained_call_ids
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    resume_payload = config.to_dict()
+    resume_payload["resume"] = True
+    resume_payload["evolution"]["max_iterations"] = 0
+    resume_config = ExperimentConfig.from_dict(resume_payload)
+
+    with pytest.raises(ValueError, match="at least 13"):
+        AgenticSciMLOrchestrator(
+            resume_config,
+            RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=30)),
+        ).run()
+
+
 def test_parallel_mutations_run_as_parallel_child_jobs(tmp_path: Path) -> None:
     config = ExperimentConfig(
         experiment_id="parallel-run",

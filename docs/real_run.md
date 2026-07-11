@@ -430,6 +430,23 @@ checkpoints require at least the four deterministic root calls. This minimum
 prevents a jointly truncated ledger and trace from looking internally
 consistent merely because both sides lost the same final call.
 
+The minimum is checkpoint-aware once finalized child nodes exist. It is derived
+from the checkpoint node set, including completed children still stored in an
+inflight batch, and from the hash-bound `use_critic` experiment condition. A
+normal evaluated/engineering child requires at least six calls without the
+critic (`4 proposer + 1 engineer + 1 result analyst`) or nine with the three
+critic rounds. A child finalized through an early `orchestration_error` adds
+only one required result-analysis call, so legitimate early failures remain
+resumable. The resulting `llm_historical_call_floor` is exported in
+`run_metadata.json` and reported by `trace-summary`. The floor also carries
+minimum per-role counts, so unrelated extra calls cannot stand in for missing
+proposer, critic, engineer, or result-analysis stages. This prevents a
+completed child run from being truncated to root-only evidence and then
+re-exported by a zero-iteration resume. Call-floor schema v2 adds this role map;
+trace verification still accepts a v1 stored floor only when every older field
+matches the recomputed checkpoint floor, while applying the v2 role checks to
+the current ledger and trace.
+
 The same ledger/trace check is part of `trace-summary` for current real-run
 artifacts. It compares ledger counts with `run_metadata.llm_calls.total` and
 `llm_ledger_usage.calls_used`, so deleting a ledger after export invalidates the

@@ -83,6 +83,7 @@ from agenticsciml.resume import (
     PreRootResumeState,
     inspect_pre_root_resume_state,
     read_source_revision,
+    real_llm_checkpoint_call_floor,
     validate_pre_root_real_llm_evidence,
     validate_real_llm_ledger_trace_consistency,
     validate_resume_conditions_compatible,
@@ -773,6 +774,18 @@ class AgenticSciMLOrchestrator:
                     )
         if node_issues:
             raise ValueError("Invalid checkpoint solution tree: " + "; ".join(node_issues))
+        if not self.config.use_mock:
+            historical_floor = real_llm_checkpoint_call_floor(
+                self.storage.run_dir,
+                payload,
+            )
+            validate_real_llm_ledger_trace_consistency(
+                self.storage.run_dir,
+                minimum_calls=int(historical_floor["minimum_calls"]),
+                minimum_calls_by_role=dict(
+                    historical_floor["minimum_calls_by_role"]
+                ),
+            )
         self.nodes = [SolutionNode.from_dict(node) for node in node_payloads]
         self.analysis_by_node = self._load_analysis_reports(self.nodes)
         self._next_solution_index = self._compute_next_solution_index()
@@ -3743,6 +3756,14 @@ class AgenticSciMLOrchestrator:
         ledger_usage = getattr(self.llm, "ledger_usage", None)
         if callable(ledger_usage):
             metadata["llm_ledger_usage"] = ledger_usage()
+        if not self.config.use_mock:
+            checkpoint = self.storage.load_json("checkpoint.json")
+            if not isinstance(checkpoint, dict):
+                raise ValueError("checkpoint.json is invalid for real LLM call-floor export")
+            metadata["llm_historical_call_floor"] = real_llm_checkpoint_call_floor(
+                self.storage.run_dir,
+                checkpoint,
+            )
         role_models: dict[str, object] = {}
         roles = sorted(set(DEFAULT_AGENT_ROLE_MODEL_SETTINGS) | set(self.config.agents))
         for role in roles:

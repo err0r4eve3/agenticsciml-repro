@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -10,6 +11,7 @@ from agenticsciml.benchmarks import BenchmarkContractFactory, ProblemBundle
 from agenticsciml.resume import (
     inspect_pre_root_resume_state,
     read_source_revision,
+    real_llm_checkpoint_call_floor,
     validate_pre_root_real_llm_evidence,
     validate_real_llm_ledger_trace_consistency,
     validate_resume_conditions_compatible,
@@ -207,6 +209,149 @@ def test_real_llm_ledger_trace_rejects_joint_metadata_downgrade(tmp_path: Path) 
 
     with pytest.raises(ValueError, match="provider metadata"):
         validate_real_llm_ledger_trace_consistency(tmp_path, minimum_calls=1)
+
+
+def test_real_llm_ledger_trace_enforces_checkpoint_role_floor(tmp_path: Path) -> None:
+    common = {
+        "method": "complete_text",
+        "schema_name": None,
+        "provider": "test-provider",
+        "model": "test-model",
+        "adapter_type": "TestAdapter",
+    }
+    (tmp_path / "llm_call_ledger.jsonl").write_text(
+        json.dumps(
+            {
+                "call_id": "llm_call_000001",
+                "success": True,
+                **common,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "trace.jsonl").write_text(
+        json.dumps(
+            {
+                "event_type": "generation_span",
+                "name": "evaluator",
+                "metadata": {"llm_call_id": "llm_call_000001", **common},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="1 data_analyst calls; found 0"):
+        validate_real_llm_ledger_trace_consistency(
+            tmp_path,
+            minimum_calls=1,
+            minimum_calls_by_role={"data_analyst": 1},
+        )
+
+
+@pytest.mark.parametrize(
+    (
+        "use_critic",
+        "child",
+        "expected_minimum",
+        "expected_child_roles",
+        "inflight",
+    ),
+    [
+        (
+            True,
+            {"status": "evaluated", "failure_kind": None},
+            13,
+            {"critic": 3, "engineer": 1, "proposer": 4, "result_analyst": 2},
+            False,
+        ),
+        (
+            False,
+            {"status": "evaluated", "failure_kind": None},
+            10,
+            {"engineer": 1, "proposer": 4, "result_analyst": 2},
+            False,
+        ),
+        (
+            True,
+            {"status": "failed", "failure_kind": "runtime_error"},
+            13,
+            {"critic": 3, "engineer": 1, "proposer": 4, "result_analyst": 2},
+            False,
+        ),
+        (
+            True,
+            {"status": "failed", "failure_kind": "orchestration_error"},
+            5,
+            {"result_analyst": 2},
+            False,
+        ),
+        (
+            True,
+            {"status": "evaluated", "failure_kind": None},
+            13,
+            {"critic": 3, "engineer": 1, "proposer": 4, "result_analyst": 2},
+            True,
+        ),
+    ],
+)
+def test_real_llm_checkpoint_call_floor_respects_finalized_child_path(
+    tmp_path: Path,
+    use_critic: bool,
+    child: dict[str, object],
+    expected_minimum: int,
+    expected_child_roles: dict[str, int],
+    inflight: bool,
+) -> None:
+    conditions = {
+        "config": {
+            "use_mock": False,
+            "evolution": {"use_critic": use_critic},
+        }
+    }
+    encoded = json.dumps(
+        conditions,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    conditions_digest = hashlib.sha256(encoded).hexdigest()
+    (tmp_path / "experiment_conditions.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "conditions": conditions,
+                "conditions_digest": conditions_digest,
+            }
+        ),
+        encoding="utf-8",
+    )
+    root = {"node_id": "solution_000", "parent_id": None}
+    child_payload = {
+        "node_id": "solution_001",
+        "parent_id": "solution_000",
+        **child,
+    }
+    checkpoint: dict[str, object] = {
+        "experiment_conditions_digest": conditions_digest,
+        "nodes": [root] if inflight else [root, child_payload],
+        "inflight_batch": (
+            {
+                "completed_children": [
+                    {"parent_id": "solution_000", "child": child_payload}
+                ]
+            }
+            if inflight
+            else None
+        ),
+    }
+
+    floor = real_llm_checkpoint_call_floor(tmp_path, checkpoint)
+
+    assert floor["minimum_calls"] == expected_minimum
+    for role, count in expected_child_roles.items():
+        assert floor["minimum_calls_by_role"][role] == count
 
 
 def test_source_revision_digest_changes_with_uncommitted_runtime_source(tmp_path: Path) -> None:

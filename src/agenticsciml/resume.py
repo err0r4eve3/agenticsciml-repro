@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import copy
 import ast
+import copy
+from collections import Counter
 import hashlib
 import json
 import math
@@ -226,7 +227,8 @@ def validate_real_llm_ledger_trace_consistency(
     run_dir: Path,
     *,
     minimum_calls: int,
-) -> dict[str, int]:
+    minimum_calls_by_role: dict[str, int] | None = None,
+) -> dict[str, object]:
     """Require a one-to-one binding between billable ledger rows and generation traces."""
 
     ledger_path = run_dir / "llm_call_ledger.jsonl"
@@ -257,6 +259,7 @@ def validate_real_llm_ledger_trace_consistency(
         raise ValueError("Real LLM ledger call IDs are not contiguous from llm_call_000001")
 
     trace_by_id: dict[str, dict[str, object]] = {}
+    trace_role_by_id: dict[str, str] = {}
     for event in traces:
         if event.get("event_type") != "generation_span":
             continue
@@ -273,7 +276,11 @@ def validate_real_llm_ledger_trace_consistency(
         ):
             raise ValueError("Real LLM trace has an invalid or duplicate llm_call_id")
         _validate_real_llm_call_metadata(metadata, call_id, source="trace")
+        role = event.get("name")
+        if not isinstance(role, str) or not role.strip():
+            raise ValueError(f"Real LLM trace {call_id} has invalid agent role")
         trace_by_id[call_id] = metadata
+        trace_role_by_id[call_id] = role
 
     ledger_ids = set(ledger_by_id)
     trace_ids = set(trace_by_id)
@@ -288,6 +295,23 @@ def validate_real_llm_ledger_trace_consistency(
             "Real LLM ledger/trace evidence requires at least "
             f"{minimum_calls} bound calls; found {len(ledger_ids)}"
         )
+    trace_calls_by_role = Counter(trace_role_by_id.values())
+    if minimum_calls_by_role is not None:
+        for role, required_count in minimum_calls_by_role.items():
+            if (
+                not isinstance(role, str)
+                or not role
+                or not isinstance(required_count, int)
+                or isinstance(required_count, bool)
+                or required_count < 0
+            ):
+                raise ValueError("Real LLM minimum role-call floor is invalid")
+            actual_count = trace_calls_by_role.get(role, 0)
+            if actual_count < required_count:
+                raise ValueError(
+                    "Real LLM trace requires at least "
+                    f"{required_count} {role} calls; found {actual_count}"
+                )
 
     for call_id in sorted(ledger_ids):
         ledger_row = ledger_by_id[call_id]
@@ -300,7 +324,139 @@ def validate_real_llm_ledger_trace_consistency(
     return {
         "ledger_call_count": len(ledger_ids),
         "trace_call_count": len(trace_ids),
+        "trace_call_count_by_role": dict(sorted(trace_calls_by_role.items())),
     }
+
+
+def real_llm_checkpoint_call_floor(
+    run_dir: Path,
+    checkpoint: dict[str, object],
+) -> dict[str, object]:
+    """Derive a conservative historical call floor from finalized checkpoint nodes."""
+
+    use_critic = _stored_checkpoint_use_critic(run_dir, checkpoint)
+    nodes = checkpoint.get("nodes")
+    if not isinstance(nodes, list) or not nodes:
+        raise ValueError("Real LLM checkpoint call floor requires a non-empty node list")
+    node_payloads: list[dict[str, object]] = []
+    for index, node in enumerate(nodes):
+        if not isinstance(node, dict):
+            raise ValueError(f"Real LLM checkpoint node {index} must be an object")
+        node_payloads.append(node)
+
+    inflight_batch = checkpoint.get("inflight_batch")
+    if inflight_batch is not None:
+        if not isinstance(inflight_batch, dict):
+            raise ValueError("Real LLM checkpoint inflight_batch must be an object or null")
+        completed_children = inflight_batch.get("completed_children")
+        if not isinstance(completed_children, list):
+            raise ValueError(
+                "Real LLM checkpoint inflight completed_children must be a list"
+            )
+        for index, entry in enumerate(completed_children):
+            if not isinstance(entry, dict) or not isinstance(entry.get("child"), dict):
+                raise ValueError(
+                    "Real LLM checkpoint inflight completed child "
+                    f"{index} must contain a child object"
+                )
+            node_payloads.append(entry["child"])
+
+    seen_ids: set[str] = set()
+    root_count = 0
+    full_child_count = 0
+    orchestration_failure_child_count = 0
+    minimum_calls = MIN_ROOT_REAL_LLM_CALLS
+    full_child_floor = 6 + (3 if use_critic else 0)
+    minimum_calls_by_role = {
+        "data_analyst": 1,
+        "evaluator": 1,
+        "root_engineer": 1,
+        "result_analyst": 1,
+    }
+    for index, node in enumerate(node_payloads):
+        node_id = node.get("node_id")
+        if not isinstance(node_id, str) or not node_id or node_id in seen_ids:
+            raise ValueError(
+                f"Real LLM checkpoint node {index} has an invalid or duplicate node_id"
+            )
+        seen_ids.add(node_id)
+        parent_id = node.get("parent_id")
+        if parent_id is None:
+            root_count += 1
+            continue
+        if not isinstance(parent_id, str) or not parent_id:
+            raise ValueError(f"Real LLM checkpoint node {node_id} has invalid parent_id")
+        status = node.get("status")
+        if status not in {"evaluated", "failed"}:
+            raise ValueError(
+                f"Real LLM finalized child {node_id} has unsupported status {status!r}"
+            )
+        if status == "failed" and node.get("failure_kind") == "orchestration_error":
+            minimum_calls += 1
+            minimum_calls_by_role["result_analyst"] += 1
+            orchestration_failure_child_count += 1
+        else:
+            minimum_calls += full_child_floor
+            minimum_calls_by_role["proposer"] = (
+                minimum_calls_by_role.get("proposer", 0) + 4
+            )
+            minimum_calls_by_role["engineer"] = (
+                minimum_calls_by_role.get("engineer", 0) + 1
+            )
+            minimum_calls_by_role["result_analyst"] += 1
+            if use_critic:
+                minimum_calls_by_role["critic"] = (
+                    minimum_calls_by_role.get("critic", 0) + 3
+                )
+            full_child_count += 1
+    if root_count != 1:
+        raise ValueError(
+            f"Real LLM checkpoint call floor requires exactly one root; found {root_count}"
+        )
+    return {
+        "schema_version": 2,
+        "minimum_calls": minimum_calls,
+        "root_calls": MIN_ROOT_REAL_LLM_CALLS,
+        "full_child_call_floor": full_child_floor,
+        "full_child_count": full_child_count,
+        "orchestration_failure_child_count": orchestration_failure_child_count,
+        "use_critic": use_critic,
+        "minimum_calls_by_role": dict(sorted(minimum_calls_by_role.items())),
+    }
+
+
+def _stored_checkpoint_use_critic(
+    run_dir: Path,
+    checkpoint: dict[str, object],
+) -> bool:
+    conditions_path = run_dir / "experiment_conditions.json"
+    conditions_payload = _load_json_object(conditions_path, "experiment conditions")
+    if conditions_payload.get("schema_version") != 1:
+        raise ValueError("Real LLM experiment conditions schema is unsupported")
+    conditions = conditions_payload.get("conditions")
+    if not isinstance(conditions, dict):
+        raise ValueError("Real LLM experiment conditions payload is invalid")
+    try:
+        encoded = json.dumps(
+            conditions,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Real LLM experiment conditions are not canonical JSON") from exc
+    conditions_digest = hashlib.sha256(encoded).hexdigest()
+    if conditions_payload.get("conditions_digest") != conditions_digest:
+        raise ValueError("Real LLM experiment conditions digest mismatch")
+    if checkpoint.get("experiment_conditions_digest") != conditions_digest:
+        raise ValueError("Real LLM checkpoint experiment conditions digest mismatch")
+    config = conditions.get("config")
+    if not isinstance(config, dict) or config.get("use_mock") is not False:
+        raise ValueError("Real LLM checkpoint conditions are not for a real run")
+    evolution = config.get("evolution")
+    if not isinstance(evolution, dict) or not isinstance(evolution.get("use_critic"), bool):
+        raise ValueError("Real LLM checkpoint use_critic condition is invalid")
+    return evolution["use_critic"]
 
 
 def _validate_real_llm_call_metadata(

@@ -4,6 +4,18 @@
 
 ## 2026-07-11 Real LLM smoke 研究诊断补强
 
+- post-root ledger/trace 下限现在绑定 checkpoint 历史，而不再固定为 root 的 4 次调用：
+  evaluated 或非 orchestration-failure child 在 `use_critic=false/true` 时分别增加至少 6/9 次，
+  early `orchestration_error` child 只增加 1 次 result-analysis 调用；inflight batch 中已经完成的
+  child 也计入。floor 同时约束各 agent role 的最低调用数，不能用无关额外调用补足缺失的
+  proposer/critic/engineer/result-analysis 阶段；`use_critic` 来自与 checkpoint digest 一致的
+  hash-bound experiment conditions。
+- historical call-floor schema v2 新增 per-role map；旧 v1 floor 只有在全部既有字段与重算结果一致
+  时才兼容读取，同时当前 ledger/trace 仍执行 v2 role floor；schema version 必须是非 boolean 的整数，
+  不接受 JSON `true` 或浮点数伪装版本，避免 schema 升级迫使已付费 run 重跑或弱化类型门禁。
+- orchestrator resume、CLI dry-run preflight 和 `trace-summary` 复用同一个 historical call-floor；
+  `run_metadata.llm_historical_call_floor` 保留计算明细。含 evaluated child 的 13-call run 即使同时
+  截断 ledger 与 generation trace 到 root-only 4 calls，也不能再通过 zero-iteration resume 重导出。
 - post-root real resume 现在在 CLI preflight 与 orchestrator 取得 run lock、刷新 ledger 后都执行
   全局 ledger↔generation trace 绑定：call id 必须唯一连续且集合完全相等，method/schema/provider/
   model/adapter metadata 必须一致。删除 ledger、只删除一侧证据，或同时截断 ledger 与对应 trace

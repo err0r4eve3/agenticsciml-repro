@@ -194,6 +194,112 @@ def test_trace_summary_rejects_current_real_metadata_field_removal(
     )
 
 
+def test_trace_summary_rejects_root_only_evidence_for_evaluated_child(
+    tmp_path: Path,
+) -> None:
+    experiment_id = "trace-child-history-truncated"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=1, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=30)),
+    ).run()
+    ledger_rows = ledger_path.read_text(encoding="utf-8").splitlines()
+    ledger_path.write_text("\n".join(ledger_rows[:4]) + "\n", encoding="utf-8")
+    retained_call_ids = {f"llm_call_{index:06d}" for index in range(1, 5)}
+    trace_path = run_dir / "trace.jsonl"
+    trace_events = [
+        json.loads(line)
+        for line in trace_path.read_text(encoding="utf-8").splitlines()
+    ]
+    _write_events(
+        trace_path,
+        [
+            event
+            for event in trace_events
+            if not (
+                event.get("event_type") == "generation_span"
+                and isinstance(event.get("metadata", {}).get("llm_call_id"), str)
+                and event["metadata"]["llm_call_id"] not in retained_call_ids
+            )
+        ],
+    )
+    metadata_path = run_dir / "run_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["llm_calls"]["total"] = 4
+    metadata["llm_ledger_usage"]["calls_used"] = 4
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    summary = summarize_trace(run_dir)
+
+    ledger_trace = summary["artifact_consistency"]["real_llm_ledger_trace"]
+    assert ledger_trace["historical_call_floor"]["minimum_calls"] == 13
+    assert ledger_trace["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert "at least 13" in ledger_trace["error"]
+
+
+def test_trace_summary_accepts_legacy_call_floor_without_role_map(tmp_path: Path) -> None:
+    experiment_id = "trace-legacy-call-floor"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    metadata_path = run_dir / "run_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["llm_historical_call_floor"]["schema_version"] = 1
+    metadata["llm_historical_call_floor"].pop("minimum_calls_by_role")
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["real_llm_ledger_trace"]["passed"] is True
+    assert summary["quality_gate"]["passed"] is True
+
+
+@pytest.mark.parametrize("invalid_schema_version", [True, 1.0, 2.0])
+def test_trace_summary_rejects_non_integer_call_floor_schema(
+    tmp_path: Path,
+    invalid_schema_version: object,
+) -> None:
+    experiment_id = f"trace-invalid-call-floor-{type(invalid_schema_version).__name__}"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    metadata_path = run_dir / "run_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["llm_historical_call_floor"]["schema_version"] = invalid_schema_version
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["real_llm_ledger_trace"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+
+
 def test_trace_summary_counts_recovered_provider_timeout(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     run_dir.mkdir()

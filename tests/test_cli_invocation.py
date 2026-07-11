@@ -453,6 +453,7 @@ def _write_pre_root_resume_conditions(
     run_dir: Path,
     *,
     requested_max_iterations: int = 1,
+    parallel_mutations: int = 1,
 ) -> None:
     benchmark_dir = Path("examples/function_approx").resolve()
     config = ExperimentConfig(
@@ -461,7 +462,7 @@ def _write_pre_root_resume_conditions(
         output_dir=run_dir.parent,
         evolution=EvolutionConfig(
             max_iterations=requested_max_iterations,
-            parallel_mutations=1,
+            parallel_mutations=parallel_mutations,
         ),
         use_mock=False,
     )
@@ -481,7 +482,7 @@ def _write_pre_root_resume_conditions(
             "--max-iterations",
             str(requested_max_iterations),
             "--parallel-mutations",
-            "1",
+            str(parallel_mutations),
             "--experiment-id",
             run_dir.name,
             "--output-dir",
@@ -513,6 +514,11 @@ def _write_pre_root_resume_conditions(
         ),
         encoding="utf-8",
     )
+    checkpoint_path = run_dir / "checkpoint.json"
+    if checkpoint_path.exists():
+        checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        checkpoint["experiment_conditions_digest"] = conditions_digest
+        checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
 
 
 def _write_pre_root_data_analysis(run_dir: Path) -> None:
@@ -644,6 +650,40 @@ def test_real_initialized_pre_root_resume_allows_zero_call_ledger(tmp_path: Path
     assert budget.calls_used == 0
 
 
+def test_real_resume_preflight_rejects_child_checkpoint_with_root_only_evidence(
+    tmp_path: Path,
+) -> None:
+    experiment_id = "resume-child-history-truncated"
+    run_dir = _write_real_resume_preflight_run(tmp_path, experiment_id)
+    _write_pre_root_resume_conditions(run_dir)
+    checkpoint_path = run_dir / "checkpoint.json"
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    checkpoint["phase"] = "completed"
+    checkpoint["completed_iterations"] = 1
+    checkpoint["target_iterations"] = 1
+    checkpoint["nodes"][0]["children"] = ["solution_001"]
+    checkpoint["nodes"].append(
+        {
+            **checkpoint["nodes"][0],
+            "node_id": "solution_001",
+            "parent_id": "solution_000",
+            "workspace": str(run_dir / "solutions" / "solution_001"),
+            "children": [],
+            "score": {"metric": "mse", "value": 0.5, "higher_is_better": False},
+        }
+    )
+    checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="checkpoint history exceeds"):
+        _resume_expected_llm_call_range(
+            run_dir=run_dir,
+            experiment_id=experiment_id,
+            benchmark_dir=Path("examples/function_approx").resolve(),
+            requested_max_iterations=0,
+            parallel_mutations=1,
+        )
+
+
 def test_real_resume_dry_run_rejects_model_drift(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -710,6 +750,66 @@ def test_real_resume_call_range_counts_pending_inflight_and_future_slots(tmp_pat
         "completed_children": [{"parent_id": "solution_000", "child": child}],
     }
     checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
+    _write_pre_root_resume_conditions(
+        run_dir,
+        requested_max_iterations=2,
+        parallel_mutations=2,
+    )
+    ledger_path = run_dir / "llm_call_ledger.jsonl"
+    ledger_rows = [
+        json.loads(line)
+        for line in ledger_path.read_text(encoding="utf-8").splitlines()
+    ]
+    trace_path = run_dir / "trace.jsonl"
+    trace_events = [
+        json.loads(line)
+        for line in trace_path.read_text(encoding="utf-8").splitlines()
+    ]
+    child_calls = [
+        ("proposer", "complete_text", None),
+        ("critic", "complete_text", None),
+        ("proposer", "complete_text", None),
+        ("critic", "complete_text", None),
+        ("proposer", "complete_text", None),
+        ("critic", "complete_text", None),
+        ("proposer", "complete_json", "proposal"),
+        ("engineer", "complete_json", "engineer"),
+        ("result_analyst", "complete_json", "analysis"),
+    ]
+    for index, (role, method, schema_name) in enumerate(child_calls, start=5):
+        call_id = f"llm_call_{index:06d}"
+        shared = {
+            "method": method,
+            "schema_name": schema_name,
+            "provider": "test-provider",
+            "model": "test-model",
+            "adapter_type": "test-adapter",
+        }
+        ledger_rows.append(
+            {
+                "call_id": call_id,
+                **shared,
+                "success": True,
+                "prompt_token_estimate": 1,
+                "response_token_estimate": 1,
+            }
+        )
+        trace_events.append(
+            {
+                "event_seq": index,
+                "event_type": "generation_span",
+                "name": role,
+                "metadata": {"llm_call_id": call_id, **shared},
+            }
+        )
+    ledger_path.write_text(
+        "".join(json.dumps(row) + "\n" for row in ledger_rows),
+        encoding="utf-8",
+    )
+    trace_path.write_text(
+        "".join(json.dumps(event) + "\n" for event in trace_events),
+        encoding="utf-8",
+    )
 
     call_range = _resume_expected_llm_call_range(
         run_dir=run_dir,
