@@ -33,6 +33,9 @@
   plan `experiment_id` 现在还必须是唯一的安全单段名称；planned、actual、locked 与 snapshotted run
   集合必须完全一致，未声明/缺失目录、非目录成员、路径逃逸，以及初次枚举到 snapshot 之间新增的
   run 都会失败。生产 v2 paired bundle 已在该集合门下零调用复验通过，manifest calls 前后均为 27。
+  verifier 还会在 run 检查前后双读计划指定的 benchmark snapshot；contract hash 或 source-manifest
+  digest 中途变化、二次读取失败都会拒绝。`verified_benchmark_snapshot` 与联合 snapshot digest 现在
+  同时绑定 benchmark、bundle 和 runs；同一生产 bundle 在该门下再次零调用通过，calls 仍为 27。
 - 生产 paired DeepSeek v2 smoke `runs/deepseek-v2-paired-snapshot-20260711` 已由新 verifier 通过：
   `branch_context` / `no_branch_context` 分别为 13/14 次调用，invocation 边界为 `(0,13)` / `(0,14)`；
   合计 38,288 prompt + 58,707 output = 96,995 provider tokens，按本地 gate rate 估算 $0.96995。

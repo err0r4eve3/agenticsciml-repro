@@ -832,6 +832,21 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
             for run_dir in run_dirs
         }
         payload = _verify_llm_smoke_output_locked(output_dir)
+        verified_benchmark_snapshot = payload.get("verified_benchmark_snapshot")
+        if isinstance(verified_benchmark_snapshot, dict):
+            benchmark_path = Path(str(verified_benchmark_snapshot.get("path", "")))
+            try:
+                benchmark_snapshot_after = _validated_benchmark_snapshot(benchmark_path)
+            except Exception as exc:
+                payload["issues"].append(
+                    "benchmark evidence could not be revalidated after verification: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+            else:
+                if benchmark_snapshot_after != verified_benchmark_snapshot:
+                    payload["issues"].append(
+                        "benchmark evidence changed during verification"
+                    )
         if bundle_snapshot_before != _bundle_evidence_snapshot(output_dir):
             payload["issues"].append("smoke bundle evidence changed during verification")
         for run_dir in run_dirs:
@@ -842,6 +857,7 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
         payload["verified_snapshot_sha256"] = _hash_payload(
             {
                 "bundle": bundle_snapshot_before,
+                "benchmark": verified_benchmark_snapshot,
                 "runs": {
                     str(run_dir.relative_to(output_dir)): snapshot
                     for run_dir, snapshot in snapshots_before.items()
@@ -860,6 +876,7 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
 
 def _verify_llm_smoke_output_locked(output_dir: Path) -> dict[str, Any]:
     issues: list[str] = []
+    verified_benchmark_snapshot: dict[str, object] | None = None
     plan = _read_json_or_issue(output_dir / "real_llm_smoke_plan.json", issues)
     manifest = _read_json_or_issue(output_dir / "real_llm_smoke_manifest.json", issues)
     runs_csv = output_dir / "real_llm_smoke_runs.csv"
@@ -911,6 +928,8 @@ def _verify_llm_smoke_output_locked(output_dir: Path) -> dict[str, Any]:
             else:
                 if current_benchmark != plan_benchmark:
                     issues.append("planned benchmark snapshot is stale or does not match current benchmark")
+                else:
+                    verified_benchmark_snapshot = current_benchmark
         variants = [str(entry.get("variant")) for entry in plan.get("runs", []) if isinstance(entry, dict)]
         try:
             _require_paired_contrast(variants)
@@ -1113,6 +1132,7 @@ def _verify_llm_smoke_output_locked(output_dir: Path) -> dict[str, Any]:
             "report": str(report_path),
             "runs_csv": str(runs_csv),
         },
+        "verified_benchmark_snapshot": verified_benchmark_snapshot,
         "recomputed_rows": recomputed_rows,
     }
 

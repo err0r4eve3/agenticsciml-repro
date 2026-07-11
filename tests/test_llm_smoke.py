@@ -822,6 +822,37 @@ def test_verify_llm_smoke_output_rejects_bundle_changed_mid_verification(
     assert isinstance(payload.get("verified_snapshot_sha256"), str)
 
 
+def test_verify_llm_smoke_output_rejects_benchmark_changed_mid_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _copy_real_smoke_bundle(tmp_path)
+    original_snapshot = llm_smoke_module._validated_benchmark_snapshot
+    call_count = 0
+
+    def changing_snapshot(benchmark_dir: Path) -> dict[str, object]:
+        nonlocal call_count
+        call_count += 1
+        snapshot = original_snapshot(benchmark_dir)
+        if call_count >= 2:
+            snapshot = dict(snapshot)
+            snapshot["benchmark_source_manifest_digest"] = "0" * 64
+        return snapshot
+
+    monkeypatch.setattr(
+        llm_smoke_module,
+        "_validated_benchmark_snapshot",
+        changing_snapshot,
+    )
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert "benchmark evidence changed during verification" in payload["issues"]
+    assert isinstance(payload.get("verified_benchmark_snapshot"), dict)
+
+
 def test_verify_llm_smoke_output_rejects_active_bundle_writer(tmp_path: Path) -> None:
     _copy_real_smoke_bundle(tmp_path)
     lock_path = tmp_path.parent / f".{tmp_path.name}.real-llm-smoke.lock"
