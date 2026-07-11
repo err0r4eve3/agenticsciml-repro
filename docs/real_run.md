@@ -93,6 +93,12 @@ Provider timeout/retry fields are written into generation trace metadata and
 `run_metadata.json`. Generated solution execution still uses `--timeout-s`;
 that is the sandbox/evaluator subprocess budget, not the provider HTTP budget.
 
+Real `run` and `smoke-llm` commands emit secret-free `llm-progress` JSON lines
+to stderr when each provider call starts and finishes. Progress events contain
+call/provider/model/schema status, duration, error type, and budget counters;
+paired smoke events also include the current variant. Events never include
+prompts, system messages, responses, or content hashes.
+
 Latency-sensitive runs can enable run-level fast mode:
 
 ```bash

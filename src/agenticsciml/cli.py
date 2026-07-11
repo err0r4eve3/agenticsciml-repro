@@ -70,6 +70,14 @@ def _default_experiment_id(mock: bool) -> str:
     return f"{prefix}-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:10]}"
 
 
+def _print_llm_progress(payload: dict[str, object]) -> None:
+    print(
+        "llm-progress " + json.dumps(payload, sort_keys=True, allow_nan=False),
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def cmd_init_example(args: argparse.Namespace) -> int:
     source = Path(__file__).resolve().parents[2] / "examples" / "function_approx"
     target = Path(args.target)
@@ -205,7 +213,12 @@ def cmd_run(args: argparse.Namespace) -> int:
             )
         )
         inner_llm = OpenAIAdapter(timeout_s=args.llm_timeout_s, max_retries=args.llm_max_retries)
-        llm = RecordingLLMClient(inner_llm, ledger_path, budget)
+        llm = RecordingLLMClient(
+            inner_llm,
+            ledger_path,
+            budget,
+            progress_callback=_print_llm_progress,
+        )
         require_llm_call_budget_preflight(
             llm_call_budget_preflight(
                 budget=budget,
@@ -590,6 +603,7 @@ def cmd_smoke_llm(args: argparse.Namespace) -> int:
         max_iterations=args.max_iterations,
         parallel_mutations=args.parallel_mutations,
         llm_fast_mode=args.llm_fast_mode,
+        progress_callback=_print_llm_progress,
     )
     print(result.report_md.resolve())
     return 0

@@ -13,7 +13,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from agenticsciml.benchmarks import BenchmarkContractFactory, ProblemBundle
 from agenticsciml.config import EvolutionConfig, ExperimentConfig
@@ -65,6 +65,7 @@ def run_llm_smoke(
     parallel_mutations: int = 2,
     llm_fast_mode: bool = False,
     llm_client: LLMClient | None = None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> LLMSmokeResult:
     benchmark_dir = Path(benchmark_dir).resolve()
     output_dir = Path(output_dir).resolve()
@@ -103,6 +104,7 @@ def run_llm_smoke(
             parallel_mutations=parallel_mutations,
             llm_fast_mode=llm_fast_mode,
             llm_client=llm_client,
+            progress_callback=progress_callback,
             benchmark_snapshot=benchmark_snapshot,
         )
     except Exception:
@@ -128,6 +130,7 @@ def _run_llm_smoke_once(
     parallel_mutations: int,
     llm_fast_mode: bool,
     llm_client: LLMClient | None,
+    progress_callback: Callable[[dict[str, Any]], None] | None,
     benchmark_snapshot: dict[str, object],
 ) -> LLMSmokeResult:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -191,6 +194,15 @@ def _run_llm_smoke_once(
         variant = str(entry["variant"])
         expected_run_dir = output_dir / "runs" / str(entry["experiment_id"])
         ledger_path = expected_run_dir / "llm_call_ledger.jsonl"
+        scoped_progress_callback = (
+            (
+                lambda payload, current_variant=variant: progress_callback(
+                    {**payload, "variant": current_variant}
+                )
+            )
+            if progress_callback is not None
+            else None
+        )
         if ledger_path.exists():
             ledger_path.unlink()
         config = ExperimentConfig(
@@ -208,7 +220,12 @@ def _run_llm_smoke_once(
             llm_fast_mode=llm_fast_mode,
         )
         try:
-            recording_llm = _RecordingLLMClient(llm, ledger_path, budget)
+            recording_llm = _RecordingLLMClient(
+                llm,
+                ledger_path,
+                budget,
+                progress_callback=scoped_progress_callback,
+            )
             run_dir = AgenticSciMLOrchestrator(config, recording_llm).run()
         except Exception as exc:
             report_path = output_dir / "real_llm_smoke_report.md"

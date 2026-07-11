@@ -265,12 +265,14 @@ def test_llm_smoke_real_mode_rejects_duplicate_variants(tmp_path: Path) -> None:
 
 
 def test_llm_smoke_real_gate_with_scripted_llm(tmp_path: Path) -> None:
+    progress_events: list[dict[str, object]] = []
     result = run_llm_smoke(
         benchmark_dir=Path("examples/function_approx").resolve(),
         output_dir=tmp_path,
         variants=["branch_context", "no_branch_context"],
         dry_run=False,
         llm_client=MockLLMClient(),
+        progress_callback=progress_events.append,
     )
     rows = list(csv.DictReader(result.runs_csv.open(encoding="utf-8")))  # type: ignore[union-attr]
 
@@ -278,6 +280,15 @@ def test_llm_smoke_real_gate_with_scripted_llm(tmp_path: Path) -> None:
     assert all(row["smoke_gate_passed"] == "True" for row in rows)
     assert all(row["trace_quality_gate_passed"] == "True" for row in rows)
     assert all(int(row["llm_calls"]) > 0 for row in rows)
+    assert {event["event"] for event in progress_events} == {
+        "llm_call_started",
+        "llm_call_finished",
+    }
+    assert {event["variant"] for event in progress_events} == {
+        "branch_context",
+        "no_branch_context",
+    }
+    assert len(progress_events) == 2 * sum(int(row["llm_calls"]) for row in rows)
     for row in rows:
         assert row["metric"]
         assert row["higher_is_better"] in {"True", "False"}

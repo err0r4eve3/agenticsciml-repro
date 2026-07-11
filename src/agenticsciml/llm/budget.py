@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from inspect import Parameter, signature
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from agenticsciml.llm.base import LLMClient
 
@@ -28,6 +28,7 @@ class _RecordingState:
     ledger_path: Path
     budget: "LLMBudget"
     lock: threading.RLock
+    progress_callback: Callable[[dict[str, Any]], None] | None = None
     call_count: int = 0
 
 
@@ -45,6 +46,7 @@ class RecordingLLMClient(LLMClient):
         ledger_path: Path,
         budget: "LLMBudget",
         *,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
         _state: _RecordingState | None = None,
     ) -> None:
         self.inner = inner
@@ -53,7 +55,11 @@ class RecordingLLMClient(LLMClient):
         self.model = getattr(inner, "model", None) or os.environ.get("OPENAI_MODEL", "gpt-5-mini")
         self.adapter_type = getattr(inner, "adapter_type", type(inner).__name__)
         self.provider_capabilities = _llm_provider_capabilities(inner)
-        self._state = _state or _load_recording_state(Path(ledger_path), budget)
+        self._state = _state or _load_recording_state(
+            Path(ledger_path),
+            budget,
+            progress_callback=progress_callback,
+        )
         self.budget = self._state.budget
         self.ledger_path = self._state.ledger_path
         self._local = threading.local()
@@ -157,6 +163,7 @@ class RecordingLLMClient(LLMClient):
         }
         if reasoning_effort is not None:
             record["reasoning_effort"] = reasoning_effort
+        self._emit_progress("llm_call_started", record)
         try:
             response = call()
         except Exception as exc:
@@ -169,6 +176,7 @@ class RecordingLLMClient(LLMClient):
             )
             self._local.last_call_metadata = _trace_call_metadata(record)
             self._append_ledger(record)
+            self._emit_progress("llm_call_finished", record)
             raise
         response_tokens = _response_token_count(response, getattr(self.inner, "last_call_metadata", None))
         try:
@@ -189,6 +197,7 @@ class RecordingLLMClient(LLMClient):
             )
             self._local.last_call_metadata = _trace_call_metadata(record)
             self._append_ledger(record)
+            self._emit_progress("llm_call_finished", record)
             raise
         record.update(
             {
@@ -204,7 +213,46 @@ class RecordingLLMClient(LLMClient):
         )
         self._local.last_call_metadata = _trace_call_metadata(record)
         self._append_ledger(record)
+        self._emit_progress("llm_call_finished", record)
         return response
+
+    def _emit_progress(self, event: str, record: dict[str, Any]) -> None:
+        callback = self._state.progress_callback
+        if callback is None:
+            return
+        with self._state.lock:
+            budget = {
+                "calls_used": self.budget.calls_used,
+                "prompt_tokens_used": self.budget.prompt_tokens_used,
+                "output_tokens_used": self.budget.output_tokens_used,
+                "total_tokens_used": (
+                    self.budget.prompt_tokens_used + self.budget.output_tokens_used
+                ),
+                "estimated_cost_usd": self.budget.estimated_cost_usd,
+            }
+        payload = {
+            "schema_version": 1,
+            "event": event,
+            "call_id": record["call_id"],
+            "provider": record["provider"],
+            "model": record["model"],
+            "adapter_type": record["adapter_type"],
+            "method": record["method"],
+            "schema_name": record["schema_name"],
+            "budget": budget,
+        }
+        if event == "llm_call_finished":
+            payload.update(
+                {
+                    "success": record["success"],
+                    "duration_s": record["duration_s"],
+                    "error_type": record.get("error_type"),
+                }
+            )
+        try:
+            callback(payload)
+        except Exception:
+            return
 
     def _append_ledger(self, record: dict[str, Any]) -> None:
         self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
@@ -418,11 +466,17 @@ def load_llm_budget_usage(ledger_path: Path, budget: LLMBudget) -> LLMBudget:
     return budget
 
 
-def _load_recording_state(ledger_path: Path, budget: LLMBudget) -> _RecordingState:
+def _load_recording_state(
+    ledger_path: Path,
+    budget: LLMBudget,
+    *,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+) -> _RecordingState:
     state = _RecordingState(
         ledger_path=ledger_path,
         budget=budget,
         lock=threading.RLock(),
+        progress_callback=progress_callback,
     )
     if not ledger_path.exists():
         return state

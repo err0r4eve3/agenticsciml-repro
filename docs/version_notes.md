@@ -19,6 +19,10 @@
   写入向量的两类 shape 错误；RootEngineer、Engineer、Debugger 现在统一要求保留 batch 首维，
   并按 `u_train` 的 per-sample tail shape 组织输出。`function_approx` 同时明确接受 `(n,1)` 或
   `(n,)` prediction，避免模型只看到“写 predictions array”却不知道 evaluator shape 契约。
+- Real `run` / `smoke-llm` 不再在十余分钟 provider 工作期间完全静默：CLI 会向 stderr 输出
+  secret-free `llm-progress` started/finished JSON，显示 call/schema、耗时、成功状态和预算计数，
+  paired smoke 还会显示当前 variant，但不包含 prompt、system、response 或 content hash；
+  进度输出失败不会中断实验事实层。
 
 ## 2026-07-10 研究工作流完整性修复
 

@@ -127,6 +127,90 @@ def test_post_response_budget_failure_is_ledgered_and_reloaded_as_billable_usage
     assert relaxed_resume_budget.output_tokens_used == row["response_token_estimate"]
 
 
+def test_recording_llm_progress_callback_is_secret_free(tmp_path: Path) -> None:
+    events: list[dict[str, Any]] = []
+    recording = RecordingLLMClient(
+        _TextLLM(lambda _prompt: "private response"),
+        tmp_path / "llm_call_ledger.jsonl",
+        LLMBudget(),
+        progress_callback=events.append,
+    )
+
+    assert recording.complete_text("private prompt", system="private system") == "private response"
+
+    assert [event["event"] for event in events] == ["llm_call_started", "llm_call_finished"]
+    assert all(event["call_id"] == "llm_call_000001" for event in events)
+    assert events[-1]["success"] is True
+    assert events[-1]["duration_s"] >= 0
+    assert set(events[-1]["budget"]) == {
+        "calls_used",
+        "prompt_tokens_used",
+        "output_tokens_used",
+        "total_tokens_used",
+        "estimated_cost_usd",
+    }
+    encoded = json.dumps(events, sort_keys=True)
+    assert "private prompt" not in encoded
+    assert "private system" not in encoded
+    assert "private response" not in encoded
+    assert "prompt_hash" not in encoded
+    assert "system_hash" not in encoded
+    assert "response_hash" not in encoded
+    assert "content_hash" not in encoded
+
+
+def test_recording_llm_wrap_child_preserves_progress_callback(tmp_path: Path) -> None:
+    events: list[dict[str, Any]] = []
+    recording = RecordingLLMClient(
+        _TextLLM(lambda _prompt: "parent"),
+        tmp_path / "llm_call_ledger.jsonl",
+        LLMBudget(),
+        progress_callback=events.append,
+    )
+    child = recording.wrap_child(_TextLLM(lambda _prompt: "child"))
+
+    assert child.complete_text("prompt") == "child"
+    assert [event["event"] for event in events] == ["llm_call_started", "llm_call_finished"]
+    assert all(event["call_id"] == "llm_call_000001" for event in events)
+
+
+def test_recording_llm_progress_callback_reports_provider_failure(tmp_path: Path) -> None:
+    events: list[dict[str, Any]] = []
+
+    def timeout(_prompt: str) -> str:
+        raise TimeoutError("private provider detail")
+
+    recording = RecordingLLMClient(
+        _TextLLM(timeout),
+        tmp_path / "llm_call_ledger.jsonl",
+        LLMBudget(),
+        progress_callback=events.append,
+    )
+
+    with pytest.raises(TimeoutError, match="private provider detail"):
+        recording.complete_text("private prompt")
+
+    assert events[-1]["event"] == "llm_call_finished"
+    assert events[-1]["success"] is False
+    assert events[-1]["error_type"] == "TimeoutError"
+    assert "private provider detail" not in json.dumps(events, sort_keys=True)
+
+
+def test_recording_llm_progress_callback_failure_does_not_break_call(tmp_path: Path) -> None:
+    def broken_progress(_event: dict[str, Any]) -> None:
+        raise OSError("closed stderr")
+
+    recording = RecordingLLMClient(
+        _TextLLM(lambda _prompt: "ok"),
+        tmp_path / "llm_call_ledger.jsonl",
+        LLMBudget(),
+        progress_callback=broken_progress,
+    )
+
+    assert recording.complete_text("prompt") == "ok"
+    assert _ledger_rows(recording.ledger_path)[0]["success"] is True
+
+
 @pytest.mark.parametrize(
     ("call_ids", "error_pattern"),
     [
