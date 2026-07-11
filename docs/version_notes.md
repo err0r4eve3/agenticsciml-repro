@@ -23,6 +23,10 @@
   secret-free `llm-progress` started/finished JSON，显示 call/schema、耗时、成功状态和预算计数，
   paired smoke 还会显示当前 variant，但不包含 prompt、system、response 或 content hash；
   进度输出失败不会中断实验事实层。
+- real smoke CSV/Markdown 新增 debugger attempted nodes、attempt total、recovered nodes、
+  failed-after-debug nodes 和 recovery rate；它按最终 node status 判定修复是否成功，不再把
+  “debugger API 返回成功”与“solution 最终恢复为 evaluated”混为一谈。零尝试时 CSV rate 留空、
+  Markdown 显示 `not_applicable`，且这些诊断不改变 smoke gate。
 
 ## 2026-07-10 研究工作流完整性修复
 

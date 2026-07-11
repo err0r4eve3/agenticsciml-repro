@@ -295,6 +295,11 @@ def test_llm_smoke_real_gate_with_scripted_llm(tmp_path: Path) -> None:
         assert int(row["evaluated_solution_count"]) > 0
         assert int(row["failed_solution_count"]) >= 0
         assert row["failed_solution_kinds"] == ""
+        assert int(row["debug_attempted_node_count"]) == 0
+        assert int(row["debug_attempt_count"]) == 0
+        assert int(row["debug_recovered_node_count"]) == 0
+        assert int(row["debug_failed_node_count"]) == 0
+        assert row["debug_recovery_rate"] == ""
         float(row["root_score"])
         float(row["best_child_score"])
         float(row["best_child_improvement_vs_root"])
@@ -309,6 +314,7 @@ def test_llm_smoke_real_gate_with_scripted_llm(tmp_path: Path) -> None:
     report = result.report_md.read_text(encoding="utf-8")
     assert "performance_comparison_supported: `false`" in report
     assert "independently generated" in report
+    assert "debug_recovery_rate=not_applicable" in report
 
     verification = verify_llm_smoke_output(tmp_path)
     verification_payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
@@ -351,6 +357,11 @@ def test_real_report_surfaces_failure_diagnostics() -> None:
                 "evaluated_solution_count": 1,
                 "failed_solution_count": 1,
                 "failed_solution_kinds": "runtime_error",
+                "debug_attempted_node_count": 1,
+                "debug_attempt_count": 2,
+                "debug_recovered_node_count": 0,
+                "debug_failed_node_count": 1,
+                "debug_recovery_rate": 0.0,
                 "trace_quality_gate_passed": False,
                 "smoke_gate_passed": False,
                 "smoke_gate_issues": "debugger call timed out; trace_summary quality gate failed",
@@ -363,6 +374,11 @@ def test_real_report_surfaces_failure_diagnostics() -> None:
     assert "gate_issues=debugger call timed out; trace_summary quality gate failed" in report
     assert "higher_is_better=False" in report
     assert "mutation_improved=unknown" in report
+    assert "debug_attempts=2" in report
+    assert "debug_nodes=1" in report
+    assert "debug_recovered=0" in report
+    assert "debug_failed=1" in report
+    assert "debug_recovery_rate=0.0" in report
 
 
 @pytest.mark.parametrize(
@@ -415,11 +431,13 @@ def test_score_diagnostics_handles_failed_unscored_root() -> None:
                 "status": "failed",
                 "score": None,
                 "failure_kind": "runtime_error",
+                "num_debug_attempts": 1,
             },
             {
                 "node_id": "solution_001",
                 "parent_id": "solution_000",
                 "status": "evaluated",
+                "num_debug_attempts": 2,
                 "score": {
                     "metric": "validation_mse",
                     "value": 0.5,
@@ -434,6 +452,11 @@ def test_score_diagnostics_handles_failed_unscored_root() -> None:
     assert diagnostics["best_child_score"] == 0.5
     assert diagnostics["best_child_improvement_vs_root"] == ""
     assert diagnostics["mutation_improved"] == ""
+    assert diagnostics["debug_attempted_node_count"] == 2
+    assert diagnostics["debug_attempt_count"] == 3
+    assert diagnostics["debug_recovered_node_count"] == 1
+    assert diagnostics["debug_failed_node_count"] == 1
+    assert diagnostics["debug_recovery_rate"] == 0.5
 
 
 def test_llm_smoke_real_mode_enforces_llm_call_budget(

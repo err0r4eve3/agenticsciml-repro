@@ -467,6 +467,21 @@ def _score_diagnostics(nodes: list[dict[str, Any]]) -> dict[str, Any]:
     failed_solution_kinds = ",".join(
         sorted({str(node.get("failure_kind") or "unknown") for node in failed_nodes})
     )
+    debug_attempted_nodes = [
+        node for node in nodes if int(node.get("num_debug_attempts", 0)) > 0
+    ]
+    debug_attempt_count = sum(int(node.get("num_debug_attempts", 0)) for node in nodes)
+    debug_recovered_node_count = sum(
+        1 for node in debug_attempted_nodes if node.get("status") == "evaluated"
+    )
+    debug_failed_node_count = sum(
+        1 for node in debug_attempted_nodes if node.get("status") == "failed"
+    )
+    debug_recovery_rate: float | str = (
+        debug_recovered_node_count / len(debug_attempted_nodes)
+        if debug_attempted_nodes
+        else ""
+    )
     scored_nodes = [node for node in evaluated_nodes if isinstance(node.get("score"), dict)]
     root = next((node for node in nodes if node.get("parent_id") is None), None)
     root_score_data = root.get("score") if isinstance(root, dict) else None
@@ -509,6 +524,11 @@ def _score_diagnostics(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         "evaluated_solution_count": len(evaluated_nodes),
         "failed_solution_count": len(failed_nodes),
         "failed_solution_kinds": failed_solution_kinds,
+        "debug_attempted_node_count": len(debug_attempted_nodes),
+        "debug_attempt_count": debug_attempt_count,
+        "debug_recovered_node_count": debug_recovered_node_count,
+        "debug_failed_node_count": debug_failed_node_count,
+        "debug_recovery_rate": debug_recovery_rate,
         "root_score": root_score,
         "best_child_score": best_child_score,
         "best_child_improvement_vs_root": best_child_improvement,
@@ -590,6 +610,11 @@ def _render_real_report(plan: dict[str, Any], rows: list[dict[str, Any]], paired
         f"mutation_improved={row['mutation_improved'] if row['mutation_improved'] != '' else 'unknown'}, "
         f"evaluated={row['evaluated_solution_count']}, failed={row['failed_solution_count']}, "
         f"failure_kinds={row['failed_solution_kinds'] or 'none'}, "
+        f"debug_nodes={row['debug_attempted_node_count']}, "
+        f"debug_attempts={row['debug_attempt_count']}, "
+        f"debug_recovered={row['debug_recovered_node_count']}, "
+        f"debug_failed={row['debug_failed_node_count']}, "
+        f"debug_recovery_rate={row['debug_recovery_rate'] if row['debug_recovery_rate'] != '' else 'not_applicable'}, "
         f"trace_gate={row['trace_quality_gate_passed']}, smoke_gate={row['smoke_gate_passed']}, "
         f"gate_issues={row['smoke_gate_issues'] or 'none'}"
         for row in rows

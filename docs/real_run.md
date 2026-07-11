@@ -248,6 +248,13 @@ gate. Each variant generates its own root independently, so comparing the two
 root or child scores does not isolate a causal branch-context effect and does
 not support a performance claim.
 
+The same rows distinguish debugger activity from recovery: attempted node
+count, total attempts, recovered nodes, nodes still failed after debugging, and
+the node-level recovery rate. A successful debugger API call is therefore not
+misreported as a successful repair when the final solution node still fails.
+Rows with no debugger attempts keep the CSV rate empty and render
+`not_applicable` in Markdown rather than implying unknown evidence.
+
 Budget, adapter, provider/orchestrator, post-run artifact, and paired-gate
 failures finalize the manifest with `status=failed`, `report_status=failed`,
 `failure_kind`, `error_type`, the failure-report digest, and the final
