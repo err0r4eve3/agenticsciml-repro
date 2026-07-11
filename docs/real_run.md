@@ -233,6 +233,15 @@ request-side prompt-delivery evidence for branch context, and verifies that
 `no_branch_context` request prompts do not leak branch fields. If the gate
 fails, the CLI returns non-zero and points at the report.
 
+The run CSV and Markdown report also expose within-run score diagnostics:
+metric direction, evaluated/failed solution counts, root score, best child
+score, direction-normalized improvement, whether any child mutation beat its
+root, failed-solution kinds, and concrete smoke-gate issues. These diagnostics
+make regressions and provider/trace failures visible but do not affect the smoke
+gate. Each variant generates its own root independently, so comparing the two
+root or child scores does not isolate a causal branch-context effect and does
+not support a performance claim.
+
 Budget, adapter, provider/orchestrator, post-run artifact, and paired-gate
 failures finalize the manifest with `status=failed`, `report_status=failed`,
 `failure_kind`, `error_type`, the failure-report digest, and the final

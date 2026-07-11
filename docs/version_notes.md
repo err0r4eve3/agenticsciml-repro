@@ -2,6 +2,17 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-07-11 Real LLM smoke 研究诊断补强
+
+- `real_llm_smoke_runs.csv` 与 Markdown 报告现在保留 metric direction、evaluated/failed
+  solution count、root score、best child score、方向归一化 improvement 和
+  `mutation_improved`，避免 trace/smoke gate 通过时掩盖实际变异退化。报告同时显示
+  failed-solution kinds 和具体 gate issues，避免失败报告只留下泛化的 paired-gate 错误。
+- smoke gate 语义保持不变：它验证真实 provider 调用、trace、ledger 和 branch-context
+  prompt delivery，不因单次 mutation score 好坏而通过或失败。
+- 报告明确标记 `performance_comparison_supported=false`。配对两侧 root 由 LLM 独立生成，
+  跨 variant 分数不能隔离 branch context 的因果效果，也不能支持科学性能声明。
+
 ## 2026-07-10 研究工作流完整性修复
 
 本次从研究人员实际使用路径出发，修复了 benchmark 科学定义、evaluation contract、

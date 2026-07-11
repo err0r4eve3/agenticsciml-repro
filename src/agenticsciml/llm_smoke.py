@@ -386,6 +386,7 @@ def _smoke_row(run_dir: Path, variant: str, seed: int) -> dict[str, Any]:
     metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
     trace_summary = json.loads((run_dir / "trace_summary.json").read_text(encoding="utf-8"))
     nodes = tree["nodes"]
+    score_diagnostics = _score_diagnostics(nodes)
     branch_tags = sorted(
         {
             tag
@@ -419,6 +420,7 @@ def _smoke_row(run_dir: Path, variant: str, seed: int) -> dict[str, Any]:
         "scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
         "branch_context_enabled": bool(metadata.get("branch_context_enabled", False)),
         "solution_count": len(nodes),
+        **score_diagnostics,
         "branch_intents": ",".join(tag.replace("branch:", "", 1) for tag in branch_tags),
         "proposal_titles": " | ".join(proposal_titles),
         "llm_calls": llm_calls_total if llm_calls_total is not None else 0,
@@ -439,6 +441,61 @@ def _smoke_row(run_dir: Path, variant: str, seed: int) -> dict[str, Any]:
         "trace_quality_gate_passed": bool(trace_summary.get("quality_gate", {}).get("passed", False)),
         "smoke_gate_passed": gate["passed"],
         "smoke_gate_issues": "; ".join(gate["issues"]),
+    }
+
+
+def _score_diagnostics(nodes: list[dict[str, Any]]) -> dict[str, Any]:
+    evaluated_nodes = [node for node in nodes if node.get("status") == "evaluated"]
+    failed_nodes = [node for node in nodes if node.get("status") == "failed"]
+    failed_solution_kinds = ",".join(
+        sorted({str(node.get("failure_kind") or "unknown") for node in failed_nodes})
+    )
+    scored_nodes = [node for node in evaluated_nodes if isinstance(node.get("score"), dict)]
+    root = next((node for node in nodes if node.get("parent_id") is None), None)
+    root_score_data = root.get("score") if isinstance(root, dict) else None
+    score_reference = root_score_data if isinstance(root_score_data, dict) else (
+        scored_nodes[0]["score"] if scored_nodes else None
+    )
+    metric = score_reference.get("metric", "") if isinstance(score_reference, dict) else ""
+    higher_is_better = (
+        bool(score_reference.get("higher_is_better", False))
+        if isinstance(score_reference, dict)
+        else ""
+    )
+    root_score = (
+        float(root_score_data["value"])
+        if isinstance(root_score_data, dict) and "value" in root_score_data
+        else ""
+    )
+    scored_children = [node for node in scored_nodes if node.get("parent_id") is not None]
+    best_child = (
+        sorted(
+            scored_children,
+            key=lambda node: float(node["score"]["value"]),
+            reverse=higher_is_better is True,
+        )[0]
+        if scored_children
+        else None
+    )
+    best_child_score = float(best_child["score"]["value"]) if best_child is not None else ""
+    if isinstance(root_score, float) and isinstance(best_child_score, float):
+        best_child_improvement = (
+            best_child_score - root_score if higher_is_better is True else root_score - best_child_score
+        )
+        mutation_improved: bool | str = best_child_improvement > 0
+    else:
+        best_child_improvement = ""
+        mutation_improved = ""
+    return {
+        "metric": metric,
+        "higher_is_better": higher_is_better,
+        "evaluated_solution_count": len(evaluated_nodes),
+        "failed_solution_count": len(failed_nodes),
+        "failed_solution_kinds": failed_solution_kinds,
+        "root_score": root_score,
+        "best_child_score": best_child_score,
+        "best_child_improvement_vs_root": best_child_improvement,
+        "mutation_improved": mutation_improved,
     }
 
 
@@ -507,7 +564,17 @@ def _render_real_report(plan: dict[str, Any], rows: list[dict[str, Any]], paired
     row_lines = "\n".join(
         f"- `{row['variant']}`: branch_context={row['branch_context_enabled']}, "
         f"solutions={row['solution_count']}, intents={row['branch_intents'] or 'none'}, "
-        f"trace_gate={row['trace_quality_gate_passed']}, smoke_gate={row['smoke_gate_passed']}"
+        f"score={row['metric'] or 'unknown'}, "
+        f"higher_is_better={row['higher_is_better'] if row['higher_is_better'] != '' else 'unknown'}, "
+        f"root={row['root_score'] if row['root_score'] != '' else 'unknown'}, "
+        f"best_child={row['best_child_score'] if row['best_child_score'] != '' else 'unknown'}, "
+        "improvement_vs_root="
+        f"{row['best_child_improvement_vs_root'] if row['best_child_improvement_vs_root'] != '' else 'unknown'}, "
+        f"mutation_improved={row['mutation_improved'] if row['mutation_improved'] != '' else 'unknown'}, "
+        f"evaluated={row['evaluated_solution_count']}, failed={row['failed_solution_count']}, "
+        f"failure_kinds={row['failed_solution_kinds'] or 'none'}, "
+        f"trace_gate={row['trace_quality_gate_passed']}, smoke_gate={row['smoke_gate_passed']}, "
+        f"gate_issues={row['smoke_gate_issues'] or 'none'}"
         for row in rows
     )
     return (
@@ -521,6 +588,11 @@ def _render_real_report(plan: dict[str, Any], rows: list[dict[str, Any]], paired
         "## Paired Contrast Gate\n\n"
         f"- paired_contrast_passed: `{paired_gate['passed']}`\n"
         f"- issues: `{'; '.join(paired_gate['issues']) or 'none'}`\n\n"
+        "## Performance Boundary\n\n"
+        "- performance_comparison_supported: `false`\n"
+        "- Root solutions are independently generated for each variant; cross-variant scores "
+        "do not isolate the effect of branch context.\n"
+        "- Mutation score diagnostics are within-run evidence only and do not change the smoke gate.\n\n"
         "## Boundary\n\n"
         f"{plan['claim_boundary']}\n"
     )

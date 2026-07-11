@@ -17,6 +17,8 @@ from agenticsciml.llm_smoke import (
     _RecordingLLMClient,
     _hash_payload,
     _paired_contrast_gate,
+    _render_real_report,
+    _score_diagnostics,
     _smoke_gate,
     run_llm_smoke,
     verify_llm_smoke_output,
@@ -276,6 +278,16 @@ def test_llm_smoke_real_gate_with_scripted_llm(tmp_path: Path) -> None:
     assert all(row["smoke_gate_passed"] == "True" for row in rows)
     assert all(row["trace_quality_gate_passed"] == "True" for row in rows)
     assert all(int(row["llm_calls"]) > 0 for row in rows)
+    for row in rows:
+        assert row["metric"]
+        assert row["higher_is_better"] in {"True", "False"}
+        assert int(row["evaluated_solution_count"]) > 0
+        assert int(row["failed_solution_count"]) >= 0
+        assert row["failed_solution_kinds"] == ""
+        float(row["root_score"])
+        float(row["best_child_score"])
+        float(row["best_child_improvement_vs_root"])
+        assert row["mutation_improved"] in {"True", "False"}
     assert result.manifest_json.exists()
     manifest = json.loads(result.manifest_json.read_text(encoding="utf-8"))
     assert manifest["provider_capabilities"]["provider"] == "MockLLMClient"
@@ -283,6 +295,9 @@ def test_llm_smoke_real_gate_with_scripted_llm(tmp_path: Path) -> None:
     no_branch = next(row for row in rows if row["variant"] == "no_branch_context")
     assert no_branch["branch_context_enabled"] == "False"
     assert no_branch["branch_intents"] == ""
+    report = result.report_md.read_text(encoding="utf-8")
+    assert "performance_comparison_supported: `false`" in report
+    assert "independently generated" in report
 
     verification = verify_llm_smoke_output(tmp_path)
     verification_payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
@@ -301,6 +316,113 @@ def test_llm_smoke_real_gate_with_scripted_llm(tmp_path: Path) -> None:
     )
     assert run_metadata["llm_provider_capabilities"]["provider"] == "MockLLMClient"
     assert run_metadata["llm_budget"]["calls_used"] > 0
+
+
+def test_real_report_surfaces_failure_diagnostics() -> None:
+    report = _render_real_report(
+        {
+            "evidence_mode": EVIDENCE_MODE_REAL_LLM_SMOKE,
+            "scientific_claim": "not_supported",
+            "claim_boundary": "workflow evidence only",
+        },
+        [
+            {
+                "variant": "branch_context",
+                "branch_context_enabled": True,
+                "solution_count": 2,
+                "branch_intents": "features_or_architecture",
+                "metric": "validation_mse",
+                "higher_is_better": False,
+                "root_score": "",
+                "best_child_score": 0.5,
+                "best_child_improvement_vs_root": "",
+                "mutation_improved": "",
+                "evaluated_solution_count": 1,
+                "failed_solution_count": 1,
+                "failed_solution_kinds": "runtime_error",
+                "trace_quality_gate_passed": False,
+                "smoke_gate_passed": False,
+                "smoke_gate_issues": "debugger call timed out; trace_summary quality gate failed",
+            }
+        ],
+        {"passed": False, "issues": ["branch_context row gate failed"]},
+    )
+
+    assert "failure_kinds=runtime_error" in report
+    assert "gate_issues=debugger call timed out; trace_summary quality gate failed" in report
+    assert "higher_is_better=False" in report
+    assert "mutation_improved=unknown" in report
+
+
+@pytest.mark.parametrize(
+    ("higher_is_better", "root_score", "child_scores", "expected_best", "expected_improvement"),
+    [
+        (False, 10.0, [8.0, 7.0], 7.0, 3.0),
+        (True, 0.5, [0.6, 0.7], 0.7, 0.2),
+    ],
+)
+def test_score_diagnostics_respects_metric_direction(
+    higher_is_better: bool,
+    root_score: float,
+    child_scores: list[float],
+    expected_best: float,
+    expected_improvement: float,
+) -> None:
+    def node(node_id: str, parent_id: str | None, score: float) -> dict[str, object]:
+        return {
+            "node_id": node_id,
+            "parent_id": parent_id,
+            "status": "evaluated",
+            "score": {
+                "metric": "research_metric",
+                "value": score,
+                "higher_is_better": higher_is_better,
+            },
+        }
+
+    diagnostics = _score_diagnostics(
+        [
+            node("solution_000", None, root_score),
+            node("solution_001", "solution_000", child_scores[0]),
+            node("solution_002", "solution_000", child_scores[1]),
+        ]
+    )
+
+    assert diagnostics["higher_is_better"] is higher_is_better
+    assert diagnostics["root_score"] == root_score
+    assert diagnostics["best_child_score"] == expected_best
+    assert diagnostics["best_child_improvement_vs_root"] == pytest.approx(expected_improvement)
+    assert diagnostics["mutation_improved"] is True
+
+
+def test_score_diagnostics_handles_failed_unscored_root() -> None:
+    diagnostics = _score_diagnostics(
+        [
+            {
+                "node_id": "solution_000",
+                "parent_id": None,
+                "status": "failed",
+                "score": None,
+                "failure_kind": "runtime_error",
+            },
+            {
+                "node_id": "solution_001",
+                "parent_id": "solution_000",
+                "status": "evaluated",
+                "score": {
+                    "metric": "validation_mse",
+                    "value": 0.5,
+                    "higher_is_better": False,
+                },
+            },
+        ]
+    )
+
+    assert diagnostics["failed_solution_kinds"] == "runtime_error"
+    assert diagnostics["root_score"] == ""
+    assert diagnostics["best_child_score"] == 0.5
+    assert diagnostics["best_child_improvement_vs_root"] == ""
+    assert diagnostics["mutation_improved"] == ""
 
 
 def test_llm_smoke_real_mode_enforces_llm_call_budget(
