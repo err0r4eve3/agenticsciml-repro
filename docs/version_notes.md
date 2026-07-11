@@ -25,6 +25,17 @@
   边界为 `(0,4)`，随后零调用 resume 追加 `(4,4)` 且 ledger 仍为 4。两次核验的 quality gate、
   artifact consistency 和 real ledger/trace gate 均通过，`.env` 真实密钥精确扫描命中 0。该结果
   仅验证真实模型工作流与审计契约，不支持论文分数、科学改进或 SOTA 结论。
+- `verify-smoke-llm` 不再信任可能陈旧的 `trace_summary.json`：每个 paired run 会在验证时从当前
+  trace/artifact 重新计算 summary，并要求 stored/derived 结果精确一致。生成与验证共用稳定的
+  bundle sibling flock，验证端再按固定顺序获取 run invocation locks；bundle 的 plan/manifest/CSV/
+  report、`runs/` 成员集合和每个 run 的全部文件/符号链接都做前后快照，任一中途变化即 fail closed。
+  verification JSON 记录联合 `verified_snapshot_sha256`，CSV 指向 bundle 外部路径时不再继续读取。
+- 生产 paired DeepSeek v2 smoke `runs/deepseek-v2-paired-snapshot-20260711` 已由新 verifier 通过：
+  `branch_context` / `no_branch_context` 分别为 13/14 次调用，invocation 边界为 `(0,13)` / `(0,14)`；
+  合计 38,288 prompt + 58,707 output = 96,995 provider tokens，按本地 gate rate 估算 $0.96995。
+  两侧 quality、artifact 与 smoke gate 全部通过，verification issues 为空，联合 snapshot digest 有效，
+  `.env` 真实密钥精确命中与长 `sk-` 模式文件均为 0。该 paired contrast 只证明工作流开关、branch
+  context prompt delivery 和证据一致性，不证明科学指标改善。
 - `run_metadata.llm_calls` 现在由共享的 generation-trace summarizer 生成并在
   `trace-summary` 中逐字段重算。除 `total` 外，`by_role`、generation attempt 数/耗时、
   unbound/pre-provider rejection 数、本地 prompt/response estimate、provider usage coverage

@@ -1,4 +1,5 @@
 import csv
+import fcntl
 import hashlib
 import json
 import shutil
@@ -10,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+import agenticsciml.llm_smoke as llm_smoke_module
 from agenticsciml.evidence import EVIDENCE_MODE_REAL_LLM_SMOKE
 from agenticsciml.llm.budget import LLMBudget
 from agenticsciml.llm.mock import MockLLMClient
@@ -69,6 +71,25 @@ def _retarget_smoke_bundle(output_dir: Path) -> None:
         str(entry["variant"]): output_dir / "runs" / str(entry["experiment_id"])
         for entry in plan["runs"]
     }
+    for run_dir in run_by_variant.values():
+        config_path = run_dir / "config.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config["output_dir"] = str(output_dir / "runs")
+        config_path.write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
+        for artifact_name in ("tree.json", "checkpoint.json"):
+            artifact_path = run_dir / artifact_name
+            artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+            for node in artifact["nodes"]:
+                workspace = run_dir / "solutions" / str(node["node_id"])
+                node["workspace"] = str(workspace)
+                for field in ("proposal_path", "analysis_path"):
+                    old_path = node.get(field)
+                    if isinstance(old_path, str):
+                        node[field] = str(workspace / Path(old_path).name)
+            artifact_path.write_text(
+                json.dumps(artifact, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
     for row in rows:
         row["run_dir"] = str(run_by_variant[str(row["variant"])])
     with rows_path.open("w", encoding="utf-8", newline="") as f:
@@ -709,6 +730,110 @@ def test_verify_llm_smoke_output_rejects_stale_run_config(tmp_path: Path) -> Non
     assert any("evolution.random_seed does not match plan" in issue for issue in payload["issues"])
 
 
+def test_verify_llm_smoke_output_rejects_stale_passing_trace_summary(
+    tmp_path: Path,
+) -> None:
+    _copy_real_smoke_bundle(tmp_path)
+    run_dir = tmp_path / "runs" / "smoke-branch_context-seed-0"
+    history_path = run_dir / "invocation_history.json"
+    history = json.loads(history_path.read_text(encoding="utf-8"))
+    history["invocations"][-1]["ledger_calls_after"] = 0
+    history_path.write_text(json.dumps(history, indent=2, sort_keys=True), encoding="utf-8")
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any(
+        "stored trace_summary.json is stale or does not match run evidence" in issue
+        for issue in payload["issues"]
+    )
+
+
+def test_verify_llm_smoke_output_rejects_active_run(tmp_path: Path) -> None:
+    _copy_real_smoke_bundle(tmp_path)
+    run_dir = tmp_path / "runs" / "smoke-branch_context-seed-0"
+    with (run_dir / ".invocation.lock").open("r", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            verification = verify_llm_smoke_output(tmp_path)
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("run has an active invocation" in issue for issue in payload["issues"])
+
+
+def test_verify_llm_smoke_output_rejects_evidence_changed_mid_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _copy_real_smoke_bundle(tmp_path)
+    original_smoke_row = llm_smoke_module._smoke_row
+    changed = False
+
+    def mutate_after_row(run_dir: Path, variant: str, seed: int) -> dict[str, object]:
+        nonlocal changed
+        row = original_smoke_row(run_dir, variant, seed)
+        if not changed:
+            tree_path = run_dir / "tree.json"
+            tree = json.loads(tree_path.read_text(encoding="utf-8"))
+            tree["nodes"] = []
+            tree_path.write_text(json.dumps(tree, indent=2, sort_keys=True), encoding="utf-8")
+            changed = True
+        return row
+
+    monkeypatch.setattr(llm_smoke_module, "_smoke_row", mutate_after_row)
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("run evidence changed during verification" in issue for issue in payload["issues"])
+
+
+def test_verify_llm_smoke_output_rejects_bundle_changed_mid_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _copy_real_smoke_bundle(tmp_path)
+    original_verify = llm_smoke_module._verify_llm_smoke_output_locked
+
+    def mutate_after_verification(output_dir: Path) -> dict[str, object]:
+        payload = original_verify(output_dir)
+        plan_path = output_dir / "real_llm_smoke_plan.json"
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        plan["seed"] = 999
+        plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True), encoding="utf-8")
+        return payload
+
+    monkeypatch.setattr(
+        llm_smoke_module,
+        "_verify_llm_smoke_output_locked",
+        mutate_after_verification,
+    )
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert "smoke bundle evidence changed during verification" in payload["issues"]
+    assert isinstance(payload.get("verified_snapshot_sha256"), str)
+
+
+def test_verify_llm_smoke_output_rejects_active_bundle_writer(tmp_path: Path) -> None:
+    _copy_real_smoke_bundle(tmp_path)
+    lock_path = tmp_path.parent / f".{tmp_path.name}.real-llm-smoke.lock"
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            with pytest.raises(RuntimeError, match="active writer or verifier"):
+                verify_llm_smoke_output(tmp_path)
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def test_verify_llm_smoke_output_binds_completed_report(tmp_path: Path) -> None:
     _copy_real_smoke_bundle(tmp_path)
     report_path = tmp_path / "real_llm_smoke_report.md"
@@ -1176,13 +1301,18 @@ def test_verify_llm_smoke_output_rejects_trace_provider_mismatch(tmp_path: Path)
     assert any("ledger call fingerprints do not match trace" in issue for issue in payload["issues"])
 
 
-def test_verify_llm_smoke_output_accepts_reordered_generation_spans(tmp_path: Path) -> None:
+def test_verify_llm_smoke_output_rejects_reordered_generation_spans(tmp_path: Path) -> None:
     _copy_real_smoke_bundle(tmp_path)
     _reverse_generation_span_order(tmp_path / "runs" / "smoke-branch_context-seed-0")
 
     verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
 
-    assert verification.passed is True
+    assert verification.passed is False
+    assert any(
+        "stored trace_summary.json is stale or does not match run evidence" in issue
+        for issue in payload["issues"]
+    )
 
 
 def test_verify_llm_smoke_output_rejects_missing_trace_call_id(tmp_path: Path) -> None:

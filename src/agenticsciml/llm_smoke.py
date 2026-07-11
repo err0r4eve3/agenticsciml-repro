@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import fcntl
 import hashlib
 import importlib.metadata
 import json
@@ -11,6 +12,8 @@ import shutil
 import sys
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -31,6 +34,7 @@ from agenticsciml.llm.budget import (
 from agenticsciml.llm.capabilities import capabilities_for_openai_compatible
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
+from agenticsciml.reporting.trace_summary import summarize_trace
 
 
 DEFAULT_SMOKE_VARIANTS = ("branch_context", "no_branch_context")
@@ -53,6 +57,28 @@ class LLMSmokeVerification:
 _RecordingLLMClient = RecordingLLMClient
 
 
+@contextmanager
+def _exclusive_bundle_lock(output_dir: Path) -> Iterator[None]:
+    lock_path = output_dir.parent / f".{output_dir.name}.real-llm-smoke.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    if lock_path.is_symlink():
+        raise RuntimeError(f"Unsafe real LLM smoke bundle lock path: {lock_path}")
+    handle = lock_path.open("a+", encoding="utf-8")
+    try:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError(
+                f"Real LLM smoke bundle has an active writer or verifier: {output_dir}"
+            ) from exc
+        yield
+    finally:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+
+
 def run_llm_smoke(
     *,
     benchmark_dir: Path,
@@ -67,8 +93,38 @@ def run_llm_smoke(
     llm_client: LLMClient | None = None,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> LLMSmokeResult:
-    benchmark_dir = Path(benchmark_dir).resolve()
     output_dir = Path(output_dir).resolve()
+    with _exclusive_bundle_lock(output_dir):
+        return _run_llm_smoke_locked(
+            benchmark_dir=benchmark_dir,
+            output_dir=output_dir,
+            variants=variants,
+            seed=seed,
+            dry_run=dry_run,
+            timeout_s=timeout_s,
+            max_iterations=max_iterations,
+            parallel_mutations=parallel_mutations,
+            llm_fast_mode=llm_fast_mode,
+            llm_client=llm_client,
+            progress_callback=progress_callback,
+        )
+
+
+def _run_llm_smoke_locked(
+    *,
+    benchmark_dir: Path,
+    output_dir: Path,
+    variants: list[str] | None = None,
+    seed: int = 0,
+    dry_run: bool = True,
+    timeout_s: int = 60,
+    max_iterations: int = 1,
+    parallel_mutations: int = 2,
+    llm_fast_mode: bool = False,
+    llm_client: LLMClient | None = None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+) -> LLMSmokeResult:
+    benchmark_dir = Path(benchmark_dir).resolve()
     selected_variants = variants or list(DEFAULT_SMOKE_VARIANTS)
     _validate_smoke_variants(selected_variants)
     if not dry_run:
@@ -288,10 +344,15 @@ def _run_llm_smoke_once(
 
 
 def verify_llm_smoke_output(output_dir: Path) -> LLMSmokeVerification:
+    output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    payload = _verify_llm_smoke_output(output_dir)
-    path = output_dir / "real_llm_smoke_verification.json"
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True, allow_nan=False), encoding="utf-8")
+    with _exclusive_bundle_lock(output_dir):
+        payload = _verify_llm_smoke_output(output_dir)
+        path = output_dir / "real_llm_smoke_verification.json"
+        path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True, allow_nan=False),
+            encoding="utf-8",
+        )
     return LLMSmokeVerification(verification_json=path, passed=bool(payload["passed"]))
 
 
@@ -401,7 +462,15 @@ def _smoke_variant_config(
 def _smoke_row(run_dir: Path, variant: str, seed: int) -> dict[str, Any]:
     tree = json.loads((run_dir / "tree.json").read_text(encoding="utf-8"))
     metadata = json.loads((run_dir / "run_metadata.json").read_text(encoding="utf-8"))
-    trace_summary = json.loads((run_dir / "trace_summary.json").read_text(encoding="utf-8"))
+    stored_trace_summary = json.loads(
+        (run_dir / "trace_summary.json").read_text(encoding="utf-8")
+    )
+    trace_summary = summarize_trace(run_dir)
+    trace_summary_issues = []
+    if stored_trace_summary != trace_summary:
+        trace_summary_issues.append(
+            f"{variant}: stored trace_summary.json is stale or does not match run evidence"
+        )
     nodes = tree["nodes"]
     score_diagnostics = _score_diagnostics(nodes)
     branch_tags = sorted(
@@ -415,6 +484,7 @@ def _smoke_row(run_dir: Path, variant: str, seed: int) -> dict[str, Any]:
     proposal_titles = _proposal_titles(run_dir, nodes)
     llm_calls_total = _llm_call_count(metadata, variant, [])
     ledger_entries, ledger_issues = _read_llm_call_ledger(run_dir, variant)
+    ledger_issues.extend(trace_summary_issues)
     ledger_call_count = len(ledger_entries)
     generation_spans = _generation_span_metadata(run_dir)
     ledger_issues.extend(
@@ -712,6 +782,73 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
+    runs_root = output_dir / "runs"
+    if runs_root.is_symlink():
+        return _failed_smoke_verification_payload(
+            output_dir,
+            ["smoke bundle runs directory must not be a symlink"],
+        )
+    run_dirs = sorted(
+        (path for path in runs_root.iterdir() if path.is_dir()),
+        key=lambda path: str(path.resolve()),
+    ) if runs_root.is_dir() else []
+    lock_handles: list[Any] = []
+    lock_issues: list[str] = []
+    try:
+        for run_dir in run_dirs:
+            lock_path = run_dir / ".invocation.lock"
+            if run_dir.is_symlink() or lock_path.is_symlink():
+                lock_issues.append(f"{run_dir.name}: unsafe invocation lock path")
+                break
+            try:
+                handle = lock_path.open("a+", encoding="utf-8")
+            except OSError as exc:
+                lock_issues.append(
+                    f"{run_dir.name}: could not open invocation lock: {type(exc).__name__}"
+                )
+                break
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                handle.close()
+                lock_issues.append(f"{run_dir.name}: run has an active invocation")
+                break
+            lock_handles.append(handle)
+        if lock_issues:
+            return _failed_smoke_verification_payload(output_dir, lock_issues)
+        bundle_snapshot_before = _bundle_evidence_snapshot(output_dir)
+        snapshots_before = {
+            run_dir: _run_evidence_snapshot(run_dir)
+            for run_dir in run_dirs
+        }
+        payload = _verify_llm_smoke_output_locked(output_dir)
+        if bundle_snapshot_before != _bundle_evidence_snapshot(output_dir):
+            payload["issues"].append("smoke bundle evidence changed during verification")
+        for run_dir in run_dirs:
+            if snapshots_before[run_dir] != _run_evidence_snapshot(run_dir):
+                payload["issues"].append(
+                    f"{run_dir.name}: run evidence changed during verification"
+                )
+        payload["verified_snapshot_sha256"] = _hash_payload(
+            {
+                "bundle": bundle_snapshot_before,
+                "runs": {
+                    str(run_dir.relative_to(output_dir)): snapshot
+                    for run_dir, snapshot in snapshots_before.items()
+                },
+            }
+        )
+        payload["passed"] = not payload["issues"]
+        return payload
+    finally:
+        for handle in reversed(lock_handles):
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            finally:
+                handle.close()
+
+
+def _verify_llm_smoke_output_locked(output_dir: Path) -> dict[str, Any]:
     issues: list[str] = []
     plan = _read_json_or_issue(output_dir / "real_llm_smoke_plan.json", issues)
     manifest = _read_json_or_issue(output_dir / "real_llm_smoke_manifest.json", issues)
@@ -798,6 +935,7 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
         expected_run_dir = (Path(str(plan.get("output_dir", ""))) / "runs" / str(plan_entry.get("experiment_id"))).resolve()
         if run_dir.resolve() != expected_run_dir:
             issues.append(f"{variant}: run_dir {run_dir} does not match expected {expected_run_dir}")
+            continue
         if not run_dir.exists():
             issues.append(f"{variant}: run_dir does not exist: {run_dir}")
             continue
@@ -964,6 +1102,80 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
         },
         "recomputed_rows": recomputed_rows,
     }
+
+
+def _failed_smoke_verification_payload(
+    output_dir: Path,
+    issues: list[str],
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "passed": False,
+        "issues": list(issues),
+        "checked_artifacts": {
+            "plan": str(output_dir / "real_llm_smoke_plan.json"),
+            "manifest": str(output_dir / "real_llm_smoke_manifest.json"),
+            "report": str(output_dir / "real_llm_smoke_report.md"),
+            "runs_csv": str(output_dir / "real_llm_smoke_runs.csv"),
+        },
+        "recomputed_rows": [],
+    }
+
+
+def _run_evidence_snapshot(run_dir: Path) -> dict[str, tuple[str, str]]:
+    snapshot: dict[str, tuple[str, str]] = {}
+    for path in sorted(run_dir.rglob("*"), key=lambda item: str(item.relative_to(run_dir))):
+        relative = str(path.relative_to(run_dir))
+        if relative == ".invocation.lock":
+            continue
+        if path.is_symlink():
+            snapshot[relative] = ("symlink", os.readlink(path))
+        elif path.is_file():
+            snapshot[relative] = ("file", _file_sha256(path))
+        elif path.is_dir():
+            snapshot[relative] = ("directory", "")
+        else:
+            snapshot[relative] = ("other", "")
+    return snapshot
+
+
+def _bundle_evidence_snapshot(output_dir: Path) -> dict[str, tuple[str, str]]:
+    snapshot: dict[str, tuple[str, str]] = {}
+    for name in (
+        "real_llm_smoke_plan.json",
+        "real_llm_smoke_manifest.json",
+        "real_llm_smoke_runs.csv",
+        "real_llm_smoke_report.md",
+    ):
+        path = output_dir / name
+        if path.is_symlink():
+            snapshot[name] = ("symlink", os.readlink(path))
+        elif path.is_file():
+            snapshot[name] = ("file", _file_sha256(path))
+        elif path.exists():
+            snapshot[name] = ("other", "")
+        else:
+            snapshot[name] = ("missing", "")
+    runs_dir = output_dir / "runs"
+    if runs_dir.is_symlink():
+        snapshot["runs"] = ("symlink", os.readlink(runs_dir))
+    elif runs_dir.is_dir():
+        snapshot["runs"] = ("directory", "")
+        for path in sorted(runs_dir.iterdir(), key=lambda item: item.name):
+            key = f"runs/{path.name}"
+            if path.is_symlink():
+                snapshot[key] = ("symlink", os.readlink(path))
+            elif path.is_dir():
+                snapshot[key] = ("directory", "")
+            elif path.is_file():
+                snapshot[key] = ("file", _file_sha256(path))
+            else:
+                snapshot[key] = ("other", "")
+    elif runs_dir.exists():
+        snapshot["runs"] = ("other", "")
+    else:
+        snapshot["runs"] = ("missing", "")
+    return snapshot
 
 
 def _read_json_or_issue(path: Path, issues: list[str]) -> dict[str, Any]:
