@@ -298,7 +298,12 @@ PYTHONPATH=src uv run --python 3.11 --extra dev python -m agenticsciml.cli verif
 
 When pointed at a dry-run bundle, `verify-smoke-llm` is expected to exit
 non-zero. That negative result confirms the bundle is not being accepted as
-real LLM evidence.
+real LLM evidence. The command keeps stdout as the verification JSON path for
+script compatibility and, on failure, writes one `smoke-verification` JSON
+line to stderr with `issue_count`, controlled `issue_categories`, and the same
+path. It does not copy artifact-derived issue text into terminal or CI logs;
+full details stay in the verification JSON. Successful verification leaves
+stderr empty.
 
 The verifier rejects dry-run-only artifacts, recomputes the paired
 branch/no-branch gates from the run directories, checks manifest/plan

@@ -939,6 +939,8 @@ def test_module_cli_smoke_dry_run_is_not_real_evidence(tmp_path: Path, cli_env: 
     assert Path(smoke.stdout.strip().splitlines()[-1]).name == "real_llm_smoke_report.md"
     assert (output_dir / "real_llm_smoke_plan.json").exists()
     assert (output_dir / "real_llm_smoke_manifest.json").exists()
+    prompt_sentinel = "PROMPT_SENTINEL_DO_NOT_PRINT"
+    (output_dir / "runs" / prompt_sentinel).mkdir(parents=True)
 
     verify = subprocess.run(
         [
@@ -956,6 +958,20 @@ def test_module_cli_smoke_dry_run_is_not_real_evidence(tmp_path: Path, cli_env: 
     payload = json.loads((output_dir / "real_llm_smoke_verification.json").read_text(encoding="utf-8"))
 
     assert verify.returncode == 1
+    assert verify.stderr.startswith("smoke-verification ")
+    diagnostic = json.loads(verify.stderr.removeprefix("smoke-verification "))
+    assert diagnostic["issue_count"] == len(payload["issues"])
+    assert diagnostic["passed"] is False
+    assert diagnostic["verification_json"] == str(
+        (output_dir / "real_llm_smoke_verification.json").resolve()
+    )
+    assert set(diagnostic["issue_categories"]) >= {
+        "dry_run_not_real_evidence",
+        "manifest_contract",
+        "paired_contrast_contract",
+    }
+    assert "issues" not in diagnostic
+    assert prompt_sentinel not in verify.stderr
     assert any("dry-run outputs are not real-smoke evidence" in issue for issue in payload["issues"])
     assert any("plan execution_mode must be real" in issue for issue in payload["issues"])
 

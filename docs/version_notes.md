@@ -41,6 +41,10 @@
   进程中断或磁盘写失败留下半截 JSON/CSV。verification JSON 还会在全部 run invocation lock 释放前
   完成发布，堵住直接 resume 在“快照已通过、结果尚未落盘”的窗口修改 run 后仍得到陈旧
   `passed=true` 的竞态。故障注入和子进程锁探针覆盖这两个发布边界。
+- `verify-smoke-llm` 失败时除保持 stdout 的 verification JSON 路径和非零退出码外，还会向 stderr
+  输出单行 `smoke-verification` JSON，携带 issue 数量、受控诊断类别和结果路径；不会把 artifact
+  派生的任意字符串复制到终端或 CI 日志，完整细节仍留在 verification JSON。成功路径 stderr 保持
+  为空，脚本兼容性不变；内部 issues 不是严格 `list[str]` 时会在发布前 fail closed，不再静默过滤。
 - 生产 paired DeepSeek v2 smoke `runs/deepseek-v2-paired-snapshot-20260711` 已由新 verifier 通过：
   `branch_context` / `no_branch_context` 分别为 13/14 次调用，invocation 边界为 `(0,13)` / `(0,14)`；
   合计 38,288 prompt + 58,707 output = 96,995 provider tokens，按本地 gate rate 估算 $0.96995。

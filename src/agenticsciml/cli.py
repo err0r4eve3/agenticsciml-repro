@@ -640,7 +640,23 @@ def cmd_smoke_llm(args: argparse.Namespace) -> int:
 def cmd_verify_smoke_llm(args: argparse.Namespace) -> int:
     result = verify_llm_smoke_output(Path(args.output_dir).resolve())
     print(result.verification_json.resolve())
-    return 0 if result.passed else 1
+    if result.passed:
+        return 0
+    print(
+        "smoke-verification "
+        + json.dumps(
+            {
+                "passed": False,
+                "issue_count": len(result.issues),
+                "issue_categories": list(result.issue_categories),
+                "verification_json": str(result.verification_json.resolve()),
+            },
+            sort_keys=True,
+            allow_nan=False,
+        ),
+        file=sys.stderr,
+    )
+    return 1
 
 
 def cmd_secret_hygiene(args: argparse.Namespace) -> int:

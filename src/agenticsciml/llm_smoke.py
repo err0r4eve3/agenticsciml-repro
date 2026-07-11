@@ -54,6 +54,8 @@ class LLMSmokeResult:
 class LLMSmokeVerification:
     verification_json: Path
     passed: bool
+    issues: tuple[str, ...] = ()
+    issue_categories: tuple[str, ...] = ()
 
 
 _RecordingLLMClient = RecordingLLMClient
@@ -345,7 +347,13 @@ def verify_llm_smoke_output(output_dir: Path) -> LLMSmokeVerification:
     path = output_dir / "real_llm_smoke_verification.json"
     with _exclusive_bundle_lock(output_dir):
         payload = _verify_llm_smoke_output(output_dir)
-    return LLMSmokeVerification(verification_json=path, passed=bool(payload["passed"]))
+    issues = _smoke_verification_issues(payload)
+    return LLMSmokeVerification(
+        verification_json=path,
+        passed=bool(payload["passed"]),
+        issues=issues,
+        issue_categories=_smoke_verification_issue_categories(issues),
+    )
 
 
 def _build_plan(
@@ -782,8 +790,45 @@ def _publish_smoke_verification(
     output_dir: Path,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
+    _smoke_verification_issues(payload)
     _write_json(output_dir / "real_llm_smoke_verification.json", payload)
     return payload
+
+
+def _smoke_verification_issues(payload: dict[str, Any]) -> tuple[str, ...]:
+    issues = payload.get("issues")
+    if not isinstance(issues, list) or any(not isinstance(issue, str) for issue in issues):
+        raise TypeError("smoke verification payload issues must be a list of strings")
+    return tuple(issues)
+
+
+def _smoke_verification_issue_categories(issues: tuple[str, ...]) -> tuple[str, ...]:
+    categories: set[str] = set()
+    for issue in issues:
+        lowered = issue.lower()
+        if "dry-run" in lowered:
+            categories.add("dry_run_not_real_evidence")
+        elif "active invocation" in lowered or "active writer" in lowered:
+            categories.add("concurrent_writer")
+        elif "benchmark" in lowered:
+            categories.add("benchmark_contract")
+        elif "ledger" in lowered or "token_budget" in lowered or "llm call" in lowered:
+            categories.add("llm_accounting_contract")
+        elif "trace" in lowered:
+            categories.add("trace_contract")
+        elif "branch" in lowered or "paired contrast" in lowered or "variant" in lowered:
+            categories.add("paired_contrast_contract")
+        elif "manifest" in lowered:
+            categories.add("manifest_contract")
+        elif "plan" in lowered or "run config" in lowered:
+            categories.add("run_config_contract")
+        elif "runs csv" in lowered or "row" in lowered:
+            categories.add("runs_csv_contract")
+        elif "run directory" in lowered or "run evidence" in lowered or "run_dir" in lowered:
+            categories.add("run_evidence_contract")
+        else:
+            categories.add("verification_contract")
+    return tuple(sorted(categories))
 
 
 def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:

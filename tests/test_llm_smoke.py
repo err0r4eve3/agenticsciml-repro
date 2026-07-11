@@ -927,6 +927,28 @@ with open(sys.argv[1], "a+", encoding="utf-8") as handle:
     assert observed_return_codes == [1, 1]
 
 
+def test_verify_llm_smoke_output_rejects_non_string_internal_issue(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _copy_real_smoke_bundle(tmp_path)
+    verification_path = tmp_path / "real_llm_smoke_verification.json"
+
+    monkeypatch.setattr(
+        llm_smoke_module,
+        "_verify_llm_smoke_output_locked",
+        lambda output_dir: {
+            "issues": ["controlled issue", 1],
+            "verified_benchmark_snapshot": None,
+        },
+    )
+
+    with pytest.raises(TypeError, match="issues must be a list of strings"):
+        verify_llm_smoke_output(tmp_path)
+
+    assert not verification_path.exists()
+
+
 def test_verify_llm_smoke_output_rejects_undeclared_run_directory(
     tmp_path: Path,
 ) -> None:
@@ -1521,6 +1543,7 @@ def test_cli_verify_smoke_llm_command(tmp_path: Path, cli_env: dict[str, str]) -
     )
 
     assert Path(result.stdout.strip().splitlines()[-1]).name == "real_llm_smoke_verification.json"
+    assert result.stderr == ""
 
 
 def test_smoke_gate_requires_branch_context_prompt_delivery(tmp_path: Path) -> None:
