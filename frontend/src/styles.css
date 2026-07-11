@@ -352,11 +352,11 @@ ul {
 }
 
 .topbar-controls {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
   align-items: center;
-  flex-wrap: wrap;
   justify-content: flex-start;
-  gap: 8px 10px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -371,15 +371,16 @@ ul {
 
 .topbar-run-settings,
 .topbar-statuses {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .topbar-actions {
-  margin-left: auto;
+  margin-left: 0;
 }
 
 .compact-field {
   display: grid;
+  flex: 1 1 178px;
   min-width: 178px;
   gap: 5px;
   color: var(--ink-muted);
@@ -388,6 +389,8 @@ ul {
 
 .compact-field select {
   min-height: 34px;
+  min-width: 0;
+  width: 100%;
 }
 
 .active-run {
@@ -1917,6 +1920,8 @@ ul {
 }
 
 .topbar-run-settings .segmented {
+  flex: 0 1 246px;
+  min-width: 192px;
   width: 246px;
 }
 
@@ -2715,6 +2720,15 @@ tbody tr:hover,
   .topbar {
     min-height: 54px;
     padding: 9px 12px;
+  }
+
+  .topbar-controls {
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
+
+  .topbar-run-settings {
+    flex-wrap: wrap;
+    grid-column: 1 / -1;
   }
 
   .paper-task-tabs {
