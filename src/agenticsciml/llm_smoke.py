@@ -15,6 +15,7 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path
 from typing import Any, Callable
 
@@ -35,6 +36,7 @@ from agenticsciml.llm.capabilities import capabilities_for_openai_compatible
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
 from agenticsciml.reporting.trace_summary import summarize_trace
+from agenticsciml.storage import atomic_write_text
 
 
 DEFAULT_SMOKE_VARIANTS = ("branch_context", "no_branch_context")
@@ -203,22 +205,19 @@ def _run_llm_smoke_once(
         benchmark_snapshot=benchmark_snapshot,
     )
     plan_path = output_dir / "real_llm_smoke_plan.json"
-    plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True), encoding="utf-8")
+    _write_json(plan_path, plan)
     manifest = _build_manifest(plan, llm_client=llm_client, budget=budget)
     manifest_path = output_dir / "real_llm_smoke_manifest.json"
-    manifest_path.write_text(
-        json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False),
-        encoding="utf-8",
-    )
+    _write_json(manifest_path, manifest)
 
     if dry_run:
         report_path = output_dir / "real_llm_smoke_report.md"
-        report_path.write_text(_render_dry_run_report(plan), encoding="utf-8")
+        atomic_write_text(report_path, _render_dry_run_report(plan))
         return LLMSmokeResult(plan_json=plan_path, report_md=report_path, manifest_json=manifest_path)
     preflight = manifest.get("budget_preflight", {})
     if isinstance(preflight, dict) and preflight.get("passed") is not True:
         report_path = output_dir / "real_llm_smoke_report.md"
-        report_path.write_text(_render_budget_blocked_report(plan, preflight), encoding="utf-8")
+        atomic_write_text(report_path, _render_budget_blocked_report(plan, preflight))
         _finalize_failed_manifest(
             manifest_path,
             manifest,
@@ -233,7 +232,7 @@ def _run_llm_smoke_once(
         llm = llm_client or OpenAIAdapter()
     except Exception as exc:
         report_path = output_dir / "real_llm_smoke_report.md"
-        report_path.write_text(_render_failure_report(plan, "adapter_init_error", exc), encoding="utf-8")
+        atomic_write_text(report_path, _render_failure_report(plan, "adapter_init_error", exc))
         _finalize_failed_manifest(
             manifest_path,
             manifest,
@@ -285,7 +284,7 @@ def _run_llm_smoke_once(
             run_dir = AgenticSciMLOrchestrator(config, recording_llm).run()
         except Exception as exc:
             report_path = output_dir / "real_llm_smoke_report.md"
-            report_path.write_text(_render_failure_report(plan, "orchestrator_error", exc), encoding="utf-8")
+            atomic_write_text(report_path, _render_failure_report(plan, "orchestrator_error", exc))
             _finalize_failed_manifest(
                 manifest_path,
                 manifest,
@@ -299,7 +298,7 @@ def _run_llm_smoke_once(
             row = _smoke_row(run_dir, variant, seed)
         except Exception as exc:
             report_path = output_dir / "real_llm_smoke_report.md"
-            report_path.write_text(_render_failure_report(plan, "run_artifact_error", exc), encoding="utf-8")
+            atomic_write_text(report_path, _render_failure_report(plan, "run_artifact_error", exc))
             _finalize_failed_manifest(
                 manifest_path,
                 manifest,
@@ -319,7 +318,7 @@ def _run_llm_smoke_once(
     runs_csv = output_dir / "real_llm_smoke_runs.csv"
     _write_csv(runs_csv, rows)
     report_path = output_dir / "real_llm_smoke_report.md"
-    report_path.write_text(_render_real_report(plan, rows, paired_gate), encoding="utf-8")
+    atomic_write_text(report_path, _render_real_report(plan, rows, paired_gate))
     if gate_issues:
         error = RuntimeError(f"Real LLM smoke gate failed; see {report_path}: {'; '.join(gate_issues)}")
         _finalize_failed_manifest(
@@ -336,10 +335,7 @@ def _run_llm_smoke_once(
     manifest["report_sha256"] = _file_sha256(report_path)
     manifest["runs_csv_sha256"] = _file_sha256(runs_csv)
     manifest["token_budget_final"] = budget.to_dict()
-    manifest_path.write_text(
-        json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False),
-        encoding="utf-8",
-    )
+    _write_json(manifest_path, manifest)
     return LLMSmokeResult(plan_json=plan_path, report_md=report_path, manifest_json=manifest_path, runs_csv=runs_csv)
 
 
@@ -349,10 +345,7 @@ def verify_llm_smoke_output(output_dir: Path) -> LLMSmokeVerification:
     with _exclusive_bundle_lock(output_dir):
         payload = _verify_llm_smoke_output(output_dir)
         path = output_dir / "real_llm_smoke_verification.json"
-        path.write_text(
-            json.dumps(payload, indent=2, sort_keys=True, allow_nan=False),
-            encoding="utf-8",
-        )
+        _write_json(path, payload)
     return LLMSmokeVerification(verification_json=path, passed=bool(payload["passed"]))
 
 
@@ -668,10 +661,7 @@ def _finalize_failed_manifest(
             "token_budget_final": budget.to_dict(),
         }
     )
-    manifest_path.write_text(
-        json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False),
-        encoding="utf-8",
-    )
+    _write_json(manifest_path, manifest)
 
 
 def _render_real_report(plan: dict[str, Any], rows: list[dict[str, Any]], paired_gate: dict[str, Any]) -> str:
@@ -773,12 +763,20 @@ def _render_budget_blocked_report(plan: dict[str, Any], preflight: dict[str, Any
 
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     if not rows:
-        path.write_text("", encoding="utf-8")
+        atomic_write_text(path, "")
         return
-    with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(rows)
+    buffer = StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=list(rows[0].keys()))
+    writer.writeheader()
+    writer.writerows(rows)
+    atomic_write_text(path, buffer.getvalue())
+
+
+def _write_json(path: Path, payload: Any) -> None:
+    atomic_write_text(
+        path,
+        json.dumps(payload, indent=2, sort_keys=True, allow_nan=False),
+    )
 
 
 def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:

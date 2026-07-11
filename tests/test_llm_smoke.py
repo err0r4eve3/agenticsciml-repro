@@ -865,6 +865,30 @@ def test_verify_llm_smoke_output_rejects_active_bundle_writer(tmp_path: Path) ->
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+def test_verify_llm_smoke_output_preserves_previous_result_when_publish_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _copy_real_smoke_bundle(tmp_path)
+    verification_path = tmp_path / "real_llm_smoke_verification.json"
+    previous_result = b'{"passed": true, "sentinel": "previous"}\n'
+    verification_path.write_bytes(previous_result)
+    original_replace = llm_smoke_module.os.replace
+
+    def fail_verification_publish(source: str | Path, destination: str | Path) -> None:
+        if Path(destination) == verification_path:
+            raise OSError("simulated verification publish failure")
+        original_replace(source, destination)
+
+    monkeypatch.setattr(llm_smoke_module.os, "replace", fail_verification_publish)
+
+    with pytest.raises(OSError, match="simulated verification publish failure"):
+        verify_llm_smoke_output(tmp_path)
+
+    assert verification_path.read_bytes() == previous_result
+    assert not list(tmp_path.glob(".real_llm_smoke_verification.json.*.tmp"))
+
+
 def test_verify_llm_smoke_output_rejects_undeclared_run_directory(
     tmp_path: Path,
 ) -> None:
