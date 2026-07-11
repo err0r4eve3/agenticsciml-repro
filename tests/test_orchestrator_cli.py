@@ -309,6 +309,45 @@ def test_llm_fast_mode_sets_unspecified_role_reasoning_to_low(tmp_path: Path) ->
     assert orchestrator._effective_agent_config_for_role("proposer").reasoning_effort == "low"
 
 
+def test_llm_call_summary_separates_provider_usage_from_text_estimates(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="provider-usage-summary",
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        use_mock=True,
+    )
+    orchestrator = AgenticSciMLOrchestrator(config, MockLLMClient())
+    for index, usage in enumerate(
+        [
+            {"prompt_tokens": 7, "completion_tokens": 11, "total_tokens": 18},
+            {"prompt_tokens": 3, "completion_tokens": 5, "total_tokens": 8},
+        ],
+        start=1,
+    ):
+        orchestrator.storage.record_trace(
+            "generation_span",
+            f"role_{index}",
+            {
+                "prompt_token_estimate": index,
+                "response_token_estimate": index + 1,
+                "duration_s": 0.5,
+                "usage": usage,
+            },
+        )
+
+    summary = orchestrator._llm_call_summary()
+
+    assert summary["prompt_token_estimate"] == 3
+    assert summary["response_token_estimate"] == 5
+    assert summary["provider_usage"] == {
+        "call_count": 2,
+        "complete": True,
+        "prompt_tokens": 10,
+        "completion_tokens": 16,
+        "total_tokens": 26,
+    }
+
+
 def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     config = ExperimentConfig(
         experiment_id="mock-run",
@@ -375,6 +414,13 @@ def test_full_mock_pipeline_generates_tree_and_champion(tmp_path: Path) -> None:
     assert run_metadata["llm_calls"]["by_role"]["proposer"] >= 1
     assert run_metadata["llm_calls"]["prompt_token_estimate"] > 0
     assert run_metadata["llm_calls"]["response_token_estimate"] > 0
+    assert run_metadata["llm_calls"]["provider_usage"] == {
+        "call_count": 0,
+        "complete": False,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+    }
     assert {"workflow_span", "tool_span", "agent_span", "generation_span", "guardrail_span"} <= event_types
     assert run_start["metadata"]["run_state"] == "partial"
     assert run_end["metadata"]["run_state"] == "exported"

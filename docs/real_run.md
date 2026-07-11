@@ -306,8 +306,27 @@ consistency, and requires parallel-child trace evidence when
 `parallel_mutations > 1`.
 
 `run_metadata.json` also records aggregate LLM call counts by role plus prompt
-and response token estimates. These are accounting placeholders, not provider
-billing records.
+and response text token estimates. When the adapter supplies numeric usage,
+`llm_calls.provider_usage` separately records provider prompt/completion/total
+tokens, the number of calls carrying usage, and whether coverage is complete.
+Before a request, `llm_budget` reserves the local prompt estimate so limits can
+fail before a provider call. After a response, it replaces that reservation
+with provider prompt usage when available, then checks prompt/output/total/cost
+limits again. Each ledger row preserves `prompt_token_estimate` separately from
+`prompt_tokens_accounted`, plus `prompt_token_source` and
+`response_token_source`; post-response failures remain billable and are written
+before the error propagates. This includes provider responses that are billed
+before JSON parsing or schema validation fails; if reconciled usage crosses a
+budget, `LLMBudgetExceeded` stops further retries and the controlled underlying
+error type remains in the ledger. Adapter metadata is thread-local so parallel
+mutations cannot exchange per-call usage. Resume rejects partial or inconsistent
+new accounting fields, while legacy ledgers with all new fields absent still
+resume from local estimates. Real-smoke verification also binds each provider
+accounted value to the matching generation trace by `llm_call_id`; a legacy
+ledger row is accepted only when its matching legacy trace also has no provider
+usage, so deleting the new fields cannot downgrade current evidence. Local
+estimates and provider usage must not be presented as interchangeable billing
+records.
 
 After a real run, scan run artifacts for accidental secret leakage before
 sharing or attaching them:

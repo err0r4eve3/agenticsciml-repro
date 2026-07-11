@@ -3416,12 +3416,23 @@ class AgenticSciMLOrchestrator:
         prompt_token_estimate = 0
         response_token_estimate = 0
         duration_s = 0.0
+        provider_usage_call_count = 0
+        provider_prompt_tokens = 0
+        provider_completion_tokens = 0
+        provider_total_tokens = 0
         if not trace_path.exists():
             return {
                 "total": total,
                 "by_role": by_role,
                 "prompt_token_estimate": prompt_token_estimate,
                 "response_token_estimate": response_token_estimate,
+                "provider_usage": {
+                    "call_count": 0,
+                    "complete": False,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                },
                 "duration_s": duration_s,
             }
         for line in trace_path.read_text(encoding="utf-8").splitlines():
@@ -3435,11 +3446,28 @@ class AgenticSciMLOrchestrator:
             prompt_token_estimate += int(metadata.get("prompt_token_estimate", 0))
             response_token_estimate += int(metadata.get("response_token_estimate", 0))
             duration_s += float(metadata.get("duration_s", 0.0))
+            usage = metadata.get("usage")
+            if isinstance(usage, dict) and all(
+                isinstance(usage.get(field), int) and not isinstance(usage.get(field), bool)
+                and int(usage[field]) >= 0
+                for field in ("prompt_tokens", "completion_tokens", "total_tokens")
+            ):
+                provider_usage_call_count += 1
+                provider_prompt_tokens += int(usage["prompt_tokens"])
+                provider_completion_tokens += int(usage["completion_tokens"])
+                provider_total_tokens += int(usage["total_tokens"])
         return {
             "total": total,
             "by_role": dict(sorted(by_role.items())),
             "prompt_token_estimate": prompt_token_estimate,
             "response_token_estimate": response_token_estimate,
+            "provider_usage": {
+                "call_count": provider_usage_call_count,
+                "complete": total > 0 and provider_usage_call_count == total,
+                "prompt_tokens": provider_prompt_tokens,
+                "completion_tokens": provider_completion_tokens,
+                "total_tokens": provider_total_tokens,
+            },
             "duration_s": duration_s,
         }
 

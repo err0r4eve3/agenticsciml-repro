@@ -417,6 +417,13 @@ def _smoke_row(run_dir: Path, variant: str, seed: int) -> dict[str, Any]:
     ledger_entries, ledger_issues = _read_llm_call_ledger(run_dir, variant)
     ledger_call_count = len(ledger_entries)
     generation_spans = _generation_span_metadata(run_dir)
+    ledger_issues.extend(
+        _llm_token_accounting_issues(
+            ledger_entries,
+            generation_spans,
+            variant,
+        )
+    )
     generation_span_count = len(generation_spans)
     gate = _smoke_gate(
         run_dir,
@@ -830,9 +837,14 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
             _verify_row_ledger(row, manifest, issues)
             ledger_entries, _ = _read_llm_call_ledger(Path(str(row.get("run_dir", ""))), row_variant)
             for entry in ledger_entries:
+                prompt_field = (
+                    "prompt_tokens_accounted"
+                    if "prompt_tokens_accounted" in entry
+                    else "prompt_token_estimate"
+                )
                 prompt_value = _parse_strict_int(
-                    entry.get("prompt_token_estimate"),
-                    f"{row_variant}: ledger prompt_token_estimate",
+                    entry.get(prompt_field),
+                    f"{row_variant}: ledger {prompt_field}",
                     issues,
                 )
                 output_value = _parse_strict_int(
@@ -1102,14 +1114,23 @@ def _validate_llm_call_ledger_entry(
         "prompt_hash",
         "system_hash",
         "prompt_token_estimate",
+        "prompt_tokens_accounted",
+        "prompt_token_source",
         "response_token_estimate",
+        "response_token_source",
         "temperature",
         "reasoning_effort",
         "started_at_unix",
         "success",
         "duration_s",
     }
-    allowed_keys = allowed_base | ({"response_hash"} if success is True else {"error_type"} if success is False else {"response_hash", "error_type"})
+    allowed_keys = allowed_base | (
+        {"response_hash"}
+        if success is True
+        else {"error_type", "underlying_error_type"}
+        if success is False
+        else {"response_hash", "error_type", "underlying_error_type"}
+    )
     extra_keys = sorted(set(entry) - allowed_keys)
     if extra_keys:
         issues.append(f"{prefix} contains unknown ledger field(s): {', '.join(extra_keys)}")
@@ -1153,6 +1174,45 @@ def _validate_llm_call_ledger_entry(
     for field in ("prompt_hash", "system_hash"):
         _validate_sha256_hex(entry.get(field), f"{prefix} {field}", issues)
     _validate_non_negative_finite_number(entry.get("prompt_token_estimate"), f"{prefix} prompt_token_estimate", issues)
+    accounting_fields = {
+        "prompt_tokens_accounted",
+        "prompt_token_source",
+        "response_token_source",
+    }
+    has_accounting_fields = bool(accounting_fields & set(entry))
+    if has_accounting_fields and "prompt_tokens_accounted" not in entry:
+        issues.append(f"{prefix} prompt_tokens_accounted is required with token sources")
+    if has_accounting_fields and "prompt_token_source" not in entry:
+        issues.append(f"{prefix} prompt_token_source is required with token accounting")
+    if (
+        has_accounting_fields
+        and "response_token_estimate" in entry
+        and "response_token_source" not in entry
+    ):
+        issues.append(f"{prefix} response_token_source is required with token accounting")
+    if "response_token_source" in entry and "response_token_estimate" not in entry:
+        issues.append(f"{prefix} response_token_estimate is required with response_token_source")
+    if "prompt_tokens_accounted" in entry:
+        _validate_non_negative_finite_number(
+            entry.get("prompt_tokens_accounted"),
+            f"{prefix} prompt_tokens_accounted",
+            issues,
+        )
+    for field in ("prompt_token_source", "response_token_source"):
+        if field in entry and entry.get(field) not in {
+            "local_estimate",
+            "provider_usage",
+        }:
+            issues.append(
+                f"{prefix} {field} must be local_estimate or provider_usage"
+            )
+    if (
+        entry.get("prompt_token_source") == "local_estimate"
+        and entry.get("prompt_tokens_accounted") != entry.get("prompt_token_estimate")
+    ):
+        issues.append(
+            f"{prefix} local_estimate prompt accounting must equal prompt_token_estimate"
+        )
     if not isinstance(success, bool):
         issues.append(f"{prefix} success must be boolean")
     elif success:
@@ -1161,6 +1221,12 @@ def _validate_llm_call_ledger_entry(
     else:
         issues.append(f"{prefix} success must be true for completed smoke evidence")
         _required_non_empty_string(entry.get("error_type"), f"{prefix} error_type", issues)
+        if "underlying_error_type" in entry:
+            _required_non_empty_string(
+                entry.get("underlying_error_type"),
+                f"{prefix} underlying_error_type",
+                issues,
+            )
     _validate_finite_number(entry.get("temperature"), f"{prefix} temperature", issues)
     reasoning_effort = entry.get("reasoning_effort")
     if reasoning_effort is not None and reasoning_effort not in {
@@ -1232,6 +1298,91 @@ def _generation_span_metadata(run_dir: Path) -> list[dict[str, Any]]:
         metadata = event.get("metadata", {})
         spans.append(metadata if isinstance(metadata, dict) else {})
     return spans
+
+
+def _llm_token_accounting_issues(
+    ledger_entries: list[dict[str, Any]],
+    generation_spans: list[dict[str, Any]],
+    variant: str,
+) -> list[str]:
+    issues: list[str] = []
+    spans_by_call_id = {
+        span.get("llm_call_id"): span
+        for span in generation_spans
+        if isinstance(span.get("llm_call_id"), str)
+    }
+    for entry in ledger_entries:
+        call_id = entry.get("call_id")
+        span = spans_by_call_id.get(call_id)
+        usage = span.get("usage") if isinstance(span, dict) else None
+        usage = usage if isinstance(usage, dict) else {}
+        if not {
+            "prompt_tokens_accounted",
+            "prompt_token_source",
+            "response_token_source",
+        } & set(entry):
+            # Legacy rows are accepted only with legacy traces. A provider
+            # usage trace proves that current accounting fields should exist;
+            # silently downgrading that row would permit budget undercounting.
+            if any(
+                isinstance(usage.get(field), int)
+                and not isinstance(usage.get(field), bool)
+                and usage[field] >= 0
+                for field in ("prompt_tokens", "completion_tokens")
+            ):
+                issues.append(
+                    f"{variant}: ledger {call_id} is missing token accounting "
+                    "fields despite provider usage trace"
+                )
+            continue
+        usage_values = [
+            usage.get(field)
+            for field in ("prompt_tokens", "completion_tokens", "total_tokens")
+        ]
+        if all(
+            isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            for value in usage_values
+        ) and usage_values[2] != usage_values[0] + usage_values[1]:
+            issues.append(
+                f"{variant}: trace {call_id} usage.total_tokens does not equal "
+                "prompt_tokens + completion_tokens"
+            )
+        for source_field, ledger_field, usage_field in (
+            (
+                "prompt_token_source",
+                "prompt_tokens_accounted",
+                "prompt_tokens",
+            ),
+            (
+                "response_token_source",
+                "response_token_estimate",
+                "completion_tokens",
+            ),
+        ):
+            source = entry.get(source_field)
+            provider_value = usage.get(usage_field)
+            has_provider_value = (
+                isinstance(provider_value, int)
+                and not isinstance(provider_value, bool)
+                and provider_value >= 0
+            )
+            if source == "provider_usage":
+                if not has_provider_value:
+                    issues.append(
+                        f"{variant}: ledger {call_id} {source_field} requires "
+                        f"trace usage.{usage_field}"
+                    )
+                elif entry.get(ledger_field) != provider_value:
+                    issues.append(
+                        f"{variant}: ledger {call_id} {ledger_field} does not "
+                        f"match trace usage.{usage_field}"
+                    )
+            elif source == "local_estimate" and has_provider_value:
+                issues.append(
+                    f"{variant}: ledger {call_id} {source_field} uses local_estimate "
+                    f"despite trace usage.{usage_field}"
+                )
+    return issues
 
 
 def _join_sequence(values: Any) -> str:

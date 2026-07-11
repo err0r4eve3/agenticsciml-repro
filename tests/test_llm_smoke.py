@@ -16,6 +16,7 @@ from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm_smoke import (
     _RecordingLLMClient,
     _hash_payload,
+    _llm_token_accounting_issues,
     _paired_contrast_gate,
     _render_real_report,
     _score_diagnostics,
@@ -970,6 +971,9 @@ def test_verify_llm_smoke_output_rejects_manifest_model_mismatch(tmp_path: Path)
         ("duration_s", float("nan"), "duration_s must be a finite number"),
         ("temperature", float("inf"), "temperature must be a finite number"),
         ("span_kind", "tool_span", "span_kind must be generation_span"),
+        ("prompt_tokens_accounted", -1, "prompt_tokens_accounted must be >= 0"),
+        ("prompt_token_source", "untrusted", "prompt_token_source must be local_estimate or provider_usage"),
+        ("response_token_source", "untrusted", "response_token_source must be local_estimate or provider_usage"),
     ],
 )
 def test_verify_llm_smoke_output_rejects_invalid_ledger_entry_schema(
@@ -986,6 +990,133 @@ def test_verify_llm_smoke_output_rejects_invalid_ledger_entry_schema(
 
     assert verification.passed is False
     assert any(expected_issue in issue for issue in payload["issues"])
+
+
+def test_verify_llm_smoke_output_rejects_accounted_prompt_mismatch_with_trace(tmp_path: Path) -> None:
+    _copy_real_smoke_bundle(tmp_path)
+    run_dir = tmp_path / "runs" / "smoke-branch_context-seed-0"
+    ledger_path = run_dir / "llm_call_ledger.jsonl"
+    entries = [
+        json.loads(line)
+        for line in ledger_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    extra_prompt_tokens = 9
+    entries[0]["prompt_tokens_accounted"] += extra_prompt_tokens
+    entries[0]["prompt_token_source"] = "provider_usage"
+    ledger_path.write_text(
+        "\n".join(json.dumps(entry, sort_keys=True) for entry in entries) + "\n",
+        encoding="utf-8",
+    )
+
+    manifest_path = tmp_path / "real_llm_smoke_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    final_budget = manifest["token_budget_final"]
+    final_budget["prompt_tokens_used"] += extra_prompt_tokens
+    cost_rate = final_budget.get("cost_per_1k_tokens_usd")
+    if cost_rate is not None:
+        final_budget["estimated_cost_usd"] = (
+            final_budget["prompt_tokens_used"] + final_budget["output_tokens_used"]
+        ) / 1000.0 * cost_rate
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any(
+        "prompt_tokens_accounted does not match trace usage.prompt_tokens" in issue
+        or "prompt_token_source requires trace usage.prompt_tokens" in issue
+        for issue in payload["issues"]
+    )
+
+
+def test_verify_llm_smoke_output_rejects_partial_token_accounting_fields(tmp_path: Path) -> None:
+    _copy_real_smoke_bundle(tmp_path)
+    _delete_first_ledger_field(
+        tmp_path / "runs" / "smoke-branch_context-seed-0",
+        "prompt_token_source",
+    )
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("prompt_token_source is required" in issue for issue in payload["issues"])
+
+
+def test_llm_token_accounting_accepts_matching_provider_trace_and_legacy_trace() -> None:
+    matching_entry = {
+        "call_id": "llm_call_000001",
+        "prompt_tokens_accounted": 7,
+        "prompt_token_source": "provider_usage",
+        "response_token_estimate": 11,
+        "response_token_source": "provider_usage",
+    }
+    span = {
+        "llm_call_id": "llm_call_000001",
+        "usage": {
+            "prompt_tokens": 7,
+            "completion_tokens": 11,
+            "total_tokens": 18,
+        },
+    }
+
+    assert _llm_token_accounting_issues([matching_entry], [span], "branch_context") == []
+    assert _llm_token_accounting_issues(
+        [{"call_id": "llm_call_000001", "prompt_token_estimate": 1}],
+        [{"llm_call_id": "llm_call_000001"}],
+        "branch_context",
+    ) == []
+
+
+def test_llm_token_accounting_rejects_legacy_downgrade_with_provider_trace() -> None:
+    issues = _llm_token_accounting_issues(
+        [{"call_id": "llm_call_000001", "prompt_token_estimate": 1}],
+        [
+            {
+                "llm_call_id": "llm_call_000001",
+                "usage": {
+                    "prompt_tokens": 7,
+                    "completion_tokens": 11,
+                    "total_tokens": 18,
+                },
+            }
+        ],
+        "branch_context",
+    )
+
+    assert any("missing token accounting fields" in issue for issue in issues)
+
+
+def test_llm_token_accounting_rejects_inconsistent_provider_total() -> None:
+    issues = _llm_token_accounting_issues(
+        [
+            {
+                "call_id": "llm_call_000001",
+                "prompt_tokens_accounted": 7,
+                "prompt_token_source": "provider_usage",
+                "response_token_estimate": 11,
+                "response_token_source": "provider_usage",
+            }
+        ],
+        [
+            {
+                "llm_call_id": "llm_call_000001",
+                "usage": {
+                    "prompt_tokens": 7,
+                    "completion_tokens": 11,
+                    "total_tokens": 99,
+                },
+            }
+        ],
+        "branch_context",
+    )
+
+    assert any("usage.total_tokens does not equal" in issue for issue in issues)
 
 
 def test_verify_llm_smoke_output_rejects_missing_ledger_hash(tmp_path: Path) -> None:

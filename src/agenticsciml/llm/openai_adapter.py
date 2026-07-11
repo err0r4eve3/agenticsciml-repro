@@ -4,6 +4,7 @@ import base64
 import json
 import mimetypes
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +59,7 @@ class OpenAIAdapter(LLMClient):
         self.provider_capabilities: ProviderCapabilities = capabilities_for_openai_compatible(self.base_url)
         self.provider_name = self.provider_capabilities.provider
         self.adapter_type = self.provider_capabilities.adapter_type
+        self._call_local = threading.local()
         self.last_call_metadata: dict[str, Any] | None = None
         if not self.api_key:
             raise RuntimeError("Real LLM mode requires OPENAI_API_KEY.")
@@ -73,6 +75,15 @@ class OpenAIAdapter(LLMClient):
         if self.base_url:
             client_kwargs["base_url"] = self.base_url
         self.client = OpenAI(**client_kwargs)
+
+    @property
+    def last_call_metadata(self) -> dict[str, Any] | None:
+        metadata = getattr(self._call_local, "last_call_metadata", None)
+        return metadata if isinstance(metadata, dict) else None
+
+    @last_call_metadata.setter
+    def last_call_metadata(self, metadata: dict[str, Any] | None) -> None:
+        self._call_local.last_call_metadata = metadata
 
     def complete_text(
         self,

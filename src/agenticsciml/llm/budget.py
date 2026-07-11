@@ -158,6 +158,8 @@ class RecordingLLMClient(LLMClient):
             "prompt_hash": _hash_text(prompt),
             "system_hash": _hash_text(system or ""),
             "prompt_token_estimate": prompt_tokens,
+            "prompt_tokens_accounted": prompt_tokens,
+            "prompt_token_source": "local_estimate",
             "temperature": temperature,
             "started_at_unix": started_wall,
         }
@@ -167,21 +169,101 @@ class RecordingLLMClient(LLMClient):
         try:
             response = call()
         except Exception as exc:
+            inner_metadata = getattr(self.inner, "last_call_metadata", None)
+            provider_prompt_tokens = _usage_token_count(
+                inner_metadata,
+                "prompt_tokens",
+                "input_tokens",
+            )
+            provider_response_tokens = _usage_token_count(
+                inner_metadata,
+                "completion_tokens",
+                "output_tokens",
+            )
+            budget_error: LLMBudgetExceeded | None = None
+            if provider_prompt_tokens is not None or provider_response_tokens is not None:
+                prompt_tokens_accounted = (
+                    provider_prompt_tokens
+                    if provider_prompt_tokens is not None
+                    else prompt_tokens
+                )
+                record.update(
+                    {
+                        "prompt_tokens_accounted": prompt_tokens_accounted,
+                        "prompt_token_source": (
+                            "provider_usage"
+                            if provider_prompt_tokens is not None
+                            else "local_estimate"
+                        ),
+                    }
+                )
+                if provider_response_tokens is not None:
+                    record.update(
+                        {
+                            "response_token_estimate": provider_response_tokens,
+                            "response_token_source": "provider_usage",
+                        }
+                    )
+                try:
+                    with self._state.lock:
+                        self.budget.record_response(
+                            output_tokens=provider_response_tokens or 0,
+                            prompt_tokens_reserved=prompt_tokens,
+                            prompt_tokens_accounted=prompt_tokens_accounted,
+                        )
+                except LLMBudgetExceeded as accounting_exc:
+                    budget_error = accounting_exc
             record.update(
                 {
                     "success": False,
-                    "error_type": type(exc).__name__,
+                    "error_type": type(budget_error or exc).__name__,
                     "duration_s": time.monotonic() - started,
                 }
             )
-            self._local.last_call_metadata = _trace_call_metadata(record)
+            if budget_error is not None:
+                record["underlying_error_type"] = type(exc).__name__
+            self._local.last_call_metadata = _trace_call_metadata(
+                record,
+                inner_metadata,
+            )
             self._append_ledger(record)
             self._emit_progress("llm_call_finished", record)
+            if budget_error is not None:
+                raise budget_error from exc
             raise
-        response_tokens = _response_token_count(response, getattr(self.inner, "last_call_metadata", None))
+        inner_metadata = getattr(self.inner, "last_call_metadata", None)
+        provider_prompt_tokens = _usage_token_count(
+            inner_metadata,
+            "prompt_tokens",
+            "input_tokens",
+        )
+        prompt_tokens_accounted = (
+            provider_prompt_tokens
+            if provider_prompt_tokens is not None
+            else prompt_tokens
+        )
+        response_tokens, response_token_source = _response_token_count(
+            response,
+            inner_metadata,
+        )
+        record.update(
+            {
+                "prompt_tokens_accounted": prompt_tokens_accounted,
+                "prompt_token_source": (
+                    "provider_usage"
+                    if provider_prompt_tokens is not None
+                    else "local_estimate"
+                ),
+                "response_token_source": response_token_source,
+            }
+        )
         try:
             with self._state.lock:
-                self.budget.record_response(output_tokens=response_tokens)
+                self.budget.record_response(
+                    output_tokens=response_tokens,
+                    prompt_tokens_reserved=prompt_tokens,
+                    prompt_tokens_accounted=prompt_tokens_accounted,
+                )
         except LLMBudgetExceeded as exc:
             # The provider response has already been produced (and may be
             # billable), so persist its usage before propagating the budget
@@ -195,7 +277,10 @@ class RecordingLLMClient(LLMClient):
                     "duration_s": time.monotonic() - started,
                 }
             )
-            self._local.last_call_metadata = _trace_call_metadata(record)
+            self._local.last_call_metadata = _trace_call_metadata(
+                record,
+                inner_metadata,
+            )
             self._append_ledger(record)
             self._emit_progress("llm_call_finished", record)
             raise
@@ -211,7 +296,10 @@ class RecordingLLMClient(LLMClient):
                 "duration_s": time.monotonic() - started,
             }
         )
-        self._local.last_call_metadata = _trace_call_metadata(record)
+        self._local.last_call_metadata = _trace_call_metadata(
+            record,
+            inner_metadata,
+        )
         self._append_ledger(record)
         self._emit_progress("llm_call_finished", record)
         return response
@@ -363,7 +451,20 @@ class LLMBudget:
         self.prompt_tokens_used += prompt_tokens
         self._refresh_cost()
 
-    def record_response(self, *, output_tokens: int) -> None:
+    def record_response(
+        self,
+        *,
+        output_tokens: int,
+        prompt_tokens_reserved: int | None = None,
+        prompt_tokens_accounted: int | None = None,
+    ) -> None:
+        if prompt_tokens_accounted is not None:
+            reserved = (
+                prompt_tokens_reserved
+                if prompt_tokens_reserved is not None
+                else prompt_tokens_accounted
+            )
+            self.prompt_tokens_used += prompt_tokens_accounted - reserved
         self.output_tokens_used += output_tokens
         self._check_after_response()
 
@@ -377,6 +478,14 @@ class LLMBudget:
             self.estimated_cost_usd = total / 1000.0 * self.cost_per_1k_tokens_usd
 
     def _check_after_response(self) -> None:
+        # Provider usage is already billable at this boundary. Keep cost
+        # accounting current even when a token or total limit fails closed.
+        self._refresh_cost()
+        if self.max_prompt_tokens is not None and self.prompt_tokens_used > self.max_prompt_tokens:
+            raise LLMBudgetExceeded(
+                "LLM prompt token budget exceeded: "
+                f"used={self.prompt_tokens_used}, max={self.max_prompt_tokens}"
+            )
         if self.max_output_tokens is not None and self.output_tokens_used > self.max_output_tokens:
             raise LLMBudgetExceeded(
                 f"LLM output token budget exceeded: used={self.output_tokens_used}, max={self.max_output_tokens}"
@@ -384,7 +493,6 @@ class LLMBudget:
         total = self.prompt_tokens_used + self.output_tokens_used
         if self.max_total_tokens is not None and total > self.max_total_tokens:
             raise LLMBudgetExceeded(f"LLM total token budget exceeded: used={total}, max={self.max_total_tokens}")
-        self._refresh_cost()
         if self.max_cost_usd is not None and self.estimated_cost_usd > self.max_cost_usd:
             raise LLMBudgetExceeded(
                 f"LLM cost budget exceeded: estimated={self.estimated_cost_usd:.6f}, max={self.max_cost_usd:.6f}"
@@ -526,14 +634,13 @@ def _load_recording_state(
     output_tokens = 0
     for call_number in range(1, calls + 1):
         line_number, record = records_by_call_number[call_number]
-        prompt_tokens += _non_negative_ledger_int(
-            record.get("prompt_token_estimate"),
+        prompt_tokens += _ledger_prompt_tokens_accounted(
+            record,
             ledger_path,
             line_number,
-            "prompt_token_estimate",
         )
-        # Failed provider calls have no response usage.  A post-response budget
-        # failure does: its response_token_estimate must remain billable and is
+        # Failed provider calls may have no response usage. Any post-response
+        # failure does: its response_token_estimate remains billable and is
         # therefore restored just like a successful response.
         if "response_token_estimate" in record:
             output_tokens += _non_negative_ledger_int(
@@ -554,13 +661,7 @@ def _load_recording_state(
         budget.calls_used = calls
         budget.prompt_tokens_used = prompt_tokens
         budget.output_tokens_used = output_tokens
-        budget._refresh_cost()
         budget._check_after_response()
-        if budget.max_prompt_tokens is not None and prompt_tokens > budget.max_prompt_tokens:
-            raise LLMBudgetExceeded(
-                "Existing LLM ledger already exceeds prompt token budget: "
-                f"used={prompt_tokens}, max={budget.max_prompt_tokens}"
-            )
         if budget.max_calls is not None and calls > budget.max_calls:
             raise LLMBudgetExceeded(
                 f"Existing LLM ledger already exceeds call budget: used={calls}, max={budget.max_calls}"
@@ -577,6 +678,74 @@ def _non_negative_ledger_int(value: Any, path: Path, line_number: int, field: st
     return value
 
 
+def _ledger_prompt_tokens_accounted(
+    record: dict[str, Any],
+    path: Path,
+    line_number: int,
+) -> int:
+    prompt_estimate = _non_negative_ledger_int(
+        record.get("prompt_token_estimate"),
+        path,
+        line_number,
+        "prompt_token_estimate",
+    )
+    accounting_fields = {
+        "prompt_tokens_accounted",
+        "prompt_token_source",
+        "response_token_source",
+    }
+    present_fields = accounting_fields & set(record)
+    if not present_fields:
+        return prompt_estimate
+    for field in ("prompt_tokens_accounted", "prompt_token_source"):
+        if field not in record:
+            raise RuntimeError(
+                f"Cannot resume with partial LLM token accounting at "
+                f"{path}:{line_number}; missing={field}"
+            )
+    prompt_accounted = _non_negative_ledger_int(
+        record.get("prompt_tokens_accounted"),
+        path,
+        line_number,
+        "prompt_tokens_accounted",
+    )
+    prompt_source = record.get("prompt_token_source")
+    if prompt_source not in {"local_estimate", "provider_usage"}:
+        raise RuntimeError(
+            f"Cannot resume with invalid prompt_token_source at {path}:{line_number}"
+        )
+    has_response_tokens = "response_token_estimate" in record
+    has_response_source = "response_token_source" in record
+    if record.get("success") is True and not has_response_tokens and not has_response_source:
+        raise RuntimeError(
+            f"Cannot resume successful LLM call without response token accounting at "
+            f"{path}:{line_number}"
+        )
+    if has_response_tokens != has_response_source:
+        missing = (
+            "response_token_source"
+            if has_response_tokens
+            else "response_token_estimate"
+        )
+        raise RuntimeError(
+            f"Cannot resume with partial LLM token accounting at "
+            f"{path}:{line_number}; missing={missing}"
+        )
+    if has_response_source and record.get("response_token_source") not in {
+        "local_estimate",
+        "provider_usage",
+    }:
+        raise RuntimeError(
+            f"Cannot resume with invalid response_token_source at {path}:{line_number}"
+        )
+    if prompt_source == "local_estimate" and prompt_accounted != prompt_estimate:
+        raise RuntimeError(
+            f"Cannot resume with inconsistent local prompt token accounting at "
+            f"{path}:{line_number}"
+        )
+    return prompt_accounted
+
+
 def _hash_payload(payload: dict[str, Any]) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -586,7 +755,7 @@ def _hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _trace_call_metadata(record: dict[str, Any]) -> dict[str, Any]:
+def _trace_call_metadata(record: dict[str, Any], inner_metadata: Any = None) -> dict[str, Any]:
     metadata = {
         "llm_call_id": record["call_id"],
         "span_kind": record["span_kind"],
@@ -599,6 +768,32 @@ def _trace_call_metadata(record: dict[str, Any]) -> dict[str, Any]:
     }
     if "reasoning_effort" in record:
         metadata["reasoning_effort"] = record["reasoning_effort"]
+    if isinstance(inner_metadata, dict) and isinstance(inner_metadata.get("usage"), dict):
+        usage = {}
+        prompt_tokens = _usage_token_count(
+            inner_metadata,
+            "prompt_tokens",
+            "input_tokens",
+        )
+        completion_tokens = _usage_token_count(
+            inner_metadata,
+            "completion_tokens",
+            "output_tokens",
+        )
+        total_tokens = _usage_token_count(inner_metadata, "total_tokens")
+        if prompt_tokens is not None:
+            usage["prompt_tokens"] = prompt_tokens
+        if completion_tokens is not None:
+            usage["completion_tokens"] = completion_tokens
+        if total_tokens is not None:
+            usage["total_tokens"] = total_tokens
+        if "total_tokens" not in usage and {
+            "prompt_tokens",
+            "completion_tokens",
+        } <= set(usage):
+            usage["total_tokens"] = usage["prompt_tokens"] + usage["completion_tokens"]
+        if usage:
+            metadata["usage"] = usage
     return metadata
 
 
@@ -674,14 +869,30 @@ def _estimate_tokens(text: str) -> int:
     return max(1, (len(text) + 3) // 4)
 
 
-def _response_token_count(response: Any, metadata: Any = None) -> int:
-    if isinstance(metadata, dict):
-        usage = metadata.get("usage")
-        if isinstance(usage, dict):
-            for key in ("completion_tokens", "output_tokens"):
-                value = usage.get(key)
-                if isinstance(value, int) and not isinstance(value, bool):
-                    return value
+def _usage_token_count(metadata: Any, *keys: str) -> int | None:
+    if not isinstance(metadata, dict):
+        return None
+    usage = metadata.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    for key in keys:
+        value = usage.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+    return None
+
+
+def _response_token_count(response: Any, metadata: Any = None) -> tuple[int, str]:
+    provider_tokens = _usage_token_count(
+        metadata,
+        "completion_tokens",
+        "output_tokens",
+    )
+    if provider_tokens is not None:
+        return provider_tokens, "provider_usage"
     if isinstance(response, dict):
-        return _estimate_tokens(json.dumps(response, sort_keys=True, default=str))
-    return _estimate_tokens(str(response))
+        return (
+            _estimate_tokens(json.dumps(response, sort_keys=True, default=str)),
+            "local_estimate",
+        )
+    return _estimate_tokens(str(response)), "local_estimate"

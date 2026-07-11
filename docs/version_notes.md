@@ -27,6 +27,17 @@
   failed-after-debug nodes 和 recovery rate；它按最终 node status 判定修复是否成功，不再把
   “debugger API 返回成功”与“solution 最终恢复为 evaluated”混为一谈。零尝试时 CSV rate 留空、
   Markdown 显示 `not_applicable`，且这些诊断不改变 smoke gate。
+- `run_metadata.llm_calls` 现在把本地 prompt/response text estimate 与 provider usage 分层：
+  adapter 返回数值 usage 时，额外记录 provider prompt/completion/total tokens、覆盖 call count
+  和 complete 标记；不再让研究人员把文本长度估算与 provider 计费 usage 当成同一口径。
+- `llm_budget` 现在先用本地 prompt estimate 做请求前预留，再在响应后用 provider prompt usage
+  对账并重新检查 prompt/output/total/cost 上限；ledger 同时保留 estimate、accounted value 和
+  source。即使响应后超预算而 fail closed，已发生的 token 与成本仍会进入 ledger 和恢复计费。
+- provider metadata 改为 thread-local，避免并行 mutation 串用另一调用的 usage；provider 已返回
+  但 JSON/schema 解析失败的调用也会按实际 prompt/completion 入账，实际 usage 超限时停止重试并
+  保留受控原始异常类型。Resume 拒绝半套或自相矛盾的新 accounting fields，real-smoke verifier
+  逐 `llm_call_id` 绑定 ledger 与 generation trace usage；legacy 全缺字段的 ledger 仅在对应旧 trace
+  同样没有 provider usage 时兼容，不能通过删除字段把当前证据降级为本地估算。
 
 ## 2026-07-10 研究工作流完整性修复
 

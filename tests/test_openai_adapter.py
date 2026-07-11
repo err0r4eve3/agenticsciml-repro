@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import types
 from pathlib import Path
 from typing import Any
@@ -101,6 +102,33 @@ def test_openai_adapter_supports_base_url_env(monkeypatch) -> None:
     assert adapter.provider_capabilities.adapter_type == "openai_compatible_chat"
     assert adapter.provider_capabilities.supports_structured_outputs is False
     assert adapter.provider_capabilities.supports_image_inputs is False
+
+
+def test_openai_adapter_last_call_metadata_is_thread_local(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeChatOpenAI))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.deepseek.com")
+    adapter = OpenAIAdapter(model="deepseek-v4-pro")
+    barrier = threading.Barrier(2)
+    observed: list[int] = []
+
+    def write_and_read(prompt_tokens: int) -> None:
+        adapter.last_call_metadata = {"usage": {"prompt_tokens": prompt_tokens}}
+        barrier.wait(timeout=5)
+        assert adapter.last_call_metadata is not None
+        observed.append(adapter.last_call_metadata["usage"]["prompt_tokens"])
+
+    threads = [
+        threading.Thread(target=write_and_read, args=(prompt_tokens,))
+        for prompt_tokens in (1, 7)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+
+    assert sorted(observed) == [1, 7]
 
 
 def test_openai_adapter_marks_gatexflow_as_multimodal_chat(monkeypatch) -> None:
