@@ -289,6 +289,7 @@ def test_real_llm_ledger_trace_rejects_provider_usage_legacy_downgrade(
                         "name": "data_analyst",
                         "metadata": {
                             "llm_call_id": "llm_call_000001",
+                            "spec_role": "data_analyst",
                             "prompt_token_estimate": 3,
                             "response_token_estimate": 5,
                             "usage": {
@@ -409,6 +410,7 @@ def test_real_llm_ledger_trace_accepts_current_failed_call_accounting(
     }
     trace_metadata: dict[str, object] = {
         "llm_call_id": "llm_call_000001",
+        "spec_role": "data_analyst",
         "prompt_token_estimate": 3,
         "response_token_estimate": 0,
         **common,
@@ -562,6 +564,7 @@ def test_real_llm_ledger_trace_accepts_mixed_legacy_and_current_resume_rows(
             "name": "evaluator",
             "metadata": {
                 "llm_call_id": "llm_call_000002",
+                "spec_role": "evaluator",
                 "method": "complete_json",
                 "schema_name": "evaluator",
                 "prompt_token_estimate": 4,
@@ -678,6 +681,7 @@ def test_real_llm_ledger_trace_rejects_legacy_local_estimate_drift(
                         "name": "data_analyst",
                         "metadata": {
                             "llm_call_id": "llm_call_000001",
+                            "spec_role": "data_analyst",
                             "prompt_token_estimate": 3,
                             "response_token_estimate": 2,
                             **common,

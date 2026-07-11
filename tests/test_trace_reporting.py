@@ -226,6 +226,104 @@ def test_trace_summary_rejects_real_llm_call_role_metadata_drift(
     )
 
 
+def test_trace_summary_rejects_per_call_real_llm_role_swap(
+    tmp_path: Path,
+) -> None:
+    experiment_id = "trace-real-call-role-swap"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    trace_path = run_dir / "trace.jsonl"
+    events = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+    evaluator = next(event for event in events if event.get("name") == "evaluator")
+    root_engineer = next(event for event in events if event.get("name") == "root_engineer")
+    evaluator["metadata"]["spec_role"] = "root_engineer"
+    root_engineer["metadata"]["spec_role"] = "evaluator"
+    _write_events(trace_path, events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["real_llm_ledger_trace"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any(
+        "spec_role does not match event name" in issue
+        for issue in summary["artifact_consistency"]["issues"]
+    )
+
+
+def test_trace_summary_rejects_joint_real_llm_role_identity_swap(
+    tmp_path: Path,
+) -> None:
+    experiment_id = "trace-real-call-joint-role-swap"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    trace_path = run_dir / "trace.jsonl"
+    events = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+    evaluator = next(event for event in events if event.get("name") == "evaluator")
+    root_engineer = next(event for event in events if event.get("name") == "root_engineer")
+    evaluator["name"] = evaluator["metadata"]["spec_role"] = "root_engineer"
+    root_engineer["name"] = root_engineer["metadata"]["spec_role"] = "evaluator"
+    _write_events(trace_path, events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["real_llm_ledger_trace"]["passed"] is False
+    assert any(
+        "role-call contract mismatch" in issue
+        for issue in summary["artifact_consistency"]["issues"]
+    )
+
+
+def test_trace_summary_rejects_missing_current_real_llm_spec_role(
+    tmp_path: Path,
+) -> None:
+    experiment_id = "trace-real-call-role-missing"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    trace_path = run_dir / "trace.jsonl"
+    events = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+    evaluator = next(event for event in events if event.get("name") == "evaluator")
+    evaluator["metadata"].pop("spec_role")
+    _write_events(trace_path, events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["real_llm_ledger_trace"]["passed"] is False
+    assert any(
+        "missing a valid spec_role" in issue
+        for issue in summary["artifact_consistency"]["issues"]
+    )
+
+
 def test_trace_summary_rejects_each_current_real_llm_call_summary_drift(
     tmp_path: Path,
 ) -> None:

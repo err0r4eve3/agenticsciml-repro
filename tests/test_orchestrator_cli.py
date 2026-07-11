@@ -788,6 +788,7 @@ def test_real_visual_audit_uses_recording_budget_and_ledger(tmp_path: Path) -> N
         json.loads(line)
         for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
     ]
+    trace_summary = summarize_trace(run_dir)
 
     assert visual_report["actual_image_inputs_used"] is True
     assert len(llm.image_calls) == 1
@@ -799,6 +800,7 @@ def test_real_visual_audit_uses_recording_budget_and_ledger(tmp_path: Path) -> N
     assert run_metadata["llm_calls"]["total"] == len(ledger_rows)
     assert run_metadata["llm_calls"]["by_role"]["visual_audit"] == 1
     assert run_metadata["llm_calls"]["provider_usage"]["call_count"] == 1
+    assert trace_summary["quality_gate"]["passed"] is True
     assert any(
         event["name"] == "visual_audit"
         and event["event_type"] == "generation_span"

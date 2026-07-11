@@ -70,6 +70,28 @@ class PromptTemplate:
         return self.template.format(**values)
 
 
+AGENT_GENERATION_CALL_CONTRACTS: dict[
+    str,
+    frozenset[tuple[str, str | None]],
+] = {
+    "data_analyst": frozenset({("complete_text", None)}),
+    "evaluator": frozenset({("complete_json", "evaluator")}),
+    "root_engineer": frozenset({("complete_json", "root_engineer")}),
+    "selector": frozenset({("complete_json", "selector")}),
+    "proposer": frozenset(
+        {
+            ("complete_text", None),
+            ("complete_json", "proposal"),
+        }
+    ),
+    "critic": frozenset({("complete_text", None)}),
+    "engineer": frozenset({("complete_json", "engineer")}),
+    "debugger": frozenset({("complete_json", "debugger")}),
+    "result_analyst": frozenset({("complete_json", "analysis")}),
+    "visual_audit": frozenset({("complete_json_with_images", "visual_audit")}),
+}
+
+
 AGENT_SPECS: dict[str, AgentSpec] = {
     "data_analyst": AgentSpec(
         role="data_analyst",

@@ -4,6 +4,14 @@
 
 ## 2026-07-11 Real LLM smoke 研究诊断补强
 
+- current-schema generation trace 现在把逐调用 agent 身份纳入 ledger/trace gate：核心
+  `AGENT_SPECS` 角色必须携带 `spec_role`，且必须与 generation event `name` 精确一致。即使交换
+  evaluator/root-engineer 等两个角色后 aggregate `by_role` 计数不变，质量门也会按 call ID 拒绝。
+  共享 `AGENT_GENERATION_CALL_CONTRACTS` 进一步把角色绑定到 ledger 已对账的 `method/schema_name`，
+  因此同时交换 event name 与 `spec_role` 也不能绕过；不再只验证角色总量。约束按
+  workflow-start schema 在 trace 顺序中启用，允许 resume bundle
+  保留 schema 标记前的 legacy generation；orchestrator 直记且不属于 AgentSpec 的 real
+  `visual_audit` 继续由其 ledger/method/schema/token 证据校验，并有 passing quality-gate 回归。
 - `run_metadata.llm_calls` 现在由共享的 generation-trace summarizer 生成并在
   `trace-summary` 中逐字段重算。除 `total` 外，`by_role`、generation attempt 数/耗时、
   unbound/pre-provider rejection 数、本地 prompt/response estimate、provider usage coverage
@@ -117,6 +125,12 @@
   root engineer、result analyst 各 1 次；provider usage 为 prompt `4481`、completion `5046`、
   total `9527`，项目费率下估算 `$0.09527`（不是供应商账单）。同配置 zero-call resume 后仍为
   4 ledger rows 且 trace quality pass。该 run 是 `proxy` + `real_llm` 工作流证据，不支持科学性能结论。
+- role-contract 修复后的 fresh DeepSeek smoke
+  `runs/deepseek-role-contract-smoke-20260711/root` 也在 4-call 硬上限内完成；四个 call ID 的
+  `name/spec_role/method/schema_name` 全部匹配共享角色合同，ledger/trace 都为 4 calls，provider
+  usage 为 prompt `4660`、completion `7108`、total `11768`，项目费率下估算 `$0.11768`
+  （不是供应商账单）。同配置 zero-call resume 后 ledger 仍为 4 行且 quality pass；证据仍仅是
+  `proxy` + `real_llm` 工作流验证，不支持论文复现或科学性能结论。
 - `llm_budget` 现在先用本地 prompt estimate 做请求前预留，再在响应后用 provider prompt usage
   对账并重新检查 prompt/output/total/cost 上限；ledger 同时保留 estimate、accounted value 和
   source。即使响应后超预算而 fail closed，已发生的 token 与成本仍会进入 ledger 和恢复计费。

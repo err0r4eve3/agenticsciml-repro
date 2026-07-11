@@ -13,8 +13,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from agenticsciml.agents.specs import AGENT_GENERATION_CALL_CONTRACTS, AGENT_SPECS
 from agenticsciml.benchmarks import BenchmarkContractFactory, ProblemBundle
 from agenticsciml.config import EvaluationContract
+from agenticsciml.evidence import REAL_LLM_EVIDENCE_SCHEMA_VERSION
 from agenticsciml.llm.budget import (
     LLMBudget,
     _hash_payload,
@@ -262,7 +264,20 @@ def validate_real_llm_ledger_trace_consistency(
 
     trace_by_id: dict[str, dict[str, object]] = {}
     trace_role_by_id: dict[str, str] = {}
+    current_evidence_schema = False
     for event in traces:
+        if (
+            event.get("event_type") == "workflow_span"
+            and event.get("name") == "agenticsciml.run.start"
+        ):
+            workflow_metadata = event.get("metadata")
+            if (
+                isinstance(workflow_metadata, dict)
+                and workflow_metadata.get("llm_evidence_schema_version")
+                == REAL_LLM_EVIDENCE_SCHEMA_VERSION
+            ):
+                current_evidence_schema = True
+            continue
         if event.get("event_type") != "generation_span":
             continue
         metadata = event.get("metadata")
@@ -281,6 +296,24 @@ def validate_real_llm_ledger_trace_consistency(
         role = event.get("name")
         if not isinstance(role, str) or not role.strip():
             raise ValueError(f"Real LLM trace {call_id} has invalid agent role")
+        spec_role = metadata.get("spec_role")
+        if current_evidence_schema:
+            call_contract = AGENT_GENERATION_CALL_CONTRACTS.get(role)
+            call_shape = (metadata.get("method"), metadata.get("schema_name"))
+            if call_contract is None or call_shape not in call_contract:
+                raise ValueError(
+                    f"Real LLM trace {call_id} role-call contract mismatch for {role}"
+                )
+        if (
+            current_evidence_schema
+            and role in AGENT_SPECS
+            and not isinstance(spec_role, str)
+        ):
+            raise ValueError(f"Real LLM trace {call_id} is missing a valid spec_role")
+        if spec_role is not None and spec_role != role:
+            raise ValueError(
+                f"Real LLM trace {call_id} spec_role does not match event name"
+            )
         trace_by_id[call_id] = metadata
         trace_role_by_id[call_id] = role
 
