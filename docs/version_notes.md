@@ -2,6 +2,35 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-07-12 LLM Wiki 接入问答与求解 Agent
+
+- `/api/solver/chat` 现在默认读取当前 `account_id` 的 `wiki/llm_wiki_okf.json`；账号没有
+  保存版本时才使用系统生成 Wiki，不会跨账号读取其他 namespace。
+- 新增确定性双语 lexical retrieval。检索会过滤 `rejected` 节点，并要求
+  `source_candidate` 先人工标记为 `promoted`；默认返回最多 4 条，可用
+  `use_llm_wiki=false` 关闭，或通过 `llm_wiki_top_k=1..8` 调整上限。
+- 响应新增 `knowledge_refs`，把节点 ID、标题、Wiki 来源、相关分数、检索模式和上下文
+  digest 与 artifact/trace refs 分开返回；ChatUI 以“知识库引用”展示，避免把 Wiki 误标为实验
+  证据。
+- Ask 模式用命中节点生成带引用的受控回答。Plan / Agent 的求解请求会把完整、有界的
+  retrieval context 写入 `problem_intake.llm_wiki_context`，并把摘要写入
+  `planner_snapshot.llm_wiki_retrieval`；Root Engineer、Proposer 和 Engineer 通过既有
+  problem-intake prompt 获得同一快照。
+- Wiki 内容仍是非权威、潜在不可信的规划上下文。`ProblemBundle`、`EvaluationContract`、
+  benchmark guidelines、sandbox、evaluator、run artifacts 和 tests 继续拥有更高优先级；
+  Wiki 命中本身不改变评分或 scientific claim。
+- 已验证：
+
+  ```bash
+  uv run --isolated --frozen --python 3.11 --extra dev python -m pytest -q
+  # 840 passed
+  cd frontend && npm run build
+  ```
+
+- 当前检索仍是本地 lexical ranking，不包含 embedding、向量数据库、reranker 或 RAGFlow；
+  Ask 回复是确定性、带节点引用的摘要，不是额外的 provider LLM 调用。前端默认启用检索并展示
+  引用，但尚未暴露 top-k / opt-out 控件；高级调用方可直接使用 API 字段。
+
 ## 2026-07-11 Real LLM smoke 研究诊断补强
 
 - current-schema generation trace 现在把逐调用 agent 身份纳入 ledger/trace gate：核心

@@ -29,7 +29,7 @@ PYTHONPATH=src uv run --python 3.11 --extra web python -m agenticsciml.cli web -
 
 ChatUI 前端是单页本地工作台，不引入路由层，但用左侧功能栏做页内切换：
 
-- 左侧功能栏选择 `ChatUI`、`VS Code` 或 `算法库`。
+- 左侧功能栏选择 `ChatUI`、`VS Code`、`算法库` 或 `Wiki`。
 - 左侧底部的本地账号选择器只切换 workspace namespace，不是登录系统。默认
   `local` 账号会使用 `.agenticsciml/accounts/local/` 下的独立代码目录和 runs
   目录；新建账号只创建本地目录和 `account.json` 元数据，不写入密钥。
@@ -147,6 +147,22 @@ Problem Intake 的完整输入会作为非权威 run context 一起传入 `POST 
 指导生成策略；`ProblemBundle`、`EvaluationContract`、benchmark guidelines、sandbox
 规则和 evaluator contract 仍是评分与安全边界的上位事实来源。
 
+`Wiki` 页保存的 account-scoped `wiki/llm_wiki_okf.json` 现在也是 ChatUI assistant
+的本地知识来源。`POST /api/solver/chat` 默认按当前 `account_id` 读取已保存 Wiki；若该
+账号尚无保存版本，则退回系统生成图谱。检索使用确定性的双语 lexical overlap，忽略
+`wiki_promotion_status=rejected` 的节点；`source_candidate` 必须人工标记为 `promoted`
+后才能进入检索。默认最多返回 4 条，并在响应的
+`knowledge_refs` 中公开节点 ID、标题、来源、分数和检索模式。请求可用
+`use_llm_wiki=false` 关闭，或用 `llm_wiki_top_k=1..8` 调整上限。
+
+Ask 模式会用命中的 Wiki 节点生成带节点引用的受控摘要。Plan / Agent 处理求解请求时，
+同一份检索快照会进入 `problem_intake.llm_wiki_context`，摘要写入
+`planner_snapshot.llm_wiki_retrieval`，随后由既有非权威 problem-intake prompt 路径传给
+Root Engineer、Proposer 和 Engineer。上下文携带内容 hash，run 会把它保存在
+`config.json`、`run_metadata.json` 与 `planning/problem_intake.json`，便于复查当时使用了
+哪些 Wiki 节点。Wiki 内容始终视为不可信规划上下文：不得覆盖 `ProblemBundle`、
+`EvaluationContract`、guidelines、sandbox、evaluator、评分或 claim gate。
+
 右侧 Agent 面板在 `agent` 模式下也可处理高上下文求解请求：当用户要求自动选择
 benchmark / 解法并启动 mock/dry-run/real run 时，`/api/solver/chat` 会复用
 Problem Intake planner 生成 `start_run` action。前端执行该 action 时必须使用 action
@@ -254,9 +270,11 @@ code-server 安装或启动入口不对。应优先检查 `command -v code-serve
 - `GET /api/runs/{id}/solutions`：从 `tree.json`、`leaderboard.csv` 和各
   solution `eval.json` 汇总 solution status、score/loss、parent、children、method tags 和
   本地 figure artifact，并返回 run-level scientific result card 摘要。
-- `POST /api/solver/chat`：内部算法 tool 入口，只返回结构化 actions、warnings、artifact refs 和 trace refs；它不是 MCP server。
+- `POST /api/solver/chat`：内部算法 tool 入口，只返回结构化 actions、warnings、artifact refs、trace refs 和
+  account-scoped `knowledge_refs`；它不是 MCP server。请求默认启用 LLM Wiki 检索，可用
+  `use_llm_wiki=false` 关闭，或用 `llm_wiki_top_k` 设置 1 到 8 条的检索上限。
   `agent` 模式下的高上下文求解请求会调用同一个受控 problem-intake planner，并返回带
-  planner snapshot 的 `start_run` action。
+  planner snapshot 与带内容 digest 的 Wiki retrieval snapshot 的 `start_run` action。
 - `GET /api/code-server/url`：生成 code-server workspace 链接，不携带 token。
 - `GET /api/code-server/workspaces`：列出 shared repo 或账号隔离 workspace 目录
   和对应 code-server URL，不携带 token。`account_id` 是可选参数；前端默认传

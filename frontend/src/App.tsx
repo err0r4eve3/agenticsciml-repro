@@ -505,6 +505,14 @@ type SolverResponse = {
   artifacts: Array<Record<string, unknown>>;
   warnings: string[];
   trace_refs: Array<Record<string, unknown>>;
+  knowledge_refs?: Array<{
+    id?: string;
+    title?: string;
+    title_zh?: string;
+    source?: string;
+    score?: number;
+    retrieval_mode?: string;
+  }>;
 };
 
 type CodeServerPayload = {
@@ -4100,6 +4108,16 @@ function StructuredResponse({ response }: { response: SolverResponse }) {
       <KeyValueList label="模型设置" values={settings} />
       {response.actions.length ? <KeyValueList label="动作" values={response.actions.map((action) => action.type)} /> : null}
       {response.warnings.length ? <KeyValueList label="警告" values={response.warnings} tone="warning" /> : null}
+      {response.knowledge_refs?.length ? (
+        <KeyValueList
+          label="知识库引用"
+          values={response.knowledge_refs.map((ref) => {
+            const label = ref.title_zh || ref.title || ref.id || "Wiki node";
+            const nodeId = ref.id ? ` [${ref.id}]` : "";
+            return `${label}${nodeId} · ${ref.source ?? "llm_wiki"} · score=${ref.score ?? 0}`;
+          })}
+        />
+      ) : null}
       {response.artifacts.length ? <KeyValueList label="证据文件" values={response.artifacts.map((artifact) => String(artifact.path ?? "artifact"))} /> : null}
       {response.trace_refs.length ? <KeyValueList label="轨迹引用" values={response.trace_refs.map((ref) => JSON.stringify(ref))} /> : null}
     </div>

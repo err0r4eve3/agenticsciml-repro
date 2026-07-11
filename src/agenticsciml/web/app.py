@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import math
 import os
@@ -54,6 +55,15 @@ DEFAULT_ACCOUNT_ID = "local"
 ACCOUNT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$")
 PLANNER_VERSION = "problem_intake_keyword_planner.v1"
 MIN_PROBLEM_INTAKE_BENCHMARK_SCORE = 10
+LLM_WIKI_RETRIEVAL_SCHEMA_VERSION = 1
+DEFAULT_LLM_WIKI_TOP_K = 4
+MAX_LLM_WIKI_TOP_K = 8
+MAX_LLM_WIKI_QUERY_CHARS = 12000
+LLM_WIKI_RETRIEVAL_MODE = "deterministic_lexical"
+LLM_WIKI_CLAIM_BOUNDARY = (
+    "LLM Wiki retrieval is non-authoritative planning context. "
+    "Benchmark contracts, evaluator outputs, run artifacts, and tests remain the evidence sources."
+)
 
 PLANNED_AGENT_CALLS = (
     "data_analyst",
@@ -459,6 +469,8 @@ class SolverChatRequest(BaseModel):
     expert_blueprint_id: ExpertBlueprintId | None = None
     multi_seed_ablation: dict[str, Any] = Field(default_factory=dict)
     llm_fast_mode: bool = False
+    use_llm_wiki: bool = True
+    llm_wiki_top_k: int = Field(default=DEFAULT_LLM_WIKI_TOP_K, ge=1, le=MAX_LLM_WIKI_TOP_K)
 
 
 class AccountCreateRequest(BaseModel):
@@ -1963,7 +1975,7 @@ def _read_account_llm_wiki(account_id: str | None) -> dict[str, object] | None:
     if payload is None:
         return None
     saved = dict(payload)
-    return saved if not _llm_wiki_validation_issues(saved) else None
+    return saved if not _llm_wiki_validation_issues(saved, allow_reviewed_source_candidates=True) else None
 
 
 def _paper_problem_loop_review_queue_payload(output_dir: Path) -> dict[str, object]:
@@ -2057,7 +2069,7 @@ def _validated_llm_wiki_payload(payload: dict[str, Any]) -> dict[str, object]:
         raise HTTPException(status_code=400, detail="LLM Wiki payload must be strict JSON") from exc
     if len(encoded.encode("utf-8")) > 1_000_000:
         raise HTTPException(status_code=413, detail="LLM Wiki payload is too large")
-    issues = _llm_wiki_validation_issues(payload)
+    issues = _llm_wiki_validation_issues(payload, allow_reviewed_source_candidates=True)
     if issues:
         raise HTTPException(status_code=400, detail=f"LLM Wiki payload invalid: {issues[0]}")
     validated = dict(payload)
@@ -2066,7 +2078,11 @@ def _validated_llm_wiki_payload(payload: dict[str, Any]) -> dict[str, object]:
     return validated
 
 
-def _llm_wiki_validation_issues(payload: dict[str, Any]) -> list[str]:
+def _llm_wiki_validation_issues(
+    payload: dict[str, Any],
+    *,
+    allow_reviewed_source_candidates: bool = False,
+) -> list[str]:
     issues: list[str] = []
     required = {
         "okf_version": str,
@@ -2130,8 +2146,14 @@ def _llm_wiki_validation_issues(payload: dict[str, Any]) -> list[str]:
             for key in ("real_problem", "real_problem_zh"):
                 if not isinstance(node.get(key), str) or not str(node.get(key)).strip():
                     issues.append(f"{node_id} missing {key}")
-        if node.get("type") == "source_candidate" and node.get("wiki_promotion_status") != "manual_review_required":
-            issues.append(f"{node_id} source candidate must require manual review")
+        if node.get("type") == "source_candidate":
+            allowed_statuses = (
+                {"manual_review_required", "edited", "promoted", "rejected"}
+                if allow_reviewed_source_candidates
+                else {"manual_review_required"}
+            )
+            if node.get("wiki_promotion_status") not in allowed_statuses:
+                issues.append(f"{node_id} source candidate has invalid review status")
 
     edges = payload.get("edges") if isinstance(payload.get("edges"), list) else []
     for edge in edges:
@@ -2821,6 +2843,238 @@ def _workspace_option(
     }
 
 
+def _llm_wiki_retrieval_terms(text: str) -> set[str]:
+    text = text[:MAX_LLM_WIKI_QUERY_CHARS]
+    stopwords = {
+        "about",
+        "agent",
+        "and",
+        "for",
+        "from",
+        "how",
+        "please",
+        "the",
+        "this",
+        "what",
+        "一个",
+        "什么",
+        "作为",
+        "可以",
+        "如何",
+        "怎么",
+        "这个",
+        "进行",
+    }
+    terms = {
+        token.lower()
+        for token in re.findall(r"[A-Za-z0-9_+.-]{2,}", text)
+        if len(token) <= 80 and token.lower() not in stopwords
+    }
+    for sequence in re.findall(r"[\u3400-\u9fff]+", text):
+        if len(sequence) <= 4 and sequence not in stopwords:
+            terms.add(sequence)
+        for size in (2, 3):
+            for index in range(max(0, len(sequence) - size + 1)):
+                token = sequence[index : index + size]
+                if token not in stopwords:
+                    terms.add(token)
+    return terms
+
+
+def _llm_wiki_node_score(node: dict[str, Any], query_terms: set[str]) -> tuple[int, list[str]]:
+    weighted_fields = (
+        (node.get("id"), 7),
+        (node.get("title"), 8),
+        (node.get("title_zh"), 8),
+        (node.get("tags"), 6),
+        (node.get("tags_zh"), 6),
+        (node.get("real_problem"), 4),
+        (node.get("real_problem_zh"), 4),
+        (node.get("project_hooks"), 4),
+        (node.get("description"), 2),
+        (node.get("description_zh"), 2),
+        (node.get("type"), 1),
+    )
+    score = 0
+    matched_terms: set[str] = set()
+    for value, weight in weighted_fields:
+        if isinstance(value, list):
+            field_text = " ".join(str(item) for item in value if isinstance(item, str))
+        elif isinstance(value, str):
+            field_text = value
+        else:
+            continue
+        overlap = query_terms & _llm_wiki_retrieval_terms(field_text)
+        score += len(overlap) * weight
+        matched_terms.update(overlap)
+    return score, sorted(matched_terms)
+
+
+def _llm_wiki_retrieval_context(request: SolverChatRequest) -> dict[str, object]:
+    resolved_account_id = _resolve_account_id(request.account_id)
+    if not request.use_llm_wiki:
+        return {
+            "schema_version": LLM_WIKI_RETRIEVAL_SCHEMA_VERSION,
+            "retrieval_mode": "disabled",
+            "source": "disabled",
+            "account_id": resolved_account_id,
+            "node_count": 0,
+            "nodes": [],
+            "claim_boundary": LLM_WIKI_CLAIM_BOUNDARY,
+        }
+
+    saved = _read_account_llm_wiki(resolved_account_id) if resolved_account_id else None
+    graph = saved or _llm_wiki_okf_payload()
+    source = "account_saved" if saved is not None else "generated_default"
+    query_terms = _llm_wiki_retrieval_terms(request.message)
+    ranked: list[tuple[int, str, dict[str, Any], list[str]]] = []
+    for value in graph.get("nodes", []):
+        if not isinstance(value, dict):
+            continue
+        promotion_status = value.get("wiki_promotion_status")
+        if promotion_status == "rejected":
+            continue
+        if value.get("type") == "source_candidate" and promotion_status != "promoted":
+            continue
+        node = cast(dict[str, Any], value)
+        score, matched_terms = _llm_wiki_node_score(node, query_terms)
+        node_id = node.get("id")
+        if score <= 0 or not isinstance(node_id, str):
+            continue
+        ranked.append((score, node_id, node, matched_terms))
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+
+    selected_nodes: list[dict[str, object]] = []
+    for score, node_id, node, matched_terms in ranked[: request.llm_wiki_top_k]:
+        source_payload = node.get("source") if isinstance(node.get("source"), dict) else {}
+        selected_nodes.append(
+            {
+                "id": node_id,
+                "type": str(node.get("type") or "unknown"),
+                "title": _compact_summary(str(node.get("title") or node_id), 180),
+                "title_zh": _compact_summary(str(node.get("title_zh") or ""), 180),
+                "description": _compact_summary(str(node.get("description") or ""), 360),
+                "description_zh": _compact_summary(str(node.get("description_zh") or ""), 360),
+                "real_problem": _compact_summary(str(node.get("real_problem") or ""), 360),
+                "real_problem_zh": _compact_summary(str(node.get("real_problem_zh") or ""), 360),
+                "tags": [
+                    _compact_summary(str(item), 80)
+                    for item in node.get("tags", [])
+                    if isinstance(item, str)
+                ][:16],
+                "tags_zh": [
+                    _compact_summary(str(item), 80)
+                    for item in node.get("tags_zh", [])
+                    if isinstance(item, str)
+                ][:16],
+                "project_hooks": [
+                    _compact_summary(str(item), 120)
+                    for item in node.get("project_hooks", [])
+                    if isinstance(item, str)
+                ][:16],
+                "source_url": _compact_summary(str(source_payload.get("url") or ""), 500),
+                "score": score,
+                "matched_terms": matched_terms[:24],
+            }
+        )
+    digest_payload = {
+        "schema_version": LLM_WIKI_RETRIEVAL_SCHEMA_VERSION,
+        "source": source,
+        "account_id": resolved_account_id,
+        "nodes": selected_nodes,
+    }
+    context_sha256 = hashlib.sha256(
+        json.dumps(digest_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    return {
+        **digest_payload,
+        "retrieval_mode": LLM_WIKI_RETRIEVAL_MODE,
+        "query": _compact_summary(request.message, 600),
+        "node_count": len(selected_nodes),
+        "node_ids": [str(node["id"]) for node in selected_nodes],
+        "context_sha256": context_sha256,
+        "claim_boundary": LLM_WIKI_CLAIM_BOUNDARY,
+    }
+
+
+def _llm_wiki_knowledge_refs(context: dict[str, object]) -> list[dict[str, object]]:
+    source = str(context.get("source") or "unknown")
+    account_id = context.get("account_id")
+    refs: list[dict[str, object]] = []
+    for value in context.get("nodes", []):
+        if not isinstance(value, dict):
+            continue
+        refs.append(
+            {
+                "kind": "llm_wiki_node",
+                "id": value.get("id"),
+                "type": value.get("type"),
+                "title": value.get("title"),
+                "title_zh": value.get("title_zh"),
+                "source_url": value.get("source_url"),
+                "score": value.get("score"),
+                "source": source,
+                "account_id": account_id,
+                "retrieval_mode": context.get("retrieval_mode"),
+                "context_sha256": context.get("context_sha256"),
+                "claim_boundary": context.get("claim_boundary"),
+            }
+        )
+    return refs
+
+
+def _llm_wiki_retrieval_snapshot(context: dict[str, object]) -> dict[str, object]:
+    return {
+        "schema_version": context.get("schema_version"),
+        "retrieval_mode": context.get("retrieval_mode"),
+        "source": context.get("source"),
+        "account_id": context.get("account_id"),
+        "node_count": context.get("node_count"),
+        "node_ids": list(context.get("node_ids", [])),
+        "context_sha256": context.get("context_sha256"),
+        "claim_boundary": context.get("claim_boundary"),
+    }
+
+
+def _attach_llm_wiki_context_to_plan(
+    plan: dict[str, object],
+    context: dict[str, object],
+) -> None:
+    if not context.get("nodes"):
+        return
+    problem_intake = dict(cast(dict[str, Any], plan.get("problem_intake") or {}))
+    problem_intake["llm_wiki_context"] = context
+    plan["problem_intake"] = problem_intake
+
+    planner_snapshot = dict(cast(dict[str, Any], plan.get("planner_snapshot") or {}))
+    planner_snapshot["llm_wiki_retrieval"] = _llm_wiki_retrieval_snapshot(context)
+    plan["planner_snapshot"] = planner_snapshot
+
+    for value in cast(list[dict[str, Any]], plan.get("actions") or []):
+        payload = dict(cast(dict[str, Any], value.get("payload") or {}))
+        payload["problem_intake"] = problem_intake
+        payload["planner_snapshot"] = planner_snapshot
+        value["payload"] = payload
+
+
+def _wiki_only_problem_intake(
+    request: SolverChatRequest,
+    context: dict[str, object],
+) -> tuple[dict[str, object], dict[str, object]]:
+    problem_intake = {
+        "schema_version": 1,
+        "problem_statement": request.message,
+        "problem_summary": _compact_summary(request.message),
+        "llm_wiki_context": context,
+    }
+    planner_snapshot = {
+        "planner_version": "solver_llm_wiki_context.v1",
+        "llm_wiki_retrieval": _llm_wiki_retrieval_snapshot(context),
+        "claim_boundary": LLM_WIKI_CLAIM_BOUNDARY,
+    }
+    return problem_intake, planner_snapshot
+
+
 def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
     text = request.message.lower()
     model_settings = _assistant_model_settings(request)
@@ -2829,6 +3083,8 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
     warnings: list[str] = []
     trace_refs: list[dict[str, object]] = []
     resolved_account_id = _resolve_account_id(request.account_id) if request.account_id else None
+    llm_wiki_context = _llm_wiki_retrieval_context(request)
+    knowledge_refs = _llm_wiki_knowledge_refs(llm_wiki_context)
     agent_scope_allowed = True
 
     if request.mode == "real":
@@ -2867,6 +3123,7 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
                     _problem_intake_request_from_chat(request),
                     materialize_custom_benchmark=request.assistant_mode == "agent",
                 )
+                _attach_llm_wiki_context_to_plan(plan, llm_wiki_context)
                 plan_actions = plan.get("actions", [])
                 if plan_actions:
                     action = dict(plan_actions[0])
@@ -2888,6 +3145,7 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
             except HTTPException as exc:
                 warnings.append(str(exc.detail))
         else:
+            problem_intake, planner_snapshot = _wiki_only_problem_intake(request, llm_wiki_context)
             proposed_actions.append(
                 {
                     "type": "start_run",
@@ -2905,6 +3163,14 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
                         "expert_blueprint_id": request.expert_blueprint_id,
                         "multi_seed_ablation": _normalized_mapping(request.multi_seed_ablation),
                         "background": True,
+                        **(
+                            {
+                                "problem_intake": problem_intake,
+                                "planner_snapshot": planner_snapshot,
+                            }
+                            if llm_wiki_context.get("nodes")
+                            else {}
+                        ),
                     },
                 }
             )
@@ -2955,12 +3221,26 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
                 "Ask mode does not return executable actions. "
                 "Switch to plan to preview actions or agent to run them."
             )
-        reply = _solver_ask_reply(request, proposed_actions, artifacts, warnings, trace_refs)
+        reply = _solver_ask_reply(
+            request,
+            proposed_actions,
+            artifacts,
+            warnings,
+            trace_refs,
+            llm_wiki_context,
+        )
     else:
         actions = proposed_actions if agent_scope_allowed else []
         if request.assistant_mode == "plan" and actions:
             warnings.append("Plan mode returns proposed actions only. The frontend must not dispatch them automatically.")
-        reply = _solver_reply(request.assistant_mode, actions, artifacts, warnings, trace_refs)
+        reply = _solver_reply(
+            request.assistant_mode,
+            actions,
+            artifacts,
+            warnings,
+            trace_refs,
+            llm_wiki_context,
+        )
 
     return {
         "assistant_mode": request.assistant_mode,
@@ -2970,6 +3250,7 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
         "artifacts": artifacts,
         "warnings": warnings,
         "trace_refs": trace_refs,
+        "knowledge_refs": knowledge_refs,
     }
 
 
@@ -3515,6 +3796,7 @@ def _solver_ask_reply(
     artifacts: list[dict[str, object]],
     warnings: list[str],
     trace_refs: list[dict[str, object]],
+    llm_wiki_context: dict[str, object],
 ) -> str:
     text = request.message.lower()
     if trace_refs:
@@ -3536,17 +3818,20 @@ def _solver_ask_reply(
         return (
             "我可以解释 AgenticSciML 的项目结构、benchmark 与 claim boundary；解读 run metadata、"
             "leaderboard、trace_summary 和 artifacts；说明 mock、dry_run、real 的风险；也可以在 Plan 模式"
-            "生成动作计划，在 Agent 模式按当前账号 workspace 执行受控动作。"
-        )
-    if _contains_any(text, ("benchmark", "基准", "算法", "algorithm", "策略")):
-        return (
-            "当前可讨论 benchmark、算法策略目录、运行模式和验证边界。算法目录只表示可选策略和 prompt seed，"
-            "是否有效必须以实际 run artifact、leaderboard、trace_summary 和测试结果为准。"
+            "生成动作计划，在 Agent 模式按当前账号 workspace 执行受控动作。提问和求解规划会优先检索"
+            "当前账号的 LLM Wiki，并返回使用过的知识节点引用。"
         )
     if proposed_actions:
         return (
             "这条请求会触发受控动作。Ask 模式不会执行或返回可执行 action；"
             "需要预览步骤请切到 Plan，需要执行请切到 Agent。"
+        )
+    if llm_wiki_context.get("nodes"):
+        return _llm_wiki_grounded_reply(llm_wiki_context)
+    if _contains_any(text, ("benchmark", "基准", "算法", "algorithm", "策略")):
+        return (
+            "当前可讨论 benchmark、算法策略目录、运行模式和验证边界。算法目录只表示可选策略和 prompt seed，"
+            "是否有效必须以实际 run artifact、leaderboard、trace_summary 和测试结果为准。"
         )
     if warnings:
         return "我可以解释这个问题，但当前缺少必要上下文或存在安全边界；请查看 warnings 里的具体原因。"
@@ -3560,12 +3845,35 @@ def _contains_any(text: str, tokens: tuple[str, ...]) -> bool:
     return any(token in text for token in tokens)
 
 
+def _llm_wiki_grounded_reply(context: dict[str, object]) -> str:
+    nodes = [node for node in context.get("nodes", []) if isinstance(node, dict)]
+    summaries: list[str] = []
+    for index, node in enumerate(nodes[:3], start=1):
+        title = str(node.get("title_zh") or node.get("title") or node.get("id") or "Wiki node")
+        description = str(
+            node.get("real_problem_zh")
+            or node.get("description_zh")
+            or node.get("real_problem")
+            or node.get("description")
+            or ""
+        )
+        summaries.append(f"{index}. {title}：{_compact_summary(description, 220)}")
+    node_ids = ", ".join(str(node.get("id")) for node in nodes[:3])
+    source = "当前账号保存的 Wiki" if context.get("source") == "account_saved" else "系统生成 Wiki"
+    return (
+        f"根据{source}检索到的相关知识："
+        + " ".join(summaries)
+        + f" 引用节点：{node_ids}。这些内容用于回答和规划，不构成 benchmark 或科学结论。"
+    )
+
+
 def _solver_reply(
     assistant_mode: AssistantMode,
     actions: list[dict[str, object]],
     artifacts: list[dict[str, object]],
     warnings: list[str],
     trace_refs: list[dict[str, object]],
+    llm_wiki_context: dict[str, object],
 ) -> str:
     if assistant_mode == "plan" and actions:
         return "Plan 模式：已生成建议动作，但不会自动执行。确认后可切到 Agent 执行。"
@@ -3576,6 +3884,11 @@ def _solver_reply(
     if trace_refs:
         gate = trace_refs[0].get("quality_gate")
         return f"已读取 trace summary。quality_gate={gate}，相关 artifacts={len(artifacts)}。"
+    if llm_wiki_context.get("nodes"):
+        return (
+            f"已从 LLM Wiki 检索 {llm_wiki_context.get('node_count')} 个相关节点，"
+            "并作为非权威规划上下文返回；没有生成可执行动作。"
+        )
     if warnings:
         return "请求需要补充上下文或受安全边界限制；请查看 warnings。"
     return "已解析请求，返回可执行 action 和相关 artifact 线索。"

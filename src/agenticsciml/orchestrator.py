@@ -1442,6 +1442,7 @@ class AgenticSciMLOrchestrator:
                 "requirements",
                 "evaluation_criteria",
                 "data_description",
+                "llm_wiki_context",
             )
             if self.config.problem_intake.get(key)
         }

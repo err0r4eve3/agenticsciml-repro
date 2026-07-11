@@ -1816,6 +1816,220 @@ def test_solver_chat_defaults_to_ask_without_actions(tmp_path: Path) -> None:
     assert any("Ask mode" in warning for warning in start_payload["warnings"])
 
 
+def test_solver_chat_uses_account_scoped_llm_wiki_without_cross_account_leakage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENTICSCIML_ACCOUNTS_ROOT", str(tmp_path / "accounts"))
+    client = TestClient(create_app())
+    graph_response = client.get(
+        "/api/llm-wiki/okf",
+        params={"account_id": "alice", "generated": True},
+    )
+    assert graph_response.status_code == 200
+    graph = graph_response.json()
+    graph["nodes"].append(
+        {
+            "id": "note:quokka-zymurgy",
+            "type": "method_note",
+            "title": "Quokka Zymurgy Solver",
+            "title_zh": "短尾矮袋鼠 Zymurgy 求解器",
+            "description": "A private account-scoped method for quokka zymurgy systems.",
+            "description_zh": "Alice 账号私有的短尾矮袋鼠 zymurgy 系统求解方法。",
+            "tags": ["quokka", "zymurgy", "solver"],
+            "tags_zh": ["短尾矮袋鼠", "求解器"],
+            "timestamp": "2026-07-12T00:00:00Z",
+            "wiki_promotion_status": "promoted",
+        }
+    )
+    graph["nodes"].append(
+        {
+            "id": "note:rejected-vexillology",
+            "type": "method_note",
+            "title": "Rejected Vexillology Solver",
+            "title_zh": "已拒绝的旗帜学求解器",
+            "description": "A rejected private note about vexillology numerics.",
+            "description_zh": "一条已经拒绝的旗帜学数值方法。",
+            "tags": ["vexillology", "rejected"],
+            "tags_zh": ["旗帜学", "已拒绝"],
+            "timestamp": "2026-07-12T00:00:00Z",
+            "wiki_promotion_status": "rejected",
+        }
+    )
+    graph["nodes"].append(
+        {
+            "id": "source:heliotrope-calculus",
+            "type": "source_candidate",
+            "title": "Heliotrope Calculus Candidate",
+            "title_zh": "向日性微积分候选方法",
+            "description": "A source candidate about heliotrope calculus.",
+            "description_zh": "一条关于向日性微积分的候选来源。",
+            "real_problem": "Solve a heliotrope calculus system after human review.",
+            "real_problem_zh": "经人工审核后求解向日性微积分系统。",
+            "tags": ["heliotrope", "calculus", "source-candidate"],
+            "tags_zh": ["向日性", "微积分", "候选来源"],
+            "timestamp": "2026-07-12T00:00:00Z",
+            "wiki_promotion_status": "manual_review_required",
+        }
+    )
+    save_response = client.post(
+        "/api/llm-wiki/okf",
+        json={"account_id": "alice", "payload": graph},
+    )
+    assert save_response.status_code == 200
+
+    alice = client.post(
+        "/api/solver/chat",
+        json={
+            "message": "quokka zymurgy 应该用什么求解方法？",
+            "assistant_mode": "ask",
+            "account_id": "alice",
+            "workspace_scope": "account",
+        },
+    )
+    assert alice.status_code == 200
+    alice_payload = alice.json()
+    assert "短尾矮袋鼠 Zymurgy 求解器" in alice_payload["reply"]
+    assert alice_payload["knowledge_refs"][0]["id"] == "note:quokka-zymurgy"
+    assert alice_payload["knowledge_refs"][0]["source"] == "account_saved"
+    assert alice_payload["knowledge_refs"][0]["retrieval_mode"] == "deterministic_lexical"
+
+    top_one = client.post(
+        "/api/solver/chat",
+        json={
+            "message": "solver method",
+            "assistant_mode": "ask",
+            "account_id": "alice",
+            "workspace_scope": "account",
+            "llm_wiki_top_k": 1,
+        },
+    )
+    assert top_one.status_code == 200
+    assert len(top_one.json()["knowledge_refs"]) == 1
+    for invalid_top_k in (0, 9):
+        invalid = client.post(
+            "/api/solver/chat",
+            json={
+                "message": "solver method",
+                "assistant_mode": "ask",
+                "account_id": "alice",
+                "workspace_scope": "account",
+                "llm_wiki_top_k": invalid_top_k,
+            },
+        )
+        assert invalid.status_code == 422
+
+    rejected = client.post(
+        "/api/solver/chat",
+        json={
+            "message": "vexillology 数值方法",
+            "assistant_mode": "ask",
+            "account_id": "alice",
+            "workspace_scope": "account",
+        },
+    )
+    assert rejected.status_code == 200
+    assert all(ref["id"] != "note:rejected-vexillology" for ref in rejected.json()["knowledge_refs"])
+
+    pending = client.post(
+        "/api/solver/chat",
+        json={
+            "message": "heliotrope calculus 怎么求解？",
+            "assistant_mode": "ask",
+            "account_id": "alice",
+            "workspace_scope": "account",
+        },
+    )
+    assert pending.status_code == 200
+    assert all(ref["id"] != "source:heliotrope-calculus" for ref in pending.json()["knowledge_refs"])
+
+    source_candidate = next(node for node in graph["nodes"] if node["id"] == "source:heliotrope-calculus")
+    source_candidate["wiki_promotion_status"] = "promoted"
+    promote_response = client.post(
+        "/api/llm-wiki/okf",
+        json={"account_id": "alice", "payload": graph},
+    )
+    assert promote_response.status_code == 200
+    promoted = client.post(
+        "/api/solver/chat",
+        json={
+            "message": "heliotrope calculus 怎么求解？",
+            "assistant_mode": "ask",
+            "account_id": "alice",
+            "workspace_scope": "account",
+        },
+    )
+    assert promoted.status_code == 200
+    assert promoted.json()["knowledge_refs"][0]["id"] == "source:heliotrope-calculus"
+
+    bob = client.post(
+        "/api/solver/chat",
+        json={
+            "message": "quokka zymurgy 应该用什么求解方法？",
+            "assistant_mode": "ask",
+            "account_id": "bob",
+            "workspace_scope": "account",
+        },
+    )
+    assert bob.status_code == 200
+    assert all(ref["id"] != "note:quokka-zymurgy" for ref in bob.json()["knowledge_refs"])
+
+    disabled = client.post(
+        "/api/solver/chat",
+        json={
+            "message": "quokka zymurgy 应该用什么求解方法？",
+            "assistant_mode": "ask",
+            "account_id": "alice",
+            "workspace_scope": "account",
+            "use_llm_wiki": False,
+        },
+    )
+    assert disabled.status_code == 200
+    assert disabled.json()["knowledge_refs"] == []
+    assert "短尾矮袋鼠 Zymurgy 求解器" not in disabled.json()["reply"]
+
+
+def test_solver_chat_uses_default_local_wiki_and_keeps_legacy_long_messages(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENTICSCIML_ACCOUNTS_ROOT", str(tmp_path / "accounts"))
+    client = TestClient(create_app())
+    graph = client.get("/api/llm-wiki/okf", params={"generated": True}).json()
+    graph["nodes"].append(
+        {
+            "id": "note:local-ambergris",
+            "type": "method_note",
+            "title": "Local Ambergris Integrator",
+            "title_zh": "本地龙涎香积分器",
+            "description": "A method stored in the default local account Wiki.",
+            "description_zh": "默认 local 账号 Wiki 中保存的积分方法。",
+            "tags": ["ambergris", "integrator"],
+            "tags_zh": ["龙涎香", "积分器"],
+            "timestamp": "2026-07-12T00:00:00Z",
+            "wiki_promotion_status": "promoted",
+        }
+    )
+    saved = client.post("/api/llm-wiki/okf", json={"payload": graph})
+    assert saved.status_code == 200
+    assert saved.json()["account_id"] == "local"
+
+    response = client.post(
+        "/api/solver/chat",
+        json={"message": "ambergris integrator 的方法是什么？", "assistant_mode": "ask"},
+    )
+    assert response.status_code == 200
+    assert response.json()["knowledge_refs"][0]["id"] == "note:local-ambergris"
+    assert response.json()["knowledge_refs"][0]["account_id"] == "local"
+
+    legacy_long_message = client.post(
+        "/api/solver/chat",
+        json={"message": "x" * 12001, "assistant_mode": "ask"},
+    )
+    assert legacy_long_message.status_code == 200
+    assert legacy_long_message.json()["knowledge_refs"] == []
+
+
 def test_solver_chat_mode_model_settings_are_distinct(tmp_path: Path) -> None:
     client = TestClient(create_app())
 
@@ -2023,7 +2237,7 @@ def test_solver_chat_agent_can_plan_benchmark_and_seeded_run(
             "assistant_mode": "agent",
             "account_id": "alice",
             "workspace_scope": "account",
-            "target_solution_count": 1,
+            "target_solution_count": 2,
             "parallel_mutations": 1,
         },
     )
@@ -2039,6 +2253,13 @@ def test_solver_chat_agent_can_plan_benchmark_and_seeded_run(
     assert "paper_cylinder_bandlimited_filter" in action_payload["selected_algorithm_ids"]
     assert action_payload["problem_intake"]["problem_statement"].startswith("请用 Agent 模式")
     assert action_payload["planner_snapshot"]["planner_version"] == "problem_intake_keyword_planner.v1"
+    wiki_context = action_payload["problem_intake"]["llm_wiki_context"]
+    assert wiki_context["retrieval_mode"] == "deterministic_lexical"
+    assert wiki_context["node_count"] > 0
+    assert action_payload["planner_snapshot"]["llm_wiki_retrieval"]["context_sha256"] == wiki_context[
+        "context_sha256"
+    ]
+    assert payload["knowledge_refs"]
     assert payload["artifacts"][0]["kind"] == "problem_intake_plan"
 
     run_response = client.post(
@@ -2057,6 +2278,23 @@ def test_solver_chat_agent_can_plan_benchmark_and_seeded_run(
     assert metadata["benchmark_name"] == "cylinder_wake_reconstruction_faithful_small"
     assert "paper_cylinder_bandlimited_filter" in metadata["strategy_seed_ids"]
     assert config["problem_intake"]["problem_statement"].startswith("请用 Agent 模式")
+    assert config["problem_intake"]["llm_wiki_context"]["context_sha256"] == wiki_context["context_sha256"]
+    transcript = json.loads(
+        (run_dir / "solutions" / "solution_000" / "transcripts" / "root_engineer.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert "llm_wiki_context" in transcript[0]["prompt"]
+    assert wiki_context["node_ids"][0] in transcript[0]["prompt"]
+    for transcript_name in ("proposal_debate.json", "engineer.json"):
+        child_transcript = json.loads(
+            (run_dir / "solutions" / "solution_001" / "transcripts" / transcript_name).read_text(
+                encoding="utf-8"
+            )
+        )
+        assert "llm_wiki_context" in child_transcript[0]["prompt"]
+        assert wiki_context["context_sha256"] in child_transcript[0]["prompt"]
+        assert wiki_context["node_ids"][0] in child_transcript[0]["prompt"]
     trace_summary = json.loads((run_dir / "trace_summary.json").read_text(encoding="utf-8"))
     assert trace_summary["quality_gate"]["passed"] is True
     describe_response = client.get("/api/runs/agent-planned-run", params={"account_id": "alice"})
