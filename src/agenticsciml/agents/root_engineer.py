@@ -62,7 +62,10 @@ class RootEngineerAgent(AgentBase):
             "only `--input predict_input.npz` with x_val and must write `--output "
             "predictions.npz` containing a `predictions` array. Lifecycle reminder: "
             "`--mode=validate` runs before training and must not require `model.pkl`, "
-            "a previous checkpoint, or any other training side effect."
+            "a previous checkpoint, or any other training side effect. Prediction shape "
+            "reminder: treat `x_val` as a batch and preserve its leading sample dimension. "
+            "When `u_train` exists, predictions should follow its per-sample tail shape. "
+            "Do not assign vector outputs into scalar prediction slots."
         )
         response = self.complete_json_checked(
             prompt,

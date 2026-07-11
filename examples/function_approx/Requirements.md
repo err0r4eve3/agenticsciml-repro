@@ -8,6 +8,7 @@
 - Training must write `model.pkl`.
 - Predict mode receives only `x_val` features and must write `predictions.npz`
   with a `predictions` array.
+- Prediction shape must be `(n, 1)` or `(n,)` for an input batch `x_val` with shape `(n, 1)`.
 - Real SciML submissions may use PyTorch, NumPy, or the Python standard library.
 - Do not require internet access.
 - Keep runtime short enough for local iteration.

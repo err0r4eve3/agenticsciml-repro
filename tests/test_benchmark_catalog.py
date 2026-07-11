@@ -617,6 +617,8 @@ def test_catalog_requires_pretraining_safe_validation() -> None:
         requirements = (spec.path / "Requirements.md").read_text(encoding="utf-8")
         assert "--mode=validate" in requirements, name
         assert "must run without training" in requirements, name
+        if name == "function_approx":
+            assert "Prediction shape must be `(n, 1)` or `(n,)`" in requirements
 
 
 def test_contract_from_dict_rejects_invalid_generated_command() -> None:

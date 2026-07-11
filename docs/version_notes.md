@@ -15,6 +15,10 @@
 - 真实 DeepSeek smoke 暴露 root baseline 在 validate 阶段提前读取 `model.pkl`；RootEngineer
   prompt 和 `function_approx/Requirements.md` 现在明确 `validate` 先于训练执行，且不得依赖
   checkpoint 或训练副作用。catalog 回归保证所有 benchmark 都保留该生命周期契约。
+- 后续真实配对 smoke 又暴露二维 `x_val` 被直接送入一维插值、以及向标量 prediction slot
+  写入向量的两类 shape 错误；RootEngineer、Engineer、Debugger 现在统一要求保留 batch 首维，
+  并按 `u_train` 的 per-sample tail shape 组织输出。`function_approx` 同时明确接受 `(n,1)` 或
+  `(n,)` prediction，避免模型只看到“写 predictions array”却不知道 evaluator shape 契约。
 
 ## 2026-07-10 研究工作流完整性修复
 

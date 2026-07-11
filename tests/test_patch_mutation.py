@@ -86,6 +86,9 @@ def test_root_engineer_prompt_includes_problem_contract_guidelines_and_data_repo
     assert "solution.py must define class MODEL" in prompt
     assert "--mode=validate` runs before training" in prompt
     assert "must not require `model.pkl`" in prompt
+    assert "preserve its leading sample dimension" in prompt
+    assert "follow its per-sample tail shape" in prompt
+    assert "Do not assign vector outputs into scalar prediction slots" in prompt
 
 
 def test_engineer_prompt_includes_context_and_applies_patch(tmp_path: Path) -> None:
@@ -117,6 +120,9 @@ def test_engineer_prompt_includes_context_and_applies_patch(tmp_path: Path) -> N
     assert '["solution.py"]' in prompt
     assert contract.contract_hash in prompt
     assert "Parent underfits" in prompt
+    assert "preserve its leading sample dimension" in prompt
+    assert "follow its per-sample tail shape" in prompt
+    assert "Do not assign vector outputs into scalar prediction slots" in prompt
     assert (workspace / "solution.py").read_text(encoding="utf-8") == "new\n"
     assert code == "new\n"
 
@@ -194,6 +200,9 @@ def test_debugger_prompt_includes_contract_context_and_applies_patch(tmp_path: P
     assert "model.pkl" in prompt
     assert contract.contract_hash in prompt
     assert "ProblemBundle Summary" in prompt
+    assert "preserve its leading sample dimension" in prompt
+    assert "follow its per-sample tail shape" in prompt
+    assert "Do not assign vector outputs into scalar prediction slots" in prompt
     assert (workspace / "solution.py").read_text(encoding="utf-8") == "fixed\n"
 
 
