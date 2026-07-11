@@ -293,6 +293,127 @@ def test_trace_summary_rejects_joint_real_llm_role_identity_swap(
     )
 
 
+def test_trace_summary_rejects_current_calls_moved_before_schema_start(
+    tmp_path: Path,
+) -> None:
+    experiment_id = "trace-current-calls-before-schema-start"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    ledger_rows = [
+        json.loads(line)
+        for line in ledger_path.read_text(encoding="utf-8").splitlines()
+    ]
+    for row in ledger_rows:
+        row.pop("prompt_tokens_accounted", None)
+        row.pop("prompt_token_source", None)
+        row.pop("response_token_source", None)
+    ledger_path.write_text(
+        "\n".join(json.dumps(row) for row in ledger_rows) + "\n",
+        encoding="utf-8",
+    )
+    trace_path = run_dir / "trace.jsonl"
+    events = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+    evaluator = next(event for event in events if event.get("name") == "evaluator")
+    root_engineer = next(event for event in events if event.get("name") == "root_engineer")
+    evaluator["name"] = evaluator["metadata"]["spec_role"] = "root_engineer"
+    root_engineer["name"] = root_engineer["metadata"]["spec_role"] = "evaluator"
+    for event in events:
+        if event.get("event_type") == "generation_span":
+            event["metadata"].pop("usage", None)
+    start = next(event for event in events if event.get("name") == "agenticsciml.run.start")
+    events.remove(start)
+    last_generation_index = max(
+        index
+        for index, event in enumerate(events)
+        if event.get("event_type") == "generation_span"
+    )
+    events.insert(last_generation_index + 1, start)
+    for event_seq, event in enumerate(events, start=1):
+        event["event_seq"] = event_seq
+    _write_events(trace_path, events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["real_llm_ledger_trace"]["passed"] is False
+    assert any(
+        "current-accounting call precedes current evidence schema" in issue
+        for issue in summary["artifact_consistency"]["issues"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "issue_fragment"),
+    [
+        ("missing_trace_floor", "invalid ledger_calls_before"),
+        ("history_floor_drift", "first v2 invocation must start before ledger call 1"),
+        ("schema_downgrade", "trace/history invocation IDs do not match"),
+        ("invocation_id_drift", "invalid invocation IDs"),
+        ("final_after_drift", "final ledger boundary does not match ledger call count"),
+    ],
+)
+def test_trace_summary_rejects_v2_invocation_ledger_boundary_drift(
+    tmp_path: Path,
+    mutation: str,
+    issue_fragment: str,
+) -> None:
+    experiment_id = f"trace-v2-invocation-boundary-{mutation}"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    if mutation in {"missing_trace_floor", "schema_downgrade", "invocation_id_drift"}:
+        trace_path = run_dir / "trace.jsonl"
+        events = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+        start = next(event for event in events if event.get("name") == "agenticsciml.run.start")
+        if mutation == "missing_trace_floor":
+            start["metadata"].pop("ledger_calls_before")
+        elif mutation == "schema_downgrade":
+            start["metadata"]["llm_evidence_schema_version"] = 1
+            metadata_path = run_dir / "run_metadata.json"
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata["llm_evidence_schema_version"] = 1
+            metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        else:
+            start["metadata"]["invocation_id"] = "invocation_000002"
+        _write_events(trace_path, events)
+    if mutation in {"history_floor_drift", "invocation_id_drift", "final_after_drift"}:
+        history_path = run_dir / "invocation_history.json"
+        history = json.loads(history_path.read_text(encoding="utf-8"))
+        if mutation == "history_floor_drift":
+            history["invocations"][0]["ledger_calls_before"] = 1
+        elif mutation == "invocation_id_drift":
+            history["invocations"][0]["invocation_id"] = "invocation_000002"
+        else:
+            history["invocations"][0]["ledger_calls_after"] = 0
+        history_path.write_text(json.dumps(history), encoding="utf-8")
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["real_llm_ledger_trace"]["passed"] is False
+    assert any(
+        issue_fragment in issue
+        for issue in summary["artifact_consistency"]["issues"]
+    )
+
+
 def test_trace_summary_rejects_missing_current_real_llm_spec_role(
     tmp_path: Path,
 ) -> None:
@@ -614,6 +735,10 @@ def test_trace_summary_rejects_root_only_evidence_for_evaluated_child(
     metadata["llm_calls"]["total"] = 4
     metadata["llm_ledger_usage"]["calls_used"] = 4
     metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    history_path = run_dir / "invocation_history.json"
+    history = json.loads(history_path.read_text(encoding="utf-8"))
+    history["invocations"][0]["ledger_calls_after"] = 4
+    history_path.write_text(json.dumps(history), encoding="utf-8")
 
     summary = summarize_trace(run_dir)
 

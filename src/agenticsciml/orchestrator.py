@@ -52,7 +52,11 @@ from agenticsciml.audit_reports import (
     render_innovation_report_markdown,
     render_scientific_result_card_markdown,
 )
-from agenticsciml.evidence import claim_gate_for_run, evidence_metadata_for_run
+from agenticsciml.evidence import (
+    REAL_LLM_EVIDENCE_SCHEMA_VERSION,
+    claim_gate_for_run,
+    evidence_metadata_for_run,
+)
 from agenticsciml.emergence_audit import audit_solution_emergence
 from agenticsciml.execution.runner import RunResult
 from agenticsciml.execution.sandbox import (
@@ -228,6 +232,7 @@ class AgenticSciMLOrchestrator:
         ):
             raise RuntimeError("Real LLM runs require readable Git source provenance")
         self._invocation_id: str | None = None
+        self._invocation_ledger_calls_before: int | None = None
         self._invocation_started_monotonic: float | None = None
         self._run_lock_handle: Any | None = None
         self._strategy_seed_context_cache: str | None = None
@@ -322,6 +327,7 @@ class AgenticSciMLOrchestrator:
                 refresh_from_ledger()
             started = time.monotonic()
             self._invocation_started_monotonic = started
+            self._invocation_ledger_calls_before = self._current_ledger_call_count()
             self._invocation_id = self._start_invocation_record()
             try:
                 return self._run_invocation(started)
@@ -366,6 +372,7 @@ class AgenticSciMLOrchestrator:
             {
                 "experiment_id": self.config.experiment_id,
                 "invocation_id": self._invocation_id,
+                "ledger_calls_before": self._invocation_ledger_calls_before,
                 "run_state": "partial",
                 "benchmark_dir": str(self.config.benchmark_dir),
                 "max_iterations": self.config.evolution.max_iterations,
@@ -477,8 +484,25 @@ class AgenticSciMLOrchestrator:
         return {
             "config": config_payload,
             "llm_runtime": self._llm_runtime_identity(self.llm),
+            "llm_evidence_schema_version": (
+                REAL_LLM_EVIDENCE_SCHEMA_VERSION if not self.config.use_mock else None
+            ),
             "source_revision": dict(self._source_revision),
         }
+
+    def _current_ledger_call_count(self) -> int | None:
+        ledger_usage = getattr(self.llm, "ledger_usage", None)
+        if not callable(ledger_usage):
+            return 0 if self.config.use_mock else None
+        payload = ledger_usage()
+        calls_used = payload.get("calls_used") if isinstance(payload, dict) else None
+        if (
+            not isinstance(calls_used, int)
+            or isinstance(calls_used, bool)
+            or calls_used < 0
+        ):
+            raise ValueError("LLM ledger usage calls_used is invalid")
+        return calls_used
 
     def _llm_runtime_identity(self, llm: object) -> dict[str, object]:
         identity: dict[str, object] = {
@@ -547,6 +571,11 @@ class AgenticSciMLOrchestrator:
         invocations.append(
             {
                 "invocation_id": invocation_id,
+                "llm_evidence_schema_version": (
+                    REAL_LLM_EVIDENCE_SCHEMA_VERSION if not self.config.use_mock else None
+                ),
+                "ledger_calls_before": self._invocation_ledger_calls_before,
+                "ledger_calls_after": None,
                 "started_at": time.time(),
                 "completed_at": None,
                 "status": "running",
@@ -577,6 +606,7 @@ class AgenticSciMLOrchestrator:
             raise ValueError("invocation_history.json is invalid")
         for entry in payload["invocations"]:
             if isinstance(entry, dict) and entry.get("invocation_id") == invocation_id:
+                entry["ledger_calls_after"] = self._current_ledger_call_count()
                 entry["completed_at"] = time.time()
                 entry["status"] = status
                 entry["wall_time_s"] = wall_time_s

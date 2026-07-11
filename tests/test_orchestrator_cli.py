@@ -1558,6 +1558,10 @@ def test_data_ready_real_run_resumes_without_repeating_paid_analysis(tmp_path: P
     assert len(ledger_rows) == 4
     assert len(data_calls) == 1
     assert [entry["status"] for entry in history["invocations"]] == ["failed", "completed"]
+    assert [
+        (entry["ledger_calls_before"], entry["ledger_calls_after"])
+        for entry in history["invocations"]
+    ] == [(0, 1), (1, 4)]
     assert history["invocations"][0]["llm_runtime"]["budget_limits"]["max_calls"] == 1
     assert history["invocations"][1]["llm_runtime"]["budget_limits"]["max_calls"] == 10
     assert run_metadata["llm_calls"]["total"] == 4

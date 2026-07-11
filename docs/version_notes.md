@@ -12,6 +12,19 @@
   workflow-start schema 在 trace 顺序中启用，允许 resume bundle
   保留 schema 标记前的 legacy generation；orchestrator 直记且不属于 AgentSpec 的 real
   `visual_audit` 继续由其 ledger/method/schema/token 证据校验，并有 passing quality-gate 回归。
+- real LLM evidence schema 升级到 v2：每个 workflow-start 与 matching invocation-history entry
+  交叉记录 `ledger_calls_before`，invocation 收口时记录 `ledger_calls_after`，并把 evidence schema
+  version 纳入 hash-bound experiment conditions。v2 trace/history invocation ID 必须连续且双向一一
+  对应；只有当前 running invocation 可保留 `ledger_calls_after=null`，最后一个已收口 invocation
+  必须与实际 ledger call count 相等。call ID 据这些 invocation 边界归属，不能把 workflow-start
+  移到 generation 后、重排 `event_seq`，或删除 accounting 字段后伪装成 legacy 来绕过角色合同。
+  v1 artifact 仍可只读核验。
+- 生产 DeepSeek root-only v2 smoke `runs/deepseek-evidence-v2-smoke-20260711/root` 已以
+  `real_llm` evidence 完成：4 个 ledger call 与 4 个 generation trace 精确对账，provider usage
+  为 4,581 prompt + 5,532 output = 10,113 tokens，按本地 gate rate 估算 $0.10113；fresh invocation
+  边界为 `(0,4)`，随后零调用 resume 追加 `(4,4)` 且 ledger 仍为 4。两次核验的 quality gate、
+  artifact consistency 和 real ledger/trace gate 均通过，`.env` 真实密钥精确扫描命中 0。该结果
+  仅验证真实模型工作流与审计契约，不支持论文分数、科学改进或 SOTA 结论。
 - `run_metadata.llm_calls` 现在由共享的 generation-trace summarizer 生成并在
   `trace-summary` 中逐字段重算。除 `total` 外，`by_role`、generation attempt 数/耗时、
   unbound/pre-provider rejection 数、本地 prompt/response estimate、provider usage coverage
@@ -53,8 +66,9 @@
   到少于 root 合同的 4 次调用都会 fail closed，不能用旧 checkpoint 重新导出正常外观的 run。
 - `trace-summary` 对当前 real run 复用同一检查，并核对 `run_metadata.llm_calls.total`、
   `llm_ledger_usage.calls_used` 与 ledger 行数。缺失/截断 ledger 不再保留通过的 artifact quality gate；
-  新产物在 workflow trace 与 run metadata 同时写入 `llm_evidence_schema_version=1`，该 schema 下
-  完整 `llm_calls` 和 `llm_ledger_usage` 都是必需字段，不回退使用 paired smoke 的 aggregate budget。
+  新产物在 workflow trace 与 run metadata 同时写入 `llm_evidence_schema_version=2`，该 schema 下
+  完整 `llm_calls`、`llm_ledger_usage` 和 invocation ledger boundary 都是必需证据；v1 bundle
+  保持只读兼容，不回退使用 paired smoke 的 aggregate budget。
 - Recording metadata 现在区分 `llm_budget` 的共享 aggregate 用量和 `llm_ledger_usage` 的当前
   run 用量；paired smoke 第二个 variant 可继续看到两侧累计预算，同时 trace gate 按本 variant
   ledger 对账，不再把合法的 `aggregate=44 / local=22` 误判为证据损坏。

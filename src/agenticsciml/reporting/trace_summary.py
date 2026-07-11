@@ -25,7 +25,8 @@ from agenticsciml.evidence import (
     CLAIM_GATE_ALLOWED,
     CLAIM_GATE_BLOCKED,
     CLAIM_GATE_DOWNGRADED,
-    REAL_LLM_EVIDENCE_SCHEMA_VERSION,
+    LLM_LEDGER_USAGE_SCHEMA_VERSION,
+    SUPPORTED_REAL_LLM_EVIDENCE_SCHEMA_VERSIONS,
 )
 
 
@@ -472,6 +473,12 @@ def _check_real_llm_ledger_trace_consistency(
         )
     except ValueError as exc:
         issues.append(f"real_llm_ledger_trace: {exc}")
+        _check_real_llm_trace_metadata_after_binding_failure(
+            issues,
+            run_metadata=run_metadata,
+            workflow_metadata=workflow_metadata,
+            events=events,
+        )
         return {
             "checked": True,
             "passed": False,
@@ -512,8 +519,8 @@ def _check_real_llm_ledger_trace_consistency(
                     )
 
         if (
-            schema_version != REAL_LLM_EVIDENCE_SCHEMA_VERSION
-            or workflow_schema_version != REAL_LLM_EVIDENCE_SCHEMA_VERSION
+            schema_version not in SUPPORTED_REAL_LLM_EVIDENCE_SCHEMA_VERSIONS
+            or workflow_schema_version != schema_version
         ):
             issues.append(
                 "real_llm_ledger_trace: real LLM evidence schema version is missing or unsupported"
@@ -553,6 +560,38 @@ def _check_real_llm_ledger_trace_consistency(
         "historical_call_floor": historical_floor,
         **counts,
     }
+
+
+def _check_real_llm_trace_metadata_after_binding_failure(
+    issues: list[str],
+    *,
+    run_metadata: dict[str, Any] | None,
+    workflow_metadata: dict[str, Any] | None,
+    events: list[dict[str, Any]],
+) -> None:
+    if not isinstance(run_metadata, dict):
+        return
+    schema_version = run_metadata.get("llm_evidence_schema_version")
+    workflow_schema_version = (
+        workflow_metadata.get("llm_evidence_schema_version")
+        if isinstance(workflow_metadata, dict)
+        else None
+    )
+    if (
+        schema_version not in SUPPORTED_REAL_LLM_EVIDENCE_SCHEMA_VERSIONS
+        or workflow_schema_version != schema_version
+    ):
+        issues.append(
+            "real_llm_ledger_trace: real LLM evidence schema version is missing or unsupported"
+        )
+    llm_calls = run_metadata.get("llm_calls")
+    if not isinstance(llm_calls, dict):
+        return
+    try:
+        expected_llm_calls = summarize_llm_call_events(events, use_mock=False)
+    except (TypeError, ValueError):
+        return
+    _check_llm_call_summary_metadata(issues, llm_calls, expected_llm_calls)
 
 
 def _historical_call_floor_matches(
@@ -619,7 +658,7 @@ def _check_llm_ledger_usage_metadata(
     cost_rate: float | None,
     cost_rate_resolved: bool,
 ) -> None:
-    if usage.get("schema_version") != REAL_LLM_EVIDENCE_SCHEMA_VERSION:
+    if usage.get("schema_version") != LLM_LEDGER_USAGE_SCHEMA_VERSION:
         issues.append(
             "real_llm_ledger_trace: run_metadata.llm_ledger_usage schema version is invalid"
         )

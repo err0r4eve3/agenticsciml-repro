@@ -16,7 +16,10 @@ from typing import Literal
 from agenticsciml.agents.specs import AGENT_GENERATION_CALL_CONTRACTS, AGENT_SPECS
 from agenticsciml.benchmarks import BenchmarkContractFactory, ProblemBundle
 from agenticsciml.config import EvaluationContract
-from agenticsciml.evidence import REAL_LLM_EVIDENCE_SCHEMA_VERSION
+from agenticsciml.evidence import (
+    REAL_LLM_EVIDENCE_SCHEMA_VERSION,
+    SUPPORTED_REAL_LLM_EVIDENCE_SCHEMA_VERSIONS,
+)
 from agenticsciml.llm.budget import (
     LLMBudget,
     _hash_payload,
@@ -243,6 +246,14 @@ def validate_real_llm_ledger_trace_consistency(
         else []
     )
     traces = _load_jsonl_objects(trace_path, "trace") if trace_path.is_file() else []
+    has_current_evidence_schema = any(
+        event.get("event_type") == "workflow_span"
+        and event.get("name") == "agenticsciml.run.start"
+        and isinstance(event.get("metadata"), dict)
+        and event["metadata"].get("llm_evidence_schema_version")
+        in SUPPORTED_REAL_LLM_EVIDENCE_SCHEMA_VERSIONS
+        for event in traces
+    )
 
     ledger_by_id: dict[str, dict[str, object]] = {}
     for row in ledger:
@@ -261,11 +272,16 @@ def validate_real_llm_ledger_trace_consistency(
     expected_ids = {f"llm_call_{index:06d}" for index in range(1, len(ledger_by_id) + 1)}
     if set(ledger_by_id) != expected_ids:
         raise ValueError("Real LLM ledger call IDs are not contiguous from llm_call_000001")
+    v2_invocation_boundaries = _real_llm_v2_invocation_boundaries(
+        run_dir,
+        traces,
+        ledger_call_count=len(ledger_by_id),
+    )
 
     trace_by_id: dict[str, dict[str, object]] = {}
     trace_role_by_id: dict[str, str] = {}
     current_evidence_schema = False
-    for event in traces:
+    for event_index, event in enumerate(traces):
         if (
             event.get("event_type") == "workflow_span"
             and event.get("name") == "agenticsciml.run.start"
@@ -274,7 +290,7 @@ def validate_real_llm_ledger_trace_consistency(
             if (
                 isinstance(workflow_metadata, dict)
                 and workflow_metadata.get("llm_evidence_schema_version")
-                == REAL_LLM_EVIDENCE_SCHEMA_VERSION
+                in SUPPORTED_REAL_LLM_EVIDENCE_SCHEMA_VERSIONS
             ):
                 current_evidence_schema = True
             continue
@@ -293,11 +309,42 @@ def validate_real_llm_ledger_trace_consistency(
         ):
             raise ValueError("Real LLM trace has an invalid or duplicate llm_call_id")
         _validate_real_llm_call_metadata(metadata, call_id, source="trace")
+        call_number = int(call_id.rsplit("_", 1)[1])
+        owning_v2_boundary = max(
+            (
+                boundary
+                for boundary in v2_invocation_boundaries
+                if int(boundary["ledger_calls_before"]) < call_number
+            ),
+            key=lambda boundary: (
+                int(boundary["ledger_calls_before"]),
+                int(boundary["trace_index"]),
+            ),
+            default=None,
+        )
+        if (
+            owning_v2_boundary is not None
+            and event_index <= int(owning_v2_boundary["trace_index"])
+        ):
+            raise ValueError(
+                "Real LLM current-accounting call precedes current evidence schema: "
+                f"{call_id}"
+            )
+        ledger_row = ledger_by_id.get(call_id)
+        if (
+            has_current_evidence_schema
+            and not current_evidence_schema
+            and ledger_row is not None
+            and _uses_current_llm_accounting(ledger_row)
+        ):
+            raise ValueError(
+                f"Real LLM current-accounting call precedes current evidence schema: {call_id}"
+            )
         role = event.get("name")
         if not isinstance(role, str) or not role.strip():
             raise ValueError(f"Real LLM trace {call_id} has invalid agent role")
         spec_role = metadata.get("spec_role")
-        if current_evidence_schema:
+        if current_evidence_schema or owning_v2_boundary is not None:
             call_contract = AGENT_GENERATION_CALL_CONTRACTS.get(role)
             call_shape = (metadata.get("method"), metadata.get("schema_name"))
             if call_contract is None or call_shape not in call_contract:
@@ -378,6 +425,213 @@ def validate_real_llm_ledger_trace_consistency(
             ),
         },
     }
+
+
+def _uses_current_llm_accounting(row: dict[str, object]) -> bool:
+    return any(
+        field in row
+        for field in (
+            "prompt_tokens_accounted",
+            "prompt_token_source",
+            "response_token_source",
+        )
+    )
+
+
+def _real_llm_v2_invocation_boundaries(
+    run_dir: Path,
+    traces: list[dict[str, object]],
+    *,
+    ledger_call_count: int,
+) -> list[dict[str, object]]:
+    boundaries: list[dict[str, object]] = []
+    seen_invocation_ids: set[str] = set()
+    for trace_index, event in enumerate(traces):
+        if (
+            event.get("event_type") != "workflow_span"
+            or event.get("name") != "agenticsciml.run.start"
+        ):
+            continue
+        metadata = event.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        if metadata.get("llm_evidence_schema_version") != REAL_LLM_EVIDENCE_SCHEMA_VERSION:
+            continue
+        invocation_id = metadata.get("invocation_id")
+        ledger_calls_before = metadata.get("ledger_calls_before")
+        if (
+            not isinstance(invocation_id, str)
+            or re.fullmatch(r"invocation_(\d{6})", invocation_id) is None
+            or invocation_id in seen_invocation_ids
+        ):
+            raise ValueError("Real LLM v2 trace has an invalid invocation_id")
+        if (
+            not isinstance(ledger_calls_before, int)
+            or isinstance(ledger_calls_before, bool)
+            or ledger_calls_before < 0
+        ):
+            raise ValueError(
+                "Real LLM ledger/trace consistency failed: "
+                f"v2 trace {invocation_id} has invalid ledger_calls_before"
+            )
+        seen_invocation_ids.add(invocation_id)
+        boundaries.append(
+            {
+                "invocation_id": invocation_id,
+                "ledger_calls_before": ledger_calls_before,
+                "trace_index": trace_index,
+            }
+        )
+    conditions_version = _real_llm_evidence_conditions_version(run_dir)
+    history_path = run_dir / "invocation_history.json"
+    if not history_path.is_file():
+        if boundaries or conditions_version == REAL_LLM_EVIDENCE_SCHEMA_VERSION:
+            raise ValueError("Real LLM v2 invocation history is missing")
+        return []
+
+    history = _load_json_object(history_path, "invocation history")
+    invocations = history.get("invocations")
+    if history.get("schema_version") != 1 or not isinstance(invocations, list):
+        raise ValueError("Real LLM v2 invocation history is invalid")
+    history_by_id: dict[str, dict[str, object]] = {}
+    v2_history: list[dict[str, object]] = []
+    for invocation_index, entry in enumerate(invocations, start=1):
+        if not isinstance(entry, dict):
+            raise ValueError("Real LLM v2 invocation history entry is invalid")
+        invocation_id = entry.get("invocation_id")
+        expected_invocation_id = f"invocation_{invocation_index:06d}"
+        if invocation_id != expected_invocation_id or invocation_id in history_by_id:
+            raise ValueError("Real LLM v2 invocation history has invalid invocation IDs")
+        invocation_id = expected_invocation_id
+        history_by_id[invocation_id] = entry
+        if entry.get("llm_evidence_schema_version") == REAL_LLM_EVIDENCE_SCHEMA_VERSION:
+            before = entry.get("ledger_calls_before")
+            after = entry.get("ledger_calls_after")
+            if (
+                not isinstance(before, int)
+                or isinstance(before, bool)
+                or before < 0
+            ):
+                raise ValueError(
+                    "Real LLM ledger/trace consistency failed: "
+                    f"v2 invocation {invocation_id} has invalid ledger_calls_before"
+                )
+            if after is not None and (
+                not isinstance(after, int)
+                or isinstance(after, bool)
+                or after < before
+            ):
+                raise ValueError(
+                    "Real LLM ledger/trace consistency failed: "
+                    f"v2 invocation {invocation_id} has invalid ledger_calls_after"
+                )
+            if invocation_id == "invocation_000001" and before != 0:
+                raise ValueError("Real LLM first v2 invocation must start before ledger call 1")
+            status = entry.get("status")
+            is_final_history_entry = invocation_index == len(invocations)
+            if after is None and (status != "running" or not is_final_history_entry):
+                raise ValueError(
+                    f"Real LLM v2 invocation {invocation_id} has an open ledger boundary"
+                )
+            if after is not None and status == "running":
+                raise ValueError(
+                    f"Real LLM v2 invocation {invocation_id} has a closed running boundary"
+                )
+            v2_history.append(entry)
+
+    has_v2_declaration = bool(boundaries or v2_history)
+    if has_v2_declaration and conditions_version != REAL_LLM_EVIDENCE_SCHEMA_VERSION:
+        raise ValueError(
+            "Real LLM v2 invocation evidence does not match experiment conditions"
+        )
+    if conditions_version == REAL_LLM_EVIDENCE_SCHEMA_VERSION and not has_v2_declaration:
+        raise ValueError("Real LLM v2 experiment conditions lack invocation evidence")
+
+    boundary_ids = [str(boundary["invocation_id"]) for boundary in boundaries]
+    history_ids = [str(entry["invocation_id"]) for entry in v2_history]
+    if boundary_ids != history_ids:
+        raise ValueError(
+            "Real LLM evidence schema version is missing or unsupported: "
+            "v2 trace/history invocation IDs do not match"
+        )
+
+    historical_call_floor = max(
+        (
+            max(
+                int(entry["ledger_calls_before"]),
+                int(entry["ledger_calls_after"])
+                if entry.get("ledger_calls_after") is not None
+                else 0,
+            )
+            for entry in v2_history
+        ),
+        default=0,
+    )
+    if ledger_call_count < historical_call_floor:
+        raise ValueError(
+            "Real LLM ledger/trace evidence requires at least "
+            f"{historical_call_floor} bound calls; found {ledger_call_count}"
+        )
+    for previous, current in zip(v2_history, v2_history[1:], strict=False):
+        previous_after = previous.get("ledger_calls_after")
+        if (
+            previous_after is not None
+            and current.get("ledger_calls_before") != previous_after
+        ):
+            raise ValueError("Real LLM v2 invocation ledger boundaries are not contiguous")
+
+    if v2_history:
+        final_after = v2_history[-1].get("ledger_calls_after")
+        if final_after is not None and final_after != ledger_call_count:
+            raise ValueError(
+                "Real LLM v2 final ledger boundary does not match ledger call count"
+            )
+
+    for boundary in boundaries:
+        invocation_id = str(boundary["invocation_id"])
+        history_entry = history_by_id.get(invocation_id)
+        if (
+            history_entry is None
+            or history_entry.get("llm_evidence_schema_version")
+            != REAL_LLM_EVIDENCE_SCHEMA_VERSION
+            or history_entry.get("ledger_calls_before")
+            != boundary["ledger_calls_before"]
+        ):
+            raise ValueError(
+                f"Real LLM v2 trace/history ledger boundary mismatch for {invocation_id}"
+            )
+    return boundaries
+
+
+def _real_llm_evidence_conditions_version(run_dir: Path) -> int | None:
+    conditions_path = run_dir / "experiment_conditions.json"
+    if not conditions_path.is_file():
+        return None
+    payload = _load_json_object(conditions_path, "experiment conditions")
+    conditions = payload.get("conditions")
+    if payload.get("schema_version") != 1 or not isinstance(conditions, dict):
+        raise ValueError("Real LLM experiment conditions are invalid")
+    try:
+        encoded = json.dumps(
+            conditions,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Real LLM experiment conditions are not canonical JSON") from exc
+    if payload.get("conditions_digest") != hashlib.sha256(encoded).hexdigest():
+        raise ValueError("Real LLM experiment conditions digest mismatch")
+    version = conditions.get("llm_evidence_schema_version")
+    if version is None:
+        return None
+    if (
+        not isinstance(version, int)
+        or isinstance(version, bool)
+        or version not in SUPPORTED_REAL_LLM_EVIDENCE_SCHEMA_VERSIONS
+    ):
+        raise ValueError("Real LLM experiment evidence schema version is unsupported")
+    return version
 
 
 def _validate_real_llm_token_binding(
