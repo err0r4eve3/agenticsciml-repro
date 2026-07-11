@@ -342,10 +342,9 @@ def _run_llm_smoke_once(
 def verify_llm_smoke_output(output_dir: Path) -> LLMSmokeVerification:
     output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / "real_llm_smoke_verification.json"
     with _exclusive_bundle_lock(output_dir):
         payload = _verify_llm_smoke_output(output_dir)
-        path = output_dir / "real_llm_smoke_verification.json"
-        _write_json(path, payload)
     return LLMSmokeVerification(verification_json=path, passed=bool(payload["passed"]))
 
 
@@ -779,12 +778,23 @@ def _write_json(path: Path, payload: Any) -> None:
     )
 
 
+def _publish_smoke_verification(
+    output_dir: Path,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    _write_json(output_dir / "real_llm_smoke_verification.json", payload)
+    return payload
+
+
 def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
     runs_root = output_dir / "runs"
     if runs_root.is_symlink():
-        return _failed_smoke_verification_payload(
+        return _publish_smoke_verification(
             output_dir,
-            ["smoke bundle runs directory must not be a symlink"],
+            _failed_smoke_verification_payload(
+                output_dir,
+                ["smoke bundle runs directory must not be a symlink"],
+            ),
         )
     run_dirs = sorted(
         (path for path in runs_root.iterdir() if path.is_dir()),
@@ -813,7 +823,10 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
                 break
             lock_handles.append(handle)
         if lock_issues:
-            return _failed_smoke_verification_payload(output_dir, lock_issues)
+            return _publish_smoke_verification(
+                output_dir,
+                _failed_smoke_verification_payload(output_dir, lock_issues),
+            )
         bundle_snapshot_before = _bundle_evidence_snapshot(output_dir)
         snapshotted_run_dirs = {
             output_dir / key
@@ -821,9 +834,12 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
             if key.startswith("runs/") and value == ("directory", "")
         }
         if set(run_dirs) != snapshotted_run_dirs:
-            return _failed_smoke_verification_payload(
+            return _publish_smoke_verification(
                 output_dir,
-                ["smoke bundle run directory set changed before verification"],
+                _failed_smoke_verification_payload(
+                    output_dir,
+                    ["smoke bundle run directory set changed before verification"],
+                ),
             )
         snapshots_before = {
             run_dir: _run_evidence_snapshot(run_dir)
@@ -863,7 +879,7 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
             }
         )
         payload["passed"] = not payload["issues"]
-        return payload
+        return _publish_smoke_verification(output_dir, payload)
     finally:
         for handle in reversed(lock_handles):
             try:

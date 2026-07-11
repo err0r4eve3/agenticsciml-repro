@@ -889,6 +889,44 @@ def test_verify_llm_smoke_output_preserves_previous_result_when_publish_fails(
     assert not list(tmp_path.glob(".real_llm_smoke_verification.json.*.tmp"))
 
 
+def test_verify_llm_smoke_output_publishes_while_run_locks_are_held(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _copy_real_smoke_bundle(tmp_path)
+    verification_path = tmp_path / "real_llm_smoke_verification.json"
+    run_locks = sorted((tmp_path / "runs").glob("*/.invocation.lock"))
+    original_write_json = llm_smoke_module._write_json
+    observed_return_codes: list[int] = []
+    lock_probe = """
+import fcntl
+import sys
+
+with open(sys.argv[1], "a+", encoding="utf-8") as handle:
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise SystemExit(1)
+"""
+
+    def observe_verification_publish(path: Path, payload: object) -> None:
+        if path == verification_path:
+            for lock_path in run_locks:
+                probe = subprocess.run(
+                    [sys.executable, "-c", lock_probe, str(lock_path)],
+                    check=False,
+                )
+                observed_return_codes.append(probe.returncode)
+        original_write_json(path, payload)
+
+    monkeypatch.setattr(llm_smoke_module, "_write_json", observe_verification_publish)
+
+    verification = verify_llm_smoke_output(tmp_path)
+
+    assert verification.passed is True
+    assert observed_return_codes == [1, 1]
+
+
 def test_verify_llm_smoke_output_rejects_undeclared_run_directory(
     tmp_path: Path,
 ) -> None:

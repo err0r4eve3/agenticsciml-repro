@@ -303,7 +303,10 @@ real LLM evidence.
 The verifier rejects dry-run-only artifacts, recomputes the paired
 branch/no-branch gates from the run directories, checks manifest/plan
 consistency, and requires parallel-child trace evidence when
-`parallel_mutations > 1`.
+`parallel_mutations > 1`. It keeps every run invocation lock until the
+atomically written verification JSON has been published, so a direct resume
+cannot mutate a checked run in the gap between snapshot validation and a
+`passed=true` result becoming visible.
 
 `run_metadata.json` also records aggregate LLM call counts by role plus prompt
 and response text token estimates. When the adapter supplies numeric usage,

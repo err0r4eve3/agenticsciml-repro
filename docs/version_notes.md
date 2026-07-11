@@ -38,7 +38,9 @@
   同时绑定 benchmark、bundle 和 runs；同一生产 bundle 在该门下再次零调用通过，calls 仍为 27。
 - real LLM smoke 顶层 plan、manifest、Markdown report、runs CSV 和 verification JSON 现在统一复用
   `fsync + os.replace` 的同目录原子发布；最终替换失败时保留上一份完整证据并清理临时文件，不再因
-  进程中断或磁盘写失败留下半截 JSON/CSV。故障注入回归覆盖 verification 发布失败边界。
+  进程中断或磁盘写失败留下半截 JSON/CSV。verification JSON 还会在全部 run invocation lock 释放前
+  完成发布，堵住直接 resume 在“快照已通过、结果尚未落盘”的窗口修改 run 后仍得到陈旧
+  `passed=true` 的竞态。故障注入和子进程锁探针覆盖这两个发布边界。
 - 生产 paired DeepSeek v2 smoke `runs/deepseek-v2-paired-snapshot-20260711` 已由新 verifier 通过：
   `branch_context` / `no_branch_context` 分别为 13/14 次调用，invocation 边界为 `(0,13)` / `(0,14)`；
   合计 38,288 prompt + 58,707 output = 96,995 provider tokens，按本地 gate rate 估算 $0.96995。
