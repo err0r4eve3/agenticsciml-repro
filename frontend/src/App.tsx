@@ -2357,40 +2357,46 @@ function TopBar({
         <span>实验工作台</span>
       </div>
       <div className="topbar-controls">
-        <label className="compact-field">
-          <span>基准任务</span>
-          <select value={selectedBenchmark} onChange={(event) => onSelectBenchmark(event.target.value)}>
-            {benchmarks.map((benchmark) => (
-              <option key={benchmark.name} value={benchmark.name}>
-                {benchmark.name}
-              </option>
+        <div className="topbar-run-settings">
+          <label className="compact-field">
+            <span>基准任务</span>
+            <select value={selectedBenchmark} onChange={(event) => onSelectBenchmark(event.target.value)}>
+              {benchmarks.map((benchmark) => (
+                <option key={benchmark.name} value={benchmark.name}>
+                  {benchmark.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="segmented" aria-label="运行模式" role="group">
+            {(["mock", "dry_run", "real"] as const).map((item) => (
+              <button
+                aria-pressed={mode === item}
+                key={item}
+                className={mode === item ? "selected" : ""}
+                type="button"
+                onClick={() => onModeChange(item)}
+              >
+                <RunModeButtonLabel mode={item} />
+              </button>
             ))}
-          </select>
-        </label>
-        <div className="segmented" aria-label="运行模式" role="group">
-          {(["mock", "dry_run", "real"] as const).map((item) => (
-            <button
-              aria-pressed={mode === item}
-              key={item}
-              className={mode === item ? "selected" : ""}
-              type="button"
-              onClick={() => onModeChange(item)}
-            >
-              <RunModeButtonLabel mode={item} />
-            </button>
-          ))}
+          </div>
         </div>
-        <StatusBadge tone={qualityGate ? "good" : qualityGate === false ? "bad" : "neutral"}>
-          {displayQualityGate(qualityGate)}
-        </StatusBadge>
-        <StatusBadge tone={runState === "idle" ? "neutral" : "info"}>{displayRunState(runState)}</StatusBadge>
-        <button className="icon-text-button" disabled={busy} type="button" onClick={onRun}>
-          <Play size={15} />
-          启动运行
-        </button>
-        <button aria-label="刷新" className="icon-button" type="button" onClick={onRefresh} title="刷新">
-          <RefreshCw size={16} />
-        </button>
+        <div className="topbar-statuses" aria-label="运行状态">
+          <StatusBadge tone={qualityGate ? "good" : qualityGate === false ? "bad" : "neutral"}>
+            {displayQualityGate(qualityGate)}
+          </StatusBadge>
+          <StatusBadge tone={runState === "idle" ? "neutral" : "info"}>{displayRunState(runState)}</StatusBadge>
+        </div>
+        <div className="topbar-actions">
+          <button className="icon-text-button" disabled={busy} type="button" onClick={onRun}>
+            <Play size={15} />
+            启动运行
+          </button>
+          <button aria-label="刷新" className="icon-button" type="button" onClick={onRefresh} title="刷新">
+            <RefreshCw size={16} />
+          </button>
+        </div>
       </div>
       <div className="active-run">
         <span>当前运行</span>
