@@ -817,6 +817,16 @@ def _verify_llm_smoke_output(output_dir: Path) -> dict[str, Any]:
         if lock_issues:
             return _failed_smoke_verification_payload(output_dir, lock_issues)
         bundle_snapshot_before = _bundle_evidence_snapshot(output_dir)
+        snapshotted_run_dirs = {
+            output_dir / key
+            for key, value in bundle_snapshot_before.items()
+            if key.startswith("runs/") and value == ("directory", "")
+        }
+        if set(run_dirs) != snapshotted_run_dirs:
+            return _failed_smoke_verification_payload(
+                output_dir,
+                ["smoke bundle run directory set changed before verification"],
+            )
         snapshots_before = {
             run_dir: _run_evidence_snapshot(run_dir)
             for run_dir in run_dirs
@@ -918,6 +928,7 @@ def _verify_llm_smoke_output_locked(output_dir: Path) -> dict[str, Any]:
         for entry in plan.get("runs", [])
         if isinstance(entry, dict)
     }
+    expected_run_dirs = _planned_run_directories(plan, output_dir, issues)
     recomputed_rows: list[dict[str, Any]] = []
     for row in rows:
         variant = str(row.get("variant", ""))
@@ -932,7 +943,9 @@ def _verify_llm_smoke_output_locked(output_dir: Path) -> dict[str, Any]:
         plan_seed = _parse_strict_int(plan.get("seed", -1), "plan seed", issues)
         if plan_seed is not None and seed != plan_seed:
             issues.append(f"{variant}: row seed {seed} does not match plan seed {plan.get('seed')}")
-        expected_run_dir = (Path(str(plan.get("output_dir", ""))) / "runs" / str(plan_entry.get("experiment_id"))).resolve()
+        expected_run_dir = expected_run_dirs.get(variant)
+        if expected_run_dir is None:
+            continue
         if run_dir.resolve() != expected_run_dir:
             issues.append(f"{variant}: run_dir {run_dir} does not match expected {expected_run_dir}")
             continue
@@ -1102,6 +1115,73 @@ def _verify_llm_smoke_output_locked(output_dir: Path) -> dict[str, Any]:
         },
         "recomputed_rows": recomputed_rows,
     }
+
+
+def _planned_run_directories(
+    plan: dict[str, Any],
+    output_dir: Path,
+    issues: list[str],
+) -> dict[str, Path]:
+    entries = plan.get("runs")
+    if not isinstance(entries, list):
+        issues.append("plan runs must be an array")
+        return {}
+    expected_by_variant: dict[str, Path] = {}
+    experiment_ids: list[str] = []
+    valid_entry_count = 0
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            issues.append(f"plan runs[{index}] must be an object")
+            continue
+        valid_entry_count += 1
+        variant = entry.get("variant")
+        experiment_id = entry.get("experiment_id")
+        if not isinstance(variant, str) or not variant:
+            issues.append(f"plan runs[{index}].variant must be a non-empty string")
+            continue
+        if (
+            not isinstance(experiment_id, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", experiment_id) is None
+            or experiment_id in {".", ".."}
+        ):
+            issues.append(
+                f"plan runs[{index}].experiment_id must be a safe single path segment"
+            )
+            continue
+        if experiment_id in experiment_ids:
+            issues.append(f"plan experiment_id must be unique: {experiment_id}")
+            continue
+        if variant in expected_by_variant:
+            issues.append(f"plan variant must be unique: {variant}")
+            continue
+        experiment_ids.append(experiment_id)
+        expected_by_variant[variant] = (output_dir / "runs" / experiment_id).resolve()
+
+    actual_members: dict[str, str] = {}
+    runs_root = output_dir / "runs"
+    if runs_root.is_dir():
+        for path in runs_root.iterdir():
+            actual_members[path.name] = "directory" if path.is_dir() else "non-directory"
+    if len(expected_by_variant) == valid_entry_count:
+        expected_names = set(experiment_ids)
+        actual_names = set(actual_members)
+        if actual_names != expected_names:
+            issues.append(
+                "smoke bundle run directory set does not match plan: "
+                f"missing={sorted(expected_names - actual_names)}, "
+                f"unexpected={sorted(actual_names - expected_names)}"
+            )
+        wrong_types = sorted(
+            name
+            for name in expected_names & actual_names
+            if actual_members[name] != "directory"
+        )
+        if wrong_types:
+            issues.append(
+                "smoke bundle planned run members must be directories: "
+                + ", ".join(wrong_types)
+            )
+    return expected_by_variant
 
 
 def _failed_smoke_verification_payload(

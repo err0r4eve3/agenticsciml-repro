@@ -834,6 +834,72 @@ def test_verify_llm_smoke_output_rejects_active_bundle_writer(tmp_path: Path) ->
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+def test_verify_llm_smoke_output_rejects_undeclared_run_directory(
+    tmp_path: Path,
+) -> None:
+    _copy_real_smoke_bundle(tmp_path)
+    (tmp_path / "runs" / "undeclared-run").mkdir()
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any(
+        "run directory set does not match plan" in issue
+        and "undeclared-run" in issue
+        for issue in payload["issues"]
+    )
+
+
+def test_verify_llm_smoke_output_rejects_experiment_id_path_escape(
+    tmp_path: Path,
+) -> None:
+    _copy_real_smoke_bundle(tmp_path)
+    plan_path = tmp_path / "real_llm_smoke_plan.json"
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    plan["runs"][0]["experiment_id"] = "../external-run"
+    plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_path = tmp_path / "real_llm_smoke_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["plan_hash"] = _hash_payload(plan)
+    manifest["config_hash"] = manifest["plan_hash"]
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert any("experiment_id must be a safe single path segment" in issue for issue in payload["issues"])
+
+
+def test_verify_llm_smoke_output_rejects_run_added_before_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _copy_real_smoke_bundle(tmp_path)
+    original_snapshot = llm_smoke_module._bundle_evidence_snapshot
+    added = False
+
+    def add_run_then_snapshot(output_dir: Path) -> dict[str, tuple[str, str]]:
+        nonlocal added
+        if not added:
+            (output_dir / "runs" / "late-run").mkdir()
+            added = True
+        return original_snapshot(output_dir)
+
+    monkeypatch.setattr(
+        llm_smoke_module,
+        "_bundle_evidence_snapshot",
+        add_run_then_snapshot,
+    )
+
+    verification = verify_llm_smoke_output(tmp_path)
+    payload = json.loads(verification.verification_json.read_text(encoding="utf-8"))
+
+    assert verification.passed is False
+    assert "smoke bundle run directory set changed before verification" in payload["issues"]
+
+
 def test_verify_llm_smoke_output_binds_completed_report(tmp_path: Path) -> None:
     _copy_real_smoke_bundle(tmp_path)
     report_path = tmp_path / "real_llm_smoke_report.md"

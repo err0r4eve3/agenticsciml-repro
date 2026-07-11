@@ -30,6 +30,9 @@
   bundle sibling flock，验证端再按固定顺序获取 run invocation locks；bundle 的 plan/manifest/CSV/
   report、`runs/` 成员集合和每个 run 的全部文件/符号链接都做前后快照，任一中途变化即 fail closed。
   verification JSON 记录联合 `verified_snapshot_sha256`，CSV 指向 bundle 外部路径时不再继续读取。
+  plan `experiment_id` 现在还必须是唯一的安全单段名称；planned、actual、locked 与 snapshotted run
+  集合必须完全一致，未声明/缺失目录、非目录成员、路径逃逸，以及初次枚举到 snapshot 之间新增的
+  run 都会失败。生产 v2 paired bundle 已在该集合门下零调用复验通过，manifest calls 前后均为 27。
 - 生产 paired DeepSeek v2 smoke `runs/deepseek-v2-paired-snapshot-20260711` 已由新 verifier 通过：
   `branch_context` / `no_branch_context` 分别为 13/14 次调用，invocation 边界为 `(0,13)` / `(0,14)`；
   合计 38,288 prompt + 58,707 output = 96,995 provider tokens，按本地 gate rate 估算 $0.96995。
