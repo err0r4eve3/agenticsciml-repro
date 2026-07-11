@@ -17,6 +17,7 @@ from agenticsciml.trace_contracts import FanoutTraceMetadata, fanout_trace_refer
 from agenticsciml.resume import (
     MIN_ROOT_REAL_LLM_CALLS,
     real_llm_checkpoint_call_floor,
+    real_llm_checkpoint_cost_rate,
     validate_real_llm_ledger_trace_consistency,
 )
 from agenticsciml.evidence import (
@@ -436,6 +437,8 @@ def _check_real_llm_ledger_trace_consistency(
         return {"checked": False, "passed": True}
     minimum_calls = MIN_ROOT_REAL_LLM_CALLS if _requires_solution_artifacts(run_metadata) else 0
     historical_floor: dict[str, object] | None = None
+    cost_rate: float | None = None
+    cost_rate_resolved = False
     if isinstance(checkpoint, dict):
         try:
             historical_floor = real_llm_checkpoint_call_floor(run_dir, checkpoint)
@@ -446,6 +449,12 @@ def _check_real_llm_ledger_trace_consistency(
                 minimum_calls,
                 int(historical_floor["minimum_calls"]),
             )
+        try:
+            cost_rate = real_llm_checkpoint_cost_rate(run_dir, checkpoint)
+        except ValueError as exc:
+            issues.append(f"real_llm_ledger_trace: {exc}")
+        else:
+            cost_rate_resolved = True
     try:
         counts = validate_real_llm_ledger_trace_consistency(
             run_dir,
@@ -465,7 +474,11 @@ def _check_real_llm_ledger_trace_consistency(
             "historical_call_floor": historical_floor,
         }
 
-    ledger_count = counts["ledger_call_count"]
+    ledger_count = int(counts["ledger_call_count"])
+    ledger_usage = counts.get("ledger_usage")
+    if not isinstance(ledger_usage, dict):
+        issues.append("real_llm_ledger_trace: ledger usage summary is missing or invalid")
+        ledger_usage = {}
     if not isinstance(run_metadata, dict):
         issues.append("real_llm_ledger_trace: run_metadata.json is missing or invalid")
     else:
@@ -506,7 +519,10 @@ def _check_real_llm_ledger_trace_consistency(
             _check_llm_ledger_usage_metadata(
                 issues,
                 llm_ledger_usage,
-                ledger_count=ledger_count,
+                ledger_usage=ledger_usage,
+                aggregate_budget=run_metadata.get("llm_budget"),
+                cost_rate=cost_rate,
+                cost_rate_resolved=cost_rate_resolved,
             )
         stored_floor = run_metadata.get("llm_historical_call_floor")
         if run_metadata.get("llm_evidence_schema_version") is not None:
@@ -553,7 +569,10 @@ def _check_llm_ledger_usage_metadata(
     issues: list[str],
     usage: dict[str, Any],
     *,
-    ledger_count: int,
+    ledger_usage: dict[str, object],
+    aggregate_budget: object,
+    cost_rate: float | None,
+    cost_rate_resolved: bool,
 ) -> None:
     if usage.get("schema_version") != REAL_LLM_EVIDENCE_SCHEMA_VERSION:
         issues.append(
@@ -570,10 +589,16 @@ def _check_llm_ledger_usage_metadata(
             issues.append(
                 f"real_llm_ledger_trace: run_metadata.llm_ledger_usage.{field} is invalid"
             )
-    if _is_non_negative_int(usage.get("calls_used")) and usage["calls_used"] != ledger_count:
-        issues.append(
-            "real_llm_ledger_trace: run_metadata.llm_ledger_usage.calls_used does not match ledger"
-        )
+    for field in integer_fields:
+        if (
+            _is_non_negative_int(usage.get(field))
+            and _is_non_negative_int(ledger_usage.get(field))
+            and usage[field] != ledger_usage[field]
+        ):
+            issues.append(
+                "real_llm_ledger_trace: run_metadata.llm_ledger_usage."
+                f"{field} does not match ledger"
+            )
     if all(_is_non_negative_int(usage.get(field)) for field in integer_fields[1:]):
         if usage["total_tokens_used"] != (
             usage["prompt_tokens_used"] + usage["output_tokens_used"]
@@ -591,6 +616,22 @@ def _check_llm_ledger_usage_metadata(
         issues.append(
             "real_llm_ledger_trace: run_metadata.llm_ledger_usage.estimated_cost_usd is invalid"
         )
+    elif cost_rate_resolved and _is_non_negative_int(ledger_usage.get("total_tokens_used")):
+        expected_local_cost = (
+            float(ledger_usage["total_tokens_used"]) / 1000.0 * cost_rate
+            if cost_rate is not None
+            else 0.0
+        )
+        if not math.isclose(
+            float(estimated_cost),
+            expected_local_cost,
+            rel_tol=1e-12,
+            abs_tol=1e-12,
+        ):
+            issues.append(
+                "real_llm_ledger_trace: run_metadata.llm_ledger_usage."
+                "estimated_cost_usd does not match ledger tokens and cost rate"
+            )
     offsets = usage.get("aggregate_offset")
     if not isinstance(offsets, dict) or any(
         not _is_non_negative_int(offsets.get(field))
@@ -599,6 +640,77 @@ def _check_llm_ledger_usage_metadata(
         issues.append(
             "real_llm_ledger_trace: run_metadata.llm_ledger_usage.aggregate_offset is invalid"
         )
+        return
+    if not isinstance(aggregate_budget, dict):
+        issues.append("real_llm_ledger_trace: run_metadata.llm_budget is missing or invalid")
+        return
+    aggregate_fields = ("calls_used", "prompt_tokens_used", "output_tokens_used")
+    for field in aggregate_fields:
+        aggregate_value = aggregate_budget.get(field)
+        local_value = ledger_usage.get(field)
+        offset_value = offsets.get(field)
+        if not _is_non_negative_int(aggregate_value):
+            issues.append(f"real_llm_ledger_trace: run_metadata.llm_budget.{field} is invalid")
+        elif _is_non_negative_int(local_value) and _is_non_negative_int(offset_value):
+            if aggregate_value != local_value + offset_value:
+                issues.append(
+                    "real_llm_ledger_trace: run_metadata.llm_budget."
+                    f"{field} does not match ledger plus aggregate offset"
+                )
+    aggregate_cost = aggregate_budget.get("estimated_cost_usd")
+    if (
+        not isinstance(aggregate_cost, (int, float))
+        or isinstance(aggregate_cost, bool)
+        or not math.isfinite(float(aggregate_cost))
+        or aggregate_cost < 0
+    ):
+        issues.append(
+            "real_llm_ledger_trace: run_metadata.llm_budget.estimated_cost_usd is invalid"
+        )
+    if cost_rate_resolved:
+        stored_rate = aggregate_budget.get("cost_per_1k_tokens_usd")
+        if cost_rate is None:
+            if stored_rate is not None:
+                issues.append(
+                    "real_llm_ledger_trace: run_metadata.llm_budget cost rate does not match conditions"
+                )
+        elif (
+            not isinstance(stored_rate, (int, float))
+            or isinstance(stored_rate, bool)
+            or not math.isclose(
+                float(stored_rate),
+                cost_rate,
+                rel_tol=1e-12,
+                abs_tol=1e-12,
+            )
+        ):
+            issues.append(
+                "real_llm_ledger_trace: run_metadata.llm_budget cost rate does not match conditions"
+            )
+        prompt = aggregate_budget.get("prompt_tokens_used")
+        output = aggregate_budget.get("output_tokens_used")
+        if (
+            isinstance(aggregate_cost, (int, float))
+            and not isinstance(aggregate_cost, bool)
+            and math.isfinite(float(aggregate_cost))
+            and _is_non_negative_int(prompt)
+            and _is_non_negative_int(output)
+        ):
+            expected_aggregate_cost = (
+                (prompt + output) / 1000.0 * cost_rate
+                if cost_rate is not None
+                else 0.0
+            )
+            if not math.isclose(
+                float(aggregate_cost),
+                expected_aggregate_cost,
+                rel_tol=1e-12,
+                abs_tol=1e-12,
+            ):
+                issues.append(
+                    "real_llm_ledger_trace: run_metadata.llm_budget.estimated_cost_usd "
+                    "does not match aggregate tokens and cost rate"
+                )
 
 
 def _is_non_negative_int(value: object) -> bool:

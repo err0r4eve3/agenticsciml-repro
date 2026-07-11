@@ -466,6 +466,30 @@ variants in a paired smoke. `llm_ledger_usage` is the usage attributable to the
 current run ledger, with an explicit aggregate offset. Keeping both prevents a
 shared budget from being confused with per-run evidence accounting.
 
+`trace-summary` recomputes local prompt and output token usage directly from
+`llm_call_ledger.jsonl` with the same accounting rules used by resume. It then
+requires `llm_ledger_usage` to match those local totals, requires `llm_budget`
+to equal local usage plus `aggregate_offset`, and recomputes local and aggregate
+estimated cost from the hash-bound experiment-condition cost rate. Matching
+call counts alone is therefore insufficient: stale or edited token, offset,
+rate, or cost metadata fails the artifact quality gate.
+
+Current-schema ledger rows must also preserve their token-accounting source.
+When a generation trace carries provider prompt/completion usage, the matching
+ledger row must use `provider_usage` and carry identical accounted values; it
+cannot drop the accounting fields and fall back to a smaller legacy local
+estimate. Failed calls before a provider response may omit response accounting,
+but their trace response estimate must be absent or zero; failed calls with
+provider response usage remain fully bound. Truly
+legacy rows remain readable when their matching trace has no provider usage,
+including legacy history retained by a later current-schema resume; a newer
+workflow marker does not retroactively rewrite old rows. Their prompt and
+successful-response local estimates must still match the corresponding trace
+estimates when present; a failed pre-response row may omit response usage only
+when the trace has no positive response estimate. Whenever provider
+`total_tokens` is present, accounted prompt plus billable response must equal
+that total even if the provider omitted one component or supplied total only.
+
 Run-level LLM ceilings may be increased for recovery, including changing a
 finite ceiling to unlimited. They may not be decreased, and the cost rate,
 provider/model identity, experiment configuration, benchmark, and source

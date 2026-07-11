@@ -250,6 +250,450 @@ def test_real_llm_ledger_trace_enforces_checkpoint_role_floor(tmp_path: Path) ->
         )
 
 
+def test_real_llm_ledger_trace_rejects_provider_usage_legacy_downgrade(
+    tmp_path: Path,
+) -> None:
+    common = {
+        "method": "complete_text",
+        "schema_name": None,
+        "provider": "test-provider",
+        "model": "test-model",
+        "adapter_type": "TestAdapter",
+    }
+    (tmp_path / "llm_call_ledger.jsonl").write_text(
+        json.dumps(
+            {
+                "call_id": "llm_call_000001",
+                "success": True,
+                "prompt_token_estimate": 3,
+                "response_token_estimate": 5,
+                **common,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "trace.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "event_type": "workflow_span",
+                        "name": "agenticsciml.run.start",
+                        "metadata": {"llm_evidence_schema_version": 1},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "event_type": "generation_span",
+                        "name": "data_analyst",
+                        "metadata": {
+                            "llm_call_id": "llm_call_000001",
+                            "prompt_token_estimate": 3,
+                            "response_token_estimate": 5,
+                            "usage": {
+                                "prompt_tokens": 7,
+                                "completion_tokens": 5,
+                                "total_tokens": 12,
+                            },
+                            **common,
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="cannot downgrade provider usage"):
+        validate_real_llm_ledger_trace_consistency(tmp_path, minimum_calls=1)
+
+
+@pytest.mark.parametrize(
+    ("trace_usage", "prompt_accounted", "prompt_source", "response_source"),
+    [
+        (
+            {"prompt_tokens": 7, "total_tokens": 99},
+            7,
+            "provider_usage",
+            "local_estimate",
+        ),
+        (
+            {"completion_tokens": 5, "total_tokens": 99},
+            3,
+            "local_estimate",
+            "provider_usage",
+        ),
+        (
+            {"total_tokens": 99},
+            3,
+            "local_estimate",
+            "local_estimate",
+        ),
+    ],
+)
+def test_real_llm_ledger_trace_rejects_unreconciled_partial_provider_total(
+    tmp_path: Path,
+    trace_usage: dict[str, int],
+    prompt_accounted: int,
+    prompt_source: str,
+    response_source: str,
+) -> None:
+    common = {
+        "method": "complete_text",
+        "schema_name": None,
+        "provider": "test-provider",
+        "model": "test-model",
+        "adapter_type": "TestAdapter",
+    }
+    (tmp_path / "llm_call_ledger.jsonl").write_text(
+        json.dumps(
+            {
+                "call_id": "llm_call_000001",
+                "success": True,
+                "prompt_token_estimate": 3,
+                "prompt_tokens_accounted": prompt_accounted,
+                "prompt_token_source": prompt_source,
+                "response_token_estimate": 5,
+                "response_token_source": response_source,
+                **common,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "trace.jsonl").write_text(
+        json.dumps(
+            {
+                "event_type": "generation_span",
+                "name": "data_analyst",
+                "metadata": {
+                    "llm_call_id": "llm_call_000001",
+                    "prompt_token_estimate": 3,
+                    "response_token_estimate": 5,
+                    "usage": trace_usage,
+                    **common,
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="provider total usage mismatch"):
+        validate_real_llm_ledger_trace_consistency(tmp_path, minimum_calls=1)
+
+
+@pytest.mark.parametrize("post_response_failure", [False, True])
+def test_real_llm_ledger_trace_accepts_current_failed_call_accounting(
+    tmp_path: Path,
+    post_response_failure: bool,
+) -> None:
+    common = {
+        "method": "complete_text",
+        "schema_name": None,
+        "provider": "test-provider",
+        "model": "test-model",
+        "adapter_type": "TestAdapter",
+    }
+    ledger_row: dict[str, object] = {
+        "call_id": "llm_call_000001",
+        "success": False,
+        "prompt_token_estimate": 3,
+        "prompt_tokens_accounted": 7 if post_response_failure else 3,
+        "prompt_token_source": (
+            "provider_usage" if post_response_failure else "local_estimate"
+        ),
+        **common,
+    }
+    trace_metadata: dict[str, object] = {
+        "llm_call_id": "llm_call_000001",
+        "prompt_token_estimate": 3,
+        "response_token_estimate": 0,
+        **common,
+    }
+    if post_response_failure:
+        ledger_row.update(
+            {
+                "response_token_estimate": 5,
+                "response_token_source": "provider_usage",
+            }
+        )
+        trace_metadata["response_token_estimate"] = 5
+        trace_metadata["usage"] = {
+            "prompt_tokens": 7,
+            "completion_tokens": 5,
+            "total_tokens": 12,
+        }
+    (tmp_path / "llm_call_ledger.jsonl").write_text(
+        json.dumps(ledger_row) + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "trace.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "event_type": "workflow_span",
+                        "name": "agenticsciml.run.start",
+                        "metadata": {"llm_evidence_schema_version": 1},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "event_type": "generation_span",
+                        "name": "data_analyst",
+                        "metadata": trace_metadata,
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = validate_real_llm_ledger_trace_consistency(tmp_path, minimum_calls=1)
+
+    assert result["ledger_usage"] == {
+        "calls_used": 1,
+        "prompt_tokens_used": 7 if post_response_failure else 3,
+        "output_tokens_used": 5 if post_response_failure else 0,
+        "total_tokens_used": 12 if post_response_failure else 3,
+    }
+
+
+def test_real_llm_ledger_trace_rejects_current_failed_pre_response_drift(
+    tmp_path: Path,
+) -> None:
+    common = {
+        "method": "complete_text",
+        "schema_name": None,
+        "provider": "test-provider",
+        "model": "test-model",
+        "adapter_type": "TestAdapter",
+    }
+    (tmp_path / "llm_call_ledger.jsonl").write_text(
+        json.dumps(
+            {
+                "call_id": "llm_call_000001",
+                "success": False,
+                "prompt_token_estimate": 3,
+                "prompt_tokens_accounted": 3,
+                "prompt_token_source": "local_estimate",
+                **common,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "trace.jsonl").write_text(
+        json.dumps(
+            {
+                "event_type": "generation_span",
+                "name": "data_analyst",
+                "metadata": {
+                    "llm_call_id": "llm_call_000001",
+                    "prompt_token_estimate": 3,
+                    "response_token_estimate": 999,
+                    **common,
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="failed response estimate mismatch"):
+        validate_real_llm_ledger_trace_consistency(tmp_path, minimum_calls=1)
+
+
+def test_real_llm_ledger_trace_accepts_mixed_legacy_and_current_resume_rows(
+    tmp_path: Path,
+) -> None:
+    common = {
+        "provider": "test-provider",
+        "model": "test-model",
+        "adapter_type": "TestAdapter",
+    }
+    ledger_rows = [
+        {
+            "call_id": "llm_call_000001",
+            "method": "complete_text",
+            "schema_name": None,
+            "success": True,
+            "prompt_token_estimate": 3,
+            "response_token_estimate": 2,
+            **common,
+        },
+        {
+            "call_id": "llm_call_000002",
+            "method": "complete_json",
+            "schema_name": "evaluator",
+            "success": True,
+            "prompt_token_estimate": 4,
+            "prompt_tokens_accounted": 4,
+            "prompt_token_source": "local_estimate",
+            "response_token_estimate": 3,
+            "response_token_source": "local_estimate",
+            **common,
+        },
+    ]
+    trace_events = [
+        {
+            "event_type": "generation_span",
+            "name": "data_analyst",
+            "metadata": {
+                "llm_call_id": "llm_call_000001",
+                "method": "complete_text",
+                "schema_name": None,
+                "prompt_token_estimate": 3,
+                "response_token_estimate": 2,
+                **common,
+            },
+        },
+        {
+            "event_type": "workflow_span",
+            "name": "agenticsciml.run.start",
+            "metadata": {"llm_evidence_schema_version": 1},
+        },
+        {
+            "event_type": "generation_span",
+            "name": "evaluator",
+            "metadata": {
+                "llm_call_id": "llm_call_000002",
+                "method": "complete_json",
+                "schema_name": "evaluator",
+                "prompt_token_estimate": 4,
+                "response_token_estimate": 3,
+                **common,
+            },
+        },
+    ]
+    (tmp_path / "llm_call_ledger.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in ledger_rows),
+        encoding="utf-8",
+    )
+    (tmp_path / "trace.jsonl").write_text(
+        "".join(json.dumps(event) + "\n" for event in trace_events),
+        encoding="utf-8",
+    )
+
+    result = validate_real_llm_ledger_trace_consistency(tmp_path, minimum_calls=2)
+
+    assert result["ledger_usage"] == {
+        "calls_used": 2,
+        "prompt_tokens_used": 7,
+        "output_tokens_used": 5,
+        "total_tokens_used": 12,
+    }
+
+
+def test_real_llm_ledger_trace_accepts_legacy_failed_pre_response_row(
+    tmp_path: Path,
+) -> None:
+    common = {
+        "method": "complete_text",
+        "schema_name": None,
+        "provider": "test-provider",
+        "model": "test-model",
+        "adapter_type": "TestAdapter",
+    }
+    (tmp_path / "llm_call_ledger.jsonl").write_text(
+        json.dumps(
+            {
+                "call_id": "llm_call_000001",
+                "success": False,
+                "prompt_token_estimate": 3,
+                **common,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "trace.jsonl").write_text(
+        json.dumps(
+            {
+                "event_type": "generation_span",
+                "name": "data_analyst",
+                "metadata": {
+                    "llm_call_id": "llm_call_000001",
+                    "prompt_token_estimate": 3,
+                    "response_token_estimate": 0,
+                    **common,
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = validate_real_llm_ledger_trace_consistency(tmp_path, minimum_calls=1)
+
+    assert result["ledger_usage"] == {
+        "calls_used": 1,
+        "prompt_tokens_used": 3,
+        "output_tokens_used": 0,
+        "total_tokens_used": 3,
+    }
+
+
+@pytest.mark.parametrize("drift_field", ["prompt_token_estimate", "response_token_estimate"])
+def test_real_llm_ledger_trace_rejects_legacy_local_estimate_drift(
+    tmp_path: Path,
+    drift_field: str,
+) -> None:
+    common = {
+        "method": "complete_text",
+        "schema_name": None,
+        "provider": "test-provider",
+        "model": "test-model",
+        "adapter_type": "TestAdapter",
+    }
+    ledger_row = {
+        "call_id": "llm_call_000001",
+        "success": True,
+        "prompt_token_estimate": 3,
+        "response_token_estimate": 2,
+        **common,
+    }
+    ledger_row[drift_field] = 1
+    (tmp_path / "llm_call_ledger.jsonl").write_text(
+        json.dumps(ledger_row) + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "trace.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "event_type": "workflow_span",
+                        "name": "agenticsciml.run.start",
+                        "metadata": {"llm_evidence_schema_version": 1},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "event_type": "generation_span",
+                        "name": "data_analyst",
+                        "metadata": {
+                            "llm_call_id": "llm_call_000001",
+                            "prompt_token_estimate": 3,
+                            "response_token_estimate": 2,
+                            **common,
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="legacy .* estimate mismatch"):
+        validate_real_llm_ledger_trace_consistency(tmp_path, minimum_calls=1)
+
+
 @pytest.mark.parametrize(
     (
         "use_critic",

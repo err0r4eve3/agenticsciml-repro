@@ -4,6 +4,17 @@
 
 ## 2026-07-11 Real LLM smoke 研究诊断补强
 
+- `trace-summary` 现在用 resume 相同的 ledger accounting 规则重算 local prompt/output/total
+  token，并要求 `llm_ledger_usage` 精确一致；aggregate `llm_budget` 必须等于 local ledger usage
+  加 `aggregate_offset`，local/aggregate cost 与 cost rate 也必须和 hash-bound experiment
+  conditions 一致。仅保持 call count 正确、但篡改 token/offset/rate/cost metadata 不再通过。
+- current-schema ledger token source/value 现在与 matching generation trace usage 绑定：provider
+  usage 存在时不能删除 accounted/source 字段并降级到 legacy local estimate。pre-response failed call
+  可不含 response usage，但 trace response estimate 必须缺失或为 0；post-response failed call 仍须
+  保存并匹配实际 provider usage。历史 legacy row
+  只按自身 matching trace 判定，因此可与 resume 新增的 current row 共存；provider partial usage 只要
+  含 `total_tokens`，ledger accounted prompt + billable response 就必须与 total 精确一致。legacy local
+  prompt/response estimate 也必须与 matching trace 的可用 estimate 一致，不能同步改 metadata 来低估。
 - post-root ledger/trace 下限现在绑定 checkpoint 历史，而不再固定为 root 的 4 次调用：
   evaluated 或非 orchestration-failure child 在 `use_critic=false/true` 时分别增加至少 6/9 次，
   early `orchestration_error` child 只增加 1 次 result-analysis 调用；inflight batch 中已经完成的

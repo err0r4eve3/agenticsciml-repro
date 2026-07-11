@@ -16,9 +16,11 @@ from typing import Literal
 from agenticsciml.benchmarks import BenchmarkContractFactory, ProblemBundle
 from agenticsciml.config import EvaluationContract
 from agenticsciml.llm.budget import (
+    LLMBudget,
     _hash_payload,
     _hash_text,
     estimate_orchestrator_llm_call_range,
+    load_llm_budget_usage,
 )
 from agenticsciml.observations import render_structured_data_analysis
 
@@ -321,11 +323,222 @@ def validate_real_llm_ledger_trace_consistency(
                 raise ValueError(
                     f"Real LLM ledger/trace {field} mismatch for {call_id}"
                 )
+        _validate_real_llm_token_binding(
+            ledger_row,
+            trace_metadata,
+            call_id=call_id,
+        )
+    try:
+        ledger_budget = load_llm_budget_usage(ledger_path, LLMBudget())
+    except (RuntimeError, OSError, UnicodeError) as exc:
+        raise ValueError("Real LLM ledger token accounting is invalid") from exc
     return {
         "ledger_call_count": len(ledger_ids),
         "trace_call_count": len(trace_ids),
         "trace_call_count_by_role": dict(sorted(trace_calls_by_role.items())),
+        "ledger_usage": {
+            "calls_used": ledger_budget.calls_used,
+            "prompt_tokens_used": ledger_budget.prompt_tokens_used,
+            "output_tokens_used": ledger_budget.output_tokens_used,
+            "total_tokens_used": (
+                ledger_budget.prompt_tokens_used + ledger_budget.output_tokens_used
+            ),
+        },
     }
+
+
+def _validate_real_llm_token_binding(
+    ledger_row: dict[str, object],
+    trace_metadata: dict[str, object],
+    *,
+    call_id: str,
+) -> None:
+    trace_usage = trace_metadata.get("usage")
+    if trace_usage is not None and not isinstance(trace_usage, dict):
+        raise ValueError(f"Real LLM trace {call_id} has invalid token usage metadata")
+    usage = trace_usage if isinstance(trace_usage, dict) else {}
+    trace_prompt_tokens = _optional_non_negative_int(
+        usage,
+        "prompt_tokens",
+        label=f"Real LLM trace {call_id} prompt token usage",
+    )
+    trace_response_tokens = _optional_non_negative_int(
+        usage,
+        "completion_tokens",
+        label=f"Real LLM trace {call_id} completion token usage",
+    )
+    trace_total_tokens = _optional_non_negative_int(
+        usage,
+        "total_tokens",
+        label=f"Real LLM trace {call_id} total token usage",
+    )
+    if (
+        trace_prompt_tokens is not None
+        and trace_response_tokens is not None
+        and trace_total_tokens is not None
+        and trace_total_tokens != trace_prompt_tokens + trace_response_tokens
+    ):
+        raise ValueError(f"Real LLM trace {call_id} token usage total is inconsistent")
+    trace_prompt_estimate = _optional_non_negative_int(
+        trace_metadata,
+        "prompt_token_estimate",
+        label=f"Real LLM trace {call_id} prompt_token_estimate",
+    )
+    trace_response_estimate = _optional_non_negative_int(
+        trace_metadata,
+        "response_token_estimate",
+        label=f"Real LLM trace {call_id} response_token_estimate",
+    )
+
+    has_prompt_accounted = "prompt_tokens_accounted" in ledger_row
+    has_prompt_source = "prompt_token_source" in ledger_row
+    if has_prompt_accounted != has_prompt_source:
+        raise ValueError(f"Real LLM ledger row {call_id} has partial prompt accounting")
+    if not has_prompt_accounted:
+        if (
+            trace_prompt_tokens is not None
+            or trace_response_tokens is not None
+            or trace_total_tokens is not None
+        ):
+            raise ValueError(
+                f"Real LLM ledger row {call_id} cannot downgrade provider usage to legacy accounting"
+            )
+        legacy_prompt_estimate = _required_non_negative_int(
+            ledger_row.get("prompt_token_estimate"),
+            label=f"Real LLM legacy ledger row {call_id} prompt_token_estimate",
+        )
+        if (
+            trace_prompt_estimate is not None
+            and legacy_prompt_estimate != trace_prompt_estimate
+        ):
+            raise ValueError(
+                f"Real LLM legacy prompt estimate mismatch for {call_id}"
+            )
+        if "response_token_source" in ledger_row:
+            raise ValueError(
+                f"Real LLM legacy ledger row {call_id} has partial response accounting"
+            )
+        has_legacy_response = "response_token_estimate" in ledger_row
+        if ledger_row.get("success") is True and not has_legacy_response:
+            raise ValueError(
+                f"Real LLM successful legacy ledger row {call_id} is missing response estimate"
+            )
+        if has_legacy_response:
+            legacy_response_estimate = _required_non_negative_int(
+                ledger_row.get("response_token_estimate"),
+                label=f"Real LLM legacy ledger row {call_id} response_token_estimate",
+            )
+            if (
+                trace_response_estimate is not None
+                and legacy_response_estimate != trace_response_estimate
+            ):
+                raise ValueError(
+                    f"Real LLM legacy response estimate mismatch for {call_id}"
+                )
+        elif trace_response_estimate not in {None, 0}:
+            raise ValueError(
+                f"Real LLM legacy failed response estimate mismatch for {call_id}"
+            )
+        return
+
+    prompt_accounted = _required_non_negative_int(
+        ledger_row.get("prompt_tokens_accounted"),
+        label=f"Real LLM ledger row {call_id} prompt_tokens_accounted",
+    )
+    prompt_estimate = _required_non_negative_int(
+        ledger_row.get("prompt_token_estimate"),
+        label=f"Real LLM ledger row {call_id} prompt_token_estimate",
+    )
+    prompt_source = ledger_row.get("prompt_token_source")
+    if prompt_source == "provider_usage":
+        if trace_prompt_tokens is None or prompt_accounted != trace_prompt_tokens:
+            raise ValueError(
+                f"Real LLM ledger/trace prompt provider usage mismatch for {call_id}"
+            )
+    elif prompt_source == "local_estimate":
+        if prompt_accounted != prompt_estimate:
+            raise ValueError(
+                f"Real LLM ledger row {call_id} local prompt accounting is inconsistent"
+            )
+        if trace_prompt_tokens is not None:
+            raise ValueError(
+                f"Real LLM ledger row {call_id} ignores trace provider prompt usage"
+            )
+        if trace_prompt_estimate is not None and trace_prompt_estimate != prompt_estimate:
+            raise ValueError(
+                f"Real LLM ledger/trace prompt estimate mismatch for {call_id}"
+            )
+    else:
+        raise ValueError(f"Real LLM ledger row {call_id} has invalid prompt_token_source")
+
+    has_response_tokens = "response_token_estimate" in ledger_row
+    has_response_source = "response_token_source" in ledger_row
+    if has_response_tokens != has_response_source:
+        raise ValueError(f"Real LLM ledger row {call_id} has partial response accounting")
+    if ledger_row.get("success") is True and not has_response_tokens:
+        raise ValueError(
+            f"Real LLM successful ledger row {call_id} is missing response accounting"
+        )
+    if not has_response_tokens:
+        if trace_response_tokens is not None:
+            raise ValueError(
+                f"Real LLM ledger row {call_id} omits trace provider response usage"
+            )
+        if trace_response_estimate not in {None, 0}:
+            raise ValueError(
+                f"Real LLM failed response estimate mismatch for {call_id}"
+            )
+        if trace_total_tokens is not None and prompt_accounted != trace_total_tokens:
+            raise ValueError(
+                f"Real LLM ledger/trace provider total usage mismatch for {call_id}"
+            )
+        return
+
+    response_tokens = _required_non_negative_int(
+        ledger_row.get("response_token_estimate"),
+        label=f"Real LLM ledger row {call_id} response_token_estimate",
+    )
+    response_source = ledger_row.get("response_token_source")
+    if response_source == "provider_usage":
+        if trace_response_tokens is None or response_tokens != trace_response_tokens:
+            raise ValueError(
+                f"Real LLM ledger/trace response provider usage mismatch for {call_id}"
+            )
+    elif response_source == "local_estimate":
+        if trace_response_tokens is not None:
+            raise ValueError(
+                f"Real LLM ledger row {call_id} ignores trace provider response usage"
+            )
+        if trace_response_estimate is not None and trace_response_estimate != response_tokens:
+            raise ValueError(
+                f"Real LLM ledger/trace response estimate mismatch for {call_id}"
+            )
+    else:
+        raise ValueError(f"Real LLM ledger row {call_id} has invalid response_token_source")
+    if (
+        trace_total_tokens is not None
+        and prompt_accounted + response_tokens != trace_total_tokens
+    ):
+        raise ValueError(
+            f"Real LLM ledger/trace provider total usage mismatch for {call_id}"
+        )
+
+
+def _optional_non_negative_int(
+    payload: dict[str, object],
+    field: str,
+    *,
+    label: str,
+) -> int | None:
+    if field not in payload:
+        return None
+    return _required_non_negative_int(payload.get(field), label=label)
+
+
+def _required_non_negative_int(value: object, *, label: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(f"{label} is invalid")
+    return value
 
 
 def real_llm_checkpoint_call_floor(
@@ -429,6 +642,44 @@ def _stored_checkpoint_use_critic(
     run_dir: Path,
     checkpoint: dict[str, object],
 ) -> bool:
+    conditions = _stored_checkpoint_conditions(run_dir, checkpoint)
+    config = conditions.get("config")
+    if not isinstance(config, dict) or config.get("use_mock") is not False:
+        raise ValueError("Real LLM checkpoint conditions are not for a real run")
+    evolution = config.get("evolution")
+    if not isinstance(evolution, dict) or not isinstance(evolution.get("use_critic"), bool):
+        raise ValueError("Real LLM checkpoint use_critic condition is invalid")
+    return evolution["use_critic"]
+
+
+def real_llm_checkpoint_cost_rate(
+    run_dir: Path,
+    checkpoint: dict[str, object],
+) -> float | None:
+    conditions = _stored_checkpoint_conditions(run_dir, checkpoint)
+    llm_runtime = conditions.get("llm_runtime")
+    if not isinstance(llm_runtime, dict):
+        raise ValueError("Real LLM runtime conditions are invalid")
+    budget_limits = llm_runtime.get("budget_limits")
+    if not isinstance(budget_limits, dict):
+        raise ValueError("Real LLM budget conditions are invalid")
+    cost_rate = budget_limits.get("cost_per_1k_tokens_usd")
+    if cost_rate is None:
+        return None
+    if (
+        not isinstance(cost_rate, (int, float))
+        or isinstance(cost_rate, bool)
+        or not math.isfinite(float(cost_rate))
+        or cost_rate <= 0
+    ):
+        raise ValueError("Real LLM cost rate condition is invalid")
+    return float(cost_rate)
+
+
+def _stored_checkpoint_conditions(
+    run_dir: Path,
+    checkpoint: dict[str, object],
+) -> dict[str, object]:
     conditions_path = run_dir / "experiment_conditions.json"
     conditions_payload = _load_json_object(conditions_path, "experiment conditions")
     if conditions_payload.get("schema_version") != 1:
@@ -450,13 +701,7 @@ def _stored_checkpoint_use_critic(
         raise ValueError("Real LLM experiment conditions digest mismatch")
     if checkpoint.get("experiment_conditions_digest") != conditions_digest:
         raise ValueError("Real LLM checkpoint experiment conditions digest mismatch")
-    config = conditions.get("config")
-    if not isinstance(config, dict) or config.get("use_mock") is not False:
-        raise ValueError("Real LLM checkpoint conditions are not for a real run")
-    evolution = config.get("evolution")
-    if not isinstance(evolution, dict) or not isinstance(evolution.get("use_critic"), bool):
-        raise ValueError("Real LLM checkpoint use_critic condition is invalid")
-    return evolution["use_critic"]
+    return conditions
 
 
 def _validate_real_llm_call_metadata(

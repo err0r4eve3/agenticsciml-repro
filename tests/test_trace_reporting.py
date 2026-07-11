@@ -300,6 +300,77 @@ def test_trace_summary_rejects_non_integer_call_floor_schema(
     assert summary["quality_gate"]["passed"] is False
 
 
+def test_trace_summary_rejects_local_token_usage_drift_from_ledger(
+    tmp_path: Path,
+) -> None:
+    experiment_id = "trace-local-token-usage-drift"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    metadata_path = run_dir / "run_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["llm_ledger_usage"]["prompt_tokens_used"] += 1
+    metadata["llm_ledger_usage"]["total_tokens_used"] += 1
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["real_llm_ledger_trace"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any(
+        "prompt_tokens_used does not match ledger" in issue
+        for issue in summary["artifact_consistency"]["issues"]
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["local_cost", "offset_calls", "aggregate_prompt", "cost_rate"],
+)
+def test_trace_summary_rejects_cost_or_aggregate_usage_drift(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    experiment_id = f"trace-budget-usage-drift-{mutation}"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    metadata_path = run_dir / "run_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if mutation == "local_cost":
+        metadata["llm_ledger_usage"]["estimated_cost_usd"] = 1.0
+    elif mutation == "offset_calls":
+        metadata["llm_ledger_usage"]["aggregate_offset"]["calls_used"] += 1
+    elif mutation == "aggregate_prompt":
+        metadata["llm_budget"]["prompt_tokens_used"] += 1
+    else:
+        metadata["llm_budget"]["cost_per_1k_tokens_usd"] = 0.01
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["real_llm_ledger_trace"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+
+
 def test_trace_summary_counts_recovered_provider_timeout(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     run_dir.mkdir()
