@@ -1372,11 +1372,15 @@ def _csv_row_matches_recomputed(row: dict[str, str], recomputed: dict[str, Any])
         "llm_trace_methods",
         "llm_trace_schema_names",
     }
-    return all(
-        str(row[key]) == str(recomputed[key])
-        for key in recomputed
-        if key not in order_insensitive_trace_fields
-    )
+    for key in recomputed:
+        if key in order_insensitive_trace_fields:
+            if sorted(_split_sequence(row[key])) != sorted(
+                _split_sequence(recomputed[key])
+            ):
+                return False
+        elif str(row[key]) != str(recomputed[key]):
+            return False
+    return True
 
 
 def _run_binding_issues(

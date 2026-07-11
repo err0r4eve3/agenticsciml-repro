@@ -6,12 +6,18 @@ import pytest
 
 from agenticsciml.agents.base import AgentBase, StructuredOutputError
 from agenticsciml.agents.proposer import ProposerAgent
+from agenticsciml.agents.output_schemas import validate_output_payload
 from agenticsciml.config import EvaluationContract
 from agenticsciml.execution.sandbox import prepare_solution_workspace, train_and_evaluate
 from agenticsciml.llm.base import LLMClient
 from agenticsciml.llm.budget import LLMBudget, LLMBudgetExceeded, RecordingLLMClient
 from agenticsciml.reporting import write_sdk_trace_export
 from agenticsciml.storage import ExperimentStorage
+
+
+def test_unknown_structured_output_model_fails_closed() -> None:
+    with pytest.raises(ValueError, match="Unknown structured output model"):
+        validate_output_payload({}, schema_name="unregistered_schema")
 
 
 class FlakyJsonLLM(LLMClient):

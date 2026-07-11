@@ -467,13 +467,9 @@ def _link_or_copy_public_input(source: Path, target: Path) -> str:
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists() or target.is_symlink():
         target.unlink()
-    try:
-        relative_source = os.path.relpath(source, start=target.parent)
-        os.symlink(relative_source, target)
-        return "symlink"
-    except OSError:
-        shutil.copy2(source, target)
-        return "copy"
+    shutil.copy2(source, target)
+    _mark_read_only(target)
+    return "copy"
 
 
 def _copy_frozen_input(source: Path, target: Path) -> None:
@@ -498,7 +494,17 @@ def _file_digest(path: Path) -> str | None:
 
 
 def _guarded_fingerprints(workspace: Path, evaluator_dir: Path | None = None) -> dict[str, str | None]:
-    fingerprints = {filename: _file_digest(workspace / filename) for filename in GUARDED_FILES}
+    guarded_files = set(GUARDED_FILES) | set(BENCHMARK_FILES)
+    try:
+        train_path, _validation_path = _benchmark_data_paths(workspace)
+    except RuntimeError:
+        train_path = None
+    if train_path is not None:
+        guarded_files.add(train_path)
+    fingerprints = {
+        filename: _file_digest(workspace / filename)
+        for filename in sorted(guarded_files)
+    }
     evaluator_dir = evaluator_dir or private_eval_dir_for_workspace(workspace)
     if evaluator_dir.exists():
         for path in evaluator_dir.rglob("*"):

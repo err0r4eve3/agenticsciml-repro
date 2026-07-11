@@ -5,6 +5,7 @@ import {
   type ReactNode,
   useEffect,
   useMemo,
+  useRef,
   useState
 } from "react";
 import {
@@ -897,6 +898,8 @@ export function App() {
   const [pendingRealAction, setPendingRealAction] = useState<SolverAction | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const activeAccountRef = useRef(activeAccountId);
+  activeAccountRef.current = activeAccountId;
 
   useEffect(() => {
     api
@@ -941,6 +944,15 @@ export function App() {
     setSelectedArtifactPath("");
     setSelectedWorkspaceId(null);
     setWorkspaceScope("account");
+    setPendingRealAction(null);
+    setBusy(false);
+    setMessages([
+      {
+        id: Date.now(),
+        role: "assistant",
+        text: "已切换账号。Ask 只回答，Plan 给出步骤，Agent 可执行当前账号内的受控动作。"
+      }
+    ]);
     refreshRuns().catch((exc) => setError(String(exc)));
     refreshCodeWorkspaces().catch((exc) => setError(String(exc)));
     refreshWiki().catch((exc) => setError(String(exc)));
@@ -982,10 +994,15 @@ export function App() {
       setArtifactPayload(null);
       return;
     }
+    const accountId = activeAccountId;
     api
-      .getArtifact(activeRunId, selectedArtifactPath, activeAccountId)
-      .then(setArtifactPayload)
-      .catch((exc) => setError(String(exc)));
+      .getArtifact(activeRunId, selectedArtifactPath, accountId)
+      .then((payload) => {
+        if (activeAccountRef.current === accountId) setArtifactPayload(payload);
+      })
+      .catch((exc) => {
+        if (activeAccountRef.current === accountId) setError(String(exc));
+      });
   }, [activeRunId, selectedArtifactPath, activeAccountId]);
 
   const selected = useMemo(
@@ -1023,13 +1040,17 @@ export function App() {
   }, [activeRunId, runs.length, activeAccountId]);
 
   async function refreshRuns() {
-    const payload = await api.getRuns(activeAccountId);
+    const accountId = activeAccountId;
+    const payload = await api.getRuns(accountId);
+    if (activeAccountRef.current !== accountId) return;
     setRuns(payload);
   }
 
   async function refreshActiveRun(runId = activeRunId) {
     if (!runId) return;
-    const run = await api.getRun(runId, activeAccountId);
+    const accountId = activeAccountId;
+    const run = await api.getRun(runId, accountId);
+    if (activeAccountRef.current !== accountId) return;
     setActiveRun(run);
     setRuns((current) => [run, ...current.filter((item) => item.run_id !== run.run_id)]);
   }
@@ -1044,6 +1065,7 @@ export function App() {
       api.getSelectorVotes(runId, accountId),
       api.getSolutions(runId, accountId)
     ]);
+    if (activeAccountRef.current !== accountId) return;
     setSelectorVotes(votes);
     setSolutionsPayload(solutions);
   }
@@ -1052,11 +1074,13 @@ export function App() {
     window.setTimeout(async () => {
       try {
         const run = await api.getRun(runId, accountId);
+        if (activeAccountRef.current !== accountId) return;
         setActiveRun((current) => (!current || current.run_id === runId ? run : current));
         setRuns((current) => [run, ...current.filter((item) => item.run_id !== run.run_id)]);
         if (run.status !== "running" || attemptsLeft <= 1) {
           await refreshRunEvidenceForAccount(runId, accountId);
           const workspaces = await api.getCodeWorkspaces(runId, accountId);
+          if (activeAccountRef.current !== accountId) return;
           setCodeWorkspaces(workspaces);
           setSelectedWorkspaceId((current) =>
             current && workspaces.some((workspace) => workspace.id === current) ? current : null
@@ -1079,16 +1103,20 @@ export function App() {
   }
 
   async function refreshCodeWorkspaces() {
-    const workspaces = await api.getCodeWorkspaces(activeRunId, activeAccountId);
+    const accountId = activeAccountId;
+    const workspaces = await api.getCodeWorkspaces(activeRunId, accountId);
+    if (activeAccountRef.current !== accountId) return;
     setCodeWorkspaces(workspaces);
     setSelectedWorkspaceId((current) => (current && workspaces.some((workspace) => workspace.id === current) ? current : null));
   }
 
   async function refreshWiki(generated = false) {
+    const accountId = activeAccountId;
     const [payload, reviewQueue] = await Promise.all([
-      api.getLlmWikiOkf(activeAccountId, generated),
+      api.getLlmWikiOkf(accountId, generated),
       api.getLlmWikiReviewQueue()
     ]);
+    if (activeAccountRef.current !== accountId) return;
     setWikiPayload(payload);
     setWikiReviewQueue(reviewQueue);
     setWikiText(JSON.stringify(payload, null, 2));
@@ -1146,7 +1174,9 @@ export function App() {
   async function selectWorkspaceFromCodeServerAction(action: SolverAction) {
     const payload = action.payload ?? {};
     const actionRunId = typeof payload.run_id === "string" ? payload.run_id : activeRunId;
-    const workspaces = await api.getCodeWorkspaces(actionRunId, activeAccountId);
+    const accountId = activeAccountId;
+    const workspaces = await api.getCodeWorkspaces(actionRunId, accountId);
+    if (activeAccountRef.current !== accountId) return;
     setCodeWorkspaces(workspaces);
 
     const targetWorkspace = typeof payload.workspace === "string" ? payload.workspace : null;
@@ -1158,7 +1188,7 @@ export function App() {
         if (targetScope && workspace.scope !== targetScope) return false;
         if (actionRunId && workspace.run_id !== actionRunId) return false;
         if (targetSolutionId && workspace.solution_id !== targetSolutionId) return false;
-        return workspace.account_id === activeAccountId;
+        return workspace.account_id === accountId;
       }) ??
       null;
 
@@ -1183,11 +1213,12 @@ export function App() {
     }
     setBusy(true);
     setError(null);
+    const accountId = activeAccountId;
     try {
       const run = await api.startRun({
         benchmark: selectedBenchmark,
         mode: nextMode,
-        account_id: activeAccountId,
+        account_id: accountId,
         target_solution_count: runConfig.target_solution_count,
         max_iterations: runBudgetPreview.max_iterations,
         parallel_mutations: runConfig.parallel_mutations,
@@ -1203,29 +1234,31 @@ export function App() {
         background,
         real_confirmed: realConfirmed
       });
+      if (activeAccountRef.current !== accountId) return;
       setActiveRun(run);
       setActiveRunId(run.run_id);
       await refreshRuns();
       await refreshRunEvidence(run.run_id);
       if (background) {
-        pollBackgroundRun(run.run_id, activeAccountId);
+        pollBackgroundRun(run.run_id, accountId);
       }
       addAssistantMessage(`${RUN_MODE_LABELS[nextMode]} 运行已登记：${run.run_id}`);
     } catch (exc) {
-      setError(String(exc));
+      if (activeAccountRef.current === accountId) setError(String(exc));
     } finally {
-      setBusy(false);
+      if (activeAccountRef.current === accountId) setBusy(false);
     }
   }
 
   async function previewRunReadiness(realConfirmed = false) {
     setBusy(true);
     setError(null);
+    const accountId = activeAccountId;
     try {
       const report = await api.previewReadiness({
         benchmark: selectedBenchmark,
         mode,
-        account_id: activeAccountId,
+        account_id: accountId,
         target_solution_count: runConfig.target_solution_count,
         max_iterations: runBudgetPreview.max_iterations,
         parallel_mutations: runConfig.parallel_mutations,
@@ -1239,11 +1272,12 @@ export function App() {
         claim_level: "workflow_proxy",
         real_confirmed: realConfirmed
       });
+      if (activeAccountRef.current !== accountId) return;
       setReadinessReport(report);
     } catch (exc) {
-      setError(String(exc));
+      if (activeAccountRef.current === accountId) setError(String(exc));
     } finally {
-      setBusy(false);
+      if (activeAccountRef.current === accountId) setBusy(false);
     }
   }
 
@@ -1256,6 +1290,7 @@ export function App() {
     setMessages((current) => [...current, { id: Date.now(), role: "user", text: userMessage }]);
     setBusy(true);
     setError(null);
+    const accountId = activeAccountId;
     try {
       const requestWorkspaceScope = overrides.workspaceScope ?? workspaceScope;
       const requestAssistantMode = overrides.assistantMode ?? assistantMode;
@@ -1266,7 +1301,7 @@ export function App() {
         mode: overrides.mode ?? mode,
         assistant_mode: requestAssistantMode,
         workspace_scope: requestWorkspaceScope,
-        account_id: activeAccountId,
+        account_id: accountId,
         target_solution_count: runConfig.target_solution_count,
         parallel_mutations: runConfig.parallel_mutations,
         selector_vote_count: runConfig.selector_vote_count,
@@ -1275,6 +1310,7 @@ export function App() {
         agent_models: activeAgentModels(),
         claim_level: "workflow_proxy"
       });
+      if (activeAccountRef.current !== accountId) return;
       setMessages((current) => [
         ...current,
         {
@@ -1290,9 +1326,9 @@ export function App() {
         await dispatchSolverActions(response.actions);
       }
     } catch (exc) {
-      setError(String(exc));
+      if (activeAccountRef.current === accountId) setError(String(exc));
     } finally {
-      setBusy(false);
+      if (activeAccountRef.current === accountId) setBusy(false);
     }
   }
 
@@ -1385,7 +1421,11 @@ export function App() {
 
   function actionBelongsToActiveAccount(action: SolverAction) {
     const actionAccountId = action.payload?.account_id;
-    if (typeof actionAccountId === "string" && actionAccountId !== activeAccountId) {
+    if (typeof actionAccountId !== "string") {
+      addAssistantMessage("已拦截缺少账号归属的动作。Agent 动作必须显式绑定当前账号。");
+      return false;
+    }
+    if (actionAccountId !== activeAccountId) {
       addAssistantMessage("已拦截跨账号动作：Agent 只能操作当前账号创建的工作区内容。");
       return false;
     }

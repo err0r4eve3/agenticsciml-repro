@@ -308,7 +308,10 @@ def _verify_latest_audit(
         issues.append("llm wiki manual edit roundtrip did not pass")
     artifacts = wiki.get("artifacts") if isinstance(wiki.get("artifacts"), dict) else {}
     for name, rel_path in artifacts.items():
-        if not isinstance(rel_path, str) or not (audit_path.parent / rel_path).exists():
+        if not isinstance(rel_path, str) or not _is_safe_bundle_artifact(
+            audit_path.parent,
+            rel_path,
+        ):
             issues.append(f"missing llm wiki artifact: {name}")
     if max_age_s is not None:
         _verify_audit_age(audit.get("created_at"), max_age_s, issues)
@@ -325,6 +328,18 @@ def _verify_audit_age(created_at: Any, max_age_s: float, issues: list[str]) -> N
         return
     if time.time() - created_epoch > max_age_s:
         issues.append("latest audit is stale")
+
+
+def _is_safe_bundle_artifact(root: Path, relative_path: str) -> bool:
+    requested = Path(relative_path)
+    if requested.is_absolute() or any(part == ".." for part in requested.parts):
+        return False
+    try:
+        resolved_root = root.resolve(strict=True)
+        resolved = (resolved_root / requested).resolve(strict=True)
+    except OSError:
+        return False
+    return resolved.is_file() and resolved.is_relative_to(resolved_root)
 
 
 def _read_json_file(path: Path, issues: list[str]) -> dict[str, Any]:

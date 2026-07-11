@@ -110,7 +110,8 @@ def validate_output_payload(
 ) -> dict[str, Any]:
     model = output_model_for(schema_name, output_model)
     if model is None:
-        return data
+        requested = output_model or schema_name
+        raise ValueError(f"Unknown structured output model: {requested}")
     try:
         parsed = model.model_validate(data)
     except ValidationError as exc:

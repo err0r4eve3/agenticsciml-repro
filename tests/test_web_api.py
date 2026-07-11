@@ -1726,6 +1726,74 @@ def test_account_scoped_runs_reject_path_overrides(tmp_path: Path, monkeypatch: 
     assert "catalog names" in benchmark_path.json()["detail"]
 
 
+def test_web_runs_reject_path_escape_ids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTICSCIML_ACCOUNTS_ROOT", str(tmp_path / "accounts"))
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/runs",
+        json={
+            "benchmark": "function_approx",
+            "mode": "dry_run",
+            "account_id": "alice",
+            "experiment_id": "../../outside",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "safe single path segment" in response.json()["detail"]
+    assert not (tmp_path / "outside").exists()
+
+
+def test_real_web_run_rejects_request_provided_base_url(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENTICSCIML_ACCOUNTS_ROOT", str(tmp_path / "accounts"))
+    monkeypatch.setenv("AGENTICSCIML_ENABLE_REAL_WEB_RUNS", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only-not-a-real-key")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/runs",
+        json={
+            "benchmark": "function_approx",
+            "mode": "real",
+            "account_id": "alice",
+            "experiment_id": "blocked-base-url",
+            "real_confirmed": True,
+            "agent_models": {
+                "engineer": {
+                    "model": "gpt-5-mini",
+                    "base_url": "https://attacker.invalid/v1",
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert "cannot route the server API key" in response.json()["detail"]
+
+
+def test_code_server_solution_scope_rejects_path_escape(tmp_path: Path) -> None:
+    run_dir = tmp_path / "safe-run"
+    (run_dir / "solutions" / "solution_000").mkdir(parents=True)
+    client = TestClient(create_app())
+
+    response = client.get(
+        "/api/code-server/url",
+        params={
+            "scope": "solution",
+            "run_id": "safe-run",
+            "solution_id": "..",
+            "output_dir": str(tmp_path),
+        },
+    )
+
+    assert response.status_code == 400
+    assert "safe single path segment" in response.json()["detail"]
+
 def test_web_artifacts_reject_path_escape(tmp_path: Path) -> None:
     client = TestClient(create_app())
     run_dir = tmp_path / "web-test"

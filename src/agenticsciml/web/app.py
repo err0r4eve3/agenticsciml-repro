@@ -37,8 +37,17 @@ from agenticsciml.custom_benchmarks import (
 )
 from agenticsciml.evidence import CLAIM_GATE_BLOCKED
 from agenticsciml.llm.mock import MockLLMClient
+from agenticsciml.llm.budget import (
+    LLMBudget,
+    RecordingLLMClient,
+    estimate_orchestrator_llm_call_range,
+    llm_call_budget_preflight,
+    load_llm_budget_usage,
+    require_llm_call_budget_preflight,
+)
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
+from agenticsciml.path_safety import resolve_contained_child, validate_path_segment
 from agenticsciml.paper_tasks import list_paper_tasks
 from agenticsciml.readiness import build_readiness_report
 
@@ -347,10 +356,10 @@ class RunStartRequest(BaseModel):
     benchmark_dir: str | None = None
     mode: RunMode = "mock"
     account_id: str | None = None
-    max_iterations: int = Field(default=1, ge=0)
-    parallel_mutations: int = Field(default=2, ge=1)
-    timeout_s: int = Field(default=60, ge=1)
-    max_debug_retries: int = Field(default=2, ge=0)
+    max_iterations: int = Field(default=1, ge=0, le=1000)
+    parallel_mutations: int = Field(default=2, ge=1, le=32)
+    timeout_s: int = Field(default=60, ge=1, le=3600)
+    max_debug_retries: int = Field(default=2, ge=0, le=20)
     output_dir: str = "runs"
     experiment_id: str | None = None
     no_kb: bool = False
@@ -359,9 +368,9 @@ class RunStartRequest(BaseModel):
     no_critic: bool = False
     no_debugger: bool = False
     no_branch_context: bool = False
-    target_solution_count: int | None = Field(default=None, ge=1)
-    selector_vote_count: int = Field(default=3, ge=1)
-    max_children_per_node: int = Field(default=10, ge=1)
+    target_solution_count: int | None = Field(default=None, ge=1, le=32001)
+    selector_vote_count: int = Field(default=3, ge=1, le=32)
+    max_children_per_node: int = Field(default=10, ge=1, le=200)
     agent_models: dict[str, AgentModelRequest] = Field(default_factory=dict)
     selector_panel: list[AgentModelRequest] = Field(default_factory=list, max_length=16)
     selected_algorithm_ids: list[str] = Field(default_factory=list)
@@ -832,8 +841,29 @@ def _run_orchestrator(
             auto_approve_evaluation=request.auto_approve_evaluation,
             resume=request.resume,
         )
-        llm = MockLLMClient() if request.mode == "mock" else OpenAIAdapter()
+        if request.mode == "mock":
+            llm = MockLLMClient()
+        else:
+            budget = LLMBudget.from_env()
+            ledger_path = output_dir / run_id / "llm_call_ledger.jsonl"
+            if request.resume:
+                load_llm_budget_usage(ledger_path, budget)
+            else:
+                require_llm_call_budget_preflight(
+                    llm_call_budget_preflight(
+                        budget=budget,
+                        expected_llm_call_range=estimate_orchestrator_llm_call_range(
+                            max_iterations=evolution.max_iterations,
+                            parallel_mutations=evolution.parallel_mutations,
+                        ),
+                    )
+                )
+            llm = RecordingLLMClient(OpenAIAdapter(), ledger_path, budget)
         run_dir = AgenticSciMLOrchestrator(config, llm).run()
+        trace_summary = _read_optional_json(run_dir / "trace_summary.json") or {}
+        quality_gate = trace_summary.get("quality_gate")
+        if not isinstance(quality_gate, dict) or quality_gate.get("passed") is not True:
+            raise RuntimeError("run completion gate failed: trace quality_gate did not pass")
         record.run_dir = str(run_dir)
         record.status = "completed"
         record.ended_at = time.time()
@@ -1534,6 +1564,7 @@ def _store_new_record(record: RunRecord, *, allow_existing: bool) -> None:
 def _validate_run_start_request(request: RunStartRequest) -> None:
     _validate_agent_model_roles(request.agent_models)
     _validate_algorithm_ids(request.selected_algorithm_ids)
+    _validate_web_run_id(request.experiment_id)
     if request.target_solution_count is not None:
         target_children = request.target_solution_count - 1
         if target_children % request.parallel_mutations != 0:
@@ -1546,6 +1577,7 @@ def _validate_run_start_request(request: RunStartRequest) -> None:
                 ),
             )
     if request.mode == "real":
+        _validate_real_model_base_urls(request)
         if not request.real_confirmed:
             raise HTTPException(
                 status_code=400,
@@ -1565,6 +1597,33 @@ def _validate_agent_model_roles(agent_models: dict[str, AgentModelRequest]) -> N
         raise HTTPException(
             status_code=400,
             detail="Unknown agent role override(s): " + ", ".join(unknown_roles),
+        )
+
+
+def _validate_web_run_id(run_id: str | None) -> None:
+    if run_id is None:
+        return
+    try:
+        validate_path_segment(run_id, label="experiment_id")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _validate_real_model_base_urls(request: RunStartRequest) -> None:
+    configured = _normalized_base_url(os.environ.get("OPENAI_BASE_URL"))
+    requested = {
+        _normalized_base_url(item.base_url)
+        for item in [*request.agent_models.values(), *request.selector_panel]
+        if _normalized_base_url(item.base_url) is not None
+    }
+    disallowed = sorted(value for value in requested if value != configured)
+    if disallowed:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "real Web runs cannot route the server API key to request-provided base_url values; "
+                "configure OPENAI_BASE_URL on the server"
+            ),
         )
 
 
@@ -1811,7 +1870,10 @@ def _normalize_run_metadata(metadata: dict[str, Any] | None) -> dict[str, Any] |
 
 
 def _describe_run(run_id: str, output_dir: Path) -> dict[str, object]:
-    run_dir = output_dir / run_id
+    try:
+        run_dir = resolve_contained_child(output_dir, run_id, label="run_id")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     record = _record_for(run_dir)
     if not run_dir.exists() and record is None:
         raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
@@ -1857,10 +1919,13 @@ def _resolve_output_dir(value: str, *, account_id: str | None = None) -> Path:
 
 
 def _resolve_run_dir(run_id: str, output_dir: Path) -> Path:
-    run_dir = output_dir / run_id
+    try:
+        run_dir = resolve_contained_child(output_dir, run_id, label="run_id")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not run_dir.exists():
         raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
-    return run_dir.resolve()
+    return run_dir
 
 
 def _resolve_benchmark_dir(
@@ -2710,7 +2775,15 @@ def _workspace_for_scope(
     if solution_id in {None, "", "champion"}:
         workspace = run_dir / "champion"
     else:
-        workspace = run_dir / "solutions" / solution_id
+        try:
+            workspace = resolve_contained_child(
+                run_dir / "solutions",
+                solution_id,
+                label="solution_id",
+                strict=True,
+            )
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not workspace.exists():
         raise HTTPException(status_code=404, detail=f"Workspace not found: {workspace}")
     return workspace.resolve(strict=True)
@@ -3121,7 +3194,9 @@ def _solver_chat_response(request: SolverChatRequest) -> dict[str, object]:
                 _validate_algorithm_ids(request.selected_algorithm_ids)
                 plan = _problem_intake_plan_payload(
                     _problem_intake_request_from_chat(request),
-                    materialize_custom_benchmark=request.assistant_mode == "agent",
+                    materialize_custom_benchmark=(
+                        request.assistant_mode == "agent" and agent_scope_allowed
+                    ),
                 )
                 _attach_llm_wiki_context_to_plan(plan, llm_wiki_context)
                 plan_actions = plan.get("actions", [])

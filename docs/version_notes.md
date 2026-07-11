@@ -2,6 +2,40 @@
 
 [返回文档树](index.md) · 相关文档：[项目概览](../README.md)、[Ablation 说明](ablation.md)
 
+## 2026-07-12 工作流边界与证据验证加固
+
+- Web real-run 请求不再允许把服务端 `OPENAI_API_KEY` 路由到任意请求提供的
+  `base_url`；只有与服务端 `OPENAI_BASE_URL` 一致的地址可用。real-run 同时复用 CLI 的
+  LLM 调用预算预检、ledger 续跑计数和完成态 trace quality gate，并限制迭代、并行度、
+  超时与解数等公开请求预算。
+- 新增共享的安全单路径段解析，run、solution 与 code-server workspace 解析会拒绝
+  `..`、绝对路径和现有 symlink 逃逸。Paper problem loop 同样拒绝 bundle 外部 artifact
+  引用；Agent scope 被拒绝时不再提前物化 benchmark 内容。
+- solution workspace 中的公开 benchmark 输入改为只读副本，避免 generated code 通过
+  symlink 修改共享 benchmark；训练数据和公开 benchmark 文件纳入执行前后 digest 检查。
+  这仍是进程级静态/文件 guardrail，不等价于容器或虚拟机级 OS sandbox。
+- ablation evidence verifier 现在要求原始 `trace.jsonl`、`tree.json` 和 `checkpoint.json`，
+  从原始证据重新计算 trace summary 并拒绝陈旧或篡改的缓存 summary；ablation 顶层 JSON、
+  CSV 与报告统一使用同目录原子替换。Real smoke CSV 核验补齐 branch-context、branch intent、
+  parent-child edge 与 branch metadata 计数。
+- 未注册的 structured output model 现在 fail closed；Critic 追加报告改为 storage lock 下的
+  原子写。ChatUI 的账号切换会清理待确认动作，并丢弃旧账号返回的 runs、artifact、workspace、
+  Wiki 和 solver 响应，避免异步响应污染当前账号视图。
+- CI 新增 Node 22 前端依赖安装、TypeScript/Vite 生产构建和浏览器 smoke 脚本语法检查。
+  lockfile 已更新到 Vite 6.4.3 与已修复的 Babel 依赖集，`npm audit --audit-level=low`
+  报告 0 个已知漏洞。
+- 已验证：
+
+  ```bash
+  uv run --python 3.11 --extra dev --extra web python -m pytest -q
+  cd frontend && npm run build
+  cd frontend && npm audit --audit-level=low
+  ```
+
+- 已知边界：Web API 的进程内 run registry 仍不是多 worker 的持久调度器；`account_id`
+  仍只是本地 namespace，不是认证/授权边界；generated code 仍需未来的容器、seccomp 或同等级
+  OS 隔离后才能面对不受信任的远程多用户输入。
+
 ## 2026-07-12 LLM Wiki 接入问答与求解 Agent
 
 - `/api/solver/chat` 现在默认读取当前 `account_id` 的 `wiki/llm_wiki_okf.json`；账号没有

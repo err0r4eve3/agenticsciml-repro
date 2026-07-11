@@ -9,7 +9,12 @@ import pytest
 from agenticsciml.ablation import run_ablation
 from agenticsciml.ablation_collect import AblationBatchCollectionError, collect_ablation_batches
 from agenticsciml.ablation_evidence import build_multi_seed_ablation_verified_manifest
+from agenticsciml.config import EvolutionConfig, ExperimentConfig
 from agenticsciml.evidence import EVIDENCE_MODE_REAL_LLM_ABLATION, LLM_MODE_REAL, SCIENTIFIC_CLAIM_NOT_SUPPORTED
+from agenticsciml.llm.budget import LLMBudget, RecordingLLMClient
+from agenticsciml.llm.mock import MockLLMClient
+from agenticsciml.orchestrator import AgenticSciMLOrchestrator
+from agenticsciml.reporting.trace_summary import summarize_trace
 
 
 def test_collect_ablation_batches_writes_complete_outputs(tmp_path: Path, monkeypatch) -> None:
@@ -253,7 +258,7 @@ def test_collection_verifier_rejects_failed_trace_and_zero_real_calls(
     )
 
     assert verified["verified"] is False
-    assert any("trace quality_gate did not pass" in item for item in verified["blockers"])
+    assert any("trace_summary.json is stale or tampered" in item for item in verified["blockers"])
     assert any("positive real llm_calls" in item for item in verified["blockers"])
 
 
@@ -490,54 +495,65 @@ def _write_batch_dir(
     _write_csv(batch_dir / "ablation_summary.csv", rows)
     for row in rows:
         run_dir = Path(row["run_dir"])
-        run_dir.mkdir(parents=True)
-        if trace_summary_present:
-            (run_dir / "trace_summary.json").write_text(json.dumps({"quality_gate": {"status": "pass"}}), encoding="utf-8")
         if scientific_seed_provenance:
             seed = int(row["search_seed"])
             experiment_id = str(row["experiment_id"])
-            (run_dir / "config.json").write_text(
-                json.dumps(
-                    {
-                        "experiment_id": experiment_id,
-                        "evolution": {"random_seed": seed},
-                    }
+            config = ExperimentConfig(
+                experiment_id=experiment_id,
+                benchmark_dir=Path("examples/function_approx").resolve(),
+                output_dir=batch_dir / "runs",
+                evolution=EvolutionConfig(
+                    max_iterations=0,
+                    parallel_mutations=1,
+                    max_debug_retries=0,
+                    random_seed=seed,
                 ),
+                use_mock=False,
+            )
+            ledger_path = run_dir / "llm_call_ledger.jsonl"
+            run_dir = AgenticSciMLOrchestrator(
+                config,
+                RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=20)),
+            ).run()
+            metadata_path = run_dir / "run_metadata.json"
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata["seed_provenance"] = {
+                "model_seed": seed,
+                "provider_seed": seed,
+            }
+            metadata_path.write_text(
+                json.dumps(metadata, indent=2, sort_keys=True),
                 encoding="utf-8",
             )
-            (run_dir / "run_metadata.json").write_text(
-                json.dumps(
-                    {
-                        "llm_mode": LLM_MODE_REAL,
-                        "run_state": "exported",
-                        "llm_calls": {"total": 1},
-                        "seed_provenance": {
-                            "model_seed": seed,
-                            "provider_seed": seed,
-                        },
-                    }
-                ),
-                encoding="utf-8",
+            contract = json.loads(
+                (run_dir / "evaluation_contract.json").read_text(encoding="utf-8")
             )
-            (run_dir / "trace_summary.json").write_text(
-                json.dumps({"quality_gate": {"passed": True}}),
-                encoding="utf-8",
+            row.update(
+                {
+                    "data_seed": str(contract["benchmark_source_manifest"]["data_seed"]),
+                    "benchmark_contract_hash": str(contract["contract_hash"]),
+                    "benchmark_source_manifest_digest": str(
+                        contract["benchmark_source_manifest_digest"]
+                    ),
+                    "llm_calls": str(metadata["llm_calls"]["total"]),
+                }
             )
-            (run_dir / "llm_call_ledger.jsonl").write_text(
-                json.dumps({"call_index": 1}) + "\n",
-                encoding="utf-8",
-            )
-            (run_dir / "evaluation_contract.json").write_text(
-                json.dumps(
-                    {
-                        "benchmark_name": "function_approx",
-                        "contract_hash": f"contract-{seed}",
-                        "benchmark_source_manifest": {"data_seed": seed},
-                        "benchmark_source_manifest_digest": f"manifest-{seed}",
-                    }
-                ),
-                encoding="utf-8",
-            )
+            if trace_summary_present:
+                (run_dir / "trace_summary.json").write_text(
+                    json.dumps(summarize_trace(run_dir), indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
+            else:
+                (run_dir / "trace_summary.json").unlink(missing_ok=True)
+        else:
+            run_dir.mkdir(parents=True)
+            if trace_summary_present:
+                (run_dir / "trace_summary.json").write_text(
+                    json.dumps({"quality_gate": {"status": "pass"}}),
+                    encoding="utf-8",
+                )
+    _write_csv(batch_dir / "ablation_runs.csv", rows)
+    _write_csv(batch_dir / "ablation_summary.csv", rows)
     manifest = {
         "schema_version": 1,
         "benchmark_dir": stage_plan["benchmark_dir"],

@@ -517,6 +517,46 @@ def test_cli_verify_paper_problem_loop_health_checks_latest_artifacts(
     assert "missing llm wiki artifact: graph" in broken_health["issues"]
 
 
+def test_verify_paper_problem_loop_rejects_external_wiki_artifact(
+    tmp_path: Path,
+    cli_env: dict[str, str],
+) -> None:
+    output_dir = tmp_path / "paper-loop"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenticsciml.cli",
+            "paper-problem-loop-audit",
+            "--output-dir",
+            str(output_dir),
+            "--repeat",
+            "--rounds",
+            "1",
+            "--interval-s",
+            "0",
+            "--fail-on-issues",
+        ],
+        check=True,
+        env=cli_env,
+    )
+    index = json.loads((output_dir / "paper_problem_loop_index.json").read_text(encoding="utf-8"))
+    audit_path = output_dir / index["latest"]["audit_json"]
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    audit["llm_wiki_audit"]["artifacts"]["graph"] = "/etc/hosts"
+    audit_path.write_text(json.dumps(audit), encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, "-m", "agenticsciml.cli", "verify-paper-problem-loop", str(output_dir)],
+        text=True,
+        capture_output=True,
+        env=cli_env,
+    )
+
+    assert result.returncode == 1
+    assert "missing llm wiki artifact: graph" in result.stdout
+
+
 def test_cli_paper_problem_loop_audit_repeat_continues_existing_round_index(
     tmp_path: Path, cli_env: dict[str, str]
 ) -> None:

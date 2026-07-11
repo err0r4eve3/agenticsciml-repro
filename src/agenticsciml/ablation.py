@@ -8,6 +8,7 @@ import os
 import statistics
 import sys
 from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,7 @@ from agenticsciml.llm.mock import MockLLMClient
 from agenticsciml.llm.openai_adapter import OpenAIAdapter
 from agenticsciml.llm_smoke import _RecordingLLMClient
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
+from agenticsciml.storage import atomic_write_text
 
 
 DEFAULT_VARIANTS = (
@@ -108,15 +110,15 @@ def run_ablation(
         timeout_s=timeout_s,
     )
     plan_path = output_dir / "ablation_plan.json"
-    plan_path.write_text(
+    atomic_write_text(
+        plan_path,
         json.dumps(plan, indent=2, sort_keys=True, allow_nan=False),
-        encoding="utf-8",
     )
     manifest = _build_mock_ablation_manifest(plan)
     manifest_path = output_dir / "ablation_manifest.json"
-    manifest_path.write_text(
+    atomic_write_text(
+        manifest_path,
         json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False),
-        encoding="utf-8",
     )
 
     run_rows: list[dict[str, Any]] = []
@@ -145,7 +147,7 @@ def run_ablation(
     summary_csv = output_dir / "ablation_summary.csv"
     _write_csv(summary_csv, summary_rows)
     report_md = output_dir / "ablation_report.md"
-    report_md.write_text(_render_report(summary_rows), encoding="utf-8")
+    atomic_write_text(report_md, _render_report(summary_rows))
     _write_ablation_evidence_bundle(
         output_dir=output_dir,
         plan=plan,
@@ -187,16 +189,16 @@ def _run_real_ablation(
     if budget_batch_index is not None:
         plan = _select_budget_batch(plan, budget_batch_index)
     plan_path = output_dir / "real_llm_ablation_plan.json"
-    plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True, allow_nan=False), encoding="utf-8")
+    atomic_write_text(plan_path, json.dumps(plan, indent=2, sort_keys=True, allow_nan=False))
     manifest = _build_real_ablation_manifest(plan, llm_client=llm_client, budget=budget)
     manifest_path = output_dir / "real_llm_ablation_manifest.json"
-    manifest_path.write_text(
+    atomic_write_text(
+        manifest_path,
         json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False),
-        encoding="utf-8",
     )
     report_md = output_dir / "ablation_report.md"
     if dry_run:
-        report_md.write_text(_render_real_dry_run_report(plan), encoding="utf-8")
+        atomic_write_text(report_md, _render_real_dry_run_report(plan))
         return AblationResult(
             summary_csv=None,
             report_md=report_md,
@@ -205,13 +207,13 @@ def _run_real_ablation(
         )
     preflight = manifest.get("budget_preflight", {})
     if isinstance(preflight, dict) and preflight.get("passed") is not True:
-        report_md.write_text(_render_real_budget_blocked_report(plan, preflight), encoding="utf-8")
+        atomic_write_text(report_md, _render_real_budget_blocked_report(plan, preflight))
         require_llm_call_budget_preflight(preflight)
 
     try:
         inner_llm = llm_client or OpenAIAdapter(timeout_s=llm_timeout_s, max_retries=llm_max_retries)
     except Exception as exc:
-        report_md.write_text(_render_real_failure_report(plan, "adapter_init_error", exc), encoding="utf-8")
+        atomic_write_text(report_md, _render_real_failure_report(plan, "adapter_init_error", exc))
         raise
 
     run_rows: list[dict[str, Any]] = []
@@ -237,7 +239,7 @@ def _run_real_ablation(
                 )
             )
     except Exception as exc:
-        report_md.write_text(_render_real_failure_report(plan, "orchestrator_error", exc), encoding="utf-8")
+        atomic_write_text(report_md, _render_real_failure_report(plan, "orchestrator_error", exc))
         raise
 
     _bind_run_rows_to_execution_artifacts(
@@ -251,7 +253,7 @@ def _run_real_ablation(
     summary_rows = _aggregate(run_rows)
     summary_csv = output_dir / "ablation_summary.csv"
     _write_csv(summary_csv, summary_rows)
-    report_md.write_text(_render_report(summary_rows), encoding="utf-8")
+    atomic_write_text(report_md, _render_report(summary_rows))
     _write_ablation_evidence_bundle(
         output_dir=output_dir,
         plan=plan,
@@ -1046,9 +1048,9 @@ def _write_ablation_evidence_bundle(
         ),
     }
     bundle_path = output_dir / "ablation_evidence_bundle.json"
-    bundle_path.write_text(
+    atomic_write_text(
+        bundle_path,
         json.dumps(bundle, indent=2, sort_keys=True, allow_nan=False),
-        encoding="utf-8",
     )
     return bundle_path
 
@@ -1071,8 +1073,12 @@ def _run_provenance_artifacts(
             "config.json",
             "run_metadata.json",
             "evaluation_contract.json",
+            "trace.jsonl",
             "trace_summary.json",
+            "tree.json",
+            "checkpoint.json",
             "llm_call_ledger.jsonl",
+            "invocation_history.json",
         ):
             path = run_dir / name
             if path.is_file():
@@ -1318,12 +1324,13 @@ def _iqr(values: list[float]) -> float | str:
 
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     if not rows:
-        path.write_text("", encoding="utf-8")
+        atomic_write_text(path, "")
         return
-    with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(rows)
+    buffer = StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=list(rows[0].keys()))
+    writer.writeheader()
+    writer.writerows(rows)
+    atomic_write_text(path, buffer.getvalue())
 
 
 def _render_report(summary_rows: list[dict[str, Any]]) -> str:

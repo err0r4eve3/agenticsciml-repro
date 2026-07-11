@@ -287,3 +287,12 @@ def test_proposal_serialization() -> None:
     )
 
     assert Proposal.from_dict(proposal.to_dict()).title == "Fourier features"
+
+
+def test_storage_rejects_path_escape_ids(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="safe single path segment"):
+        ExperimentStorage.create(tmp_path, "../outside")
+
+    storage = ExperimentStorage.create(tmp_path, "safe-run")
+    with pytest.raises(ValueError, match="safe single path segment"):
+        storage.create_solution_workspace("../../outside")

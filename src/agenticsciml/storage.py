@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from agenticsciml.path_safety import resolve_contained_child
 from agenticsciml.state import AgentMessage
 
 
@@ -20,7 +21,7 @@ class ExperimentStorage:
 
     @classmethod
     def create(cls, output_dir: Path, experiment_id: str) -> "ExperimentStorage":
-        run_dir = output_dir / experiment_id
+        run_dir = resolve_contained_child(output_dir, experiment_id, label="experiment_id")
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "transcripts").mkdir(exist_ok=True)
         (run_dir / "reports").mkdir(exist_ok=True)
@@ -30,13 +31,21 @@ class ExperimentStorage:
 
     def create_solution_workspace(self, solution_id: str) -> Path:
         with self._lock:
-            workspace = self.solutions_dir / solution_id
+            workspace = resolve_contained_child(
+                self.solutions_dir,
+                solution_id,
+                label="solution_id",
+            )
             workspace.mkdir(parents=True, exist_ok=True)
             (workspace / "transcripts").mkdir(exist_ok=True)
             return workspace
 
     def solution_workspace(self, solution_id: str) -> Path:
-        return self.solutions_dir / solution_id
+        return resolve_contained_child(
+            self.solutions_dir,
+            solution_id,
+            label="solution_id",
+        )
 
     def save_json(self, relative_path: str | Path, data: Any) -> Path:
         with self._lock:
@@ -109,6 +118,21 @@ class ExperimentStorage:
             workspace = self.create_solution_workspace(solution_id)
             path = workspace / filename
             atomic_write_bytes(path, data)
+            return path
+
+    def append_solution_text(
+        self,
+        solution_id: str,
+        filename: str,
+        text: str,
+        *,
+        initial_text: str = "",
+    ) -> Path:
+        with self._lock:
+            workspace = self.create_solution_workspace(solution_id)
+            path = workspace / filename
+            existing = path.read_text(encoding="utf-8") if path.exists() else initial_text
+            atomic_write_text(path, existing + text)
             return path
 
     def save_transcript(

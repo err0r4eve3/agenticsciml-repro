@@ -29,13 +29,13 @@ class CriticAgent(AgentBase):
             f"Context:\n{context}"
         )
         response = self.complete_text(prompt)
-        workspace = self.storage.create_solution_workspace(solution_id)
-        path = workspace / "critic.md"
         section = f"## Critic Round {round_index}\n\n{response}\n\n"
-        if path.exists():
-            path.write_text(path.read_text(encoding="utf-8") + section, encoding="utf-8")
-        else:
-            path.write_text(f"# Critic Review\n\n{section}", encoding="utf-8")
+        self.storage.append_solution_text(
+            solution_id,
+            "critic.md",
+            section,
+            initial_text="# Critic Review\n\n",
+        )
         self._save_messages(
             solution_id,
             [AgentMessage(self.role, prompt, response, {"round": round_index})],

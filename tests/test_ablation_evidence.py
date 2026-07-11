@@ -30,7 +30,9 @@ from agenticsciml.evidence import (
     SCIENTIFIC_CLAIM_NOT_SUPPORTED,
 )
 from agenticsciml.llm.mock import MockLLMClient
+from agenticsciml.llm.budget import LLMBudget, RecordingLLMClient
 from agenticsciml.orchestrator import AgenticSciMLOrchestrator
+from agenticsciml.reporting.trace_summary import summarize_trace
 from agenticsciml.scientific_readiness import build_scientific_discovery_readiness_report
 
 
@@ -58,6 +60,23 @@ def test_ablation_evidence_builder_verifies_local_output(tmp_path: Path) -> None
     assert manifest["scientific_claims"] == [SCIENTIFIC_CLAIM_NOT_SUPPORTED]
     assert manifest["seed_provenance"]["seed_provenance_complete"] is True
     assert manifest["seed_provenance"]["scientific_random_dimension_varied"] is True
+
+
+def test_ablation_evidence_rejects_missing_raw_trace(tmp_path: Path) -> None:
+    _write_bound_ablation_output(tmp_path, seeds=[0, 1], variants=["root_only", "kb"])
+    (tmp_path / "runs" / "root_only-seed-0" / "trace.jsonl").unlink()
+
+    manifest = build_multi_seed_ablation_verified_manifest(
+        {
+            "ablation_output_dir": str(tmp_path),
+            "verified_by": "ablation-reviewer",
+            "expected_seeds": [0, 1],
+            "expected_variants": ["root_only", "kb"],
+        }
+    )
+
+    assert manifest["scientific_multi_seed_verified"] is False
+    assert any("raw run evidence" in item or "binding" in item for item in manifest["blockers"])
 
 
 def test_ablation_evidence_builder_blocks_single_seed_output(tmp_path: Path) -> None:
@@ -373,7 +392,9 @@ def _write_bound_ablation_output(
     benchmark_dir: Path | None = None,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+    shutil.rmtree(output_dir / "runs", ignore_errors=True)
     benchmark_dir = benchmark_dir or Path("examples/function_approx").resolve()
+    run_benchmark_dir = Path("examples/function_approx").resolve()
     evidence_mode = (
         EVIDENCE_MODE_REAL_LLM_ABLATION
         if execution_mode == "real"
@@ -436,61 +457,51 @@ def _write_bound_ablation_output(
     for variant in variants:
         for seed in seeds:
             experiment_id = f"{variant}-seed-{seed}"
-            run_dir = output_dir / "runs" / experiment_id
-            run_dir.mkdir(parents=True, exist_ok=True)
             scientific_seed = seed if vary_scientific_seeds else 0
             model_seed = scientific_seed if complete_seed_provenance else None
             provider_seed = scientific_seed if complete_seed_provenance else None
-            (run_dir / "config.json").write_text(
-                json.dumps(
-                    {
-                        "experiment_id": experiment_id,
-                        "evolution": {"random_seed": seed},
-                    }
+            run_output_dir = output_dir / "runs"
+            config = ExperimentConfig(
+                experiment_id=experiment_id,
+                benchmark_dir=run_benchmark_dir,
+                output_dir=run_output_dir,
+                evolution=EvolutionConfig(
+                    max_iterations=0,
+                    parallel_mutations=1,
+                    max_debug_retries=0,
+                    random_seed=seed,
                 ),
-                encoding="utf-8",
+                use_mock=execution_mode != "real",
             )
-            (run_dir / "run_metadata.json").write_text(
-                json.dumps(
-                    {
-                        "llm_mode": llm_mode,
-                        "run_state": "exported",
-                        "llm_calls": {"total": 1 if execution_mode == "real" else 0},
-                        "seed_provenance": {
-                            "model_seed": model_seed,
-                            "provider_seed": provider_seed,
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
-            (run_dir / "trace_summary.json").write_text(
-                json.dumps({"quality_gate": {"passed": execution_mode == "real"}}),
-                encoding="utf-8",
-            )
+            llm = MockLLMClient()
             if execution_mode == "real":
-                (run_dir / "llm_call_ledger.jsonl").write_text(
-                    json.dumps({"call_index": 1}) + "\n",
-                    encoding="utf-8",
-                )
-            (run_dir / "evaluation_contract.json").write_text(
-                json.dumps(
-                    {
-                        "benchmark_name": "function_approx",
-                        "contract_hash": f"contract-{scientific_seed}",
-                        "benchmark_source_manifest": {"data_seed": scientific_seed},
-                        "benchmark_source_manifest_digest": f"manifest-{scientific_seed}",
-                    }
-                ),
-                encoding="utf-8",
+                ledger_path = run_output_dir / experiment_id / "llm_call_ledger.jsonl"
+                run_llm = RecordingLLMClient(llm, ledger_path, LLMBudget(max_calls=20))
+            else:
+                run_llm = llm
+            run_dir = AgenticSciMLOrchestrator(config, run_llm).run()
+            metadata_path = run_dir / "run_metadata.json"
+            run_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            run_metadata["seed_provenance"] = {
+                "model_seed": model_seed,
+                "provider_seed": provider_seed,
+            }
+            metadata_path.write_text(
+                json.dumps(run_metadata, indent=2, sort_keys=True), encoding="utf-8"
             )
+            trace_summary = summarize_trace(run_dir)
+            (run_dir / "trace_summary.json").write_text(
+                json.dumps(trace_summary, indent=2, sort_keys=True), encoding="utf-8"
+            )
+            contract = json.loads((run_dir / "evaluation_contract.json").read_text(encoding="utf-8"))
+            data_seed = int(contract["benchmark_source_manifest"]["data_seed"])
             run_rows.append(
                 {
                     "variant": variant,
                     "seed": seed,
                     "experiment_id": experiment_id,
                     "search_seed": seed,
-                    "data_seed": scientific_seed,
+                    "data_seed": data_seed,
                     "model_seed": model_seed,
                     "provider_seed": provider_seed,
                     "search_seed_source": "config.json:evolution.random_seed",
@@ -516,8 +527,10 @@ def _write_bound_ablation_output(
                     "run_scientific_claim": SCIENTIFIC_CLAIM_NOT_SUPPORTED,
                     "run_dir": str(run_dir),
                     "benchmark_name": "function_approx",
-                    "benchmark_contract_hash": f"contract-{scientific_seed}",
-                    "benchmark_source_manifest_digest": f"manifest-{scientific_seed}",
+                    "benchmark_contract_hash": contract["contract_hash"],
+                    "benchmark_source_manifest_digest": contract[
+                        "benchmark_source_manifest_digest"
+                    ],
                     "benchmark_content_hash": plan["benchmark_content_hash"],
                     "plan_hash": _hash_payload(plan),
                     "plan_sha256": plan_sha256,
@@ -535,7 +548,7 @@ def _write_bound_ablation_output(
                     "debug_success_count": 0,
                     "branch_context_count": 0,
                     "branch_intents": "",
-                    "llm_calls": 1 if execution_mode == "real" else 0,
+                    "llm_calls": run_metadata.get("llm_calls", {}).get("total", 0),
                     "wall_time_s": 1.0,
                 }
             )

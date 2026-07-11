@@ -13,6 +13,7 @@ from agenticsciml.evidence import (
     LLM_MODE_REAL,
     SCIENTIFIC_CLAIM_NOT_SUPPORTED,
 )
+from agenticsciml.reporting.trace_summary import summarize_trace
 
 
 ABLATION_EVIDENCE_SCHEMA_VERSION = 2
@@ -617,12 +618,32 @@ def _audit_seed_provenance(
         contract, contract_issues = _read_json(run_dir / "evaluation_contract.json")
         trace_summary, trace_issues = _read_json(run_dir / "trace_summary.json")
         ledger_path = run_dir / "llm_call_ledger.jsonl"
+        raw_evidence_paths = [
+            run_dir / "trace.jsonl",
+            run_dir / "tree.json",
+            run_dir / "checkpoint.json",
+        ]
+        missing_raw = [path.name for path in raw_evidence_paths if not path.is_file()]
+        if missing_raw:
+            blockers.append(
+                f"{experiment_id}: raw run evidence is incomplete: {', '.join(missing_raw)}"
+            )
+            continue
         if config_issues or metadata_issues or contract_issues or trace_issues:
             blockers.append(f"{experiment_id}: seed provenance run artifacts are incomplete")
             continue
         if run_metadata.get("run_state") not in {"completed", "exported", "finalized"}:
             blockers.append(f"{experiment_id}: run_state is not exported/completed/finalized")
-        quality_gate = trace_summary.get("quality_gate")
+        try:
+            recomputed_trace_summary = summarize_trace(run_dir)
+        except Exception as exc:
+            blockers.append(
+                f"{experiment_id}: trace summary recomputation failed: {type(exc).__name__}: {exc}"
+            )
+            continue
+        if trace_summary != recomputed_trace_summary:
+            blockers.append(f"{experiment_id}: trace_summary.json is stale or tampered")
+        quality_gate = recomputed_trace_summary.get("quality_gate")
         if not isinstance(quality_gate, dict) or quality_gate.get("passed") is not True:
             blockers.append(f"{experiment_id}: trace quality_gate did not pass")
         llm_calls = run_metadata.get("llm_calls")

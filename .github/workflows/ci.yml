@@ -13,6 +13,31 @@ permissions:
   contents: read
 
 jobs:
+  frontend-build:
+    name: Frontend typecheck and production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Build frontend
+        run: npm run build --prefix frontend
+
+      - name: Check browser smoke script syntax
+        run: node --check scripts/web_ui_dispatch_e2e.mjs
+
   fast-evidence-gates:
     name: Fast catalog, sandbox, and evidence gates
     runs-on: ubuntu-latest
