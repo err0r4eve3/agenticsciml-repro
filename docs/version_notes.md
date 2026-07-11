@@ -4,6 +4,18 @@
 
 ## 2026-07-11 Real LLM smoke 研究诊断补强
 
+- `run_metadata.llm_calls` 现在由共享的 generation-trace summarizer 生成并在
+  `trace-summary` 中逐字段重算。除 `total` 外，`by_role`、generation attempt 数/耗时、
+  unbound/pre-provider rejection 数、本地 prompt/response estimate、provider usage coverage
+  与 token、provider-call duration 都必须以闭合字段集合和精确 JSON 类型匹配；等值 float/int
+  漂移、非有限 duration、缺字段、未知字段或任一局部值漂移都会使 artifact quality gate fail closed。
+- 真实 LLM evidence schema 现在是必需契约，不能同时删除 run metadata 与 workflow-start
+  trace 中的 `llm_evidence_schema_version` 后降级成只核对 call total；无版本或不支持版本的旧
+  real artifact 会明确失败，需要重新生成或显式迁移，不能静默获得可信证据状态。
+- 真实专属 evidence surface（ledger、`llm_ledger_usage`、带 `llm_call_id` 的 generation trace）
+  会独立触发 real gate，并要求 run metadata 与 workflow trace 都声明 `llm_mode=real`；反过来只要
+  任一有效 metadata 声明 real，即使 ledger、调用汇总和 trace call IDs 被整体删除，也必须进入
+  gate 并失败。删除或伪装 `llm_mode`、以及“删光证据让检查跳过”不再是降级路径。
 - `trace-summary` 现在用 resume 相同的 ledger accounting 规则重算 local prompt/output/total
   token，并要求 `llm_ledger_usage` 精确一致；aggregate `llm_budget` 必须等于 local ledger usage
   加 `aggregate_offset`，local/aggregate cost 与 cost rate 也必须和 hash-bound experiment
@@ -34,8 +46,7 @@
 - `trace-summary` 对当前 real run 复用同一检查，并核对 `run_metadata.llm_calls.total`、
   `llm_ledger_usage.calls_used` 与 ledger 行数。缺失/截断 ledger 不再保留通过的 artifact quality gate；
   新产物在 workflow trace 与 run metadata 同时写入 `llm_evidence_schema_version=1`，该 schema 下
-  `llm_calls` 和完整 `llm_ledger_usage` 都是必需字段；legacy real bundle 仍以 ledger、generation trace
-  和 `llm_calls.total` 对账，不回退使用 paired smoke 的 aggregate budget。
+  完整 `llm_calls` 和 `llm_ledger_usage` 都是必需字段，不回退使用 paired smoke 的 aggregate budget。
 - Recording metadata 现在区分 `llm_budget` 的共享 aggregate 用量和 `llm_ledger_usage` 的当前
   run 用量；paired smoke 第二个 variant 可继续看到两侧累计预算，同时 trace gate 按本 variant
   ledger 对账，不再把合法的 `aggregate=44 / local=22` 误判为证据损坏。
@@ -101,6 +112,11 @@
 - `run_metadata.llm_calls` 现在把本地 prompt/response text estimate 与 provider usage 分层：
   adapter 返回数值 usage 时，额外记录 provider prompt/completion/total tokens、覆盖 call count
   和 complete 标记；不再让研究人员把文本长度估算与 provider 计费 usage 当成同一口径。
+- fresh root-only DeepSeek smoke `runs/deepseek-llm-call-summary-smoke-20260711/root` 在 4-call
+  硬上限下完成，ledger/trace/metadata 都为 4 calls，角色分布为 data analyst、evaluator、
+  root engineer、result analyst 各 1 次；provider usage 为 prompt `4481`、completion `5046`、
+  total `9527`，项目费率下估算 `$0.09527`（不是供应商账单）。同配置 zero-call resume 后仍为
+  4 ledger rows 且 trace quality pass。该 run 是 `proxy` + `real_llm` 工作流证据，不支持科学性能结论。
 - `llm_budget` 现在先用本地 prompt estimate 做请求前预留，再在响应后用 provider prompt usage
   对账并重新检查 prompt/output/total/cost 上限；ledger 同时保留 estimate、accounted value 和
   source。即使响应后超预算而 fail closed，已发生的 token 与成本仍会进入 ledger 和恢复计费。

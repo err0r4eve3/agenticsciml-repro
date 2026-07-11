@@ -6,6 +6,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from agenticsciml.llm_call_summary import summarize_llm_call_events
 from agenticsciml.state import (
     SOLUTION_TREE_SCHEMA_VERSION,
     validate_solution_node_artifact_paths,
@@ -414,27 +415,31 @@ def _check_real_llm_ledger_trace_consistency(
         llm_mode = run_metadata.get("llm_mode")
     if llm_mode is None and isinstance(workflow_metadata, dict):
         llm_mode = workflow_metadata.get("llm_mode")
-    current_real_evidence = (
-        llm_mode == "real"
-        and (
-            (run_dir / "llm_call_ledger.jsonl").exists()
-            or (
-                isinstance(run_metadata, dict)
-                and (
-                    isinstance(run_metadata.get("llm_calls"), dict)
-                    or isinstance(run_metadata.get("llm_ledger_usage"), dict)
-                )
-            )
-            or any(
-                event.get("event_type") == "generation_span"
-                and isinstance(event.get("metadata"), dict)
-                and isinstance(event["metadata"].get("llm_call_id"), str)
-                for event in events
-            )
+    real_only_evidence = (
+        (run_dir / "llm_call_ledger.jsonl").exists()
+        or (
+            isinstance(run_metadata, dict)
+            and isinstance(run_metadata.get("llm_ledger_usage"), dict)
+        )
+        or any(
+            event.get("event_type") == "generation_span"
+            and isinstance(event.get("metadata"), dict)
+            and isinstance(event["metadata"].get("llm_call_id"), str)
+            for event in events
         )
     )
+    current_real_evidence = real_only_evidence or llm_mode == "real"
     if not current_real_evidence:
         return {"checked": False, "passed": True}
+    run_llm_mode = run_metadata.get("llm_mode") if isinstance(run_metadata, dict) else None
+    workflow_llm_mode = (
+        workflow_metadata.get("llm_mode") if isinstance(workflow_metadata, dict) else None
+    )
+    if real_only_evidence and (run_llm_mode != "real" or workflow_llm_mode != "real"):
+        issues.append(
+            "real_llm_ledger_trace: real-only evidence requires llm_mode=real in "
+            "run metadata and workflow trace"
+        )
     minimum_calls = MIN_ROOT_REAL_LLM_CALLS if _requires_solution_artifacts(run_metadata) else 0
     historical_floor: dict[str, object] | None = None
     cost_rate: float | None = None
@@ -482,28 +487,31 @@ def _check_real_llm_ledger_trace_consistency(
     if not isinstance(run_metadata, dict):
         issues.append("real_llm_ledger_trace: run_metadata.json is missing or invalid")
     else:
-        llm_calls = run_metadata.get("llm_calls")
-        if not isinstance(llm_calls, dict):
-            issues.append("real_llm_ledger_trace: run_metadata.llm_calls is missing or invalid")
-        else:
-            total = llm_calls.get("total")
-            if not _is_non_negative_int(total):
-                issues.append("real_llm_ledger_trace: run_metadata.llm_calls.total is invalid")
-            elif total != ledger_count:
-                issues.append(
-                    "real_llm_ledger_trace: run_metadata.llm_calls.total does not match ledger"
-                )
-
         schema_version = run_metadata.get("llm_evidence_schema_version")
         workflow_schema_version = (
             workflow_metadata.get("llm_evidence_schema_version")
             if isinstance(workflow_metadata, dict)
             else None
         )
-        current_schema = (
-            schema_version is not None or workflow_schema_version is not None
-        )
-        if current_schema and (
+        llm_calls = run_metadata.get("llm_calls")
+        if not isinstance(llm_calls, dict):
+            issues.append("real_llm_ledger_trace: run_metadata.llm_calls is missing or invalid")
+        else:
+            try:
+                expected_llm_calls = summarize_llm_call_events(events, use_mock=False)
+            except (TypeError, ValueError) as exc:
+                issues.append(
+                    "real_llm_ledger_trace: generation trace cannot be summarized: "
+                    f"{exc}"
+                )
+            else:
+                _check_llm_call_summary_metadata(issues, llm_calls, expected_llm_calls)
+                if expected_llm_calls["total"] != ledger_count:
+                    issues.append(
+                        "real_llm_ledger_trace: generation trace call total does not match ledger"
+                    )
+
+        if (
             schema_version != REAL_LLM_EVIDENCE_SCHEMA_VERSION
             or workflow_schema_version != REAL_LLM_EVIDENCE_SCHEMA_VERSION
         ):
@@ -511,7 +519,7 @@ def _check_real_llm_ledger_trace_consistency(
                 "real_llm_ledger_trace: real LLM evidence schema version is missing or unsupported"
             )
         llm_ledger_usage = run_metadata.get("llm_ledger_usage")
-        if current_schema and not isinstance(llm_ledger_usage, dict):
+        if not isinstance(llm_ledger_usage, dict):
             issues.append(
                 "real_llm_ledger_trace: run_metadata.llm_ledger_usage is missing or invalid"
             )
@@ -525,20 +533,19 @@ def _check_real_llm_ledger_trace_consistency(
                 cost_rate_resolved=cost_rate_resolved,
             )
         stored_floor = run_metadata.get("llm_historical_call_floor")
-        if run_metadata.get("llm_evidence_schema_version") is not None:
-            if not isinstance(stored_floor, dict):
-                issues.append(
-                    "real_llm_ledger_trace: run_metadata.llm_historical_call_floor "
-                    "is missing or invalid"
-                )
-            elif historical_floor is not None and not _historical_call_floor_matches(
-                stored_floor,
-                historical_floor,
-            ):
-                issues.append(
-                    "real_llm_ledger_trace: run_metadata.llm_historical_call_floor "
-                    "does not match checkpoint history"
-                )
+        if not isinstance(stored_floor, dict):
+            issues.append(
+                "real_llm_ledger_trace: run_metadata.llm_historical_call_floor "
+                "is missing or invalid"
+            )
+        elif historical_floor is not None and not _historical_call_floor_matches(
+            stored_floor,
+            historical_floor,
+        ):
+            issues.append(
+                "real_llm_ledger_trace: run_metadata.llm_historical_call_floor "
+                "does not match checkpoint history"
+            )
     passed = not any(issue.startswith("real_llm_ledger_trace:") for issue in issues)
     return {
         "checked": True,
@@ -563,6 +570,44 @@ def _historical_call_floor_matches(
     legacy_current["schema_version"] = 1
     legacy_current.pop("minimum_calls_by_role", None)
     return stored == legacy_current
+
+
+def _check_llm_call_summary_metadata(
+    issues: list[str],
+    stored: dict[str, Any],
+    expected: dict[str, object],
+) -> None:
+    for field, expected_value in expected.items():
+        if field not in stored:
+            issues.append(
+                f"real_llm_ledger_trace: run_metadata.llm_calls.{field} is missing"
+            )
+        elif not _llm_call_summary_value_matches(stored[field], expected_value):
+            issues.append(
+                "real_llm_ledger_trace: run_metadata.llm_calls."
+                f"{field} does not match trace"
+            )
+    unknown_fields = sorted(set(stored) - set(expected))
+    if unknown_fields:
+        issues.append(
+            "real_llm_ledger_trace: run_metadata.llm_calls has unknown fields: "
+            + ", ".join(unknown_fields)
+        )
+
+
+def _llm_call_summary_value_matches(stored: object, expected: object) -> bool:
+    if type(stored) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        if set(stored) != set(expected):
+            return False
+        return all(
+            _llm_call_summary_value_matches(stored[key], expected_value)
+            for key, expected_value in expected.items()
+        )
+    if isinstance(expected, float):
+        return math.isfinite(stored) and math.isfinite(expected) and stored == expected
+    return stored == expected
 
 
 def _check_llm_ledger_usage_metadata(

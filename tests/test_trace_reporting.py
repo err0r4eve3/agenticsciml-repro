@@ -194,6 +194,287 @@ def test_trace_summary_rejects_current_real_metadata_field_removal(
     )
 
 
+def test_trace_summary_rejects_real_llm_call_role_metadata_drift(
+    tmp_path: Path,
+) -> None:
+    experiment_id = "trace-real-call-role-drift"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    metadata_path = run_dir / "run_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert metadata["llm_calls"]["total"] == 4
+    metadata["llm_calls"]["by_role"] = {"root_engineer": 4}
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["real_llm_ledger_trace"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any(
+        "run_metadata.llm_calls.by_role does not match trace" in issue
+        for issue in summary["artifact_consistency"]["issues"]
+    )
+
+
+def test_trace_summary_rejects_each_current_real_llm_call_summary_drift(
+    tmp_path: Path,
+) -> None:
+    experiment_id = "trace-real-call-summary-drift"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    metadata_path = run_dir / "run_metadata.json"
+    baseline = json.loads(metadata_path.read_text(encoding="utf-8"))
+    drifts = {
+        "total": 5,
+        "by_role": {"root_engineer": 4},
+        "generation_attempt_count": 5,
+        "generation_attempt_duration_s": baseline["llm_calls"]["generation_attempt_duration_s"] + 1,
+        "unbound_generation_attempt_count": 1,
+        "pre_provider_rejection_count": 1,
+        "prompt_token_estimate": baseline["llm_calls"]["prompt_token_estimate"] + 1,
+        "response_token_estimate": baseline["llm_calls"]["response_token_estimate"] + 1,
+        "provider_usage": {
+            **baseline["llm_calls"]["provider_usage"],
+            "call_count": 3,
+        },
+        "duration_s": baseline["llm_calls"]["duration_s"] + 1,
+    }
+
+    for field, invalid_value in drifts.items():
+        metadata = json.loads(json.dumps(baseline))
+        metadata["llm_calls"][field] = invalid_value
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+        summary = summarize_trace(run_dir)
+
+        assert summary["artifact_consistency"]["real_llm_ledger_trace"]["passed"] is False
+        assert any(
+            f"run_metadata.llm_calls.{field} does not match trace" in issue
+            for issue in summary["artifact_consistency"]["issues"]
+        )
+
+
+def test_trace_summary_rejects_real_llm_evidence_schema_downgrade(
+    tmp_path: Path,
+) -> None:
+    experiment_id = "trace-call-summary-schema-downgrade"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    metadata_path = run_dir / "run_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["llm_calls"]["by_role"] = {"root_engineer": 4}
+    metadata.pop("llm_evidence_schema_version")
+    workflow_path = run_dir / "trace.jsonl"
+    events = [json.loads(line) for line in workflow_path.read_text(encoding="utf-8").splitlines()]
+    for event in events:
+        if event.get("name") == "agenticsciml.run.start":
+            event["metadata"].pop("llm_evidence_schema_version")
+    _write_events(workflow_path, events)
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["real_llm_ledger_trace"]["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+    assert any(
+        "evidence schema version is missing or unsupported" in issue
+        for issue in summary["artifact_consistency"]["issues"]
+    )
+    assert any(
+        "run_metadata.llm_calls.by_role does not match trace" in issue
+        for issue in summary["artifact_consistency"]["issues"]
+    )
+
+
+@pytest.mark.parametrize("downgraded_mode", [None, "mock"])
+def test_trace_summary_rejects_real_llm_mode_downgrade(
+    tmp_path: Path,
+    downgraded_mode: str | None,
+) -> None:
+    experiment_id = f"trace-real-mode-downgrade-{downgraded_mode}"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    metadata_path = run_dir / "run_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    trace_path = run_dir / "trace.jsonl"
+    events = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+    if downgraded_mode is None:
+        metadata.pop("llm_mode")
+    else:
+        metadata["llm_mode"] = downgraded_mode
+    for event in events:
+        if event.get("name") == "agenticsciml.run.start":
+            if downgraded_mode is None:
+                event["metadata"].pop("llm_mode")
+            else:
+                event["metadata"]["llm_mode"] = downgraded_mode
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    _write_events(trace_path, events)
+
+    summary = summarize_trace(run_dir)
+
+    ledger_trace = summary["artifact_consistency"]["real_llm_ledger_trace"]
+    assert ledger_trace["checked"] is True
+    assert ledger_trace["passed"] is False
+    assert any(
+        "real-only evidence requires llm_mode=real" in issue
+        for issue in summary["artifact_consistency"]["issues"]
+    )
+
+
+def test_trace_summary_rejects_removing_all_declared_real_llm_call_evidence(
+    tmp_path: Path,
+) -> None:
+    experiment_id = "trace-real-evidence-removed"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    ledger_path.unlink()
+    metadata_path = run_dir / "run_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata.pop("llm_calls")
+    metadata.pop("llm_ledger_usage")
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    trace_path = run_dir / "trace.jsonl"
+    events = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+    for event in events:
+        event.get("metadata", {}).pop("llm_call_id", None)
+    _write_events(trace_path, events)
+
+    summary = summarize_trace(run_dir)
+
+    ledger_trace = summary["artifact_consistency"]["real_llm_ledger_trace"]
+    assert ledger_trace["checked"] is True
+    assert ledger_trace["passed"] is False
+    assert summary["quality_gate"]["passed"] is False
+
+
+def test_trace_summary_rejects_real_llm_call_summary_numeric_type_drift(
+    tmp_path: Path,
+) -> None:
+    experiment_id = "trace-real-call-summary-type-drift"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    metadata_path = run_dir / "run_metadata.json"
+    baseline = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+    for field, invalid_value in (
+        ("total", float(baseline["llm_calls"]["total"])),
+        ("duration_s", float("nan")),
+    ):
+        metadata = json.loads(json.dumps(baseline))
+        metadata["llm_calls"][field] = invalid_value
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        summary = summarize_trace(run_dir)
+        assert any(
+            f"run_metadata.llm_calls.{field} does not match trace" in issue
+            for issue in summary["artifact_consistency"]["issues"]
+        )
+
+    metadata = json.loads(json.dumps(baseline))
+    metadata["llm_calls"]["provider_usage"]["total_tokens"] = float(
+        metadata["llm_calls"]["provider_usage"]["total_tokens"]
+    )
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    summary = summarize_trace(run_dir)
+    assert any(
+        "run_metadata.llm_calls.provider_usage does not match trace" in issue
+        for issue in summary["artifact_consistency"]["issues"]
+    )
+
+
+def test_trace_summary_rejects_non_finite_generation_duration(
+    tmp_path: Path,
+) -> None:
+    experiment_id = "trace-real-non-finite-generation-duration"
+    config = ExperimentConfig(
+        experiment_id=experiment_id,
+        benchmark_dir=Path("examples/function_approx").resolve(),
+        output_dir=tmp_path,
+        evolution=EvolutionConfig(max_iterations=0, parallel_mutations=1, max_debug_retries=0),
+        use_mock=False,
+    )
+    ledger_path = tmp_path / experiment_id / "llm_call_ledger.jsonl"
+    run_dir = AgenticSciMLOrchestrator(
+        config,
+        RecordingLLMClient(MockLLMClient(), ledger_path, LLMBudget(max_calls=10)),
+    ).run()
+    trace_path = run_dir / "trace.jsonl"
+    events = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+    generation = next(event for event in events if event.get("event_type") == "generation_span")
+    generation["metadata"]["duration_s"] = float("inf")
+    _write_events(trace_path, events)
+
+    summary = summarize_trace(run_dir)
+
+    assert summary["artifact_consistency"]["real_llm_ledger_trace"]["passed"] is False
+    assert any(
+        "non-finite JSON constant" in issue
+        or "Invalid trace" in issue
+        or "generation trace cannot be summarized" in issue
+        for issue in summary["artifact_consistency"]["issues"]
+    )
+
+
 def test_trace_summary_rejects_root_only_evidence_for_evaluated_child(
     tmp_path: Path,
 ) -> None:
